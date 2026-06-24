@@ -13,6 +13,7 @@ const SHELLY_SERVER_URI = process.env.SHELLY_SERVER_URI; // e.g. shelly-133-eu.s
 const SHELLY_DEVICE_ID = process.env.SHELLY_DEVICE_ID;
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
 app.get('/api/solax', async (req, res) => {
   if (!SOLAX_TOKEN_ID || !SOLAX_SN) {
@@ -98,6 +99,49 @@ app.get('/api/shelly', async (req, res) => {
       isOn,
       fetchedAt: new Date().toISOString()
     });
+  } catch (err) {
+    const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
+    res.status(502).json({ error: message });
+  }
+});
+
+app.post('/api/shelly/set', async (req, res) => {
+  if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI || !SHELLY_DEVICE_ID) {
+    return res.status(500).json({ error: 'Server není nakonfigurován (chybí SHELLY_AUTH_KEY / SHELLY_SERVER_URI / SHELLY_DEVICE_ID).' });
+  }
+
+  const { turn } = req.body || {};
+  if (turn !== 'on' && turn !== 'off') {
+    return res.status(400).json({ error: 'Parametr turn musí být "on" nebo "off".' });
+  }
+
+  try {
+    const url = `https://${SHELLY_SERVER_URI}/device/relay/control`;
+    const body = new URLSearchParams({
+      id: SHELLY_DEVICE_ID,
+      auth_key: SHELLY_AUTH_KEY,
+      channel: '0',
+      turn
+    });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: `Shelly API HTTP ${response.status}` });
+    }
+
+    const data = await response.json();
+
+    if (!data.isok) {
+      return res.status(502).json({ error: 'Shelly API odmítlo příkaz.' });
+    }
+
+    res.json({ success: true, turn });
   } catch (err) {
     const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
     res.status(502).json({ error: message });
