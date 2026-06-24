@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f3f6f9">
+<title>Přetok u Šmogyho</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root{
+    --bg:#eef2f6;
+    --card:#ffffff;
+    --orange:#f5933d;
+    --orange-dark:#e8801f;
+    --navy:#2c3e50;
+    --grey-text:#5b6b78;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;
+    padding:0;
+    background:var(--bg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:var(--navy);
+    min-height:100vh;
+    min-height:100dvh;
+  }
+  .page{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+  }
+  .topbar{
+    padding:max(18px, env(safe-area-inset-top)) 20px 14px;
+    text-align:center;
+  }
+  .title{
+    font-size:22px;
+    font-weight:700;
+    color:var(--navy);
+    letter-spacing:-0.01em;
+  }
+  .subtitle{
+    font-size:13px;
+    color:var(--grey-text);
+    margin-top:4px;
+  }
+  .card{
+    background:var(--card);
+    border-radius:28px;
+    margin:8px 16px 16px;
+    padding:36px 20px 28px;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 1px 3px rgba(44,62,80,0.06);
+  }
+  .nodes{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:56px;
+    flex-wrap:wrap;
+  }
+  .node{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    text-align:center;
+  }
+  .icon{
+    width:46px;
+    height:46px;
+    margin-bottom:14px;
+  }
+  .node-label{
+    font-size:18px;
+    font-weight:700;
+    color:var(--navy);
+  }
+  .node-value{
+    font-size:18px;
+    color:var(--navy);
+    margin-top:4px;
+    font-weight:400;
+  }
+  .node-value.dim{
+    color:var(--grey-text);
+  }
+  .arrow{
+    width:34px;
+    height:24px;
+    color:var(--orange);
+  }
+  .flow-col{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+  }
+  .meta{
+    text-align:center;
+    padding:0 20px 14px;
+  }
+  .updated{
+    font-size:12px;
+    color:var(--grey-text);
+  }
+  .refresh-btn{
+    margin:0 20px max(20px, env(safe-area-inset-bottom));
+    padding:15px;
+    border:none;
+    border-radius:16px;
+    background:var(--orange);
+    color:#fff;
+    font-size:16px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    transition:transform .15s ease, background .15s ease;
+  }
+  .refresh-btn:active{
+    transform:scale(0.97);
+    background:var(--orange-dark);
+  }
+  .refresh-btn.loading svg{
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{
+    from{transform:rotate(0deg);}
+    to{transform:rotate(360deg);}
+  }
+  .error-banner{
+    margin:0 20px 12px;
+    padding:12px 14px;
+    background:#fdecea;
+    color:#b3372c;
+    border-radius:14px;
+    font-size:13px;
+    text-align:center;
+    display:none;
+  }
+  .error-banner.show{
+    display:block;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <div class="title">přetok u Šmogyho</div>
+    <div class="subtitle">živá data ze Solax</div>
+  </div>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="card">
+    <div class="nodes">
+      <div class="node">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="14" width="48" height="30" rx="2"/>
+          <line x1="8" y1="24" x2="56" y2="24"/>
+          <line x1="8" y1="34" x2="56" y2="34"/>
+          <line x1="22" y1="14" x2="22" y2="44"/>
+          <line x1="36" y1="14" x2="36" y2="44"/>
+          <line x1="50" y1="14" x2="50" y2="44"/>
+          <line x1="32" y1="44" x2="32" y2="52"/>
+          <line x1="20" y1="52" x2="44" y2="52"/>
+        </svg>
+        <div class="node-label">FVE</div>
+        <div class="node-value" id="fveValue">– kW</div>
+      </div>
+
+      <div class="flow-col">
+        <svg class="arrow" viewBox="0 0 34 24" fill="none">
+          <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="node">
+          <div class="node-label">Přetok</div>
+          <div class="node-value" id="feedinValue">– kW</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="updated" id="updatedAt">Načítám…</div>
+  </div>
+
+  <button class="refresh-btn" id="refreshBtn">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+      <path d="M21 3v6h-6"/>
+    </svg>
+    <span id="refreshLabel">Aktualizovat</span>
+  </button>
+</div>
+
+<script>
+const fveEl = document.getElementById('fveValue');
+const feedinEl = document.getElementById('feedinValue');
+const updatedEl = document.getElementById('updatedAt');
+const errorEl = document.getElementById('errorBanner');
+const btn = document.getElementById('refreshBtn');
+const btnLabel = document.getElementById('refreshLabel');
+
+function formatKw(value) {
+  return value.toFixed(1).replace('.', ',') + ' kW';
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadData(isManual) {
+  if (isManual) {
+    btn.classList.add('loading');
+    btnLabel.textContent = 'Aktualizuji…';
+  }
+  try {
+    const res = await fetch('/api/solax');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Neznámá chyba');
+
+    fveEl.textContent = formatKw(data.fveKw);
+    feedinEl.textContent = formatKw(data.feedinKw);
+    updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
+    errorEl.classList.add('show');
+  } finally {
+    btn.classList.remove('loading');
+    btnLabel.textContent = 'Aktualizovat';
+  }
+}
+
+btn.addEventListener('click', () => loadData(true));
+
+loadData(false);
+setInterval(() => loadData(false), 5 * 60 * 1000);
+</script>
+</body>
+</html>
