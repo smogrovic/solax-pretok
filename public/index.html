@@ -2,12 +2,13 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#f3f6f9">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#eef2f6">
 <title>Přetok u Šmogyho</title>
 <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
   :root{
     --bg:#eef2f6;
@@ -16,6 +17,8 @@
     --orange-dark:#e8801f;
     --navy:#2c3e50;
     --grey-text:#5b6b78;
+    --green:#3fb950;
+    --red:#e5534b;
   }
   *{box-sizing:border-box;}
   html,body{
@@ -24,22 +27,34 @@
     background:var(--bg);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     color:var(--navy);
+    height:100%;
+    overscroll-behavior:none;
+  }
+  body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
     min-height:100vh;
     min-height:100dvh;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
   }
   .page{
-    max-width:480px;
-    margin:0 auto;
-    min-height:100dvh;
+    width:100%;
+    max-width:340px;
     display:flex;
     flex-direction:column;
+    align-items:center;
   }
   .topbar{
-    padding:max(18px, env(safe-area-inset-top)) 20px 14px;
     text-align:center;
+    margin-bottom:14px;
   }
   .title{
-    font-size:22px;
+    font-size:21px;
     font-weight:700;
     color:var(--navy);
     letter-spacing:-0.01em;
@@ -50,11 +65,11 @@
     margin-top:4px;
   }
   .card{
+    width:100%;
+    aspect-ratio:1/1;
     background:var(--card);
     border-radius:28px;
-    margin:8px 16px 16px;
-    padding:36px 20px 28px;
-    flex:1;
+    padding:24px 20px;
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -65,7 +80,7 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    gap:56px;
+    gap:40px;
     flex-wrap:wrap;
   }
   .node{
@@ -75,27 +90,24 @@
     text-align:center;
   }
   .icon{
-    width:46px;
-    height:46px;
-    margin-bottom:14px;
+    width:42px;
+    height:42px;
+    margin-bottom:12px;
   }
   .node-label{
-    font-size:18px;
+    font-size:17px;
     font-weight:700;
     color:var(--navy);
   }
   .node-value{
-    font-size:18px;
+    font-size:17px;
     color:var(--navy);
     margin-top:4px;
     font-weight:400;
   }
-  .node-value.dim{
-    color:var(--grey-text);
-  }
   .arrow{
-    width:34px;
-    height:24px;
+    width:30px;
+    height:22px;
     color:var(--orange);
   }
   .flow-col{
@@ -104,16 +116,50 @@
     align-items:center;
     gap:6px;
   }
+  .divider{
+    width:100%;
+    height:1px;
+    background:rgba(44,62,80,0.08);
+    margin:22px 0 18px;
+  }
+  .shelly-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .traffic-light{
+    width:14px;
+    height:14px;
+    border-radius:50%;
+    background:#cfd6dc;
+    flex-shrink:0;
+    transition:background .2s ease;
+  }
+  .traffic-light.on{
+    background:var(--green);
+  }
+  .traffic-light.off{
+    background:var(--red);
+  }
+  .shelly-label{
+    font-size:14px;
+    color:var(--grey-text);
+  }
+  .shelly-label .state{
+    font-weight:700;
+    color:var(--navy);
+  }
   .meta{
     text-align:center;
-    padding:0 20px 14px;
+    margin-top:14px;
   }
   .updated{
     font-size:12px;
     color:var(--grey-text);
   }
   .refresh-btn{
-    margin:0 20px max(20px, env(safe-area-inset-bottom));
+    width:100%;
+    margin-top:16px;
     padding:15px;
     border:none;
     border-radius:16px;
@@ -139,7 +185,8 @@
     to{transform:rotate(360deg);}
   }
   .error-banner{
-    margin:0 20px 12px;
+    width:100%;
+    margin-bottom:12px;
     padding:12px 14px;
     background:#fdecea;
     color:#b3372c;
@@ -189,6 +236,13 @@
         </div>
       </div>
     </div>
+
+    <div class="divider"></div>
+
+    <div class="shelly-row">
+      <div class="traffic-light" id="shellyLight"></div>
+      <div class="shelly-label">Relé: <span class="state" id="shellyState">–</span></div>
+    </div>
   </div>
 
   <div class="meta">
@@ -211,6 +265,8 @@ const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
 const btn = document.getElementById('refreshBtn');
 const btnLabel = document.getElementById('refreshLabel');
+const shellyLight = document.getElementById('shellyLight');
+const shellyState = document.getElementById('shellyState');
 
 function formatKw(value) {
   return value.toFixed(1).replace('.', ',') + ' kW';
@@ -222,27 +278,52 @@ function formatTime(iso) {
   return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
 }
 
+async function loadSolax() {
+  const res = await fetch('/api/solax');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Neznámá chyba (Solax)');
+  fveEl.textContent = formatKw(data.fveKw);
+  feedinEl.textContent = formatKw(data.feedinKw);
+  updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
+}
+
+async function loadShelly() {
+  try {
+    const res = await fetch('/api/shelly');
+    const data = await res.json();
+    if (!res.ok || data.isOn === null || data.isOn === undefined) {
+      shellyLight.className = 'traffic-light';
+      shellyState.textContent = 'neznámý';
+      return;
+    }
+    if (data.isOn) {
+      shellyLight.className = 'traffic-light on';
+      shellyState.textContent = 'zapnuto';
+    } else {
+      shellyLight.className = 'traffic-light off';
+      shellyState.textContent = 'vypnuto';
+    }
+  } catch (err) {
+    shellyLight.className = 'traffic-light';
+    shellyState.textContent = 'neznámý';
+  }
+}
+
 async function loadData(isManual) {
   if (isManual) {
     btn.classList.add('loading');
     btnLabel.textContent = 'Aktualizuji…';
   }
   try {
-    const res = await fetch('/api/solax');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Neznámá chyba');
-
-    fveEl.textContent = formatKw(data.fveKw);
-    feedinEl.textContent = formatKw(data.feedinKw);
-    updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
+    await loadSolax();
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
     errorEl.classList.add('show');
-  } finally {
-    btn.classList.remove('loading');
-    btnLabel.textContent = 'Aktualizovat';
   }
+  await loadShelly();
+  btn.classList.remove('loading');
+  btnLabel.textContent = 'Aktualizovat';
 }
 
 btn.addEventListener('click', () => loadData(true));
