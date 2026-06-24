@@ -149,6 +149,39 @@
     font-weight:700;
     color:var(--navy);
   }
+  .power-buttons{
+    display:flex;
+    gap:18px;
+    margin-top:16px;
+  }
+  .power-btn{
+    width:52px;
+    height:52px;
+    border-radius:50%;
+    border:none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:13px;
+    font-weight:700;
+    color:#fff;
+    transition:transform .15s ease, opacity .15s ease;
+  }
+  .power-btn:active{
+    transform:scale(0.93);
+  }
+  .power-btn.on-btn{
+    background:var(--green);
+  }
+  .power-btn.off-btn{
+    background:var(--red);
+  }
+  .power-btn:disabled{
+    opacity:0.5;
+  }
+  .power-btn.active-state{
+    box-shadow:0 0 0 3px rgba(44,62,80,0.18);
+  }
   .meta{
     text-align:center;
     margin-top:14px;
@@ -241,7 +274,12 @@
 
     <div class="shelly-row">
       <div class="traffic-light" id="shellyLight"></div>
-      <div class="shelly-label">Relé: <span class="state" id="shellyState">–</span></div>
+      <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
+    </div>
+
+    <div class="power-buttons">
+      <button class="power-btn on-btn" id="onBtn">ON</button>
+      <button class="power-btn off-btn" id="offBtn">OFF</button>
     </div>
   </div>
 
@@ -267,6 +305,8 @@ const btn = document.getElementById('refreshBtn');
 const btnLabel = document.getElementById('refreshLabel');
 const shellyLight = document.getElementById('shellyLight');
 const shellyState = document.getElementById('shellyState');
+const onBtn = document.getElementById('onBtn');
+const offBtn = document.getElementById('offBtn');
 
 function formatKw(value) {
   return value.toFixed(1).replace('.', ',') + ' kW';
@@ -294,20 +334,52 @@ async function loadShelly() {
     if (!res.ok || data.isOn === null || data.isOn === undefined) {
       shellyLight.className = 'traffic-light';
       shellyState.textContent = 'neznámý';
+      onBtn.classList.remove('active-state');
+      offBtn.classList.remove('active-state');
       return;
     }
     if (data.isOn) {
       shellyLight.className = 'traffic-light on';
       shellyState.textContent = 'zapnuto';
+      onBtn.classList.add('active-state');
+      offBtn.classList.remove('active-state');
     } else {
       shellyLight.className = 'traffic-light off';
       shellyState.textContent = 'vypnuto';
+      offBtn.classList.add('active-state');
+      onBtn.classList.remove('active-state');
     }
   } catch (err) {
     shellyLight.className = 'traffic-light';
     shellyState.textContent = 'neznámý';
+    onBtn.classList.remove('active-state');
+    offBtn.classList.remove('active-state');
   }
 }
+
+async function setShelly(turn) {
+  onBtn.disabled = true;
+  offBtn.disabled = true;
+  try {
+    const res = await fetch('/api/shelly/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turn })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Bojler se nepodařilo přepnout: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  await loadShelly();
+  onBtn.disabled = false;
+  offBtn.disabled = false;
+}
+
+onBtn.addEventListener('click', () => setShelly('on'));
+offBtn.addEventListener('click', () => setShelly('off'));
 
 async function loadData(isManual) {
   if (isManual) {
