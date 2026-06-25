@@ -18,6 +18,9 @@ const POOL_DEVICE_ID = process.env.POOL_DEVICE_ID;
 const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_URI;
 const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID;
 
+const shellyCache = new Map();
+const CACHE_TTL_MS = 5000; // 5s cache, ať se nezahlcuje Shelly cloud při rychlém refreshi
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
@@ -65,6 +68,12 @@ async function fetchShellyStatus(serverUri, deviceId) {
     throw Object.assign(new Error('Server není nakonfigurován pro toto zařízení.'), { status: 500 });
   }
 
+  const cacheKey = deviceId;
+  const cached = shellyCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.value;
+  }
+
   const url = `https://${serverUri}/device/status`;
   const body = new URLSearchParams({
     id: deviceId,
@@ -79,12 +88,15 @@ async function fetchShellyStatus(serverUri, deviceId) {
   });
 
   if (!response.ok) {
+    // Pokud máme starší cache, raději vrátíme ji než tvrdou chybu (typicky při rate limitu 429)
+    if (cached) return cached.value;
     throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
   }
 
   const data = await response.json();
 
   if (!data.isok) {
+    if (cached) return cached.value;
     throw Object.assign(new Error('Shelly API vrátilo chybu.'), { status: 502 });
   }
 
@@ -99,7 +111,9 @@ async function fetchShellyStatus(serverUri, deviceId) {
     isOn = status['switch:0'].output;
   }
 
-  return { online: !!online, isOn };
+  const result = { online: !!online, isOn };
+  shellyCache.set(cacheKey, { value: result, ts: Date.now() });
+  return result;
 }
 
 function registerStatusEndpoint(path, serverUri, deviceId) {
