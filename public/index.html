@@ -392,7 +392,7 @@ async function loadTrafficLight(endpoint, lightEl, stateEl, retried) {
     const res = await fetch(endpoint);
     const data = await res.json();
     if (res.status === 429 && !retried) {
-      await sleep(1500);
+      await sleep(2500);
       return loadTrafficLight(endpoint, lightEl, stateEl, true);
     }
     if (!res.ok || data.isOn === null || data.isOn === undefined) {
@@ -478,9 +478,9 @@ async function loadData(isManual) {
     errorEl.classList.add('show');
   }
   await loadShelly();
-  await sleep(600);
+  await sleep(1500);
   await loadPool();
-  await sleep(600);
+  await sleep(1500);
   await loadSolinator();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
