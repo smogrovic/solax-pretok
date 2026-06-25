@@ -10,7 +10,13 @@ const SOLAX_URL = 'https://global.solaxcloud.com/proxyApp/proxy/api/getRealtimeI
 
 const SHELLY_AUTH_KEY = process.env.SHELLY_AUTH_KEY;
 const SHELLY_SERVER_URI = process.env.SHELLY_SERVER_URI; // e.g. shelly-133-eu.shelly.cloud
-const SHELLY_DEVICE_ID = process.env.SHELLY_DEVICE_ID;
+const SHELLY_DEVICE_ID = process.env.SHELLY_DEVICE_ID; // bojler
+
+const POOL_SERVER_URI = process.env.POOL_SERVER_URI || SHELLY_SERVER_URI;
+const POOL_DEVICE_ID = process.env.POOL_DEVICE_ID;
+
+const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_URI;
+const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID;
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -54,56 +60,64 @@ app.get('/api/solax', async (req, res) => {
   }
 });
 
-app.get('/api/shelly', async (req, res) => {
-  if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI || !SHELLY_DEVICE_ID) {
-    return res.status(500).json({ error: 'Server není nakonfigurován (chybí SHELLY_AUTH_KEY / SHELLY_SERVER_URI / SHELLY_DEVICE_ID).' });
+async function fetchShellyStatus(serverUri, deviceId) {
+  if (!SHELLY_AUTH_KEY || !serverUri || !deviceId) {
+    throw Object.assign(new Error('Server není nakonfigurován pro toto zařízení.'), { status: 500 });
   }
 
-  try {
-    const url = `https://${SHELLY_SERVER_URI}/device/status`;
-    const body = new URLSearchParams({
-      id: SHELLY_DEVICE_ID,
-      auth_key: SHELLY_AUTH_KEY
-    });
+  const url = `https://${serverUri}/device/status`;
+  const body = new URLSearchParams({
+    id: deviceId,
+    auth_key: SHELLY_AUTH_KEY
+  });
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: AbortSignal.timeout(10000)
-    });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10000)
+  });
 
-    if (!response.ok) {
-      return res.status(502).json({ error: `Shelly API HTTP ${response.status}` });
-    }
-
-    const data = await response.json();
-
-    if (!data.isok) {
-      return res.status(502).json({ error: 'Shelly API vrátilo chybu.' });
-    }
-
-    const status = data.data?.device_status;
-    const online = data.data?.online;
-
-    // Gen1 relé má klíč "relays": [{ ison: true/false }], Gen2+ má "switch:0": { output: true/false }
-    let isOn = null;
-    if (status?.relays && Array.isArray(status.relays) && status.relays.length > 0) {
-      isOn = status.relays[0].ison;
-    } else if (status?.['switch:0']) {
-      isOn = status['switch:0'].output;
-    }
-
-    res.json({
-      online: !!online,
-      isOn,
-      fetchedAt: new Date().toISOString()
-    });
-  } catch (err) {
-    const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
-    res.status(502).json({ error: message });
+  if (!response.ok) {
+    throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
   }
-});
+
+  const data = await response.json();
+
+  if (!data.isok) {
+    throw Object.assign(new Error('Shelly API vrátilo chybu.'), { status: 502 });
+  }
+
+  const status = data.data?.device_status;
+  const online = data.data?.online;
+
+  // Gen1 relé má klíč "relays": [{ ison: true/false }], Gen2+/Gen3 má "switch:0": { output: true/false }
+  let isOn = null;
+  if (status?.relays && Array.isArray(status.relays) && status.relays.length > 0) {
+    isOn = status.relays[0].ison;
+  } else if (status?.['switch:0']) {
+    isOn = status['switch:0'].output;
+  }
+
+  return { online: !!online, isOn };
+}
+
+function registerStatusEndpoint(path, serverUri, deviceId) {
+  app.get(path, async (req, res) => {
+    try {
+      const result = await fetchShellyStatus(serverUri, deviceId);
+      res.json({ ...result, fetchedAt: new Date().toISOString() });
+    } catch (err) {
+      const status = err.status || 502;
+      const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
+      res.status(status).json({ error: message });
+    }
+  });
+}
+
+registerStatusEndpoint('/api/shelly', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
+registerStatusEndpoint('/api/pool', POOL_SERVER_URI, POOL_DEVICE_ID);
+registerStatusEndpoint('/api/solinator', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
 
 app.post('/api/shelly/set', async (req, res) => {
   if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI || !SHELLY_DEVICE_ID) {
