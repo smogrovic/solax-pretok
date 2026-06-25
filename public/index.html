@@ -66,19 +66,18 @@
   }
   .card{
     width:100%;
-    aspect-ratio:1/1;
     background:var(--card);
     border-radius:28px;
-    padding:24px 20px;
+    padding:28px 20px 24px;
     display:flex;
     flex-direction:column;
     align-items:center;
-    justify-content:center;
     box-shadow:0 1px 3px rgba(44,62,80,0.06);
   }
   .nodes{
+    width:100%;
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     justify-content:center;
     gap:40px;
     flex-wrap:wrap;
@@ -89,10 +88,20 @@
     align-items:center;
     text-align:center;
   }
+  .icon-slot{
+    height:46px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin-bottom:12px;
+  }
   .icon{
     width:42px;
     height:42px;
-    margin-bottom:12px;
+  }
+  .icon-fve{
+    width:50px;
+    height:50px;
   }
   .node-label{
     font-size:17px;
@@ -114,7 +123,7 @@
     display:flex;
     flex-direction:column;
     align-items:center;
-    gap:6px;
+    text-align:center;
   }
   .divider{
     width:100%;
@@ -153,6 +162,20 @@
     display:flex;
     gap:18px;
     margin-top:16px;
+  }
+  .device-block{
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding-bottom:18px;
+    margin-bottom:18px;
+    border-bottom:1px solid rgba(44,62,80,0.08);
+  }
+  .device-block.last{
+    padding-bottom:0;
+    margin-bottom:0;
+    border-bottom:none;
   }
   .power-btn{
     width:52px;
@@ -245,41 +268,74 @@
   <div class="card">
     <div class="nodes">
       <div class="node">
-        <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="8" y="14" width="48" height="30" rx="2"/>
-          <line x1="8" y1="24" x2="56" y2="24"/>
-          <line x1="8" y1="34" x2="56" y2="34"/>
-          <line x1="22" y1="14" x2="22" y2="44"/>
-          <line x1="36" y1="14" x2="36" y2="44"/>
-          <line x1="50" y1="14" x2="50" y2="44"/>
-          <line x1="32" y1="44" x2="32" y2="52"/>
-          <line x1="20" y1="52" x2="44" y2="52"/>
-        </svg>
+        <div class="icon-slot">
+          <svg class="icon icon-fve" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <!-- sun -->
+            <circle cx="47" cy="13" r="8.5"/>
+            <line x1="47" y1="0" x2="47" y2="3"/>
+            <line x1="34.5" y1="5.5" x2="36.5" y2="7.7"/>
+            <line x1="59.5" y1="5.5" x2="57.5" y2="7.7"/>
+            <line x1="30" y1="13" x2="33" y2="13"/>
+            <line x1="64" y1="13" x2="61" y2="13"/>
+            <line x1="34.5" y1="20.5" x2="36.5" y2="18.3"/>
+            <line x1="59.5" y1="20.5" x2="57.5" y2="18.3"/>
+            <line x1="47" y1="26" x2="47" y2="23"/>
+            <!-- panel (perspective trapezoid) -->
+            <path d="M9 21 L46 17 L57 47 L2 50 Z"/>
+            <line x1="9" y1="21" x2="2" y2="50"/>
+            <line x1="46" y1="17" x2="57" y2="47"/>
+            <line x1="13.7" y1="20.5" x2="9.6" y2="49.6"/>
+            <line x1="18.6" y1="20" x2="17.5" y2="49.2"/>
+            <line x1="23.5" y1="19.5" x2="25.5" y2="48.8"/>
+            <line x1="28.4" y1="19" x2="33.5" y2="48.4"/>
+            <line x1="33.3" y1="18.5" x2="41.5" y2="48"/>
+            <line x1="38.2" y1="18" x2="49.5" y2="47.6"/>
+            <line x1="4.2" y1="35.5" x2="55.3" y2="32.5"/>
+            <!-- stand -->
+            <line x1="29.5" y1="50" x2="29.5" y2="58"/>
+            <path d="M16 64 L29.5 58 L43 64"/>
+          </svg>
+        </div>
         <div class="node-label">FVE</div>
         <div class="node-value" id="fveValue">– kW</div>
       </div>
 
       <div class="flow-col">
-        <svg class="arrow" viewBox="0 0 34 24" fill="none">
-          <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <div class="node">
-          <div class="node-label">Přetok</div>
-          <div class="node-value" id="feedinValue">– kW</div>
+        <div class="icon-slot">
+          <svg class="arrow" viewBox="0 0 34 24" fill="none">
+            <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
+        <div class="node-label">Přetok</div>
+        <div class="node-value" id="feedinValue">– kW</div>
       </div>
     </div>
 
     <div class="divider"></div>
 
-    <div class="shelly-row">
-      <div class="traffic-light" id="shellyLight"></div>
-      <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
+    <div class="device-block">
+      <div class="shelly-row">
+        <div class="traffic-light" id="shellyLight"></div>
+        <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
+      </div>
+      <div class="power-buttons">
+        <button class="power-btn on-btn" id="onBtn">ON</button>
+        <button class="power-btn off-btn" id="offBtn">OFF</button>
+      </div>
     </div>
 
-    <div class="power-buttons">
-      <button class="power-btn on-btn" id="onBtn">ON</button>
-      <button class="power-btn off-btn" id="offBtn">OFF</button>
+    <div class="device-block">
+      <div class="shelly-row">
+        <div class="traffic-light" id="poolLight"></div>
+        <div class="shelly-label">Bazén: <span class="state" id="poolState">–</span></div>
+      </div>
+    </div>
+
+    <div class="device-block last">
+      <div class="shelly-row">
+        <div class="traffic-light" id="solinatorLight"></div>
+        <div class="shelly-label">Solinator: <span class="state" id="solinatorState">–</span></div>
+      </div>
     </div>
   </div>
 
@@ -307,6 +363,10 @@ const shellyLight = document.getElementById('shellyLight');
 const shellyState = document.getElementById('shellyState');
 const onBtn = document.getElementById('onBtn');
 const offBtn = document.getElementById('offBtn');
+const poolLight = document.getElementById('poolLight');
+const poolState = document.getElementById('poolState');
+const solinatorLight = document.getElementById('solinatorLight');
+const solinatorState = document.getElementById('solinatorState');
 
 function formatKw(value) {
   return value.toFixed(1).replace('.', ',') + ' kW';
@@ -327,34 +387,50 @@ async function loadSolax() {
   updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
 }
 
-async function loadShelly() {
+async function loadTrafficLight(endpoint, lightEl, stateEl) {
   try {
-    const res = await fetch('/api/shelly');
+    const res = await fetch(endpoint);
     const data = await res.json();
     if (!res.ok || data.isOn === null || data.isOn === undefined) {
-      shellyLight.className = 'traffic-light';
-      shellyState.textContent = 'neznámý';
-      onBtn.classList.remove('active-state');
-      offBtn.classList.remove('active-state');
-      return;
+      lightEl.className = 'traffic-light';
+      stateEl.textContent = 'neznámý';
+      return null;
     }
     if (data.isOn) {
-      shellyLight.className = 'traffic-light on';
-      shellyState.textContent = 'zapnuto';
-      onBtn.classList.add('active-state');
-      offBtn.classList.remove('active-state');
+      lightEl.className = 'traffic-light on';
+      stateEl.textContent = 'zapnuto';
     } else {
-      shellyLight.className = 'traffic-light off';
-      shellyState.textContent = 'vypnuto';
-      offBtn.classList.add('active-state');
-      onBtn.classList.remove('active-state');
+      lightEl.className = 'traffic-light off';
+      stateEl.textContent = 'vypnuto';
     }
+    return data.isOn;
   } catch (err) {
-    shellyLight.className = 'traffic-light';
-    shellyState.textContent = 'neznámý';
+    lightEl.className = 'traffic-light';
+    stateEl.textContent = 'neznámý';
+    return null;
+  }
+}
+
+async function loadShelly() {
+  const isOn = await loadTrafficLight('/api/shelly', shellyLight, shellyState);
+  if (isOn === true) {
+    onBtn.classList.add('active-state');
+    offBtn.classList.remove('active-state');
+  } else if (isOn === false) {
+    offBtn.classList.add('active-state');
+    onBtn.classList.remove('active-state');
+  } else {
     onBtn.classList.remove('active-state');
     offBtn.classList.remove('active-state');
   }
+}
+
+async function loadPool() {
+  await loadTrafficLight('/api/pool', poolLight, poolState);
+}
+
+async function loadSolinator() {
+  await loadTrafficLight('/api/solinator', solinatorLight, solinatorState);
 }
 
 async function setShelly(turn) {
@@ -394,6 +470,8 @@ async function loadData(isManual) {
     errorEl.classList.add('show');
   }
   await loadShelly();
+  await loadPool();
+  await loadSolinator();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
 }
