@@ -387,10 +387,14 @@ async function loadSolax() {
   updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
 }
 
-async function loadTrafficLight(endpoint, lightEl, stateEl) {
+async function loadTrafficLight(endpoint, lightEl, stateEl, retried) {
   try {
     const res = await fetch(endpoint);
     const data = await res.json();
+    if (res.status === 429 && !retried) {
+      await sleep(1500);
+      return loadTrafficLight(endpoint, lightEl, stateEl, true);
+    }
     if (!res.ok || data.isOn === null || data.isOn === undefined) {
       lightEl.className = 'traffic-light';
       stateEl.textContent = 'neznámý';
@@ -457,6 +461,10 @@ async function setShelly(turn) {
 onBtn.addEventListener('click', () => setShelly('on'));
 offBtn.addEventListener('click', () => setShelly('off'));
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function loadData(isManual) {
   if (isManual) {
     btn.classList.add('loading');
@@ -470,7 +478,9 @@ async function loadData(isManual) {
     errorEl.classList.add('show');
   }
   await loadShelly();
+  await sleep(600);
   await loadPool();
+  await sleep(600);
   await loadSolinator();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
