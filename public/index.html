@@ -76,11 +76,10 @@
   }
   .nodes{
     width:100%;
-    display:flex;
-    align-items:flex-start;
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:8px;
     justify-content:center;
-    gap:40px;
-    flex-wrap:wrap;
   }
   .node{
     display:flex;
@@ -89,34 +88,36 @@
     text-align:center;
   }
   .icon-slot{
-    height:46px;
+    height:42px;
     display:flex;
     align-items:center;
     justify-content:center;
-    margin-bottom:12px;
+    margin-bottom:10px;
   }
   .icon{
-    width:42px;
-    height:42px;
+    width:38px;
+    height:38px;
   }
   .icon-fve{
-    width:50px;
-    height:50px;
+    width:44px;
+    height:44px;
   }
   .node-label{
-    font-size:17px;
+    font-size:14px;
     font-weight:700;
     color:var(--navy);
+    white-space:nowrap;
   }
   .node-value{
-    font-size:17px;
+    font-size:14px;
     color:var(--navy);
-    margin-top:4px;
+    margin-top:3px;
     font-weight:400;
+    white-space:nowrap;
   }
   .arrow{
-    width:30px;
-    height:22px;
+    width:26px;
+    height:19px;
     color:var(--orange);
   }
   .flow-col{
@@ -204,6 +205,15 @@
   }
   .power-btn.active-state{
     box-shadow:0 0 0 3px rgba(44,62,80,0.18);
+  }
+  .power-btn.small{
+    width:47px;
+    height:47px;
+    font-size:12px;
+  }
+  .power-buttons.small-buttons{
+    gap:16px;
+    margin-top:14px;
   }
   .meta{
     text-align:center;
@@ -309,6 +319,34 @@
         <div class="node-label">Přetok</div>
         <div class="node-value" id="feedinValue">– kW</div>
       </div>
+
+      <div class="node">
+        <div class="icon-slot">
+          <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 32 L32 9 L58 32"/>
+            <path d="M13 26 V56 H51 V26"/>
+            <line x1="25" y1="56" x2="25" y2="40"/>
+            <line x1="39" y1="56" x2="39" y2="40"/>
+            <line x1="25" y1="40" x2="39" y2="40"/>
+            <line x1="44" y1="20" x2="44" y2="12"/>
+            <line x1="40" y1="12" x2="48" y2="12"/>
+          </svg>
+        </div>
+        <div class="node-label">Dům</div>
+        <div class="node-value" id="houseValue">– kW</div>
+      </div>
+
+      <div class="node">
+        <div class="icon-slot">
+          <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="10" y="18" width="38" height="32" rx="3"/>
+            <line x1="52" y1="27" x2="52" y2="41"/>
+            <path d="M26 24 L18 35 L26 35 L22 44 L34 31 L26 31 Z" fill="var(--orange)" stroke="none"/>
+          </svg>
+        </div>
+        <div class="node-label">Baterie</div>
+        <div class="node-value" id="batteryValue">– %</div>
+      </div>
     </div>
 
     <div class="divider"></div>
@@ -329,12 +367,20 @@
         <div class="traffic-light" id="poolLight"></div>
         <div class="shelly-label">Bazén: <span class="state" id="poolState">–</span></div>
       </div>
+      <div class="power-buttons small-buttons">
+        <button class="power-btn small on-btn" id="poolOnBtn">ON</button>
+        <button class="power-btn small off-btn" id="poolOffBtn">OFF</button>
+      </div>
     </div>
 
     <div class="device-block last">
       <div class="shelly-row">
         <div class="traffic-light" id="solinatorLight"></div>
         <div class="shelly-label">Solinator: <span class="state" id="solinatorState">–</span></div>
+      </div>
+      <div class="power-buttons small-buttons">
+        <button class="power-btn small on-btn" id="solinatorOnBtn">ON</button>
+        <button class="power-btn small off-btn" id="solinatorOffBtn">OFF</button>
       </div>
     </div>
   </div>
@@ -355,21 +401,20 @@
 <script>
 const fveEl = document.getElementById('fveValue');
 const feedinEl = document.getElementById('feedinValue');
+const houseEl = document.getElementById('houseValue');
+const batteryEl = document.getElementById('batteryValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
 const btn = document.getElementById('refreshBtn');
 const btnLabel = document.getElementById('refreshLabel');
-const shellyLight = document.getElementById('shellyLight');
-const shellyState = document.getElementById('shellyState');
-const onBtn = document.getElementById('onBtn');
-const offBtn = document.getElementById('offBtn');
-const poolLight = document.getElementById('poolLight');
-const poolState = document.getElementById('poolState');
-const solinatorLight = document.getElementById('solinatorLight');
-const solinatorState = document.getElementById('solinatorState');
 
 function formatKw(value) {
   return value.toFixed(1).replace('.', ',') + ' kW';
+}
+
+function formatPct(value) {
+  if (value === null || value === undefined) return '– %';
+  return Math.round(value) + ' %';
 }
 
 function formatTime(iso) {
@@ -378,70 +423,93 @@ function formatTime(iso) {
   return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function loadSolax() {
   const res = await fetch('/api/solax');
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Neznámá chyba (Solax)');
   fveEl.textContent = formatKw(data.fveKw);
   feedinEl.textContent = formatKw(data.feedinKw);
+  houseEl.textContent = formatKw(data.houseKw);
+  batteryEl.textContent = formatPct(data.batterySoc);
   updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
 }
 
-async function loadTrafficLight(endpoint, lightEl, stateEl, retried) {
+// --- Obecná logika pro ovládaná Shelly zařízení (bojler, bazén, solinator) ---
+const devices = {
+  shelly: {
+    statusUrl: '/api/shelly',
+    setUrl: '/api/shelly/set',
+    light: document.getElementById('shellyLight'),
+    state: document.getElementById('shellyState'),
+    onBtn: document.getElementById('onBtn'),
+    offBtn: document.getElementById('offBtn'),
+    label: 'Bojler'
+  },
+  pool: {
+    statusUrl: '/api/pool',
+    setUrl: '/api/pool/set',
+    light: document.getElementById('poolLight'),
+    state: document.getElementById('poolState'),
+    onBtn: document.getElementById('poolOnBtn'),
+    offBtn: document.getElementById('poolOffBtn'),
+    label: 'Bazén'
+  },
+  solinator: {
+    statusUrl: '/api/solinator',
+    setUrl: '/api/solinator/set',
+    light: document.getElementById('solinatorLight'),
+    state: document.getElementById('solinatorState'),
+    onBtn: document.getElementById('solinatorOnBtn'),
+    offBtn: document.getElementById('solinatorOffBtn'),
+    label: 'Solinator'
+  }
+};
+
+async function loadDeviceStatus(device, retried) {
   try {
-    const res = await fetch(endpoint);
+    const res = await fetch(device.statusUrl);
     const data = await res.json();
     if (res.status === 429 && !retried) {
       await sleep(2500);
-      return loadTrafficLight(endpoint, lightEl, stateEl, true);
+      return loadDeviceStatus(device, true);
     }
     if (!res.ok || data.isOn === null || data.isOn === undefined) {
-      lightEl.className = 'traffic-light';
-      stateEl.textContent = 'neznámý';
+      device.light.className = 'traffic-light';
+      device.state.textContent = 'neznámý';
+      device.onBtn.classList.remove('active-state');
+      device.offBtn.classList.remove('active-state');
       return null;
     }
     if (data.isOn) {
-      lightEl.className = 'traffic-light on';
-      stateEl.textContent = 'zapnuto';
+      device.light.className = 'traffic-light on';
+      device.state.textContent = 'zapnuto';
+      device.onBtn.classList.add('active-state');
+      device.offBtn.classList.remove('active-state');
     } else {
-      lightEl.className = 'traffic-light off';
-      stateEl.textContent = 'vypnuto';
+      device.light.className = 'traffic-light off';
+      device.state.textContent = 'vypnuto';
+      device.offBtn.classList.add('active-state');
+      device.onBtn.classList.remove('active-state');
     }
     return data.isOn;
   } catch (err) {
-    lightEl.className = 'traffic-light';
-    stateEl.textContent = 'neznámý';
+    device.light.className = 'traffic-light';
+    device.state.textContent = 'neznámý';
+    device.onBtn.classList.remove('active-state');
+    device.offBtn.classList.remove('active-state');
     return null;
   }
 }
 
-async function loadShelly() {
-  const isOn = await loadTrafficLight('/api/shelly', shellyLight, shellyState);
-  if (isOn === true) {
-    onBtn.classList.add('active-state');
-    offBtn.classList.remove('active-state');
-  } else if (isOn === false) {
-    offBtn.classList.add('active-state');
-    onBtn.classList.remove('active-state');
-  } else {
-    onBtn.classList.remove('active-state');
-    offBtn.classList.remove('active-state');
-  }
-}
-
-async function loadPool() {
-  await loadTrafficLight('/api/pool', poolLight, poolState);
-}
-
-async function loadSolinator() {
-  await loadTrafficLight('/api/solinator', solinatorLight, solinatorState);
-}
-
-async function setShelly(turn) {
-  onBtn.disabled = true;
-  offBtn.disabled = true;
+async function setDeviceState(device, turn) {
+  device.onBtn.disabled = true;
+  device.offBtn.disabled = true;
   try {
-    const res = await fetch('/api/shelly/set', {
+    const res = await fetch(device.setUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ turn })
@@ -450,20 +518,18 @@ async function setShelly(turn) {
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
   } catch (err) {
-    errorEl.textContent = 'Bojler se nepodařilo přepnout: ' + err.message;
+    errorEl.textContent = device.label + ' se nepodařilo přepnout: ' + err.message;
     errorEl.classList.add('show');
   }
-  await loadShelly();
-  onBtn.disabled = false;
-  offBtn.disabled = false;
+  await loadDeviceStatus(device);
+  device.onBtn.disabled = false;
+  device.offBtn.disabled = false;
 }
 
-onBtn.addEventListener('click', () => setShelly('on'));
-offBtn.addEventListener('click', () => setShelly('off'));
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+Object.values(devices).forEach(device => {
+  device.onBtn.addEventListener('click', () => setDeviceState(device, 'on'));
+  device.offBtn.addEventListener('click', () => setDeviceState(device, 'off'));
+});
 
 async function loadData(isManual) {
   if (isManual) {
@@ -477,11 +543,11 @@ async function loadData(isManual) {
     errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
     errorEl.classList.add('show');
   }
-  await loadShelly();
+  await loadDeviceStatus(devices.shelly);
   await sleep(1500);
-  await loadPool();
+  await loadDeviceStatus(devices.pool);
   await sleep(1500);
-  await loadSolinator();
+  await loadDeviceStatus(devices.solinator);
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
 }
