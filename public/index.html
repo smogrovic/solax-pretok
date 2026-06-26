@@ -32,12 +32,12 @@
   }
   body{
     display:flex;
+    flex-direction:column;
     align-items:center;
-    justify-content:center;
     min-height:100vh;
     min-height:100dvh;
     padding:
-      max(16px, env(safe-area-inset-top))
+      max(20px, env(safe-area-inset-top))
       max(16px, env(safe-area-inset-right))
       max(16px, env(safe-area-inset-bottom))
       max(16px, env(safe-area-inset-left));
@@ -159,11 +159,6 @@
     font-weight:700;
     color:var(--navy);
   }
-  .power-buttons{
-    display:flex;
-    gap:18px;
-    margin-top:16px;
-  }
   .device-block{
     width:100%;
     display:flex;
@@ -179,14 +174,14 @@
     border-bottom:none;
   }
   .power-btn{
-    width:52px;
-    height:52px;
+    width:44px;
+    height:44px;
     border-radius:50%;
     border:none;
     display:flex;
     align-items:center;
     justify-content:center;
-    font-size:13px;
+    font-size:11px;
     font-weight:700;
     color:#fff;
     transition:transform .15s ease, opacity .15s ease;
@@ -207,13 +202,18 @@
     box-shadow:0 0 0 3px rgba(44,62,80,0.18);
   }
   .power-btn.small{
-    width:47px;
-    height:47px;
-    font-size:12px;
+    width:38px;
+    height:38px;
+    font-size:10px;
   }
-  .power-buttons.small-buttons{
+  .power-buttons{
+    display:flex;
     gap:16px;
     margin-top:14px;
+  }
+  .power-buttons.small-buttons{
+    gap:14px;
+    margin-top:12px;
   }
   .meta{
     text-align:center;
@@ -269,8 +269,7 @@
 <body>
 <div class="page">
   <div class="topbar">
-    <div class="title">přetok u Šmogyho</div>
-    <div class="subtitle">živá data ze Solax</div>
+    <div class="title">Šmogyho FVE</div>
   </div>
 
   <div class="error-banner" id="errorBanner"></div>
@@ -409,6 +408,7 @@ const btn = document.getElementById('refreshBtn');
 const btnLabel = document.getElementById('refreshLabel');
 
 function formatKw(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '– kW';
   return value.toFixed(1).replace('.', ',') + ' kW';
 }
 
