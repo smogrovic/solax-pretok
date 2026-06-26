@@ -51,9 +51,18 @@ app.get('/api/solax', async (req, res) => {
     const fveKw = (dc1 + dc2 + dc3 + dc4) / 1000;
     const feedinKw = (r.feedinpower || 0) / 1000;
 
+    // batPower: kladné = baterie se nabíjí (odebírá výkon), záporné = baterie se vybíjí (dodává výkon)
+    const batPower = typeof r.batPower === 'number' ? r.batPower : 0;
+    // Spotřeba domu = výroba FVE - výkon spotřebovaný na nabíjení baterie - přetok do sítě
+    // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného číslo spotřebu zvýší - správně)
+    const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0)) / 1000);
+    const batterySoc = typeof r.soc === 'number' ? r.soc : null;
+
     res.json({
       fveKw,
       feedinKw,
+      houseKw,
+      batterySoc,
       uploadTime: r.uploadTime,
       fetchedAt: new Date().toISOString()
     });
@@ -133,48 +142,60 @@ registerStatusEndpoint('/api/shelly', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
 registerStatusEndpoint('/api/pool', POOL_SERVER_URI, POOL_DEVICE_ID);
 registerStatusEndpoint('/api/solinator', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
 
-app.post('/api/shelly/set', async (req, res) => {
-  if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI || !SHELLY_DEVICE_ID) {
-    return res.status(500).json({ error: 'Server není nakonfigurován (chybí SHELLY_AUTH_KEY / SHELLY_SERVER_URI / SHELLY_DEVICE_ID).' });
+async function setShellyState(serverUri, deviceId, turn) {
+  if (!SHELLY_AUTH_KEY || !serverUri || !deviceId) {
+    throw Object.assign(new Error('Server není nakonfigurován pro toto zařízení.'), { status: 500 });
   }
 
-  const { turn } = req.body || {};
-  if (turn !== 'on' && turn !== 'off') {
-    return res.status(400).json({ error: 'Parametr turn musí být "on" nebo "off".' });
+  const url = `https://${serverUri}/device/relay/control`;
+  const body = new URLSearchParams({
+    id: deviceId,
+    auth_key: SHELLY_AUTH_KEY,
+    channel: '0',
+    turn
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10000)
+  });
+
+  if (!response.ok) {
+    throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
   }
 
-  try {
-    const url = `https://${SHELLY_SERVER_URI}/device/relay/control`;
-    const body = new URLSearchParams({
-      id: SHELLY_DEVICE_ID,
-      auth_key: SHELLY_AUTH_KEY,
-      channel: '0',
-      turn
-    });
+  const data = await response.json();
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: AbortSignal.timeout(10000)
-    });
+  if (!data.isok) {
+    throw Object.assign(new Error('Shelly API odmítlo příkaz.'), { status: 502 });
+  }
 
-    if (!response.ok) {
-      return res.status(502).json({ error: `Shelly API HTTP ${response.status}` });
+  // Po úspěšném přepnutí zneplatníme cache pro toto zařízení, ať se hned ukáže nový stav
+  shellyCache.delete(deviceId);
+}
+
+function registerSetEndpoint(path, serverUri, deviceId) {
+  app.post(path, async (req, res) => {
+    const { turn } = req.body || {};
+    if (turn !== 'on' && turn !== 'off') {
+      return res.status(400).json({ error: 'Parametr turn musí být "on" nebo "off".' });
     }
-
-    const data = await response.json();
-
-    if (!data.isok) {
-      return res.status(502).json({ error: 'Shelly API odmítlo příkaz.' });
+    try {
+      await setShellyState(serverUri, deviceId, turn);
+      res.json({ success: true, turn });
+    } catch (err) {
+      const status = err.status || 502;
+      const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
+      res.status(status).json({ error: message });
     }
+  });
+}
 
-    res.json({ success: true, turn });
-  } catch (err) {
-    const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
-    res.status(502).json({ error: message });
-  }
-});
+registerSetEndpoint('/api/shelly/set', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
+registerSetEndpoint('/api/pool/set', POOL_SERVER_URI, POOL_DEVICE_ID);
+registerSetEndpoint('/api/solinator/set', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
 
 app.listen(PORT, () => {
   console.log(`Server běží na portu ${PORT}`);
