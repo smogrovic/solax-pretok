@@ -27,14 +27,34 @@
     background:var(--bg);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     color:var(--navy);
-    height:100%;
     overscroll-behavior:none;
   }
   body{
     display:flex;
     flex-direction:column;
-    min-height:100vh;
-    min-height:100dvh;
+    height:100vh;
+    height:100dvh;
+    overflow:hidden;
+  }
+  .slider-wrap{
+    flex:1;
+    display:flex;
+    overflow-x:scroll;
+    overflow-y:hidden;
+    scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .slider-wrap::-webkit-scrollbar{display:none;}
+  .slide{
+    flex:none;
+    width:100vw;
+    height:100%;
+    scroll-snap-align:start;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
     padding:
       max(20px, env(safe-area-inset-top))
       max(16px, env(safe-area-inset-right))
@@ -59,16 +79,11 @@
     color:var(--navy);
     letter-spacing:-0.01em;
   }
-  .subtitle{
-    font-size:13px;
-    color:var(--grey-text);
-    margin-top:4px;
-  }
   .card{
     width:100%;
     background:var(--card);
     border-radius:28px;
-    padding:28px 20px 24px;
+    padding:24px 20px;
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -76,88 +91,48 @@
   }
   .nodes{
     width:100%;
+    aspect-ratio:1;
     display:grid;
-    grid-template-columns:repeat(4, 1fr);
-    gap:8px;
-    justify-content:center;
+    grid-template-columns:repeat(2, 1fr);
+    grid-template-rows:repeat(2, 1fr);
+    gap:12px;
   }
   .node{
     display:flex;
     flex-direction:column;
     align-items:center;
+    justify-content:center;
     text-align:center;
+    background:rgba(44,62,80,0.04);
+    border-radius:18px;
+    padding:12px 8px;
   }
   .icon-slot{
-    height:42px;
     display:flex;
     align-items:center;
     justify-content:center;
-    margin-bottom:10px;
+    margin-bottom:8px;
   }
   .icon{
-    width:38px;
-    height:38px;
+    width:40px;
+    height:40px;
   }
   .icon-fve{
-    width:44px;
-    height:44px;
+    width:46px;
+    height:46px;
   }
   .node-label{
-    font-size:14px;
+    font-size:13px;
     font-weight:700;
     color:var(--navy);
     white-space:nowrap;
   }
   .node-value{
-    font-size:14px;
-    color:var(--navy);
-    margin-top:3px;
-    font-weight:400;
-    white-space:nowrap;
-  }
-  .arrow{
-    width:26px;
-    height:19px;
-    color:var(--orange);
-  }
-  .flow-col{
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    text-align:center;
-  }
-  .divider{
-    width:100%;
-    height:1px;
-    background:rgba(44,62,80,0.08);
-    margin:22px 0 18px;
-  }
-  .shelly-row{
-    display:flex;
-    align-items:center;
-    gap:10px;
-  }
-  .traffic-light{
-    width:14px;
-    height:14px;
-    border-radius:50%;
-    background:#cfd6dc;
-    flex-shrink:0;
-    transition:background .2s ease;
-  }
-  .traffic-light.on{
-    background:var(--green);
-  }
-  .traffic-light.off{
-    background:var(--red);
-  }
-  .shelly-label{
-    font-size:14px;
+    font-size:13px;
     color:var(--grey-text);
-  }
-  .shelly-label .state{
-    font-weight:700;
-    color:var(--navy);
+    margin-top:2px;
+    font-weight:600;
+    white-space:nowrap;
   }
   .device-block{
     width:100%;
@@ -173,45 +148,49 @@
     margin-bottom:0;
     border-bottom:none;
   }
+  .shelly-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .traffic-light{
+    width:14px;
+    height:14px;
+    border-radius:50%;
+    background:#cfd6dc;
+    flex-shrink:0;
+    transition:background .2s ease;
+  }
+  .traffic-light.on{background:var(--green);}
+  .traffic-light.off{background:var(--red);}
+  .shelly-label{
+    font-size:14px;
+    color:var(--grey-text);
+  }
+  .shelly-label .state{
+    font-weight:700;
+    color:var(--navy);
+  }
   .power-btn{
-    width:44px;
-    height:44px;
+    width:38px;
+    height:38px;
     border-radius:50%;
     border:none;
     display:flex;
     align-items:center;
     justify-content:center;
-    font-size:11px;
+    font-size:10px;
     font-weight:700;
     color:#fff;
     transition:transform .15s ease, opacity .15s ease;
   }
-  .power-btn:active{
-    transform:scale(0.93);
-  }
-  .power-btn.on-btn{
-    background:var(--green);
-  }
-  .power-btn.off-btn{
-    background:var(--red);
-  }
-  .power-btn:disabled{
-    opacity:0.5;
-  }
-  .power-btn.active-state{
-    box-shadow:0 0 0 3px rgba(44,62,80,0.18);
-  }
-  .power-btn.small{
-    width:38px;
-    height:38px;
-    font-size:10px;
-  }
+  .power-btn:active{transform:scale(0.93);}
+  .power-btn.on-btn{background:var(--green);}
+  .power-btn.off-btn{background:var(--red);}
+  .power-btn:disabled{opacity:0.5;}
+  .power-btn.active-state{box-shadow:0 0 0 3px rgba(44,62,80,0.18);}
   .power-buttons{
     display:flex;
-    gap:16px;
-    margin-top:14px;
-  }
-  .power-buttons.small-buttons{
     gap:14px;
     margin-top:12px;
   }
@@ -261,140 +240,178 @@
     text-align:center;
     display:none;
   }
-  .error-banner.show{
-    display:block;
+  .error-banner.show{display:block;}
+  .page-dots{
+    flex-shrink:0;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:8px;
+    padding:10px 0 max(14px, env(safe-area-inset-bottom));
+    background:var(--bg);
+  }
+  .dot{
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:rgba(44,62,80,0.2);
+    cursor:pointer;
+    transition:background .2s, transform .2s;
+  }
+  .dot.active{
+    background:var(--orange);
+    transform:scale(1.2);
   }
 </style>
 </head>
 <body>
-<div class="page">
-  <div class="topbar">
-    <div class="title">Šmogyho FVE</div>
-  </div>
 
-  <div class="error-banner" id="errorBanner"></div>
+<div class="slider-wrap" id="sliderWrap">
 
-  <div class="card">
-    <div class="nodes">
-      <div class="node">
-        <div class="icon-slot">
-          <svg class="icon icon-fve" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-            <!-- sun -->
-            <circle cx="47" cy="13" r="8.5"/>
-            <line x1="47" y1="0" x2="47" y2="3"/>
-            <line x1="34.5" y1="5.5" x2="36.5" y2="7.7"/>
-            <line x1="59.5" y1="5.5" x2="57.5" y2="7.7"/>
-            <line x1="30" y1="13" x2="33" y2="13"/>
-            <line x1="64" y1="13" x2="61" y2="13"/>
-            <line x1="34.5" y1="20.5" x2="36.5" y2="18.3"/>
-            <line x1="59.5" y1="20.5" x2="57.5" y2="18.3"/>
-            <line x1="47" y1="26" x2="47" y2="23"/>
-            <!-- panel (perspective trapezoid) -->
-            <path d="M9 21 L46 17 L57 47 L2 50 Z"/>
-            <line x1="9" y1="21" x2="2" y2="50"/>
-            <line x1="46" y1="17" x2="57" y2="47"/>
-            <line x1="13.7" y1="20.5" x2="9.6" y2="49.6"/>
-            <line x1="18.6" y1="20" x2="17.5" y2="49.2"/>
-            <line x1="23.5" y1="19.5" x2="25.5" y2="48.8"/>
-            <line x1="28.4" y1="19" x2="33.5" y2="48.4"/>
-            <line x1="33.3" y1="18.5" x2="41.5" y2="48"/>
-            <line x1="38.2" y1="18" x2="49.5" y2="47.6"/>
-            <line x1="4.2" y1="35.5" x2="55.3" y2="32.5"/>
-            <!-- stand -->
-            <line x1="29.5" y1="50" x2="29.5" y2="58"/>
-            <path d="M16 64 L29.5 58 L43 64"/>
-          </svg>
+  <!-- Slide 1: Stats -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Šmogyho FVE</div>
+      </div>
+      <div class="error-banner" id="errorBanner"></div>
+      <div class="card">
+        <div class="nodes">
+          <div class="node">
+            <div class="icon-slot">
+              <svg class="icon icon-fve" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <!-- sun -->
+                <circle cx="47" cy="13" r="8.5"/>
+                <line x1="47" y1="0" x2="47" y2="3"/>
+                <line x1="34.5" y1="5.5" x2="36.5" y2="7.7"/>
+                <line x1="59.5" y1="5.5" x2="57.5" y2="7.7"/>
+                <line x1="30" y1="13" x2="33" y2="13"/>
+                <line x1="64" y1="13" x2="61" y2="13"/>
+                <line x1="34.5" y1="20.5" x2="36.5" y2="18.3"/>
+                <line x1="59.5" y1="20.5" x2="57.5" y2="18.3"/>
+                <line x1="47" y1="26" x2="47" y2="23"/>
+                <!-- panel (perspective trapezoid) -->
+                <path d="M9 21 L46 17 L57 47 L2 50 Z"/>
+                <line x1="9" y1="21" x2="2" y2="50"/>
+                <line x1="46" y1="17" x2="57" y2="47"/>
+                <line x1="13.7" y1="20.5" x2="9.6" y2="49.6"/>
+                <line x1="18.6" y1="20" x2="17.5" y2="49.2"/>
+                <line x1="23.5" y1="19.5" x2="25.5" y2="48.8"/>
+                <line x1="28.4" y1="19" x2="33.5" y2="48.4"/>
+                <line x1="33.3" y1="18.5" x2="41.5" y2="48"/>
+                <line x1="38.2" y1="18" x2="49.5" y2="47.6"/>
+                <line x1="4.2" y1="35.5" x2="55.3" y2="32.5"/>
+                <!-- stand -->
+                <line x1="29.5" y1="50" x2="29.5" y2="58"/>
+                <path d="M16 64 L29.5 58 L43 64"/>
+              </svg>
+            </div>
+            <div class="node-label">FVE</div>
+            <div class="node-value" id="fveValue">– kW</div>
+          </div>
+
+          <div class="node">
+            <div class="icon-slot">
+              <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
+                <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="node-label">Přetok</div>
+            <div class="node-value" id="feedinValue">– kW</div>
+          </div>
+
+          <div class="node">
+            <div class="icon-slot">
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 32 L32 9 L58 32"/>
+                <path d="M13 26 V56 H51 V26"/>
+                <line x1="25" y1="56" x2="25" y2="40"/>
+                <line x1="39" y1="56" x2="39" y2="40"/>
+                <line x1="25" y1="40" x2="39" y2="40"/>
+                <line x1="44" y1="20" x2="44" y2="12"/>
+                <line x1="40" y1="12" x2="48" y2="12"/>
+              </svg>
+            </div>
+            <div class="node-label">Dům</div>
+            <div class="node-value" id="houseValue">– kW</div>
+          </div>
+
+          <div class="node">
+            <div class="icon-slot">
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="10" y="18" width="38" height="32" rx="3"/>
+                <line x1="52" y1="27" x2="52" y2="41"/>
+                <path d="M26 24 L18 35 L26 35 L22 44 L34 31 L26 31 Z" fill="var(--orange)" stroke="none"/>
+              </svg>
+            </div>
+            <div class="node-label">Baterie</div>
+            <div class="node-value" id="batteryValue">– %</div>
+          </div>
         </div>
-        <div class="node-label">FVE</div>
-        <div class="node-value" id="fveValue">– kW</div>
       </div>
 
-      <div class="flow-col">
-        <div class="icon-slot">
-          <svg class="arrow" viewBox="0 0 34 24" fill="none">
-            <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div class="node-label">Přetok</div>
-        <div class="node-value" id="feedinValue">– kW</div>
+      <div class="meta">
+        <div class="updated" id="updatedAt">Načítám…</div>
       </div>
 
-      <div class="node">
-        <div class="icon-slot">
-          <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 32 L32 9 L58 32"/>
-            <path d="M13 26 V56 H51 V26"/>
-            <line x1="25" y1="56" x2="25" y2="40"/>
-            <line x1="39" y1="56" x2="39" y2="40"/>
-            <line x1="25" y1="40" x2="39" y2="40"/>
-            <line x1="44" y1="20" x2="44" y2="12"/>
-            <line x1="40" y1="12" x2="48" y2="12"/>
-          </svg>
-        </div>
-        <div class="node-label">Dům</div>
-        <div class="node-value" id="houseValue">– kW</div>
-      </div>
-
-      <div class="node">
-        <div class="icon-slot">
-          <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="10" y="18" width="38" height="32" rx="3"/>
-            <line x1="52" y1="27" x2="52" y2="41"/>
-            <path d="M26 24 L18 35 L26 35 L22 44 L34 31 L26 31 Z" fill="var(--orange)" stroke="none"/>
-          </svg>
-        </div>
-        <div class="node-label">Baterie</div>
-        <div class="node-value" id="batteryValue">– %</div>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="device-block">
-      <div class="shelly-row">
-        <div class="traffic-light" id="shellyLight"></div>
-        <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
-      </div>
-      <div class="power-buttons small-buttons">
-        <button class="power-btn small on-btn" id="onBtn">ON</button>
-        <button class="power-btn small off-btn" id="offBtn">OFF</button>
-      </div>
-    </div>
-
-    <div class="device-block">
-      <div class="shelly-row">
-        <div class="traffic-light" id="poolLight"></div>
-        <div class="shelly-label">Bazén: <span class="state" id="poolState">–</span></div>
-      </div>
-      <div class="power-buttons small-buttons">
-        <button class="power-btn small on-btn" id="poolOnBtn">ON</button>
-        <button class="power-btn small off-btn" id="poolOffBtn">OFF</button>
-      </div>
-    </div>
-
-    <div class="device-block last">
-      <div class="shelly-row">
-        <div class="traffic-light" id="solinatorLight"></div>
-        <div class="shelly-label">Solinátor: <span class="state" id="solinatorState">–</span></div>
-      </div>
-      <div class="power-buttons small-buttons">
-        <button class="power-btn small on-btn" id="solinatorOnBtn">ON</button>
-        <button class="power-btn small off-btn" id="solinatorOffBtn">OFF</button>
-      </div>
+      <button class="refresh-btn" id="refreshBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+        <span id="refreshLabel">Aktualizovat</span>
+      </button>
     </div>
   </div>
 
-  <div class="meta">
-    <div class="updated" id="updatedAt">Načítám…</div>
+  <!-- Slide 2: Devices -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Ovládání</div>
+      </div>
+      <div class="card">
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="shellyLight"></div>
+            <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="onBtn">ON</button>
+            <button class="power-btn off-btn" id="offBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="poolLight"></div>
+            <div class="shelly-label">Bazén: <span class="state" id="poolState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="poolOnBtn">ON</button>
+            <button class="power-btn off-btn" id="poolOffBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="solinatorLight"></div>
+            <div class="shelly-label">Solinátor: <span class="state" id="solinatorState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
+            <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <button class="refresh-btn" id="refreshBtn">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
-      <path d="M21 3v6h-6"/>
-    </svg>
-    <span id="refreshLabel">Aktualizovat</span>
-  </button>
+</div>
+
+<div class="page-dots" id="pageDots">
+  <span class="dot active"></span>
+  <span class="dot"></span>
 </div>
 
 <script>
@@ -438,7 +455,6 @@ async function loadSolax() {
   updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
 }
 
-// --- Obecná logika pro ovládaná Shelly zařízení (bojler, bazén, solinator) ---
 const devices = {
   shelly: {
     statusUrl: '/api/shelly',
@@ -556,6 +572,21 @@ btn.addEventListener('click', () => loadData(true));
 
 loadData(false);
 setInterval(() => loadData(false), 5 * 60 * 1000);
+
+// Slider dots
+const sliderWrap = document.getElementById('sliderWrap');
+const dots = document.querySelectorAll('.dot');
+
+sliderWrap.addEventListener('scroll', () => {
+  const idx = Math.round(sliderWrap.scrollLeft / sliderWrap.clientWidth);
+  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+}, { passive: true });
+
+dots.forEach((dot, i) => {
+  dot.addEventListener('click', () => {
+    sliderWrap.scrollTo({ left: i * sliderWrap.clientWidth, behavior: 'smooth' });
+  });
+});
 </script>
 </body>
 </html>
