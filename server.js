@@ -63,6 +63,7 @@ app.get('/api/solax', async (req, res) => {
       feedinKw,
       houseKw,
       batterySoc,
+      batPowerKw: batPower / 1000,
       uploadTime: r.uploadTime,
       fetchedAt: new Date().toISOString()
     });
