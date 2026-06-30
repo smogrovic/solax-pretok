@@ -313,12 +313,17 @@
 
           <div class="node">
             <div class="icon-slot">
-              <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
-                <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="10" y="18" width="38" height="32" rx="3"/>
+                <line x1="52" y1="27" x2="52" y2="41"/>
+                <line x1="32" y1="10" x2="32" y2="18"/>
+                <polyline points="26,15 32,8 38,15" fill="none"/>
+                <line x1="32" y1="54" x2="32" y2="62"/>
+                <polyline points="38,57 32,64 26,57" fill="none"/>
               </svg>
             </div>
-            <div class="node-label">Přetok</div>
-            <div class="node-value" id="feedinValue">– kW</div>
+            <div class="node-label" id="batPowerLabel">Tok baterie</div>
+            <div class="node-value" id="batPowerValue">– kW</div>
           </div>
 
           <div class="node">
@@ -333,7 +338,7 @@
                 <line x1="40" y1="12" x2="48" y2="12"/>
               </svg>
             </div>
-            <div class="node-label">Dům</div>
+            <div class="node-label">Spotřeba domu</div>
             <div class="node-value" id="houseValue">– kW</div>
           </div>
 
@@ -351,17 +356,12 @@
 
           <div class="node full">
             <div class="icon-slot">
-              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="10" y="18" width="38" height="32" rx="3"/>
-                <line x1="52" y1="27" x2="52" y2="41"/>
-                <line x1="32" y1="10" x2="32" y2="18"/>
-                <polyline points="26,15 32,8 38,15" fill="none"/>
-                <line x1="32" y1="54" x2="32" y2="62"/>
-                <polyline points="38,57 32,64 26,57" fill="none"/>
+              <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
+                <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <div class="node-label" id="batPowerLabel">Tok baterie</div>
-            <div class="node-value" id="batPowerValue">– kW</div>
+            <div class="node-label">Přetok</div>
+            <div class="node-value" id="feedinValue">– kW</div>
           </div>
         </div>
       </div>
