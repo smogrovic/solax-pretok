@@ -623,6 +623,7 @@ async function loadData(isManual) {
   await loadDeviceStatus(devices.pool);
   await sleep(1500);
   await loadDeviceStatus(devices.solinator);
+  await sleep(1500);
   await loadPoolPower();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
