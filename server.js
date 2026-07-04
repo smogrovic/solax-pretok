@@ -222,6 +222,8 @@ async function fetchShellyPowerW(deviceId) {
   const status = data.data?.device_status;
   let powerW = null;
   if (typeof status?.['switch:0']?.apower === 'number') powerW = status['switch:0'].apower;
+  else if (typeof status?.['pm1:0']?.apower === 'number') powerW = status['pm1:0'].apower;
+  else if (typeof status?.['em:0']?.act_power === 'number') powerW = status['em:0'].act_power;
   else if (status?.meters?.[0] && typeof status.meters[0].power === 'number') powerW = status.meters[0].power;
 
   shellyCache.set(cacheKey, { value: powerW, ts: Date.now() });
