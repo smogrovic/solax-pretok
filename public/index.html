@@ -425,6 +425,7 @@
             <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
             <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
           </div>
+          <div class="device-power" id="poolTotalPower"></div>
         </div>
       </div>
     </div>
@@ -444,6 +445,7 @@ const houseEl = document.getElementById('houseValue');
 const batteryEl = document.getElementById('batteryValue');
 const batPowerEl = document.getElementById('batPowerValue');
 const batPowerLabel = document.getElementById('batPowerLabel');
+const poolTotalPowerEl = document.getElementById('poolTotalPower');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
 const btn = document.getElementById('refreshBtn');
@@ -592,6 +594,18 @@ Object.values(devices).forEach(device => {
   device.offBtn.addEventListener('click', () => setDeviceState(device, 'off'));
 });
 
+async function loadPoolPower() {
+  try {
+    const res = await fetch('/api/pool/power');
+    const data = await res.json();
+    poolTotalPowerEl.textContent = typeof data.totalPowerW === 'number'
+      ? 'Bazén: ' + Math.round(data.totalPowerW) + ' W'
+      : '';
+  } catch {
+    poolTotalPowerEl.textContent = '';
+  }
+}
+
 async function loadData(isManual) {
   if (isManual) {
     btn.classList.add('loading');
@@ -609,6 +623,7 @@ async function loadData(isManual) {
   await loadDeviceStatus(devices.pool);
   await sleep(1500);
   await loadDeviceStatus(devices.solinator);
+  await loadPoolPower();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
 }

@@ -18,6 +18,8 @@ const POOL_DEVICE_ID = process.env.POOL_DEVICE_ID;
 const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_URI;
 const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID;
 
+const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
+
 const shellyCache = new Map();
 const CACHE_TTL_MS = 5000; // 5s cache, ať se nezahlcuje Shelly cloud při rychlém refreshi
 
@@ -200,6 +202,45 @@ function registerSetEndpoint(path, serverUri, deviceId) {
 registerSetEndpoint('/api/shelly/set', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
 registerSetEndpoint('/api/pool/set', POOL_SERVER_URI, POOL_DEVICE_ID);
 registerSetEndpoint('/api/solinator/set', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
+
+async function fetchShellyPowerW(deviceId) {
+  const cacheKey = 'pm_' + deviceId;
+  const cached = shellyCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.value;
+
+  const url = `https://${SHELLY_SERVER_URI}/device/status`;
+  const body = new URLSearchParams({ id: deviceId, auth_key: SHELLY_AUTH_KEY });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  if (!data.isok) return null;
+  const status = data.data?.device_status;
+  let powerW = null;
+  if (typeof status?.['switch:0']?.apower === 'number') powerW = status['switch:0'].apower;
+  else if (status?.meters?.[0] && typeof status.meters[0].power === 'number') powerW = status.meters[0].power;
+
+  shellyCache.set(cacheKey, { value: powerW, ts: Date.now() });
+  return powerW;
+}
+
+app.get('/api/pool/power', async (req, res) => {
+  if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI) {
+    return res.status(500).json({ error: 'Server není nakonfigurován.' });
+  }
+  try {
+    const powers = await Promise.all(POOL_PM_IDS.map(id => fetchShellyPowerW(id)));
+    const valid = powers.filter(p => typeof p === 'number');
+    const totalPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
+    res.json({ totalPowerW, devices: powers });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server běží na portu ${PORT}`);
