@@ -190,6 +190,12 @@
   .power-btn.off-btn{background:var(--red);}
   .power-btn:disabled{opacity:0.5;}
   .power-btn.active-state{box-shadow:0 0 0 3px rgba(44,62,80,0.18);}
+  .device-power{
+    font-size:12px;
+    color:var(--grey-text);
+    margin-top:6px;
+    min-height:16px;
+  }
   .power-buttons{
     display:flex;
     gap:14px;
@@ -396,6 +402,7 @@
             <button class="power-btn on-btn" id="onBtn">ON</button>
             <button class="power-btn off-btn" id="offBtn">OFF</button>
           </div>
+          <div class="device-power" id="shellyPower"></div>
         </div>
 
         <div class="device-block">
@@ -494,6 +501,7 @@ const devices = {
     state: document.getElementById('shellyState'),
     onBtn: document.getElementById('onBtn'),
     offBtn: document.getElementById('offBtn'),
+    powerEl: document.getElementById('shellyPower'),
     label: 'Bojler'
   },
   pool: {
@@ -529,6 +537,7 @@ async function loadDeviceStatus(device, retried) {
       device.state.textContent = 'neznámý';
       device.onBtn.classList.remove('active-state');
       device.offBtn.classList.remove('active-state');
+      if (device.powerEl) device.powerEl.textContent = '';
       return null;
     }
     if (data.isOn) {
@@ -541,6 +550,11 @@ async function loadDeviceStatus(device, retried) {
       device.state.textContent = 'vypnuto';
       device.offBtn.classList.add('active-state');
       device.onBtn.classList.remove('active-state');
+    }
+    if (device.powerEl) {
+      device.powerEl.textContent = typeof data.powerW === 'number'
+        ? Math.round(data.powerW) + ' W'
+        : '';
     }
     return data.isOn;
   } catch (err) {

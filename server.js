@@ -115,13 +115,16 @@ async function fetchShellyStatus(serverUri, deviceId) {
 
   // Gen1 relé má klíč "relays": [{ ison: true/false }], Gen2+/Gen3 má "switch:0": { output: true/false }
   let isOn = null;
+  let powerW = null;
   if (status?.relays && Array.isArray(status.relays) && status.relays.length > 0) {
     isOn = status.relays[0].ison;
+    if (typeof status.relays[0].power === 'number') powerW = status.relays[0].power;
   } else if (status?.['switch:0']) {
     isOn = status['switch:0'].output;
+    if (typeof status['switch:0'].apower === 'number') powerW = status['switch:0'].apower;
   }
 
-  const result = { online: !!online, isOn };
+  const result = { online: !!online, isOn, powerW };
   shellyCache.set(cacheKey, { value: result, ts: Date.now() });
   return result;
 }
