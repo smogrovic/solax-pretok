@@ -235,7 +235,10 @@ app.get('/api/pool/power', async (req, res) => {
     return res.status(500).json({ error: 'Server není nakonfigurován.' });
   }
   try {
-    const powers = await Promise.all(POOL_PM_IDS.map(id => fetchShellyPowerW(id)));
+    const powers = [];
+    for (const id of POOL_PM_IDS) {
+      powers.push(await fetchShellyPowerW(id));
+    }
     const valid = powers.filter(p => typeof p === 'number');
     const totalPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
     res.json({ totalPowerW, devices: powers });
