@@ -238,7 +238,7 @@ app.get('/api/pool/power', async (req, res) => {
     const powers = [];
     for (let i = 0; i < POOL_PM_IDS.length; i++) {
       powers.push(await fetchShellyPowerW(POOL_PM_IDS[i]));
-      if (i < POOL_PM_IDS.length - 1) await new Promise(r => setTimeout(r, 1500));
+      if (i < POOL_PM_IDS.length - 1) await new Promise(r => setTimeout(r, 800));
     }
     const valid = powers.filter(p => typeof p === 'number');
     const totalPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
