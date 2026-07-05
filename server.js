@@ -203,6 +203,21 @@ registerSetEndpoint('/api/shelly/set', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
 registerSetEndpoint('/api/pool/set', POOL_SERVER_URI, POOL_DEVICE_ID);
 registerSetEndpoint('/api/solinator/set', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
 
+const LIGHT_ZAHRADA_DOLE_ID   = '34b7dacb5f6c';
+const LIGHT_ZAHRADA_NAHORE_ID = '34b7daca6dc8';
+const LIGHT_BAZEN_ID          = '34b7daca4150';
+const LIGHT_NOCNI_ID          = 'dcda0cea454c';
+
+registerStatusEndpoint('/api/light/zahradadole',   SHELLY_SERVER_URI, LIGHT_ZAHRADA_DOLE_ID);
+registerStatusEndpoint('/api/light/zahradanahore', SHELLY_SERVER_URI, LIGHT_ZAHRADA_NAHORE_ID);
+registerStatusEndpoint('/api/light/bazen',         SHELLY_SERVER_URI, LIGHT_BAZEN_ID);
+registerStatusEndpoint('/api/light/nocni',         SHELLY_SERVER_URI, LIGHT_NOCNI_ID);
+
+registerSetEndpoint('/api/light/zahradadole/set',   SHELLY_SERVER_URI, LIGHT_ZAHRADA_DOLE_ID);
+registerSetEndpoint('/api/light/zahradanahore/set', SHELLY_SERVER_URI, LIGHT_ZAHRADA_NAHORE_ID);
+registerSetEndpoint('/api/light/bazen/set',         SHELLY_SERVER_URI, LIGHT_BAZEN_ID);
+registerSetEndpoint('/api/light/nocni/set',         SHELLY_SERVER_URI, LIGHT_NOCNI_ID);
+
 async function fetchShellyPowerW(deviceId) {
   const cacheKey = 'pm_' + deviceId;
   const cached = shellyCache.get(cacheKey);

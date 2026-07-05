@@ -436,10 +436,65 @@
     </div>
   </div>
 
+  <!-- Slide 3: Světla -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Světla</div>
+      </div>
+      <div class="card">
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="lightDoleLight"></div>
+            <div class="shelly-label">Zahrada dole: <span class="state" id="lightDoleState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="lightDoleOnBtn">ON</button>
+            <button class="power-btn off-btn" id="lightDoleOffBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="lightNahoreLight"></div>
+            <div class="shelly-label">Zahrada nahoře: <span class="state" id="lightNahoreState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="lightNahoreOnBtn">ON</button>
+            <button class="power-btn off-btn" id="lightNahoreOffBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="lightBazenLight"></div>
+            <div class="shelly-label">Světlo bazén: <span class="state" id="lightBazenState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="lightBazenOnBtn">ON</button>
+            <button class="power-btn off-btn" id="lightBazenOffBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="lightNocniLight"></div>
+            <div class="shelly-label">Noční světla: <span class="state" id="lightNocniState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="lightNocniOnBtn">ON</button>
+            <button class="power-btn off-btn" id="lightNocniOffBtn">OFF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="page-dots" id="pageDots">
   <span class="dot active"></span>
+  <span class="dot"></span>
   <span class="dot"></span>
 </div>
 
@@ -528,6 +583,42 @@ const devices = {
     onBtn: document.getElementById('solinatorOnBtn'),
     offBtn: document.getElementById('solinatorOffBtn'),
     label: 'Solinátor'
+  },
+  lightDole: {
+    statusUrl: '/api/light/zahradadole',
+    setUrl: '/api/light/zahradadole/set',
+    light: document.getElementById('lightDoleLight'),
+    state: document.getElementById('lightDoleState'),
+    onBtn: document.getElementById('lightDoleOnBtn'),
+    offBtn: document.getElementById('lightDoleOffBtn'),
+    label: 'Zahrada dole'
+  },
+  lightNahore: {
+    statusUrl: '/api/light/zahradanahore',
+    setUrl: '/api/light/zahradanahore/set',
+    light: document.getElementById('lightNahoreLight'),
+    state: document.getElementById('lightNahoreState'),
+    onBtn: document.getElementById('lightNahoreOnBtn'),
+    offBtn: document.getElementById('lightNahoreOffBtn'),
+    label: 'Zahrada nahoře'
+  },
+  lightBazen: {
+    statusUrl: '/api/light/bazen',
+    setUrl: '/api/light/bazen/set',
+    light: document.getElementById('lightBazenLight'),
+    state: document.getElementById('lightBazenState'),
+    onBtn: document.getElementById('lightBazenOnBtn'),
+    offBtn: document.getElementById('lightBazenOffBtn'),
+    label: 'Světlo bazén'
+  },
+  lightNocni: {
+    statusUrl: '/api/light/nocni',
+    setUrl: '/api/light/nocni/set',
+    light: document.getElementById('lightNocniLight'),
+    state: document.getElementById('lightNocniState'),
+    onBtn: document.getElementById('lightNocniOnBtn'),
+    offBtn: document.getElementById('lightNocniOffBtn'),
+    label: 'Noční světla'
   }
 };
 
@@ -630,6 +721,14 @@ async function loadData(isManual) {
   await loadDeviceStatus(devices.pool);
   await sleep(800);
   await loadDeviceStatus(devices.solinator);
+  await sleep(800);
+  await loadDeviceStatus(devices.lightDole);
+  await sleep(800);
+  await loadDeviceStatus(devices.lightNahore);
+  await sleep(800);
+  await loadDeviceStatus(devices.lightBazen);
+  await sleep(800);
+  await loadDeviceStatus(devices.lightNocni);
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
 }
