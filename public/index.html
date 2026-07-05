@@ -236,6 +236,9 @@
     from{transform:rotate(0deg);}
     to{transform:rotate(360deg);}
   }
+  .pool-card{
+    margin-top:12px;
+  }
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -393,7 +396,7 @@
         <div class="title">Ovládání</div>
       </div>
       <div class="card">
-        <div class="device-block">
+        <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="shellyLight"></div>
             <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
@@ -404,7 +407,9 @@
           </div>
           <div class="device-power" id="shellyPower"></div>
         </div>
+      </div>
 
+      <div class="card pool-card">
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="poolLight"></div>
@@ -620,11 +625,11 @@ async function loadData(isManual) {
   }
   await loadDeviceStatus(devices.shelly);
   await sleep(1500);
+  await loadPoolPower();
+  await sleep(1500);
   await loadDeviceStatus(devices.pool);
   await sleep(1500);
   await loadDeviceStatus(devices.solinator);
-  await sleep(1500);
-  await loadPoolPower();
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
 }
