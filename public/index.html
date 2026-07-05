@@ -715,19 +715,19 @@ async function loadData(isManual) {
     errorEl.classList.add('show');
   }
   await loadDeviceStatus(devices.shelly);
-  await sleep(800);
+  await sleep(1000);
   await loadPoolPower();
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.pool);
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.solinator);
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.lightDole);
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.lightNahore);
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.lightBazen);
-  await sleep(800);
+  await sleep(1000);
   await loadDeviceStatus(devices.lightNocni);
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
