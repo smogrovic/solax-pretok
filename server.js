@@ -102,7 +102,9 @@ async function fetchShellyStatus(serverUri, deviceId) {
   if (!response.ok) {
     // Pokud máme starší cache, raději vrátíme ji než tvrdou chybu (typicky při rate limitu 429)
     if (cached) return cached.value;
-    throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
+    // 429 propouštíme dál, ať klient ví, že má počkat a zkusit to znovu
+    const status = response.status === 429 ? 429 : 502;
+    throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status });
   }
 
   const data = await response.json();

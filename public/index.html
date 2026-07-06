@@ -702,35 +702,45 @@ async function loadPoolPower() {
   }
 }
 
+let isLoadingData = false;
+
 async function loadData(isManual) {
+  // Zámek: sekvence trvá ~10 s a nesmí běžet dvakrát přes sebe,
+  // jinak jdou na Shelly cloud paralelní dotazy a přijde rate limit
+  if (isLoadingData) return;
+  isLoadingData = true;
   if (isManual) {
     btn.classList.add('loading');
     btnLabel.textContent = 'Aktualizuji…';
   }
   try {
-    await loadSolax();
-    errorEl.classList.remove('show');
-  } catch (err) {
-    errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
-    errorEl.classList.add('show');
+    try {
+      await loadSolax();
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
+      errorEl.classList.add('show');
+    }
+    await loadDeviceStatus(devices.shelly);
+    await sleep(1000);
+    await loadPoolPower();
+    await sleep(1000);
+    await loadDeviceStatus(devices.pool);
+    await sleep(1000);
+    await loadDeviceStatus(devices.solinator);
+    await sleep(1000);
+    await loadDeviceStatus(devices.lightDole);
+    await sleep(1000);
+    await loadDeviceStatus(devices.lightNahore);
+    await sleep(1000);
+    await loadDeviceStatus(devices.lightBazen);
+    await sleep(1000);
+    await loadDeviceStatus(devices.lightNocni);
+  } finally {
+    isLoadingData = false;
+    btn.classList.remove('loading');
+    btnLabel.textContent = 'Aktualizovat';
   }
-  await loadDeviceStatus(devices.shelly);
-  await sleep(1000);
-  await loadPoolPower();
-  await sleep(1000);
-  await loadDeviceStatus(devices.pool);
-  await sleep(1000);
-  await loadDeviceStatus(devices.solinator);
-  await sleep(1000);
-  await loadDeviceStatus(devices.lightDole);
-  await sleep(1000);
-  await loadDeviceStatus(devices.lightNahore);
-  await sleep(1000);
-  await loadDeviceStatus(devices.lightBazen);
-  await sleep(1000);
-  await loadDeviceStatus(devices.lightNocni);
-  btn.classList.remove('loading');
-  btnLabel.textContent = 'Aktualizovat';
 }
 
 btn.addEventListener('click', () => loadData(true));
