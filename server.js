@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,60 +21,178 @@ const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID;
 
 const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
 
+const LIGHT_ZAHRADA_DOLE_ID   = '34b7dacb5f6c';
+const LIGHT_ZAHRADA_NAHORE_ID = '34b7daca6dc8';
+const LIGHT_BAZEN_ID          = '34b7daca4150';
+const LIGHT_NOCNI_ID          = 'dcda0cea454c';
+
+// Všechna relé, která obchází centrální poller; klíče odpovídají zařízením ve frontendu
+const DEVICES = {
+  shelly:      { apiPath: '/api/shelly',              serverUri: SHELLY_SERVER_URI,    deviceId: SHELLY_DEVICE_ID },
+  pool:        { apiPath: '/api/pool',                serverUri: POOL_SERVER_URI,      deviceId: POOL_DEVICE_ID },
+  solinator:   { apiPath: '/api/solinator',           serverUri: SOLINATOR_SERVER_URI, deviceId: SOLINATOR_DEVICE_ID },
+  lightDole:   { apiPath: '/api/light/zahradadole',   serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_ZAHRADA_DOLE_ID },
+  lightNahore: { apiPath: '/api/light/zahradanahore', serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_ZAHRADA_NAHORE_ID },
+  lightBazen:  { apiPath: '/api/light/bazen',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_BAZEN_ID },
+  lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID }
+};
+
 const shellyCache = new Map();
-const CACHE_TTL_MS = 5000; // 5s cache, ať se nezahlcuje Shelly cloud při rychlém refreshi
+const CACHE_TTL_MS = 5000; // 5s cache, ať se nezahlcuje Shelly cloud při rychlém sledu dotazů
+
+const POLL_INTERVAL_MS = 2 * 60 * 1000; // jak často poller obchází Solax i Shelly
+const SHELLY_GAP_MS = 1000;             // rozestup mezi dotazy na Shelly cloud (rate limit)
+const HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Centrální stav — jediný zdroj pravdy pro všechny připojené klienty
+const state = {
+  solax: null,      // poslední úspěšná data ze střídače
+  devices: {},      // key -> { online, isOn, powerW, fetchedAt }
+  poolPowerW: null, // součet 3 PM měření bazénu
+  history: []       // { t, kw } — přetok za posledních 24 h
+};
+
+function delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-app.get('/api/solax', async (req, res) => {
+// ---------- SSE stream pro živé aktualizace ----------
+
+const sseClients = new Set();
+
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(msg);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function pruneHistory() {
+  const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+  while (state.history.length && state.history[0].t < cutoff) state.history.shift();
+}
+
+function snapshot() {
+  pruneHistory();
+  return {
+    solax: state.solax,
+    devices: state.devices,
+    poolPowerW: state.poolPowerW,
+    history: state.history,
+    pushEnabled
+  };
+}
+
+app.get('/api/stream', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive'
+  });
+  res.flushHeaders();
+  res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`);
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
+// Heartbeat, ať spojení nezabije proxy kvůli nečinnosti
+setInterval(() => {
+  for (const res of sseClients) {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}, 25000);
+
+// ---------- Solax ----------
+
+async function fetchSolax() {
   if (!SOLAX_TOKEN_ID || !SOLAX_SN) {
-    return res.status(500).json({ error: 'Server není nakonfigurován (chybí SOLAX_TOKEN_ID / SOLAX_SN).' });
+    throw Object.assign(new Error('Server není nakonfigurován (chybí SOLAX_TOKEN_ID / SOLAX_SN).'), { status: 500 });
   }
 
+  const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(SOLAX_SN)}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+
+  if (!response.ok) {
+    throw Object.assign(new Error(`Solax API HTTP ${response.status}`), { status: 502 });
+  }
+
+  const data = await response.json();
+
+  if (!data.success) {
+    throw Object.assign(new Error(data.exception || 'Solax API vrátilo chybu.'), { status: 502 });
+  }
+
+  const r = data.result;
+  const dc1 = typeof r.powerdc1 === 'number' ? r.powerdc1 : 0;
+  const dc2 = typeof r.powerdc2 === 'number' ? r.powerdc2 : 0;
+  const dc3 = typeof r.powerdc3 === 'number' ? r.powerdc3 : 0;
+  const dc4 = typeof r.powerdc4 === 'number' ? r.powerdc4 : 0;
+  const fveKw = (dc1 + dc2 + dc3 + dc4) / 1000;
+  const feedinKw = (r.feedinpower || 0) / 1000;
+
+  // batPower: kladné = baterie se nabíjí (odebírá výkon), záporné = baterie se vybíjí (dodává výkon)
+  const batPower = typeof r.batPower === 'number' ? r.batPower : 0;
+  // Spotřeba domu = výroba FVE - výkon spotřebovaný na nabíjení baterie - přetok do sítě
+  // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného čísla spotřebu zvýší - správně)
+  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0)) / 1000);
+  const batterySoc = typeof r.soc === 'number' ? r.soc : null;
+
+  return {
+    fveKw,
+    feedinKw,
+    houseKw,
+    batterySoc,
+    batPowerKw: batPower / 1000,
+    uploadTime: r.uploadTime,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+app.get('/api/solax', async (req, res) => {
   try {
-    const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(SOLAX_SN)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-
-    if (!response.ok) {
-      return res.status(502).json({ error: `Solax API HTTP ${response.status}` });
-    }
-
-    const data = await response.json();
-
-    if (!data.success) {
-      return res.status(502).json({ error: data.exception || 'Solax API vrátilo chybu.' });
-    }
-
-    const r = data.result;
-    const dc1 = typeof r.powerdc1 === 'number' ? r.powerdc1 : 0;
-    const dc2 = typeof r.powerdc2 === 'number' ? r.powerdc2 : 0;
-    const dc3 = typeof r.powerdc3 === 'number' ? r.powerdc3 : 0;
-    const dc4 = typeof r.powerdc4 === 'number' ? r.powerdc4 : 0;
-    const fveKw = (dc1 + dc2 + dc3 + dc4) / 1000;
-    const feedinKw = (r.feedinpower || 0) / 1000;
-
-    // batPower: kladné = baterie se nabíjí (odebírá výkon), záporné = baterie se vybíjí (dodává výkon)
-    const batPower = typeof r.batPower === 'number' ? r.batPower : 0;
-    // Spotřeba domu = výroba FVE - výkon spotřebovaný na nabíjení baterie - přetok do sítě
-    // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného číslo spotřebu zvýší - správně)
-    const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0)) / 1000);
-    const batterySoc = typeof r.soc === 'number' ? r.soc : null;
-
-    res.json({
-      fveKw,
-      feedinKw,
-      houseKw,
-      batterySoc,
-      batPowerKw: batPower / 1000,
-      uploadTime: r.uploadTime,
-      fetchedAt: new Date().toISOString()
-    });
+    const data = await fetchSolax();
+    res.json(data);
   } catch (err) {
+    const status = err.status || 502;
     const message = err.name === 'TimeoutError' ? 'Solax API neodpovědělo včas.' : err.message;
-    res.status(502).json({ error: message });
+    res.status(status).json({ error: message });
   }
 });
+
+async function pollSolax() {
+  try {
+    const data = await fetchSolax();
+    state.solax = data;
+
+    // Bod do historie přidáváme max. jednou za 30 s (ruční refresh nemá plnit graf duplicitami)
+    let historyPoint = null;
+    const last = state.history[state.history.length - 1];
+    if (!last || Date.now() - last.t > 30000) {
+      historyPoint = { t: Date.now(), kw: data.feedinKw };
+      state.history.push(historyPoint);
+      pruneHistory();
+    }
+
+    checkBatteryFull(data.batterySoc);
+    broadcast('solax', { solax: state.solax, historyPoint });
+  } catch (err) {
+    const message = err.name === 'TimeoutError' ? 'Solax API neodpovědělo včas.' : err.message;
+    broadcast('solaxError', { error: message });
+  }
+}
+
+// ---------- Shelly ----------
 
 async function fetchShellyStatus(serverUri, deviceId) {
   if (!SHELLY_AUTH_KEY || !serverUri || !deviceId) {
@@ -102,7 +221,7 @@ async function fetchShellyStatus(serverUri, deviceId) {
   if (!response.ok) {
     // Pokud máme starší cache, raději vrátíme ji než tvrdou chybu (typicky při rate limitu 429)
     if (cached) return cached.value;
-    // 429 propouštíme dál, ať klient ví, že má počkat a zkusit to znovu
+    // 429 propouštíme dál, ať volající ví, že má počkat a zkusit to znovu
     const status = response.status === 429 ? 429 : 502;
     throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status });
   }
@@ -133,10 +252,90 @@ async function fetchShellyStatus(serverUri, deviceId) {
   return result;
 }
 
-function registerStatusEndpoint(path, serverUri, deviceId) {
-  app.get(path, async (req, res) => {
+async function fetchShellyPowerW(deviceId) {
+  const cacheKey = 'pm_' + deviceId;
+  const cached = shellyCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.value;
+
+  try {
+    const url = `https://${SHELLY_SERVER_URI}/device/status`;
+    const body = new URLSearchParams({ id: deviceId, auth_key: SHELLY_AUTH_KEY });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.isok) return null;
+    const status = data.data?.device_status;
+    let powerW = null;
+    if (typeof status?.['switch:0']?.apower === 'number') powerW = status['switch:0'].apower;
+    else if (typeof status?.['pm1:0']?.apower === 'number') powerW = status['pm1:0'].apower;
+    else if (typeof status?.['em:0']?.act_power === 'number') powerW = status['em:0'].act_power;
+    else if (status?.meters?.[0] && typeof status.meters[0].power === 'number') powerW = status.meters[0].power;
+
+    shellyCache.set(cacheKey, { value: powerW, ts: Date.now() });
+    return powerW;
+  } catch {
+    return null;
+  }
+}
+
+async function pollDevice(key) {
+  const dev = DEVICES[key];
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await fetchShellyStatus(serverUri, deviceId);
+      const status = await fetchShellyStatus(dev.serverUri, dev.deviceId);
+      state.devices[key] = { ...status, fetchedAt: new Date().toISOString() };
+      break;
+    } catch (err) {
+      if (err.status === 429 && attempt === 0) {
+        await delay(2500);
+        continue;
+      }
+      state.devices[key] = { online: false, isOn: null, powerW: null, fetchedAt: new Date().toISOString() };
+      break;
+    }
+  }
+  broadcast('device', { key, status: state.devices[key] });
+}
+
+let shellyPollRunning = false;
+
+async function pollShelly() {
+  if (shellyPollRunning) return;
+  shellyPollRunning = true;
+  try {
+    for (const key of Object.keys(DEVICES)) {
+      await pollDevice(key);
+      await delay(SHELLY_GAP_MS);
+    }
+
+    const powers = [];
+    for (let i = 0; i < POOL_PM_IDS.length; i++) {
+      powers.push(await fetchShellyPowerW(POOL_PM_IDS[i]));
+      if (i < POOL_PM_IDS.length - 1) await delay(SHELLY_GAP_MS);
+    }
+    const valid = powers.filter(p => typeof p === 'number');
+    state.poolPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
+    broadcast('poolPower', { totalPowerW: state.poolPowerW });
+  } finally {
+    shellyPollRunning = false;
+  }
+}
+
+// ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
+
+function registerStatusEndpoint(key) {
+  const dev = DEVICES[key];
+  app.get(dev.apiPath, async (req, res) => {
+    if (state.devices[key]) {
+      return res.json(state.devices[key]);
+    }
+    try {
+      const result = await fetchShellyStatus(dev.serverUri, dev.deviceId);
       res.json({ ...result, fetchedAt: new Date().toISOString() });
     } catch (err) {
       const status = err.status || 502;
@@ -145,10 +344,6 @@ function registerStatusEndpoint(path, serverUri, deviceId) {
     }
   });
 }
-
-registerStatusEndpoint('/api/shelly', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
-registerStatusEndpoint('/api/pool', POOL_SERVER_URI, POOL_DEVICE_ID);
-registerStatusEndpoint('/api/solinator', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
 
 async function setShellyState(serverUri, deviceId, turn) {
   if (!SHELLY_AUTH_KEY || !serverUri || !deviceId) {
@@ -184,15 +379,25 @@ async function setShellyState(serverUri, deviceId, turn) {
   shellyCache.delete(deviceId);
 }
 
-function registerSetEndpoint(path, serverUri, deviceId) {
-  app.post(path, async (req, res) => {
+function registerSetEndpoint(key) {
+  const dev = DEVICES[key];
+  app.post(dev.apiPath + '/set', async (req, res) => {
     const { turn } = req.body || {};
     if (turn !== 'on' && turn !== 'off') {
       return res.status(400).json({ error: 'Parametr turn musí být "on" nebo "off".' });
     }
     try {
-      await setShellyState(serverUri, deviceId, turn);
+      await setShellyState(dev.serverUri, dev.deviceId, turn);
+
+      // Optimistická aktualizace, ať klienti vidí nový stav okamžitě
+      const prev = state.devices[key] || {};
+      state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
+      broadcast('device', { key, status: state.devices[key] });
+
       res.json({ success: true, turn });
+
+      // Za chvíli ověříme skutečný stav ze Shelly cloudu
+      setTimeout(() => { pollDevice(key); }, 1500);
     } catch (err) {
       const status = err.status || 502;
       const message = err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message;
@@ -201,69 +406,99 @@ function registerSetEndpoint(path, serverUri, deviceId) {
   });
 }
 
-registerSetEndpoint('/api/shelly/set', SHELLY_SERVER_URI, SHELLY_DEVICE_ID);
-registerSetEndpoint('/api/pool/set', POOL_SERVER_URI, POOL_DEVICE_ID);
-registerSetEndpoint('/api/solinator/set', SOLINATOR_SERVER_URI, SOLINATOR_DEVICE_ID);
-
-const LIGHT_ZAHRADA_DOLE_ID   = '34b7dacb5f6c';
-const LIGHT_ZAHRADA_NAHORE_ID = '34b7daca6dc8';
-const LIGHT_BAZEN_ID          = '34b7daca4150';
-const LIGHT_NOCNI_ID          = 'dcda0cea454c';
-
-registerStatusEndpoint('/api/light/zahradadole',   SHELLY_SERVER_URI, LIGHT_ZAHRADA_DOLE_ID);
-registerStatusEndpoint('/api/light/zahradanahore', SHELLY_SERVER_URI, LIGHT_ZAHRADA_NAHORE_ID);
-registerStatusEndpoint('/api/light/bazen',         SHELLY_SERVER_URI, LIGHT_BAZEN_ID);
-registerStatusEndpoint('/api/light/nocni',         SHELLY_SERVER_URI, LIGHT_NOCNI_ID);
-
-registerSetEndpoint('/api/light/zahradadole/set',   SHELLY_SERVER_URI, LIGHT_ZAHRADA_DOLE_ID);
-registerSetEndpoint('/api/light/zahradanahore/set', SHELLY_SERVER_URI, LIGHT_ZAHRADA_NAHORE_ID);
-registerSetEndpoint('/api/light/bazen/set',         SHELLY_SERVER_URI, LIGHT_BAZEN_ID);
-registerSetEndpoint('/api/light/nocni/set',         SHELLY_SERVER_URI, LIGHT_NOCNI_ID);
-
-async function fetchShellyPowerW(deviceId) {
-  const cacheKey = 'pm_' + deviceId;
-  const cached = shellyCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.value;
-
-  const url = `https://${SHELLY_SERVER_URI}/device/status`;
-  const body = new URLSearchParams({ id: deviceId, auth_key: SHELLY_AUTH_KEY });
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-    signal: AbortSignal.timeout(10000)
-  });
-  if (!response.ok) return null;
-  const data = await response.json();
-  if (!data.isok) return null;
-  const status = data.data?.device_status;
-  let powerW = null;
-  if (typeof status?.['switch:0']?.apower === 'number') powerW = status['switch:0'].apower;
-  else if (typeof status?.['pm1:0']?.apower === 'number') powerW = status['pm1:0'].apower;
-  else if (typeof status?.['em:0']?.act_power === 'number') powerW = status['em:0'].act_power;
-  else if (status?.meters?.[0] && typeof status.meters[0].power === 'number') powerW = status.meters[0].power;
-
-  shellyCache.set(cacheKey, { value: powerW, ts: Date.now() });
-  return powerW;
+for (const key of Object.keys(DEVICES)) {
+  registerStatusEndpoint(key);
+  registerSetEndpoint(key);
 }
 
-app.get('/api/pool/power', async (req, res) => {
-  if (!SHELLY_AUTH_KEY || !SHELLY_SERVER_URI) {
-    return res.status(500).json({ error: 'Server není nakonfigurován.' });
-  }
-  try {
-    const powers = [];
-    for (let i = 0; i < POOL_PM_IDS.length; i++) {
-      powers.push(await fetchShellyPowerW(POOL_PM_IDS[i]));
-      if (i < POOL_PM_IDS.length - 1) await new Promise(r => setTimeout(r, 1000));
-    }
-    const valid = powers.filter(p => typeof p === 'number');
-    const totalPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
-    res.json({ totalPowerW, devices: powers });
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
+app.get('/api/pool/power', (req, res) => {
+  res.json({ totalPowerW: state.poolPowerW });
 });
+
+// Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
+app.post('/api/refresh', async (req, res) => {
+  pollShelly();
+  await pollSolax();
+  res.json({ ok: true });
+});
+
+// ---------- Push notifikace (plná baterie) ----------
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:smogrovic@gmail.com';
+const pushEnabled = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+
+if (pushEnabled) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.log('Push notifikace vypnuty (chybí VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY).');
+}
+
+// Subscriptions jsou jen v paměti — klient se proto při každém otevření appky přihlásí znovu
+const pushSubscriptions = new Map();
+
+app.get('/api/push/vapid-key', (req, res) => {
+  if (!pushEnabled) {
+    return res.status(503).json({ error: 'Push není na serveru nastaven (chybí VAPID klíče).' });
+  }
+  res.json({ key: VAPID_PUBLIC_KEY });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  const sub = req.body;
+  if (!sub || !sub.endpoint) {
+    return res.status(400).json({ error: 'Neplatná subscription.' });
+  }
+  pushSubscriptions.set(sub.endpoint, sub);
+  res.json({ ok: true });
+});
+
+async function sendPushToAll(title, bodyText) {
+  if (!pushEnabled) return;
+  const payload = JSON.stringify({ title, body: bodyText });
+  for (const [endpoint, sub] of pushSubscriptions) {
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      // 404/410 = subscription už neplatí
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        pushSubscriptions.delete(endpoint);
+      }
+    }
+  }
+}
+
+// Notifikaci pošleme jednou při dosažení 99 %; znovu se odjistí, až baterie klesne pod 90 %
+let batteryFullNotified = false;
+
+function checkBatteryFull(soc) {
+  if (typeof soc !== 'number') return;
+  if (soc >= 99 && !batteryFullNotified) {
+    batteryFullNotified = true;
+    sendPushToAll('🔋 Baterie je plná', `Baterie je nabitá na ${Math.round(soc)} %.`);
+  } else if (soc <= 90) {
+    batteryFullNotified = false;
+  }
+}
+
+// ---------- Keep-alive a start ----------
+
+app.get('/healthz', (req, res) => res.send('ok'));
+
+// Render free tier uspává službu po 15 min bez requestů — tím by zamrzla historie grafu.
+// Self-ping přes veřejnou URL (Render ji dává v RENDER_EXTERNAL_URL) službu drží vzhůru.
+const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+if (SELF_URL) {
+  setInterval(() => {
+    fetch(`${SELF_URL}/healthz`).catch(() => {});
+  }, 10 * 60 * 1000);
+}
+
+pollSolax();
+pollShelly();
+setInterval(pollSolax, POLL_INTERVAL_MS);
+setInterval(pollShelly, POLL_INTERVAL_MS);
 
 app.listen(PORT, () => {
   console.log(`Server běží na portu ${PORT}`);

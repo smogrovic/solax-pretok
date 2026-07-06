@@ -239,6 +239,36 @@
   .pool-card{
     margin-top:12px;
   }
+  .graph-card{
+    margin-top:12px;
+    padding:16px 14px 10px;
+    align-items:stretch;
+  }
+  .graph-title{
+    font-size:13px;
+    font-weight:700;
+    color:var(--navy);
+    text-align:center;
+    margin-bottom:8px;
+  }
+  #feedinChart{
+    width:100%;
+    height:120px;
+    display:block;
+  }
+  .notif-btn{
+    width:100%;
+    margin-top:10px;
+    padding:11px;
+    border:none;
+    border-radius:16px;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+    font-size:13px;
+    font-weight:600;
+    transition:opacity .15s ease;
+  }
+  .notif-btn:disabled{opacity:0.7;}
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -375,6 +405,11 @@
         </div>
       </div>
 
+      <div class="card graph-card">
+        <div class="graph-title">Přetok za 24 h (kW)</div>
+        <canvas id="feedinChart"></canvas>
+      </div>
+
       <div class="meta">
         <div class="updated" id="updatedAt">Načítám…</div>
       </div>
@@ -386,6 +421,8 @@
         </svg>
         <span id="refreshLabel">Aktualizovat</span>
       </button>
+
+      <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
     </div>
   </div>
 
@@ -533,14 +570,8 @@ function formatTime(iso) {
   return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function loadSolax() {
-  const res = await fetch('/api/solax');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Neznámá chyba (Solax)');
+function renderSolax(data) {
+  if (!data) return;
   fveEl.textContent = formatKw(data.fveKw);
   feedinEl.textContent = formatKw(data.feedinKw);
   houseEl.textContent = formatKw(data.houseKw);
@@ -622,45 +653,30 @@ const devices = {
   }
 };
 
-async function loadDeviceStatus(device, retried) {
-  try {
-    const res = await fetch(device.statusUrl);
-    const data = await res.json();
-    if (res.status === 429 && !retried) {
-      await sleep(2500);
-      return loadDeviceStatus(device, true);
-    }
-    if (!res.ok || data.isOn === null || data.isOn === undefined) {
-      device.light.className = 'traffic-light';
-      device.state.textContent = 'neznámý';
-      device.onBtn.classList.remove('active-state');
-      device.offBtn.classList.remove('active-state');
-      if (device.powerEl) device.powerEl.textContent = '';
-      return null;
-    }
-    if (data.isOn) {
-      device.light.className = 'traffic-light on';
-      device.state.textContent = 'zapnuto';
-      device.onBtn.classList.add('active-state');
-      device.offBtn.classList.remove('active-state');
-    } else {
-      device.light.className = 'traffic-light off';
-      device.state.textContent = 'vypnuto';
-      device.offBtn.classList.add('active-state');
-      device.onBtn.classList.remove('active-state');
-    }
-    if (device.powerEl) {
-      device.powerEl.textContent = typeof data.powerW === 'number'
-        ? Math.round(data.powerW) + ' W'
-        : '';
-    }
-    return data.isOn;
-  } catch (err) {
+function renderDevice(device, data) {
+  if (!data || data.isOn === null || data.isOn === undefined) {
     device.light.className = 'traffic-light';
     device.state.textContent = 'neznámý';
     device.onBtn.classList.remove('active-state');
     device.offBtn.classList.remove('active-state');
-    return null;
+    if (device.powerEl) device.powerEl.textContent = '';
+    return;
+  }
+  if (data.isOn) {
+    device.light.className = 'traffic-light on';
+    device.state.textContent = 'zapnuto';
+    device.onBtn.classList.add('active-state');
+    device.offBtn.classList.remove('active-state');
+  } else {
+    device.light.className = 'traffic-light off';
+    device.state.textContent = 'vypnuto';
+    device.offBtn.classList.add('active-state');
+    device.onBtn.classList.remove('active-state');
+  }
+  if (device.powerEl) {
+    device.powerEl.textContent = typeof data.powerW === 'number'
+      ? Math.round(data.powerW) + ' W'
+      : '';
   }
 }
 
@@ -680,7 +696,7 @@ async function setDeviceState(device, turn) {
     errorEl.textContent = device.label + ' se nepodařilo přepnout: ' + err.message;
     errorEl.classList.add('show');
   }
-  await loadDeviceStatus(device);
+  // Nový stav přijde ze serveru přes SSE stream
   device.onBtn.disabled = false;
   device.offBtn.disabled = false;
 }
@@ -690,63 +706,228 @@ Object.values(devices).forEach(device => {
   device.offBtn.addEventListener('click', () => setDeviceState(device, 'off'));
 });
 
-async function loadPoolPower() {
-  try {
-    const res = await fetch('/api/pool/power');
-    const data = await res.json();
-    poolTotalPowerEl.textContent = typeof data.totalPowerW === 'number'
-      ? 'Bazén: ' + Math.round(data.totalPowerW) + ' W'
-      : '';
-  } catch {
-    poolTotalPowerEl.textContent = '';
-  }
+function renderPoolPower(totalPowerW) {
+  poolTotalPowerEl.textContent = typeof totalPowerW === 'number'
+    ? 'Bazén: ' + Math.round(totalPowerW) + ' W'
+    : '';
 }
 
-let isLoadingData = false;
+// ---------- Graf přetoku za 24 h ----------
 
-async function loadData(isManual) {
-  // Zámek: sekvence trvá ~10 s a nesmí běžet dvakrát přes sebe,
-  // jinak jdou na Shelly cloud paralelní dotazy a přijde rate limit
-  if (isLoadingData) return;
-  isLoadingData = true;
-  if (isManual) {
-    btn.classList.add('loading');
-    btnLabel.textContent = 'Aktualizuji…';
+const chartCanvas = document.getElementById('feedinChart');
+let history = [];
+
+function renderChart() {
+  const ctx = chartCanvas.getContext('2d');
+  const w = chartCanvas.clientWidth || 300;
+  const h = chartCanvas.clientHeight || 120;
+  const dpr = window.devicePixelRatio || 1;
+  chartCanvas.width = w * dpr;
+  chartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now();
+  const start = now - 24 * 60 * 60 * 1000;
+  const pts = history.filter(p => p.t >= start);
+
+  const grey = 'rgba(44,62,80,0.4)';
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  if (pts.length < 2) {
+    ctx.fillStyle = grey;
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    return;
   }
-  try {
-    try {
-      await loadSolax();
-      errorEl.classList.remove('show');
-    } catch (err) {
-      errorEl.textContent = 'Nepodařilo se načíst data: ' + err.message;
-      errorEl.classList.add('show');
+
+  const padL = 32, padR = 8, padT = 10, padB = 18;
+  let min = 0, max = 0.5;
+  for (const p of pts) {
+    if (p.kw < min) min = p.kw;
+    if (p.kw > max) max = p.kw;
+  }
+
+  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
+  const y = kw => padT + (1 - (kw - min) / (max - min)) * (h - padT - padB);
+
+  // Nulová linka
+  ctx.strokeStyle = 'rgba(44,62,80,0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, y(0));
+  ctx.lineTo(w - padR, y(0));
+  ctx.stroke();
+
+  // Popisky osy Y
+  ctx.fillStyle = grey;
+  ctx.textAlign = 'right';
+  ctx.fillText(max.toFixed(1).replace('.', ','), padL - 5, y(max) + 8);
+  ctx.fillText('0', padL - 5, y(0) + 3);
+  if (min < 0) ctx.fillText(min.toFixed(1).replace('.', ','), padL - 5, y(min) - 2);
+
+  // Časové značky po 6 hodinách
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const t = start + i * 6 * 60 * 60 * 1000;
+    const d = new Date(t);
+    ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
+  }
+
+  // Výplň pod křivkou
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].kw));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.kw));
+  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
+  ctx.lineTo(x(pts[0].t), y(0));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(245,147,61,0.18)';
+  ctx.fill();
+
+  // Křivka
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].kw));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.kw));
+  ctx.strokeStyle = '#f5933d';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+window.addEventListener('resize', renderChart);
+
+// ---------- SSE stream — živé aktualizace ze serveru ----------
+
+let es = null;
+
+function applySnapshot(snap) {
+  renderSolax(snap.solax);
+  for (const key of Object.keys(snap.devices || {})) {
+    if (devices[key]) renderDevice(devices[key], snap.devices[key]);
+  }
+  renderPoolPower(snap.poolPowerW);
+  history = snap.history || [];
+  renderChart();
+  if (snap.pushEnabled === false) notifBtn.style.display = 'none';
+}
+
+function connectStream() {
+  if (es) es.close();
+  es = new EventSource('/api/stream');
+  es.addEventListener('snapshot', e => {
+    applySnapshot(JSON.parse(e.data));
+    errorEl.classList.remove('show');
+  });
+  es.addEventListener('solax', e => {
+    const d = JSON.parse(e.data);
+    renderSolax(d.solax);
+    if (d.historyPoint) {
+      history.push(d.historyPoint);
+      renderChart();
     }
-    await loadDeviceStatus(devices.shelly);
-    await sleep(1000);
-    await loadPoolPower();
-    await sleep(1000);
-    await loadDeviceStatus(devices.pool);
-    await sleep(1000);
-    await loadDeviceStatus(devices.solinator);
-    await sleep(1000);
-    await loadDeviceStatus(devices.lightDole);
-    await sleep(1000);
-    await loadDeviceStatus(devices.lightNahore);
-    await sleep(1000);
-    await loadDeviceStatus(devices.lightBazen);
-    await sleep(1000);
-    await loadDeviceStatus(devices.lightNocni);
-  } finally {
-    isLoadingData = false;
-    btn.classList.remove('loading');
-    btnLabel.textContent = 'Aktualizovat';
+    errorEl.classList.remove('show');
+  });
+  es.addEventListener('solaxError', e => {
+    const d = JSON.parse(e.data);
+    errorEl.textContent = 'Nepodařilo se načíst data: ' + d.error;
+    errorEl.classList.add('show');
+  });
+  es.addEventListener('device', e => {
+    const d = JSON.parse(e.data);
+    if (devices[d.key]) renderDevice(devices[d.key], d.status);
+  });
+  es.addEventListener('poolPower', e => {
+    renderPoolPower(JSON.parse(e.data).totalPowerW);
+  });
+  es.onerror = () => {
+    updatedEl.textContent = 'Připojuji…';
+  };
+}
+
+connectStream();
+
+// Po návratu appky z pozadí obnovíme spojení, pokud mezitím spadlo
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && (!es || es.readyState === EventSource.CLOSED)) {
+    connectStream();
+  }
+});
+
+// Ruční refresh: server hned oběhne Solax i Shelly, výsledky přijdou streamem
+btn.addEventListener('click', async () => {
+  btn.classList.add('loading');
+  btnLabel.textContent = 'Aktualizuji…';
+  try {
+    await fetch('/api/refresh', { method: 'POST' });
+  } catch {}
+  btn.classList.remove('loading');
+  btnLabel.textContent = 'Aktualizovat';
+});
+
+// ---------- Push notifikace (plná baterie) ----------
+
+const notifBtn = document.getElementById('notifBtn');
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+async function subscribePush() {
+  await navigator.serviceWorker.register('sw.js');
+  const reg = await navigator.serviceWorker.ready;
+  const keyRes = await fetch('/api/push/vapid-key');
+  const keyData = await keyRes.json();
+  if (!keyRes.ok) throw new Error(keyData.error || 'Push není na serveru nastaven.');
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(keyData.key)
+  });
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub)
+  });
+}
+
+notifBtn.addEventListener('click', async () => {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      notifBtn.textContent = '🔕 Notifikace zamítnuty';
+      return;
+    }
+    await subscribePush();
+    notifBtn.textContent = '🔔 Notifikace zapnuty';
+    notifBtn.disabled = true;
+  } catch (err) {
+    errorEl.textContent = 'Notifikace se nepodařilo zapnout: ' + err.message;
+    errorEl.classList.add('show');
+  }
+});
+
+// Server drží subscriptions jen v paměti — po každém otevření appky se tiše přihlásíme znovu
+async function initPush() {
+  if (!pushSupported) {
+    notifBtn.style.display = 'none';
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    try {
+      await subscribePush();
+      notifBtn.textContent = '🔔 Notifikace zapnuty';
+      notifBtn.disabled = true;
+    } catch {}
   }
 }
 
-btn.addEventListener('click', () => loadData(true));
-
-loadData(false);
-setInterval(() => loadData(false), 5 * 60 * 1000);
+initPush();
 
 // Slider dots
 const sliderWrap = document.getElementById('sliderWrap');
