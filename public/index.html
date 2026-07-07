@@ -256,6 +256,14 @@
     height:120px;
     display:block;
   }
+  .graph-total{
+    font-size:12px;
+    font-weight:600;
+    color:var(--grey-text);
+    text-align:center;
+    margin-top:6px;
+    min-height:15px;
+  }
   .notif-btn{
     width:100%;
     margin-top:10px;
@@ -408,6 +416,7 @@
       <div class="card graph-card">
         <div class="graph-title">Přetok za 24 h (kW)</div>
         <canvas id="feedinChart"></canvas>
+        <div class="graph-total" id="feedinTotal"></div>
       </div>
 
       <div class="meta">
@@ -715,7 +724,21 @@ function renderPoolPower(totalPowerW) {
 // ---------- Graf přetoku za 24 h ----------
 
 const chartCanvas = document.getElementById('feedinChart');
+const feedinTotalEl = document.getElementById('feedinTotal');
 let history = [];
+
+// Vyvezená energie (kWh) = plocha pod kladnou částí křivky přetoku.
+// Mezery delší než 10 min (výpadek serveru/dat) se do součtu nepočítají.
+function computeFeedinKwh(pts) {
+  let kwh = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dtMs = pts[i].t - pts[i - 1].t;
+    if (dtMs > 10 * 60 * 1000) continue;
+    const avgKw = (Math.max(0, pts[i - 1].kw) + Math.max(0, pts[i].kw)) / 2;
+    kwh += avgKw * (dtMs / 3600000);
+  }
+  return kwh;
+}
 
 function renderChart() {
   const ctx = chartCanvas.getContext('2d');
@@ -739,8 +762,12 @@ function renderChart() {
     ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    feedinTotalEl.textContent = '';
     return;
   }
+
+  feedinTotalEl.textContent = 'Vyvezeno celkem: '
+    + computeFeedinKwh(pts).toFixed(1).replace('.', ',') + ' kWh';
 
   const padL = 32, padR = 8, padT = 10, padB = 18;
   let min = 0, max = 0.5;
