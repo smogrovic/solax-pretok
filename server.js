@@ -1,8 +1,10 @@
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const webpush = require('web-push');
 
 const app = express();
+app.set('trust proxy', 1); // Render běží za proxy — ať req.ip je skutečná IP klienta
 const PORT = process.env.PORT || 3000;
 
 const SOLAX_TOKEN_ID = process.env.SOLAX_TOKEN_ID;
@@ -86,7 +88,8 @@ function snapshot() {
     devices: state.devices,
     poolPowerW: state.poolPowerW,
     history: state.history,
-    pushEnabled
+    pushEnabled,
+    lockEnabled
   };
 }
 
@@ -382,6 +385,7 @@ async function setShellyState(serverUri, deviceId, turn) {
 function registerSetEndpoint(key) {
   const dev = DEVICES[key];
   app.post(dev.apiPath + '/set', async (req, res) => {
+    if (!requireAuth(req, res)) return;
     const { turn } = req.body || {};
     if (turn !== 'on' && turn !== 'off') {
       return res.status(400).json({ error: 'Parametr turn musí být "on" nebo "off".' });
@@ -421,6 +425,69 @@ app.post('/api/refresh', async (req, res) => {
   await pollSolax();
   res.json({ ok: true });
 });
+
+// ---------- Zámek ovládání (PIN) ----------
+
+// Bez APP_PIN je ovládání odemčené jako dřív; s ním vyžadují /set endpointy token
+const APP_PIN = process.env.APP_PIN;
+const lockEnabled = !!APP_PIN;
+// Token je odvozený z PINu — přežije restart serveru a při změně PINu přestane platit
+const UNLOCK_TOKEN = lockEnabled
+  ? crypto.createHmac('sha256', APP_PIN).update('solax-unlock-v1').digest('hex')
+  : null;
+
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+// Ochrana proti hádání PINu: max 10 pokusů za 15 minut na IP
+const unlockAttempts = new Map();
+const ATTEMPT_LIMIT = 10;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+function registerFailedAttempt(ip) {
+  const rec = unlockAttempts.get(ip);
+  if (!rec || Date.now() > rec.resetAt) {
+    unlockAttempts.set(ip, { count: 1, resetAt: Date.now() + ATTEMPT_WINDOW_MS });
+  } else {
+    rec.count++;
+  }
+}
+
+function tooManyAttempts(ip) {
+  const rec = unlockAttempts.get(ip);
+  return !!rec && Date.now() <= rec.resetAt && rec.count >= ATTEMPT_LIMIT;
+}
+
+app.post('/api/unlock', (req, res) => {
+  if (!lockEnabled) return res.json({ token: null, lockEnabled: false });
+  if (tooManyAttempts(req.ip)) {
+    return res.status(429).json({ error: 'Příliš mnoho pokusů, zkus to za chvíli.' });
+  }
+  const { pin } = req.body || {};
+  if (typeof pin === 'string' && safeEqual(pin, APP_PIN)) {
+    unlockAttempts.delete(req.ip);
+    return res.json({ token: UNLOCK_TOKEN, lockEnabled: true });
+  }
+  registerFailedAttempt(req.ip);
+  res.status(401).json({ error: 'Nesprávný kód.' });
+});
+
+app.post('/api/unlock/check', (req, res) => {
+  const { token } = req.body || {};
+  const valid = !lockEnabled || (typeof token === 'string' && token.length > 0 && safeEqual(token, UNLOCK_TOKEN));
+  res.json({ valid, lockEnabled });
+});
+
+function requireAuth(req, res) {
+  if (!lockEnabled) return true;
+  const token = req.get('X-Auth-Token');
+  if (typeof token === 'string' && token.length > 0 && safeEqual(token, UNLOCK_TOKEN)) return true;
+  res.status(401).json({ error: 'Ovládání je zamčené — odemkni appku kódem.' });
+  return false;
+}
 
 // ---------- Push notifikace (plná baterie) ----------
 

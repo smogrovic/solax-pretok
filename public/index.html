@@ -277,6 +277,58 @@
     transition:opacity .15s ease;
   }
   .notif-btn:disabled{opacity:0.7;}
+  body.locked .lockable{display:none;}
+  body:not(.locked) .lock-panel{display:none;}
+  .lock-panel{align-items:center;}
+  .lock-icon{font-size:34px;margin-bottom:8px;}
+  .lock-text{
+    font-size:14px;
+    font-weight:700;
+    color:var(--navy);
+    margin-bottom:14px;
+  }
+  .faceid-btn{
+    width:100%;
+    margin-bottom:12px;
+    padding:13px;
+    border:none;
+    border-radius:14px;
+    background:var(--navy);
+    color:#fff;
+    font-size:15px;
+    font-weight:600;
+    display:none;
+  }
+  .pin-input{
+    width:100%;
+    padding:12px;
+    border:1px solid rgba(44,62,80,0.15);
+    border-radius:14px;
+    font-size:18px;
+    text-align:center;
+    letter-spacing:4px;
+    background:var(--bg);
+    color:var(--navy);
+    outline:none;
+  }
+  .unlock-btn{
+    width:100%;
+    margin-top:10px;
+    padding:13px;
+    border:none;
+    border-radius:14px;
+    background:var(--orange);
+    color:#fff;
+    font-size:15px;
+    font-weight:600;
+  }
+  .lock-error{
+    font-size:12px;
+    color:var(--red);
+    margin-top:8px;
+    min-height:15px;
+    text-align:center;
+  }
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -312,7 +364,7 @@
   }
 </style>
 </head>
-<body>
+<body class="locked">
 
 <div class="slider-wrap" id="sliderWrap">
 
@@ -441,7 +493,15 @@
       <div class="topbar">
         <div class="title">Ovládání</div>
       </div>
-      <div class="card">
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="shellyLight"></div>
@@ -455,7 +515,7 @@
         </div>
       </div>
 
-      <div class="card pool-card">
+      <div class="card pool-card lockable">
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="poolLight"></div>
@@ -488,7 +548,15 @@
       <div class="topbar">
         <div class="title">Světla</div>
       </div>
-      <div class="card">
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable">
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="lightDoleLight"></div>
@@ -695,10 +763,14 @@ async function setDeviceState(device, turn) {
   try {
     const res = await fetch(device.setUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
       body: JSON.stringify({ turn })
     });
     const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
   } catch (err) {
@@ -837,6 +909,8 @@ function applySnapshot(snap) {
   history = snap.history || [];
   renderChart();
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
+  // Server nemá nastavený APP_PIN — zámek se nepoužívá
+  if (snap.lockEnabled === false) setLocked(false);
 }
 
 function connectStream() {
@@ -890,6 +964,111 @@ btn.addEventListener('click', async () => {
   } catch {}
   btn.classList.remove('loading');
   btnLabel.textContent = 'Aktualizovat';
+});
+
+// ---------- Zámek ovládání (PIN / Face ID) ----------
+
+let authToken = localStorage.getItem('authToken') || '';
+const faceIdSupported = !!(window.PublicKeyCredential && navigator.credentials);
+
+function setLocked(locked) {
+  document.body.classList.toggle('locked', locked);
+}
+
+async function enrollFaceId() {
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'Šmogyho FVE' },
+      user: {
+        id: crypto.getRandomValues(new Uint8Array(16)),
+        name: 'smogy',
+        displayName: 'Šmogy'
+      },
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 },
+        { type: 'public-key', alg: -257 }
+      ],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+      timeout: 60000
+    }
+  });
+  localStorage.setItem('faceIdCredId', btoa(String.fromCharCode(...new Uint8Array(cred.rawId))));
+}
+
+async function verifyStoredToken() {
+  const res = await fetch('/api/unlock/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: authToken })
+  });
+  const data = await res.json();
+  return !!data.valid;
+}
+
+async function doPinUnlock(pinInput, errEl) {
+  const pin = pinInput.value.trim();
+  if (!pin) return;
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/api/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nesprávný kód.');
+    authToken = data.token || '';
+    localStorage.setItem('authToken', authToken);
+    pinInput.value = '';
+    setLocked(false);
+    // Nabídneme odemykání přes Face ID pro příště
+    if (faceIdSupported && !localStorage.getItem('faceIdCredId')
+        && confirm('Chceš příště odemykat přes Face ID?')) {
+      try { await enrollFaceId(); } catch {}
+    }
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+}
+
+async function doFaceIdUnlock(errEl) {
+  errEl.textContent = '';
+  try {
+    const idB64 = localStorage.getItem('faceIdCredId');
+    const id = Uint8Array.from(atob(idB64), c => c.charCodeAt(0));
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ type: 'public-key', id }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+    // Face ID prošlo — ověříme, že uložený token pořád platí (PIN se mohl změnit)
+    if (await verifyStoredToken()) {
+      setLocked(false);
+    } else {
+      errEl.textContent = 'Kód se změnil — zadej ho znovu.';
+    }
+  } catch {
+    errEl.textContent = 'Face ID se nepodařilo, zadej kód.';
+  }
+}
+
+document.querySelectorAll('.lock-panel').forEach(panel => {
+  const pinInput = panel.querySelector('.pin-input');
+  const unlockBtn = panel.querySelector('.unlock-btn');
+  const faceBtn = panel.querySelector('.faceid-btn');
+  const errEl = panel.querySelector('.lock-error');
+  if (faceIdSupported && localStorage.getItem('faceIdCredId')) {
+    faceBtn.style.display = 'block';
+  }
+  unlockBtn.addEventListener('click', () => doPinUnlock(pinInput, errEl));
+  pinInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doPinUnlock(pinInput, errEl);
+  });
+  faceBtn.addEventListener('click', () => doFaceIdUnlock(errEl));
 });
 
 // ---------- Push notifikace (plná baterie) ----------
