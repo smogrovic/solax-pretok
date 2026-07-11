@@ -78,11 +78,14 @@ const DEVICE_LABELS = {
 };
 
 const state = {
-  solax: null,      // poslední úspěšná data ze střídače
-  devices: {},      // key -> { online, isOn, powerW, fetchedAt }
-  poolPowerW: null, // součet 3 PM měření bazénu
-  history: [],      // { t, kw } — přetok za posledních 24 h
-  log: []           // { t, msg } — záznamy zapínání/vypínání za 24 h
+  solax: null,       // poslední úspěšná data ze střídače
+  devices: {},       // key -> { online, isOn, powerW, fetchedAt }
+  poolPowerW: null,  // součet 3 PM měření bazénu
+  history: [],       // { t, kw } — přetok za posledních 24 h
+  log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
+  autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
+  weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
+  runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() } // dnešní doba běhu
 };
 
 function delay(ms) {
@@ -128,6 +131,9 @@ function snapshot() {
     poolPowerW: state.poolPowerW,
     history: state.history,
     log: state.log,
+    autoEnabled: state.autoEnabled,
+    weather: state.weather,
+    runtime: { date: state.runtime.date, ms: state.runtime.ms },
     pushEnabled,
     lockEnabled
   };
@@ -363,9 +369,29 @@ async function pollShelly() {
     const valid = powers.filter(p => typeof p === 'number');
     state.poolPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
     broadcast('poolPower', { totalPowerW: state.poolPowerW });
+
+    updateRuntimes();
   } finally {
     shellyPollRunning = false;
   }
+}
+
+// Dnešní doba běhu bojleru/bazénu/solinátoru; nuluje se o pražské půlnoci
+function updateRuntimes() {
+  const today = pragueDateString();
+  const now = Date.now();
+  const dt = Math.min(now - state.runtime.lastTs, 10 * 60 * 1000);
+  if (state.runtime.date !== today) {
+    state.runtime.date = today;
+    state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
+  }
+  for (const k of Object.keys(state.runtime.ms)) {
+    if (state.devices[k] && state.devices[k].isOn === true) {
+      state.runtime.ms[k] += dt;
+    }
+  }
+  state.runtime.lastTs = now;
+  broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -515,6 +541,21 @@ app.post('/api/log/restore', (req, res) => {
   const added = state.log.length - before;
   if (added > 0) broadcast('logAll', { log: state.log });
   res.json({ added });
+});
+
+// Hlavní vypínač automatiky (vyžaduje odemčení stejně jako ovládání relé)
+app.post('/api/automation', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { enabled } = req.body || {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Parametr enabled musí být true/false.' });
+  }
+  if (state.autoEnabled !== enabled) {
+    state.autoEnabled = enabled;
+    addLog(`Automatika: ${enabled ? 'zapnuta' : 'vypnuta'} ručně`);
+    broadcast('automation', { enabled });
+  }
+  res.json({ enabled: state.autoEnabled });
 });
 
 // Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
@@ -678,6 +719,12 @@ async function fetchWeather() {
     const data = await res.json();
     if (!data.sys || data.sys.sunset === undefined) return weatherCache.data;
     weatherCache = { ts: Date.now(), data };
+
+    // Uložíme i pro zobrazení v appce (teplota venku + kdy automatika vypíná)
+    const tempC = data.main && typeof data.main.temp === 'number' ? data.main.temp : null;
+    state.weather = { tempC, sunsetMs: data.sys.sunset * 1000, fetchedAt: new Date().toISOString() };
+    broadcast('weather', { weather: state.weather });
+
     return data;
   } catch {
     return weatherCache.data;
@@ -785,14 +832,28 @@ async function runPoolAutomation(now, prague, weather, totalW, soc) {
   }
 }
 
+// Bojler si pamatuje svůj skutečný příkon (default 2 kW), aby se nezapínal
+// při přebytku, který ho stejně neutáhne, a nevypínal kvůli jedinému výkyvu
+const boilerAuto = { nominalW: 2000, underCount: 0, lastOnTime: 0 };
+const BOILER_HARD_OFF_W = -1500;          // okamžité vypnutí při silném odběru
+const BOILER_MIN_RUN_MS = 10 * 60 * 1000; // mírný deficit toleruje aspoň 10 min
+
 async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   const boiler = state.devices.shelly;
   if (!boiler || boiler.isOn === null || boiler.isOn === undefined) return;
   const isOn = boiler.isOn;
 
+  // Zapamatujeme si reálný příkon topné spirály, když zrovna topí
+  if (isOn && typeof boiler.powerW === 'number' && boiler.powerW > 500) {
+    boilerAuto.nominalW = boiler.powerW;
+  }
+  // Fix po restartu serveru: bojler už topí, ale nemáme čas zapnutí
+  if (boilerAuto.lastOnTime === 0 && isOn) boilerAuto.lastOnTime = now;
+
   const sunsetMs = weather.sys.sunset * 1000;
   if (now >= sunsetMs - 3600000 || prague.hour < 10) {
     if (isOn) await autoSet('shelly', 'off', prague.hour < 10 ? 'ráno' : 'západ slunce');
+    boilerAuto.underCount = 0;
     return;
   }
 
@@ -801,24 +862,42 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   if (!pool.isOn) {
     if (isOn) await autoSet('shelly', 'off', 'bazén neběží');
+    boilerAuto.underCount = 0;
     return;
   }
 
-  // Rychlá ochrana při velkém odběru ze sítě
-  if (totalW < BOILER_QUICK_OFF_W) {
-    if (isOn) await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
-    return;
+  if (isOn) {
+    if (totalW < BOILER_HARD_OFF_W) {
+      // Silný odběr (něco velkého běží) → hned vypnout
+      await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
+      boilerAuto.underCount = 0;
+      return;
+    }
+    if (totalW < BOILER_QUICK_OFF_W) {
+      // Mírný deficit: až 2× po sobě a po min. době běhu — jeden mrak bojler nevypne
+      boilerAuto.underCount++;
+      if (boilerAuto.underCount >= 2 && now - boilerAuto.lastOnTime >= BOILER_MIN_RUN_MS) {
+        await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
+        boilerAuto.underCount = 0;
+      }
+      return;
+    }
+    boilerAuto.underCount = 0;
+    return; // topí a vydělá si na sebe → drží stav
   }
 
-  // Dynamický práh podle nabití baterie
-  let threshold = 1400;
-  if (typeof soc === 'number' && soc < 50) threshold = 2600;
-  else if (typeof soc === 'number' && soc < 80) threshold = 2000;
+  // Zapnutí: práh podle nabití baterie, ale vždy aspoň tolik,
+  // aby přebytek skutečný příkon bojleru pokryl (s tolerancí 300 W)
+  let socThreshold = 1400;
+  if (typeof soc === 'number' && soc < 50) socThreshold = 2600;
+  else if (typeof soc === 'number' && soc < 80) socThreshold = 2000;
+  const threshold = Math.max(socThreshold, boilerAuto.nominalW - 300);
 
-  if (totalW > threshold && !isOn) {
+  if (totalW > threshold) {
     await autoSet('shelly', 'on', `přetok ${formatKwLog(totalW)}`);
+    boilerAuto.lastOnTime = now;
+    boilerAuto.underCount = 0;
   }
-  // jinak drží stav
 }
 
 async function runSolinatorAutomation(now, prague, weather) {
@@ -894,6 +973,9 @@ async function runAutomation() {
       return;
     }
     weatherProblemLogged = false;
+
+    // Hlavní vypínač: počasí se stahuje dál (kvůli zobrazení), ale zařízení nesaháme
+    if (!state.autoEnabled) return;
 
     const now = Date.now();
     const prague = pragueTime();

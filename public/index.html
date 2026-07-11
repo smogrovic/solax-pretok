@@ -360,6 +360,24 @@
     color:var(--grey-text);
     text-align:center;
   }
+  .stats-card{
+    margin-top:12px;
+    align-items:stretch;
+    gap:0;
+  }
+  .stat-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:13px;
+    color:var(--grey-text);
+    padding:7px 2px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+  }
+  .stat-row:last-child{border-bottom:none;}
+  .stat-val{
+    font-weight:700;
+    color:var(--navy);
+  }
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -505,6 +523,7 @@
 
       <div class="meta">
         <div class="updated" id="updatedAt">Načítám…</div>
+        <div class="updated" id="weatherInfo"></div>
       </div>
 
       <button class="refresh-btn" id="refreshBtn">
@@ -650,10 +669,49 @@
     </div>
   </div>
 
+  <!-- Slide 5: Přehled -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Přehled</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="autoLight"></div>
+            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="autoOnBtn">ON</button>
+            <button class="power-btn off-btn" id="autoOffBtn">OFF</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Dnes</div>
+        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
+        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
+        <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojler">–</span></div>
+        <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
+        <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="page-dots" id="pageDots">
   <span class="dot active"></span>
+  <span class="dot"></span>
   <span class="dot"></span>
   <span class="dot"></span>
   <span class="dot"></span>
@@ -992,6 +1050,8 @@ function renderChart() {
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   ctx.stroke();
+
+  renderStats(); // denní přehled počítá ze stejné historie
 }
 
 window.addEventListener('resize', renderChart);
@@ -1074,6 +1134,89 @@ function renderLog() {
   }
 }
 
+// ---------- Počasí, denní přehled a vypínač automatiky ----------
+
+const weatherInfoEl = document.getElementById('weatherInfo');
+const statFeedinTodayEl = document.getElementById('statFeedinToday');
+const statImportTodayEl = document.getElementById('statImportToday');
+const statRunBojlerEl = document.getElementById('statRunBojler');
+const statRunBazenEl = document.getElementById('statRunBazen');
+const statRunSolinatorEl = document.getElementById('statRunSolinator');
+const autoLight = document.getElementById('autoLight');
+const autoStateEl = document.getElementById('autoState');
+const autoOnBtn = document.getElementById('autoOnBtn');
+const autoOffBtn = document.getElementById('autoOffBtn');
+let runtimeData = null;
+
+function renderWeather(w) {
+  if (!w) {
+    weatherInfoEl.textContent = '';
+    return;
+  }
+  const parts = [];
+  if (typeof w.tempC === 'number') parts.push('Venku ' + Math.round(w.tempC) + ' °C');
+  if (typeof w.sunsetMs === 'number') {
+    const offTime = new Date(w.sunsetMs - 3600000);
+    parts.push('automatika vypne v ' + offTime.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' }));
+  }
+  weatherInfoEl.textContent = parts.join(' · ');
+}
+
+function formatRuntime(ms) {
+  if (typeof ms !== 'number') return '–';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.round((ms % 3600000) / 60000);
+  return h > 0 ? h + ' h ' + m + ' min' : m + ' min';
+}
+
+function renderStats() {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const pts = history.filter(p => p.t >= midnight.getTime());
+  statFeedinTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, p.kw))) : '–';
+  statImportTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw))) : '–';
+  if (runtimeData && runtimeData.ms) {
+    statRunBojlerEl.textContent = formatRuntime(runtimeData.ms.shelly);
+    statRunBazenEl.textContent = formatRuntime(runtimeData.ms.pool);
+    statRunSolinatorEl.textContent = formatRuntime(runtimeData.ms.solinator);
+  }
+}
+
+function renderAutomation(enabled) {
+  autoLight.className = 'traffic-light ' + (enabled ? 'on' : 'off');
+  autoStateEl.textContent = enabled ? 'zapnuta' : 'vypnuta';
+  autoOnBtn.classList.toggle('active-state', enabled);
+  autoOffBtn.classList.toggle('active-state', !enabled);
+}
+
+async function setAutomation(enabled) {
+  autoOnBtn.disabled = true;
+  autoOffBtn.disabled = true;
+  try {
+    const res = await fetch('/api/automation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ enabled })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    renderAutomation(data.enabled);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Automatiku se nepodařilo přepnout: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  autoOnBtn.disabled = false;
+  autoOffBtn.disabled = false;
+}
+
+autoOnBtn.addEventListener('click', () => setAutomation(true));
+autoOffBtn.addEventListener('click', () => setAutomation(false));
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -1096,6 +1239,10 @@ function applySnapshot(snap) {
   renderLog();
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
+  renderWeather(snap.weather);
+  renderAutomation(snap.autoEnabled !== false);
+  runtimeData = snap.runtime || null;
+  renderStats();
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
   // Server nemá nastavený APP_PIN — zámek se nepoužívá
   if (snap.lockEnabled === false) setLocked(false);
@@ -1147,6 +1294,16 @@ function connectStream() {
     logEntries = JSON.parse(e.data).log || [];
     renderLog();
     saveLogLocal();
+  });
+  es.addEventListener('weather', e => {
+    renderWeather(JSON.parse(e.data).weather);
+  });
+  es.addEventListener('runtime', e => {
+    runtimeData = JSON.parse(e.data).runtime;
+    renderStats();
+  });
+  es.addEventListener('automation', e => {
+    renderAutomation(JSON.parse(e.data).enabled);
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';
