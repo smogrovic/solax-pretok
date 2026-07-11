@@ -1078,25 +1078,48 @@ async function getBlinds() {
     return blindsCache.list;
   }
   const devices = await tahomaFetch('/setup/devices');
+  // Bereme všechno, co umí jezdit (up/down/open/close/deploy) — rolety, screeny,
+  // markýzy, pergoly… — a vylučujeme jen centrálu, ovladače a senzory
+  const EXCLUDED_UI = ['Pod', 'ProtocolGateway', 'NetworkComponent', 'RemoteController',
+    'ElectricitySensor', 'TemperatureSensor', 'LightSensor', 'HumiditySensor',
+    'ContactSensor', 'OccupancySensor', 'Alarm', 'Siren'];
   const list = devices
-    .filter(d => ['RollerShutter', 'Screen', 'ExteriorScreen', 'Awning'].includes(d.uiClass))
     .map(d => {
-      // RTS rolety umí up/down/stop/my, io open/close/stop — vybereme, co zařízení podporuje
+      // RTS rolety umí up/down/stop/my, io open/close/stop, pergoly deploy/undeploy
       const cmds = new Set(((d.definition && d.definition.commands) || []).map(c => c.commandName));
       return {
         deviceURL: d.deviceURL,
         label: d.label,
+        uiClass: d.uiClass,
         commands: {
-          up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : null),
-          down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : null),
+          up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : (cmds.has('deploy') ? 'deploy' : null)),
+          down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : (cmds.has('undeploy') ? 'undeploy' : null)),
           stop: cmds.has('stop') ? 'stop' : (cmds.has('my') ? 'my' : null),
           my: cmds.has('my') ? 'my' : null
         }
       };
-    });
+    })
+    .filter(d => !EXCLUDED_UI.includes(d.uiClass) && d.commands.up && d.commands.down)
+    .sort((a, b) => a.label.localeCompare(b.label, 'cs'));
   blindsCache = { ts: Date.now(), list };
   return list;
 }
+
+// Diagnostika: co všechno TaHoma vrací (typy a povely) — pro ladění filtru
+app.get('/api/blinds/all', async (req, res) => {
+  if (!tahomaEnabled) return res.json({ enabled: false });
+  try {
+    const devices = await tahomaFetch('/setup/devices');
+    res.json(devices.map(d => ({
+      label: d.label,
+      uiClass: d.uiClass,
+      controllableName: d.controllableName,
+      commands: ((d.definition && d.definition.commands) || []).map(c => c.commandName)
+    })));
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
 
 async function blindCommand(deviceURL, action) {
   const blinds = await getBlinds();
