@@ -458,6 +458,50 @@
     border-radius:50%;
     margin-right:5px;
   }
+  .aircon-controls{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding-bottom:8px;
+  }
+  .temp-stepper{
+    display:flex;
+    align-items:center;
+    gap:7px;
+  }
+  .temp-btn{
+    width:30px;
+    height:30px;
+    border-radius:50%;
+    border:none;
+    background:rgba(44,62,80,0.08);
+    color:var(--navy);
+    font-size:17px;
+    font-weight:700;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .temp-btn:active{transform:scale(0.93);}
+  .temp-btn:disabled{opacity:0.5;}
+  .temp-val{
+    font-size:14px;
+    font-weight:700;
+    color:var(--navy);
+    min-width:56px;
+    text-align:center;
+  }
+  .mode-btn{
+    border:none;
+    border-radius:12px;
+    padding:8px 12px;
+    background:rgba(44,62,80,0.08);
+    color:var(--navy);
+    font-size:12px;
+    font-weight:600;
+  }
+  .mode-btn:disabled{opacity:0.5;}
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -817,7 +861,29 @@
     </div>
   </div>
 
-  <!-- Slide 6: Přehled -->
+  <!-- Slide 6: Klima -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Klima</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="airconList">
+          <div class="log-empty">Načítám klimatizace…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 7: Přehled -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -865,7 +931,7 @@
     </div>
   </div>
 
-  <!-- Slide 7: Log -->
+  <!-- Slide 8: Log -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1801,6 +1867,146 @@ async function loadBlinds() {
 
 loadBlinds();
 
+// ---------- Klima (Panasonic Comfort Cloud) ----------
+
+const airconListEl = document.getElementById('airconList');
+let airconData = { devices: [], error: null };
+let airconEnabled = null;
+
+const AIRCON_MODE_LABELS = { auto: 'Auto', dry: 'Vysoušení', cool: 'Chlazení', heat: 'Topení', fan: 'Ventilátor' };
+const AIRCON_MODE_ORDER = ['cool', 'heat', 'auto', 'dry', 'fan'];
+
+function formatTempC(v) {
+  return typeof v === 'number' ? String(Math.round(v * 10) / 10).replace('.', ',') + ' °C' : '–';
+}
+
+async function airconSet(guid, payload, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/aircon/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ guid, ...payload })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Klima: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+function renderAircon() {
+  airconListEl.textContent = '';
+  if (airconEnabled === false) {
+    blindsMessage(airconListEl, 'Panasonic není nastaven (chybí přihlášení na serveru).');
+    return;
+  }
+  if (!airconData.devices.length) {
+    blindsMessage(airconListEl, airconData.error
+      ? 'Připojení k Panasonic selhalo: ' + airconData.error
+      : 'Načítám klimatizace…');
+    return;
+  }
+
+  for (const d of airconData.devices) {
+    const wrap = document.createElement('div');
+    wrap.className = 'blind-item';
+
+    const row = document.createElement('div');
+    row.className = 'blind-row';
+    const info = document.createElement('div');
+    info.className = 'blind-info';
+    const label = document.createElement('span');
+    label.className = 'blind-label';
+    label.textContent = d.name;
+    info.appendChild(label);
+    const pos = document.createElement('span');
+    pos.className = 'blind-pos';
+    if (d.power === null || d.power === undefined) {
+      pos.textContent = 'stav neznámý';
+    } else {
+      const parts = [d.power ? 'zapnuto' : 'vypnuto'];
+      if (typeof d.insideTemp === 'number') parts.push('uvnitř ' + formatTempC(d.insideTemp));
+      if (d.power && d.mode) parts.push(AIRCON_MODE_LABELS[d.mode] || d.mode);
+      pos.textContent = parts.join(' · ');
+    }
+    info.appendChild(pos);
+
+    const btns = document.createElement('div');
+    btns.className = 'blind-btns';
+    const onBtn = document.createElement('button');
+    onBtn.className = 'blind-btn blind-btn-txt';
+    onBtn.textContent = 'ON';
+    onBtn.addEventListener('click', () => airconSet(d.guid, { power: 'on' }, onBtn));
+    const sp = document.createElement('span');
+    sp.className = 'blind-btn-spacer';
+    const offBtn = document.createElement('button');
+    offBtn.className = 'blind-btn blind-btn-txt';
+    offBtn.textContent = 'OFF';
+    offBtn.addEventListener('click', () => airconSet(d.guid, { power: 'off' }, offBtn));
+    btns.appendChild(onBtn);
+    btns.appendChild(sp);
+    btns.appendChild(offBtn);
+
+    row.appendChild(info);
+    row.appendChild(btns);
+    wrap.appendChild(row);
+
+    // Cílová teplota (±0,5 °C) a přepínání režimu
+    const controls = document.createElement('div');
+    controls.className = 'aircon-controls';
+
+    const stepper = document.createElement('div');
+    stepper.className = 'temp-stepper';
+    const minus = document.createElement('button');
+    minus.className = 'temp-btn';
+    minus.textContent = '−';
+    const tempVal = document.createElement('span');
+    tempVal.className = 'temp-val';
+    tempVal.textContent = formatTempC(d.targetTemp);
+    const plus = document.createElement('button');
+    plus.className = 'temp-btn';
+    plus.textContent = '+';
+    const stepTemp = (dir, btn) => {
+      if (typeof d.targetTemp !== 'number') return;
+      const t = Math.min(30, Math.max(16, d.targetTemp + dir * 0.5));
+      if (t === d.targetTemp) return;
+      d.targetTemp = t;
+      tempVal.textContent = formatTempC(t);
+      airconSet(d.guid, { temperature: t }, btn);
+    };
+    minus.addEventListener('click', () => stepTemp(-1, minus));
+    plus.addEventListener('click', () => stepTemp(1, plus));
+    stepper.appendChild(minus);
+    stepper.appendChild(tempVal);
+    stepper.appendChild(plus);
+
+    const modeBtn = document.createElement('button');
+    modeBtn.className = 'mode-btn';
+    modeBtn.textContent = AIRCON_MODE_LABELS[d.mode] || 'Režim';
+    modeBtn.addEventListener('click', () => {
+      const idx = AIRCON_MODE_ORDER.indexOf(d.mode);
+      const next = AIRCON_MODE_ORDER[(idx + 1) % AIRCON_MODE_ORDER.length];
+      d.mode = next;
+      modeBtn.textContent = AIRCON_MODE_LABELS[next];
+      airconSet(d.guid, { mode: next }, modeBtn);
+    });
+
+    controls.appendChild(stepper);
+    controls.appendChild(modeBtn);
+    wrap.appendChild(controls);
+
+    airconListEl.appendChild(wrap);
+  }
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -1825,6 +2031,9 @@ function applySnapshot(snap) {
   maybeRestoreLogToServer(serverLog, localLog);
   renderWeather(snap.weather);
   renderAutomation(snap.autoEnabled !== false);
+  airconEnabled = snap.airconEnabled !== false;
+  airconData = snap.aircon || { devices: [], error: null };
+  renderAircon();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -1913,6 +2122,10 @@ function connectStream() {
     timelineData = pruneTimelineLocal(JSON.parse(e.data).timeline);
     renderTimeline();
     saveTimelineLocal();
+  });
+  es.addEventListener('aircon', e => {
+    airconData = JSON.parse(e.data).aircon || { devices: [], error: null };
+    renderAircon();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);

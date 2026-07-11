@@ -86,7 +86,8 @@ const state = {
   autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
   runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
-  timeline: { shelly: [], pool: [], solinator: [] } // segmenty { from, to } zapnutí za 48 h
+  timeline: { shelly: [], pool: [], solinator: [] }, // segmenty { from, to } zapnutí za 48 h
+  aircon: { devices: [], error: null } // Panasonic klimatizace
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -164,6 +165,8 @@ function snapshot() {
     runtime: { date: state.runtime.date, ms: state.runtime.ms },
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
+    aircon: state.aircon,
+    airconEnabled: panasonicEnabled,
     pushEnabled,
     lockEnabled
   };
@@ -1323,6 +1326,466 @@ app.post('/api/blinds/command', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+// ---------- Panasonic Comfort Cloud (klimatizace) ----------
+// Neoficiální API appky Comfort Cloud — stejné používá Home Assistant a Homebridge.
+// Přihlášení: Auth0 PKCE flow, pak accsmart.panasonic.com s podepsanými hlavičkami.
+
+const PANASONIC_EMAIL = process.env.PANASONIC_EMAIL;
+const PANASONIC_PASSWORD = process.env.PANASONIC_PASSWORD;
+const panasonicEnabled = !!(PANASONIC_EMAIL && PANASONIC_PASSWORD);
+
+const PCC_AUTH_BASE = 'https://authglb.digital.panasonic.com';
+const PCC_ACC_BASE = 'https://accsmart.panasonic.com';
+const PCC_CLIENT_ID = 'Xmy6xIYIitMxngjB2rHvlm6HSDNnaMJx';
+const PCC_AUTH0_CLIENT = 'eyJuYW1lIjoiQXV0aDAuQW5kcm9pZCIsImVudiI6eyJhbmRyb2lkIjoiMzAifSwidmVyc2lvbiI6IjIuOS4zIn0=';
+const PCC_REDIRECT_URI = 'panasonic-iot-cfc://authglb.digital.panasonic.com/android/com.panasonic.ACCsmart/callback';
+const PCC_SCOPE = 'openid offline_access comfortcloud.control a2w.control';
+const PCC_API_UA = 'okhttp/4.10.0';
+const PCC_BROWSER_UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36';
+const PCC_INVALID_TEMP = 126;
+
+const pcc = {
+  accessToken: null,
+  refreshToken: null,
+  expiresAt: 0,
+  scope: PCC_SCOPE,
+  clientId: null,
+  appVersion: process.env.PANASONIC_APP_VERSION || '1.21.0',
+  appVersionTs: 0
+};
+
+// Jeden požadavek po druhém — Panasonic je citlivý na souběh
+let pccQueueTail = Promise.resolve();
+function pccQueued(fn) {
+  const run = pccQueueTail.then(fn);
+  pccQueueTail = run.catch(() => {});
+  return run;
+}
+
+function pccRandomString(len) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+function pccStoreCookies(res, jar) {
+  let cookies = [];
+  if (typeof res.headers.getSetCookie === 'function') {
+    cookies = res.headers.getSetCookie();
+  } else {
+    const sc = res.headers.get('set-cookie');
+    if (sc) cookies = sc.split(/,(?=[^;=]+=)/);
+  }
+  for (const c of cookies) {
+    const kv = c.split(';')[0];
+    const i = kv.indexOf('=');
+    if (i > 0) jar.set(kv.slice(0, i).trim(), kv.slice(i + 1).trim());
+  }
+}
+
+function pccCookieHeader(jar) {
+  return Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
+}
+
+function pccAbsUrl(location) {
+  if (location.startsWith('http')) return location;
+  return PCC_AUTH_BASE + (location.startsWith('/') ? '' : '/') + location;
+}
+
+function pccParam(url, name) {
+  const q = (url.split('?')[1] || '').split('#')[0];
+  return new URLSearchParams(q).get(name);
+}
+
+function pccDecodeEntities(s) {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function pccParseHiddenInputs(html) {
+  const params = {};
+  for (const tag of html.match(/<input[^>]*type="hidden"[^>]*>/g) || []) {
+    const name = tag.match(/name="([^"]*)"/);
+    const value = tag.match(/value="([^"]*)"/);
+    if (name && name[1]) params[name[1]] = pccDecodeEntities(value ? value[1] : '');
+  }
+  return params;
+}
+
+// Aktuální verze appky z Play Store — API odmítá zastaralé verze (chyba 4106)
+async function pccUpdateAppVersion(force) {
+  if (!force && Date.now() - pcc.appVersionTs < 24 * 60 * 60 * 1000) return;
+  try {
+    const res = await fetch('https://play.google.com/store/apps/details?id=com.panasonic.ACCsmart', {
+      signal: AbortSignal.timeout(15000)
+    });
+    const text = await res.text();
+    const m = text.match(/\["(\d+\.\d+\.\d+)"\]/);
+    if (m) pcc.appVersion = m[1];
+    pcc.appVersionTs = Date.now();
+  } catch {}
+}
+
+function pccApiHeaders(includeClientId = true) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const ts = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} `
+    + `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+  const tsMs = String(Math.floor(now.getTime() / 1000) * 1000);
+  const hash = crypto.createHash('sha256')
+    .update('Comfort Cloud' + '521325fb2dd486bf4831b47644317fca' + tsMs + 'Bearer ' + pcc.accessToken)
+    .digest('hex');
+  const headers = {
+    'content-type': 'application/json;charset=utf-8',
+    'user-agent': 'G-RAC',
+    'x-app-name': 'Comfort Cloud',
+    'x-app-timestamp': ts,
+    'x-app-type': '1',
+    'x-app-version': pcc.appVersion,
+    'x-cfc-api-key': hash.slice(0, 9) + 'cfc' + hash.slice(9),
+    'x-user-authorization-v2': 'Bearer ' + pcc.accessToken
+  };
+  if (includeClientId && pcc.clientId) headers['x-client-id'] = pcc.clientId;
+  return headers;
+}
+
+function pccSetTokens(tokenResponse) {
+  pcc.accessToken = tokenResponse.access_token;
+  if (tokenResponse.refresh_token) pcc.refreshToken = tokenResponse.refresh_token;
+  if (tokenResponse.scope) pcc.scope = tokenResponse.scope;
+  pcc.expiresAt = Date.now() + Math.max(60, (tokenResponse.expires_in || 3600) - 120) * 1000;
+}
+
+async function pccAuthenticate() {
+  await pccUpdateAppVersion();
+  const jar = new Map();
+  const verifier = pccRandomString(43);
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+
+  // 1) authorize → 302 (nová session) nebo rovnou code
+  const authorizeParams = new URLSearchParams({
+    scope: PCC_SCOPE,
+    audience: `https://digital.panasonic.com/${PCC_CLIENT_ID}/api/v1/`,
+    protocol: 'oauth2',
+    response_type: 'code',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    auth0Client: PCC_AUTH0_CLIENT,
+    client_id: PCC_CLIENT_ID,
+    redirect_uri: PCC_REDIRECT_URI,
+    state: pccRandomString(20)
+  });
+  let res = await fetch(`${PCC_AUTH_BASE}/authorize?${authorizeParams}`, {
+    headers: { 'user-agent': PCC_API_UA },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(20000)
+  });
+  pccStoreCookies(res, jar);
+  if (res.status !== 302) throw new Error(`Panasonic authorize selhal (HTTP ${res.status})`);
+  let location = res.headers.get('location') || '';
+  let code;
+
+  if (location.startsWith(PCC_REDIRECT_URI)) {
+    code = pccParam(location, 'code');
+  } else {
+    // 2) přihlašovací stránka → _csrf cookie
+    const state = pccParam(location, 'state');
+    res = await fetch(pccAbsUrl(location), {
+      headers: { 'user-agent': PCC_API_UA, cookie: pccCookieHeader(jar) },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000)
+    });
+    pccStoreCookies(res, jar);
+    if (res.status !== 200) throw new Error(`Panasonic login page selhala (HTTP ${res.status})`);
+    const csrf = jar.get('_csrf');
+    if (!csrf) throw new Error('Panasonic nevrátil _csrf cookie.');
+
+    // 3) jméno + heslo
+    res = await fetch(`${PCC_AUTH_BASE}/usernamepassword/login`, {
+      method: 'POST',
+      headers: {
+        'Auth0-Client': PCC_AUTH0_CLIENT,
+        'user-agent': PCC_API_UA,
+        'content-type': 'application/json',
+        cookie: pccCookieHeader(jar)
+      },
+      body: JSON.stringify({
+        client_id: PCC_CLIENT_ID,
+        redirect_uri: PCC_REDIRECT_URI,
+        tenant: 'pdpauthglb-a1',
+        response_type: 'code',
+        scope: PCC_SCOPE,
+        audience: `https://digital.panasonic.com/${PCC_CLIENT_ID}/api/v1/`,
+        _csrf: csrf,
+        state,
+        _intstate: 'deprecated',
+        username: PANASONIC_EMAIL,
+        password: PANASONIC_PASSWORD,
+        lang: 'en',
+        connection: 'PanasonicID-Authentication'
+      }),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000)
+    });
+    pccStoreCookies(res, jar);
+    if (res.status !== 200) {
+      throw new Error(`Panasonic přihlášení odmítnuto (HTTP ${res.status}) — zkontroluj PANASONIC_EMAIL/PASSWORD`);
+    }
+
+    // 4) callback s hodnotami ze skrytého formuláře
+    const formParams = pccParseHiddenInputs(await res.text());
+    if (formParams.mfa_token) {
+      throw new Error('Panasonic vyžaduje 2FA potvrzení — přihlas se jednou v Comfort Cloud appce tímto účtem.');
+    }
+    res = await fetch(`${PCC_AUTH_BASE}/login/callback`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': PCC_BROWSER_UA,
+        cookie: pccCookieHeader(jar)
+      },
+      body: new URLSearchParams(formParams).toString(),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000)
+    });
+    pccStoreCookies(res, jar);
+    if (res.status !== 302) throw new Error(`Panasonic callback selhal (HTTP ${res.status})`);
+
+    // 5) poslední redirect nese autorizační kód
+    res = await fetch(pccAbsUrl(res.headers.get('location') || ''), {
+      headers: { 'user-agent': PCC_BROWSER_UA, cookie: pccCookieHeader(jar) },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000)
+    });
+    pccStoreCookies(res, jar);
+    if (res.status !== 302) throw new Error(`Panasonic redirect selhal (HTTP ${res.status})`);
+    code = pccParam(res.headers.get('location') || '', 'code');
+  }
+
+  if (!code) throw new Error('Panasonic nevrátil autorizační kód.');
+
+  // 6) výměna kódu za tokeny
+  res = await fetch(`${PCC_AUTH_BASE}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Auth0-Client': PCC_AUTH0_CLIENT, 'user-agent': PCC_API_UA, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      scope: 'openid',
+      client_id: PCC_CLIENT_ID,
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: PCC_REDIRECT_URI,
+      code_verifier: verifier
+    }),
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!res.ok) throw new Error(`Panasonic token selhal (HTTP ${res.status})`);
+  pccSetTokens(await res.json());
+
+  // 7) přihlášení do ACC → x-client-id
+  res = await fetch(`${PCC_ACC_BASE}/auth/v2/login`, {
+    method: 'POST',
+    headers: pccApiHeaders(false),
+    body: JSON.stringify({ language: 0 }),
+    signal: AbortSignal.timeout(20000)
+  });
+  if (res.status === 401 && (await res.clone().text()).includes('4106')) {
+    await pccUpdateAppVersion(true);
+    res = await fetch(`${PCC_ACC_BASE}/auth/v2/login`, {
+      method: 'POST',
+      headers: pccApiHeaders(false),
+      body: JSON.stringify({ language: 0 }),
+      signal: AbortSignal.timeout(20000)
+    });
+  }
+  if (!res.ok) throw new Error(`Panasonic ACC login selhal (HTTP ${res.status})`);
+  pcc.clientId = (await res.json()).clientId;
+}
+
+async function pccRefreshTokens() {
+  const res = await fetch(`${PCC_AUTH_BASE}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Auth0-Client': PCC_AUTH0_CLIENT, 'user-agent': PCC_API_UA, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      scope: pcc.scope,
+      client_id: PCC_CLIENT_ID,
+      refresh_token: pcc.refreshToken,
+      grant_type: 'refresh_token'
+    }),
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!res.ok) throw new Error(`Panasonic refresh selhal (HTTP ${res.status})`);
+  pccSetTokens(await res.json());
+}
+
+async function pccEnsureToken() {
+  if (!panasonicEnabled) {
+    throw Object.assign(new Error('Panasonic není nakonfigurován (chybí PANASONIC_EMAIL / PANASONIC_PASSWORD).'), { status: 500 });
+  }
+  if (pcc.accessToken && Date.now() < pcc.expiresAt) return;
+  if (pcc.refreshToken) {
+    try {
+      await pccRefreshTokens();
+      return;
+    } catch (err) {
+      console.error('Panasonic:', err.message);
+    }
+  }
+  await pccAuthenticate();
+}
+
+async function pccApiFetch(path, options = {}) {
+  await pccEnsureToken();
+  const doFetch = () => fetch(PCC_ACC_BASE + path, {
+    ...options,
+    headers: { ...pccApiHeaders(), ...(options.headers || {}) },
+    signal: AbortSignal.timeout(20000)
+  });
+  let res = await doFetch();
+  if (res.status === 401) {
+    const text = await res.text();
+    if (text.includes('4106')) {
+      await pccUpdateAppVersion(true);
+    } else {
+      pcc.accessToken = null;
+      await pccEnsureToken();
+    }
+    res = await doFetch();
+  }
+  if (!res.ok) {
+    throw new Error(`Panasonic API HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  }
+  return res.json();
+}
+
+let pccDevCache = { ts: 0, list: [] };
+
+async function pccGetDevices() {
+  if (pccDevCache.list.length && Date.now() - pccDevCache.ts < 10 * 60 * 1000) return pccDevCache.list;
+  const groups = await pccApiFetch('/device/group');
+  const list = [];
+  for (const g of (groups && groups.groupList) || []) {
+    for (const d of g.deviceList || []) {
+      // Klimatizace mají parameters; Aquarea (tepelné čerpadlo) jede přes jiné API
+      if (d && d.deviceGuid && d.parameters) {
+        list.push({ guid: d.deviceGuid, name: d.deviceName || d.deviceGuid });
+      }
+    }
+  }
+  pccDevCache = { ts: Date.now(), list };
+  return list;
+}
+
+const PCC_MODES = { auto: 0, dry: 1, cool: 2, heat: 3, fan: 4 };
+const PCC_MODE_NAMES = ['auto', 'dry', 'cool', 'heat', 'fan'];
+
+function pccTemp(v) {
+  return typeof v === 'number' && v !== PCC_INVALID_TEMP ? v : null;
+}
+
+async function pccGetStatus(guid) {
+  const data = await pccApiFetch('/deviceStatus/' + encodeURIComponent(guid));
+  const p = (data && data.parameters) || {};
+  return {
+    power: p.operate === 1,
+    mode: PCC_MODE_NAMES[p.operationMode] || null,
+    targetTemp: pccTemp(p.temperatureSet),
+    insideTemp: pccTemp(p.insideTemperature),
+    outsideTemp: pccTemp(p.outTemperature)
+  };
+}
+
+let airconPollRunning = false;
+let airconStatusLogged = false;
+
+async function pollAircon() {
+  if (!panasonicEnabled || airconPollRunning) return;
+  airconPollRunning = true;
+  try {
+    const devices = await pccQueued(() => pccGetDevices());
+    const out = [];
+    for (const d of devices) {
+      try {
+        const status = await pccQueued(() => pccGetStatus(d.guid));
+        out.push({ guid: d.guid, name: d.name, ...status });
+      } catch {
+        out.push({ guid: d.guid, name: d.name, power: null });
+      }
+      await delay(500);
+    }
+    state.aircon = { devices: out, error: null, fetchedAt: new Date().toISOString() };
+    if (!airconStatusLogged) {
+      airconStatusLogged = true;
+      addLog(`Klima: připojeno k Panasonic (${out.length} jednotek)`);
+    }
+    broadcast('aircon', { aircon: state.aircon });
+  } catch (err) {
+    state.aircon = { devices: state.aircon.devices || [], error: err.message };
+    if (!airconStatusLogged) {
+      airconStatusLogged = true;
+      addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140));
+    }
+    broadcast('aircon', { aircon: state.aircon });
+  } finally {
+    airconPollRunning = false;
+  }
+}
+
+if (panasonicEnabled) {
+  setTimeout(pollAircon, 15000);
+  setInterval(pollAircon, 5 * 60 * 1000);
+}
+
+app.post('/api/aircon/set', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { guid, power, temperature, mode } = req.body || {};
+  if (typeof guid !== 'string') return res.status(400).json({ error: 'Chybí guid.' });
+
+  const parameters = {};
+  const actions = [];
+  if (power === 'on' || power === 'off') {
+    parameters.operate = power === 'on' ? 1 : 0;
+    actions.push(power === 'on' ? 'zapnuto' : 'vypnuto');
+  }
+  if (temperature !== undefined) {
+    const t = Number(temperature);
+    if (!Number.isFinite(t) || t < 8 || t > 32) return res.status(400).json({ error: 'Teplota musí být 8–32 °C.' });
+    parameters.temperatureSet = t;
+    actions.push(`cíl ${String(t).replace('.', ',')} °C`);
+  }
+  if (mode !== undefined) {
+    if (PCC_MODES[mode] === undefined) return res.status(400).json({ error: 'Neznámý režim.' });
+    parameters.operationMode = PCC_MODES[mode];
+    actions.push(`režim ${mode}`);
+  }
+  if (!Object.keys(parameters).length) return res.status(400).json({ error: 'Žádný parametr ke změně.' });
+
+  try {
+    await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+      method: 'POST',
+      body: JSON.stringify({ deviceGuid: guid, parameters })
+    }));
+
+    // Optimistická aktualizace, ověření proběhne příštím pollem
+    const dev = state.aircon.devices.find(d => d.guid === guid);
+    if (dev) {
+      if (parameters.operate !== undefined) dev.power = parameters.operate === 1;
+      if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
+      if (parameters.operationMode !== undefined) dev.mode = mode;
+      broadcast('aircon', { aircon: state.aircon });
+      addLog(`${dev.name}: ${actions.join(', ')}`);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 
