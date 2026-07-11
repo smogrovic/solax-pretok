@@ -1683,17 +1683,18 @@ function renderBlindRow(b) {
     btns.appendChild(spacer());
     btns.appendChild(makeBlindBtn('blind-btn blind-btn-txt', 'OFF', btn => blindCommand(b.deviceURL, 'off', null, btn)));
   } else {
-    btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', null, btn)));
+    // Žaluzie po jízdě skončí zavřené/otevřené bez ohledu na dřívější naklopení —
+    // s každým pohybovým povelem (i stopem) proto posíláme cílové naklopení
+    // z posuvníku a zařízení ho nastaví samo, jakmile zastaví
+    const tiltValue = () => (tiltSlider ? Number(tiltSlider.value) : null);
+    btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', tiltValue(), btn)));
     // Garáž (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
     if (b.hasStop && b.uiClass !== 'GarageDoor') {
-      btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', null, btn)));
+      btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
     } else {
       btns.appendChild(spacer());
     }
-    // Žaluzie po sjetí dolů skončí zavřené — s povelem dolů posíláme i cílové
-    // naklopení z posuvníku, zařízení ho nastaví samo po dojetí
-    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn =>
-      blindCommand(b.deviceURL, 'down', tiltSlider ? Number(tiltSlider.value) : null, btn)));
+    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, 'down', tiltValue(), btn)));
   }
 
   row.appendChild(info);

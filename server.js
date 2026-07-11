@@ -1249,10 +1249,10 @@ async function blindCommand(deviceURL, action, value) {
   if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
 
   const commandList = [{ name: cmd, parameters: action === 'orientation' ? [Math.round(value)] : [] }];
-  // Žaluzie po sjetí dolů skončí vždy zavřené (naklopení 100 %) — proto při
-  // jízdě dolů zřetězíme i nastavení naklopení; zařízení povely vykoná po sobě,
-  // takže se žaluzie po dojetí sama naklopí na hodnotu z posuvníku
-  if (action === 'down' && blind.commands.orientation && Number.isFinite(value)) {
+  // Žaluzie po jízdě skončí zavřené (dolů) nebo otevřené (nahoru) bez ohledu
+  // na dřívější naklopení — proto za každý pohybový povel (i stop) zřetězíme
+  // nastavení naklopení z posuvníku; zařízení povely vykoná po sobě
+  if (['up', 'down', 'stop'].includes(action) && blind.commands.orientation && Number.isFinite(value)) {
     commandList.push({ name: blind.commands.orientation, parameters: [Math.round(value)] });
   }
 
@@ -1302,8 +1302,9 @@ app.post('/api/blinds/command', async (req, res) => {
   if (typeof deviceURL !== 'string' || !BLIND_ACTION_LABELS[action]) {
     return res.status(400).json({ error: 'Chybí deviceURL nebo neznámá action.' });
   }
+  const movesWithTilt = ['up', 'down', 'stop'];
   let v = null;
-  if (action === 'orientation' || (action === 'down' && value !== undefined && value !== null)) {
+  if (action === 'orientation' || (movesWithTilt.includes(action) && value !== undefined && value !== null)) {
     v = Number(value);
     if (!Number.isFinite(v) || v < 0 || v > 100) {
       return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
@@ -1313,7 +1314,7 @@ app.post('/api/blinds/command', async (req, res) => {
     const blind = await blindCommand(deviceURL, action, v);
     let suffix = '';
     if (action === 'orientation') suffix = ` ${Math.round(v)} %`;
-    else if (action === 'down' && v !== null && blind.commands.orientation) suffix = ` + naklopení ${Math.round(v)} %`;
+    else if (movesWithTilt.includes(action) && v !== null && blind.commands.orientation) suffix = ` + naklopení ${Math.round(v)} %`;
     addLog(`${blind.label}: ${BLIND_ACTION_LABELS[action]}${suffix}`);
     res.json({ success: true });
   } catch (err) {
