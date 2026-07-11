@@ -384,10 +384,8 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:10px 2px;
-    border-bottom:1px solid rgba(44,62,80,0.06);
+    padding:6px 0;
   }
-  .blind-row:last-child{border-bottom:none;}
   .blind-info{
     display:flex;
     flex-direction:column;
@@ -403,15 +401,52 @@
     font-size:11px;
     color:var(--grey-text);
   }
+  .blind-room{
+    background:rgba(44,62,80,0.04);
+    border-radius:16px;
+    padding:10px 12px;
+    margin-bottom:10px;
+  }
+  .blind-room:last-child{margin-bottom:0;}
   .blind-room-title{
     font-size:11px;
     font-weight:700;
     text-transform:uppercase;
     letter-spacing:0.05em;
     color:var(--grey-text);
-    margin:12px 0 2px;
+    margin-bottom:2px;
   }
-  .blind-room-title:first-child{margin-top:0;}
+  .blind-item{
+    border-bottom:1px solid rgba(44,62,80,0.06);
+    padding-bottom:6px;
+  }
+  .blind-item:last-child{border-bottom:none;padding-bottom:0;}
+  .blind-btn.blind-on{background:var(--green);font-size:10px;font-weight:700;}
+  .blind-btn.blind-off{background:var(--red);font-size:10px;font-weight:700;}
+  .blind-tilt{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding-bottom:6px;
+  }
+  .blind-tilt-label{
+    font-size:11px;
+    color:var(--grey-text);
+    white-space:nowrap;
+  }
+  .blind-tilt input[type=range]{
+    flex:1;
+    accent-color:var(--orange);
+    min-width:0;
+    margin:0;
+  }
+  .blind-tilt-val{
+    font-size:11px;
+    font-weight:700;
+    color:var(--navy);
+    min-width:36px;
+    text-align:right;
+  }
   .blind-btns{display:flex;gap:8px;}
   .blind-btn{
     width:34px;
@@ -1336,20 +1371,37 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
   } catch {}
 }
 
-// ---------- Rolety (TaHoma) — dvě stránky, seskupené podle místností ----------
+// ---------- Rolety (TaHoma) — bloky podle místností na dvou stránkách ----------
 
 const blindsList1El = document.getElementById('blindsList1');
 const blindsList2El = document.getElementById('blindsList2');
 let blinds = [];
 let blindsReloadTimer = null;
 
-async function blindCommand(deviceURL, action, btn) {
+// Rozložení místností: co nesedí do seznamů, přijde na konec druhé stránky
+const BLINDS_PAGE1 = ['obyvak', 'terasa', 'garaz'];
+const BLINDS_PAGE2 = ['hoste', 'miky', 'elenka', 'loznice'];
+
+function normalizeName(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function roomPageIndex(room) {
+  const n = normalizeName(room);
+  const i1 = BLINDS_PAGE1.findIndex(r => n.includes(r));
+  if (i1 >= 0) return { page: 1, order: i1 };
+  const i2 = BLINDS_PAGE2.findIndex(r => n.includes(r));
+  if (i2 >= 0) return { page: 2, order: i2 };
+  return { page: 2, order: 99 };
+}
+
+async function blindCommand(deviceURL, action, value, btn) {
   if (btn) btn.disabled = true;
   try {
     const res = await fetch('/api/blinds/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ deviceURL, action })
+      body: JSON.stringify({ deviceURL, action, value })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -1358,28 +1410,27 @@ async function blindCommand(deviceURL, action, btn) {
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
-    // Až roleta dojede, obnovíme zobrazené polohy
+    // Až zařízení dojede, obnovíme zobrazené polohy
     clearTimeout(blindsReloadTimer);
     blindsReloadTimer = setTimeout(loadBlinds, 20000);
   } catch (err) {
-    errorEl.textContent = 'Roleta: ' + err.message;
+    errorEl.textContent = 'Rolety: ' + err.message;
     errorEl.classList.add('show');
   }
   if (btn) btn.disabled = false;
 }
 
 function blindPositionText(b) {
-  // closure: 0 = otevřeno, 100 = zavřeno; orientation = naklopení lamel (io žaluzie)
-  const parts = [];
-  if (typeof b.closure === 'number') {
-    if (b.closure <= 0) parts.push('otevřeno');
-    else if (b.closure >= 100) parts.push('zavřeno');
-    else parts.push('zataženo ' + Math.round(b.closure) + ' %');
+  // closure: 0 = otevřeno, 100 = zavřeno (jen io zařízení, RTS polohu nehlásí)
+  if (b.type === 'switch') {
+    if (b.onState === true) return 'zapnuto';
+    if (b.onState === false) return 'vypnuto';
+    return '';
   }
-  if (typeof b.orientation === 'number') {
-    parts.push('naklopení ' + Math.round(b.orientation) + ' %');
-  }
-  return parts.join(' · ');
+  if (typeof b.closure !== 'number') return '';
+  if (b.closure <= 0) return 'otevřeno';
+  if (b.closure >= 100) return 'zavřeno';
+  return 'zataženo ' + Math.round(b.closure) + ' %';
 }
 
 function blindsMessage(listEl, msg) {
@@ -1390,9 +1441,21 @@ function blindsMessage(listEl, msg) {
   listEl.appendChild(empty);
 }
 
+function makeBlindBtn(cls, text, handler) {
+  const btn = document.createElement('button');
+  btn.className = cls;
+  btn.textContent = text;
+  btn.addEventListener('click', () => handler(btn));
+  return btn;
+}
+
 function renderBlindRow(b) {
+  const wrap = document.createElement('div');
+  wrap.className = 'blind-item';
+
   const row = document.createElement('div');
   row.className = 'blind-row';
+
   const info = document.createElement('div');
   info.className = 'blind-info';
   const label = document.createElement('span');
@@ -1406,18 +1469,51 @@ function renderBlindRow(b) {
     posEl.textContent = pos;
     info.appendChild(posEl);
   }
+
   const btns = document.createElement('div');
   btns.className = 'blind-btns';
-  for (const [action, symbol] of [['up', '▲'], ['stop', '■'], ['down', '▼']]) {
-    const btn = document.createElement('button');
-    btn.className = 'blind-btn';
-    btn.textContent = symbol;
-    btn.addEventListener('click', () => blindCommand(b.deviceURL, action, btn));
-    btns.appendChild(btn);
+
+  if (b.type === 'switch') {
+    // Světlo apod. — ON/OFF místo šipek, bez prostředního tlačítka
+    btns.appendChild(makeBlindBtn('blind-btn blind-on', 'ON', btn => blindCommand(b.deviceURL, 'on', null, btn)));
+    btns.appendChild(makeBlindBtn('blind-btn blind-off', 'OFF', btn => blindCommand(b.deviceURL, 'off', null, btn)));
+  } else {
+    btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', null, btn)));
+    // Garáž (a zařízení bez povelu stop) prostřední tlačítko nemají
+    if (b.hasStop && b.uiClass !== 'GarageDoor') {
+      btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', null, btn)));
+    }
+    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, 'down', null, btn)));
   }
+
   row.appendChild(info);
   row.appendChild(btns);
-  return row;
+  wrap.appendChild(row);
+
+  // Naklopení lamel: posuvník 0–100 %, povel se pošle po puštění prstu
+  if (b.hasOrientation) {
+    const tilt = document.createElement('div');
+    tilt.className = 'blind-tilt';
+    const tiltLabel = document.createElement('span');
+    tiltLabel.className = 'blind-tilt-label';
+    tiltLabel.textContent = 'Naklopení';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.value = typeof b.orientation === 'number' ? Math.round(b.orientation) : 50;
+    const val = document.createElement('span');
+    val.className = 'blind-tilt-val';
+    val.textContent = slider.value + ' %';
+    slider.addEventListener('input', () => { val.textContent = slider.value + ' %'; });
+    slider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(slider.value), null));
+    tilt.appendChild(tiltLabel);
+    tilt.appendChild(slider);
+    tilt.appendChild(val);
+    wrap.appendChild(tilt);
+  }
+
+  return wrap;
 }
 
 function hideBlindsSlide2() {
@@ -1437,32 +1533,28 @@ function renderBlinds() {
     return;
   }
 
-  // Seskupení podle místností (server posílá seřazené podle místnosti)
-  const rooms = [];
+  // Seskupení podle místností a seřazení podle definovaného rozložení stránek
+  const roomsMap = new Map();
   for (const b of blinds) {
-    let group = rooms[rooms.length - 1];
-    if (!group || group.room !== b.room) {
-      group = { room: b.room, items: [] };
-      rooms.push(group);
-    }
-    group.items.push(b);
+    if (!roomsMap.has(b.room)) roomsMap.set(b.room, []);
+    roomsMap.get(b.room).push(b);
   }
+  const rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
+  rooms.sort((a, b) => a.page - b.page || a.order - b.order || a.room.localeCompare(b.room, 'cs'));
 
-  // Rozdělení místností na dvě stránky zhruba napůl (podle počtu rolet)
-  const half = Math.ceil(blinds.length / 2);
-  let placed = 0;
+  const slide2Exists = !!document.getElementById('blindsSlide2');
   for (const group of rooms) {
-    const listEl = (placed < half || !blindsList2El || !document.getElementById('blindsSlide2'))
-      ? blindsList1El
-      : blindsList2El;
+    const listEl = (group.page === 2 && slide2Exists && blindsList2El) ? blindsList2El : blindsList1El;
+    const block = document.createElement('div');
+    block.className = 'blind-room';
     const title = document.createElement('div');
     title.className = 'blind-room-title';
     title.textContent = group.room;
-    listEl.appendChild(title);
+    block.appendChild(title);
     for (const b of group.items) {
-      listEl.appendChild(renderBlindRow(b));
+      block.appendChild(renderBlindRow(b));
     }
-    placed += group.items.length;
+    listEl.appendChild(block);
   }
 
   if (blindsList2El && !blindsList2El.children.length) hideBlindsSlide2();

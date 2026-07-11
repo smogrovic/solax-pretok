@@ -1107,22 +1107,33 @@ async function getBlinds() {
       const orientation = typeof states['core:SlateOrientationState'] === 'number'
         ? states['core:SlateOrientationState']
         : null;
+      const onState = states['core:OnOffState'] === 'on' ? true
+        : (states['core:OnOffState'] === 'off' ? false : null);
+      const commands = {
+        up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : (cmds.has('deploy') ? 'deploy' : null)),
+        down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : (cmds.has('undeploy') ? 'undeploy' : null)),
+        stop: cmds.has('stop') ? 'stop' : (cmds.has('my') ? 'my' : null),
+        my: cmds.has('my') ? 'my' : null,
+        on: cmds.has('on') ? 'on' : null,
+        off: cmds.has('off') ? 'off' : null,
+        orientation: cmds.has('setOrientation') ? 'setOrientation' : null
+      };
+      // cover = jezdí nahoru/dolů; switch = spíná (světlo na terase apod.)
+      const type = (commands.up && commands.down) ? 'cover'
+        : ((commands.on && commands.off) ? 'switch' : null);
       return {
         deviceURL: d.deviceURL,
         label: d.label,
         uiClass: d.uiClass,
+        type,
         room: placeMap[d.placeOID] || 'Ostatní',
         closure,
         orientation,
-        commands: {
-          up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : (cmds.has('deploy') ? 'deploy' : null)),
-          down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : (cmds.has('undeploy') ? 'undeploy' : null)),
-          stop: cmds.has('stop') ? 'stop' : (cmds.has('my') ? 'my' : null),
-          my: cmds.has('my') ? 'my' : null
-        }
+        onState,
+        commands
       };
     })
-    .filter(d => !EXCLUDED_UI.includes(d.uiClass) && d.commands.up && d.commands.down)
+    .filter(d => !EXCLUDED_UI.includes(d.uiClass) && d.type)
     .sort((a, b) => a.room.localeCompare(b.room, 'cs') || a.label.localeCompare(b.label, 'cs'));
   blindsCache = { ts: Date.now(), list };
   return list;
@@ -1144,18 +1155,19 @@ app.get('/api/blinds/all', async (req, res) => {
   }
 });
 
-async function blindCommand(deviceURL, action) {
+async function blindCommand(deviceURL, action, value) {
   const blinds = await getBlinds();
   const blind = blinds.find(b => b.deviceURL === deviceURL);
   if (!blind) throw Object.assign(new Error('Neznámá roleta.'), { status: 400 });
   const cmd = blind.commands[action];
-  if (!cmd) throw Object.assign(new Error(`Roleta ${blind.label} povel neumí.`), { status: 400 });
+  if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
+  const parameters = action === 'orientation' ? [Math.round(value)] : [];
   await tahomaFetch('/exec/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       label: `Šmogyho FVE: ${blind.label} ${action}`,
-      actions: [{ deviceURL, commands: [{ name: cmd, parameters: [] }] }]
+      actions: [{ deviceURL, commands: [{ name: cmd, parameters }] }]
     })
   });
   return blind;
@@ -1171,8 +1183,13 @@ app.get('/api/blinds', async (req, res) => {
         deviceURL: b.deviceURL,
         label: b.label,
         room: b.room,
+        type: b.type,
+        uiClass: b.uiClass,
         closure: b.closure,
-        orientation: b.orientation
+        orientation: b.orientation,
+        onState: b.onState,
+        hasStop: !!b.commands.stop,
+        hasOrientation: !!b.commands.orientation
       }))
     });
   } catch (err) {
@@ -1180,17 +1197,28 @@ app.get('/api/blinds', async (req, res) => {
   }
 });
 
-const BLIND_ACTION_LABELS = { up: 'nahoru', down: 'dolů', stop: 'stop', my: 'moje pozice' };
+const BLIND_ACTION_LABELS = {
+  up: 'nahoru', down: 'dolů', stop: 'stop', my: 'moje pozice',
+  on: 'zapnuto', off: 'vypnuto', orientation: 'naklopení'
+};
 
 app.post('/api/blinds/command', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { deviceURL, action } = req.body || {};
+  const { deviceURL, action, value } = req.body || {};
   if (typeof deviceURL !== 'string' || !BLIND_ACTION_LABELS[action]) {
-    return res.status(400).json({ error: 'Chybí deviceURL nebo action (up/down/stop/my).' });
+    return res.status(400).json({ error: 'Chybí deviceURL nebo neznámá action.' });
+  }
+  let v = null;
+  if (action === 'orientation') {
+    v = Number(value);
+    if (!Number.isFinite(v) || v < 0 || v > 100) {
+      return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
+    }
   }
   try {
-    const blind = await blindCommand(deviceURL, action);
-    addLog(`Roleta ${blind.label}: ${BLIND_ACTION_LABELS[action]}`);
+    const blind = await blindCommand(deviceURL, action, v);
+    const suffix = action === 'orientation' ? ` ${Math.round(v)} %` : '';
+    addLog(`${blind.label}: ${BLIND_ACTION_LABELS[action]}${suffix}`);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
