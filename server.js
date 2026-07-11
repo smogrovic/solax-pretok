@@ -1134,7 +1134,13 @@ async function tahomaFetch(path, options = {}, retried) {
   if (!res.ok) {
     throw Object.assign(new Error(`TaHoma API HTTP ${res.status}`), { status: 502 });
   }
-  return res.json();
+  // Některé endpointy (refreshStates) vrací prázdné tělo
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 let blindsCache = { ts: 0, list: [] };
@@ -1143,6 +1149,14 @@ async function getBlinds() {
   if (blindsCache.list.length && Date.now() - blindsCache.ts < 60 * 1000) {
     return blindsCache.list;
   }
+
+  // Cloud drží stavy naposledy nahlášené bránou — když roletou pohnul ovladač
+  // nebo sluneční automatika, jsou zastaralé. Požádáme o obnovu a chvíli počkáme.
+  try {
+    await tahomaFetch('/setup/devices/refreshStates', { method: 'POST' });
+    await delay(1500);
+  } catch {}
+
   const devices = await tahomaFetch('/setup/devices');
 
   // Názvy místností: strom míst z TaHomy → mapa placeOID -> label
@@ -1217,7 +1231,10 @@ app.get('/api/blinds/all', async (req, res) => {
       label: d.label,
       uiClass: d.uiClass,
       controllableName: d.controllableName,
-      commands: ((d.definition && d.definition.commands) || []).map(c => c.commandName)
+      commands: ((d.definition && d.definition.commands) || []).map(c => c.commandName),
+      states: Object.fromEntries((d.states || [])
+        .filter(s => s.name.startsWith('core:'))
+        .map(s => [s.name, s.value]))
     })));
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
