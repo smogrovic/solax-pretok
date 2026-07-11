@@ -1197,7 +1197,8 @@ async function getBlinds() {
         my: cmds.has('my') ? 'my' : null,
         on: cmds.has('on') ? 'on' : null,
         off: cmds.has('off') ? 'off' : null,
-        orientation: cmds.has('setOrientation') ? 'setOrientation' : null
+        orientation: cmds.has('setOrientation') ? 'setOrientation' : null,
+        closureOrientation: cmds.has('setClosureAndOrientation') ? 'setClosureAndOrientation' : null
       };
       // cover = jezdí nahoru/dolů; switch = spíná (světlo na terase apod.)
       // Světla jsou vždy spínač, i když umí up/down (stmívání) — v appce mají ON/OFF
@@ -1248,12 +1249,18 @@ async function blindCommand(deviceURL, action, value) {
   const cmd = blind.commands[action];
   if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
 
-  const commandList = [{ name: cmd, parameters: action === 'orientation' ? [Math.round(value)] : [] }];
-  // Žaluzie po jízdě skončí zavřené (dolů) nebo otevřené (nahoru) bez ohledu
-  // na dřívější naklopení — proto za každý pohybový povel (i stop) zřetězíme
-  // nastavení naklopení z posuvníku; zařízení povely vykoná po sobě
-  if (['up', 'down', 'stop'].includes(action) && blind.commands.orientation && Number.isFinite(value)) {
-    commandList.push({ name: blind.commands.orientation, parameters: [Math.round(value)] });
+  let commandList = [{ name: cmd, parameters: action === 'orientation' ? [Math.round(value)] : [] }];
+  if ((action === 'up' || action === 'down') && Number.isFinite(value) && blind.commands.closureOrientation) {
+    // Žaluzie: jeden atomický povel „jeď do krajní polohy s tímto naklopením" —
+    // jede kontinuálně (zřetězené up+setOrientation by pohyb hned přerušilo)
+    const closure = action === 'down' ? 100 : 0;
+    commandList = [{ name: blind.commands.closureOrientation, parameters: [closure, Math.round(value)] }];
+  } else if (action === 'stop' && blind.commands.orientation && Number.isFinite(value)) {
+    // Po zastavení v mezipoloze se žaluzie ještě naklopí na hodnotu z posuvníku
+    commandList = [
+      { name: cmd, parameters: [] },
+      { name: blind.commands.orientation, parameters: [Math.round(value)] }
+    ];
   }
 
   await tahomaFetch('/exec/apply', {
@@ -1311,11 +1318,8 @@ app.post('/api/blinds/command', async (req, res) => {
     }
   }
   try {
-    const blind = await blindCommand(deviceURL, action, v);
-    let suffix = '';
-    if (action === 'orientation') suffix = ` ${Math.round(v)} %`;
-    else if (movesWithTilt.includes(action) && v !== null && blind.commands.orientation) suffix = ` + naklopení ${Math.round(v)} %`;
-    addLog(`${blind.label}: ${BLIND_ACTION_LABELS[action]}${suffix}`);
+    // Ovládání rolet/žaluzií se do logu nezapisuje
+    await blindCommand(deviceURL, action, v);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
