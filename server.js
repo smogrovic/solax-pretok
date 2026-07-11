@@ -1186,8 +1186,10 @@ async function getBlinds() {
         orientation: cmds.has('setOrientation') ? 'setOrientation' : null
       };
       // cover = jezdí nahoru/dolů; switch = spíná (světlo na terase apod.)
-      const type = (commands.up && commands.down) ? 'cover'
-        : ((commands.on && commands.off) ? 'switch' : null);
+      // Světla jsou vždy spínač, i když umí up/down (stmívání) — v appce mají ON/OFF
+      const type = (d.uiClass === 'Light' && commands.on && commands.off) ? 'switch'
+        : ((commands.up && commands.down) ? 'cover'
+        : ((commands.on && commands.off) ? 'switch' : null));
       return {
         deviceURL: d.deviceURL,
         label: d.label,
