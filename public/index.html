@@ -502,6 +502,76 @@
     font-weight:600;
   }
   .mode-btn:disabled{opacity:0.5;}
+  .mode-btn.active{background:var(--orange);color:#fff;}
+  .timer-card{
+    margin-top:12px;
+    align-items:stretch;
+  }
+  .timer-select,
+  .timer-time{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid rgba(44,62,80,0.15);
+    border-radius:12px;
+    background:var(--bg);
+    color:var(--navy);
+    font-size:14px;
+    font-family:inherit;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  .timer-form-row{
+    display:flex;
+    gap:8px;
+    margin-top:8px;
+  }
+  .timer-form-row > *{flex:1;}
+  .timer-time{text-align:center;font-weight:700;}
+  .timer-add-btn{
+    width:100%;
+    margin-top:10px;
+    padding:11px;
+    border:none;
+    border-radius:12px;
+    background:var(--orange);
+    color:#fff;
+    font-size:14px;
+    font-weight:600;
+  }
+  .timer-add-btn:active{background:var(--orange-dark);}
+  .timer-add-btn:disabled{opacity:0.6;}
+  .timer-list{
+    display:flex;
+    flex-direction:column;
+    margin-top:6px;
+  }
+  .timer-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 2px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+    font-size:13px;
+    color:var(--navy);
+  }
+  .timer-row:last-child{border-bottom:none;}
+  .timer-row-time{font-weight:700;white-space:nowrap;}
+  .timer-row-text{flex:1;min-width:0;}
+  .timer-del{
+    width:26px;
+    height:26px;
+    border-radius:50%;
+    border:none;
+    background:rgba(44,62,80,0.08);
+    color:var(--grey-text);
+    font-size:13px;
+    font-weight:700;
+    flex-shrink:0;
+  }
+  .aqua-zone{
+    font-size:11px;
+    color:var(--grey-text);
+  }
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -879,6 +949,20 @@
         <div class="blinds-list" id="airconList">
           <div class="log-empty">Načítám klimatizace…</div>
         </div>
+      </div>
+
+      <div class="card lockable timer-card">
+        <div class="graph-title">Časovač</div>
+        <select id="timerDevice" class="timer-select"></select>
+        <div class="timer-form-row">
+          <select id="timerAction" class="timer-select">
+            <option value="on">Zapnout</option>
+            <option value="off">Vypnout</option>
+          </select>
+          <input type="time" id="timerTime" class="timer-time" value="06:30">
+        </div>
+        <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
+        <div class="timer-list" id="timerList"></div>
       </div>
     </div>
   </div>
@@ -1935,6 +2019,8 @@ function renderAircon() {
       const parts = [d.power ? 'zapnuto' : 'vypnuto'];
       if (typeof d.insideTemp === 'number') parts.push('uvnitř ' + formatTempC(d.insideTemp));
       if (d.power && d.mode) parts.push(AIRCON_MODE_LABELS[d.mode] || d.mode);
+      if (d.power && d.eco === 2) parts.push('tichý');
+      if (d.power && d.eco === 1) parts.push('výkonný');
       pos.textContent = parts.join(' · ');
     }
     info.appendChild(pos);
@@ -1999,13 +2085,145 @@ function renderAircon() {
       airconSet(d.guid, { mode: next }, modeBtn);
     });
 
+    // Tichý režim: přepíná ecoMode tichý ↔ běžný
+    const quietBtn = document.createElement('button');
+    quietBtn.className = 'mode-btn' + (d.eco === 2 ? ' active' : '');
+    quietBtn.textContent = 'Tichý';
+    quietBtn.addEventListener('click', () => {
+      const next = d.eco === 2 ? 'auto' : 'quiet';
+      d.eco = next === 'quiet' ? 2 : 0;
+      quietBtn.classList.toggle('active', d.eco === 2);
+      airconSet(d.guid, { eco: next }, quietBtn);
+    });
+
     controls.appendChild(stepper);
     controls.appendChild(modeBtn);
+    controls.appendChild(quietBtn);
     wrap.appendChild(controls);
 
     airconListEl.appendChild(wrap);
   }
+
+  // Tepelko (Aquarea) — zatím jen náhled stavu
+  for (const a of airconData.aquarea || []) {
+    const wrap = document.createElement('div');
+    wrap.className = 'blind-item';
+    const row = document.createElement('div');
+    row.className = 'blind-row';
+    const info = document.createElement('div');
+    info.className = 'blind-info';
+    const label = document.createElement('span');
+    label.className = 'blind-label';
+    label.textContent = a.name;
+    info.appendChild(label);
+    const pos = document.createElement('span');
+    pos.className = 'blind-pos';
+    if (typeof a.tankTemp === 'number') {
+      const parts = ['nádrž ' + formatTempC(a.tankTemp)];
+      if (typeof a.tankTarget === 'number') parts.push('cíl ' + formatTempC(a.tankTarget));
+      if (typeof a.outdoorTemp === 'number') parts.push('venku ' + formatTempC(a.outdoorTemp));
+      if (a.quiet) parts.push('tichý');
+      pos.textContent = parts.join(' · ');
+    } else {
+      pos.textContent = 'stav nedostupný';
+    }
+    info.appendChild(pos);
+    for (const z of a.zones || []) {
+      const zone = document.createElement('span');
+      zone.className = 'aqua-zone';
+      const zparts = [z.name + ': ' + formatTempC(z.temp)];
+      if (typeof z.target === 'number') zparts.push('cíl ' + formatTempC(z.target));
+      zparts.push(z.on ? 'zapnuto' : 'vypnuto');
+      zone.textContent = zparts.join(' · ');
+      info.appendChild(zone);
+    }
+    row.appendChild(info);
+    wrap.appendChild(row);
+    airconListEl.appendChild(wrap);
+  }
+
+  renderTimerDeviceOptions();
 }
+
+// ---------- Časovače klimatizací ----------
+
+const timerDeviceEl = document.getElementById('timerDevice');
+const timerActionEl = document.getElementById('timerAction');
+const timerTimeEl = document.getElementById('timerTime');
+const timerAddBtn = document.getElementById('timerAddBtn');
+const timerListEl = document.getElementById('timerList');
+let airconTimersData = [];
+
+function renderTimerDeviceOptions() {
+  const selected = timerDeviceEl.value;
+  timerDeviceEl.textContent = '';
+  for (const d of airconData.devices || []) {
+    const opt = document.createElement('option');
+    opt.value = d.guid;
+    opt.textContent = d.name;
+    timerDeviceEl.appendChild(opt);
+  }
+  if (selected) timerDeviceEl.value = selected;
+}
+
+function renderTimers() {
+  timerListEl.textContent = '';
+  for (const t of airconTimersData) {
+    const row = document.createElement('div');
+    row.className = 'timer-row';
+    const time = document.createElement('span');
+    time.className = 'timer-row-time';
+    time.textContent = t.time;
+    const text = document.createElement('span');
+    text.className = 'timer-row-text';
+    text.textContent = `${t.name} — ${t.action === 'on' ? 'zapnout' : 'vypnout'}`;
+    const del = document.createElement('button');
+    del.className = 'timer-del';
+    del.textContent = '✕';
+    del.addEventListener('click', async () => {
+      del.disabled = true;
+      try {
+        const res = await fetch('/api/aircon/timer/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+          body: JSON.stringify({ id: t.id })
+        });
+        if (res.status === 401) setLocked(true);
+      } catch {}
+      del.disabled = false;
+    });
+    row.appendChild(time);
+    row.appendChild(text);
+    row.appendChild(del);
+    timerListEl.appendChild(row);
+  }
+}
+
+timerAddBtn.addEventListener('click', async () => {
+  const guid = timerDeviceEl.value;
+  const time = timerTimeEl.value;
+  const action = timerActionEl.value;
+  if (!guid || !time) return;
+  timerAddBtn.disabled = true;
+  try {
+    const res = await fetch('/api/aircon/timer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ guid, time, action })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Časovač se nepodařilo přidat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Časovač: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  timerAddBtn.disabled = false;
+});
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
@@ -2034,6 +2252,8 @@ function applySnapshot(snap) {
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
   renderAircon();
+  airconTimersData = snap.airconTimers || [];
+  renderTimers();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -2126,6 +2346,10 @@ function connectStream() {
   es.addEventListener('aircon', e => {
     airconData = JSON.parse(e.data).aircon || { devices: [], error: null };
     renderAircon();
+  });
+  es.addEventListener('airconTimers', e => {
+    airconTimersData = JSON.parse(e.data).timers || [];
+    renderTimers();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);

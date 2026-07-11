@@ -167,6 +167,7 @@ function snapshot() {
     blindsEnabled: tahomaEnabled,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
+    airconTimers,
     pushEnabled,
     lockEnabled
   };
@@ -1666,22 +1667,54 @@ async function pccApiFetch(path, options = {}) {
   return res.json();
 }
 
-let pccDevCache = { ts: 0, list: [] };
+let pccDevCache = { ts: 0, list: [], aquarea: [] };
 
 async function pccGetDevices() {
-  if (pccDevCache.list.length && Date.now() - pccDevCache.ts < 10 * 60 * 1000) return pccDevCache.list;
+  if (pccDevCache.list.length && Date.now() - pccDevCache.ts < 10 * 60 * 1000) return pccDevCache;
   const groups = await pccApiFetch('/device/group');
   const list = [];
+  const aquarea = [];
   for (const g of (groups && groups.groupList) || []) {
     for (const d of g.deviceList || []) {
-      // Klimatizace mají parameters; Aquarea (tepelné čerpadlo) jede přes jiné API
-      if (d && d.deviceGuid && d.parameters) {
+      if (!d || !d.deviceGuid) continue;
+      // Klimatizace mají parameters; zařízení bez nich je Aquarea (tepelné čerpadlo)
+      if (d.parameters) {
         list.push({ guid: d.deviceGuid, name: d.deviceName || d.deviceGuid });
+      } else {
+        aquarea.push({ guid: d.deviceGuid, name: d.deviceName || 'Tepelné čerpadlo' });
       }
     }
   }
-  pccDevCache = { ts: Date.now(), list };
-  return list;
+  pccDevCache = { ts: Date.now(), list, aquarea };
+  return pccDevCache;
+}
+
+// Stav Aquarey jde přes proxy endpoint accsmart API (deviceDirect=1 čte přímo ze zařízení)
+async function pccGetAquareaStatus(guid, direct = 1) {
+  const data = await pccApiFetch('/remote/v1/app/common/transfer', {
+    method: 'POST',
+    body: JSON.stringify({
+      apiName: `/remote/v1/api/devices?gwid=${guid}&deviceDirect=${direct}`,
+      requestMethod: 'GET'
+    })
+  });
+  const st = (data && data.status) || {};
+  const tank = st.tankStatus || {};
+  const zones = Array.isArray(st.zoneStatus) ? st.zoneStatus : [];
+  return {
+    name: (data && data.a2wName) || null,
+    outdoorTemp: typeof st.outdoorNow === 'number' ? st.outdoorNow : null,
+    quiet: st.quietMode === 1,
+    tankTemp: typeof tank.temperatureNow === 'number' ? tank.temperatureNow : null,
+    tankTarget: typeof tank.heatSet === 'number' ? tank.heatSet : null,
+    tankOn: tank.operationStatus === 1,
+    zones: zones.map(z => ({
+      name: z.zoneName || 'Zóna',
+      temp: typeof z.temperatureNow === 'number' ? z.temperatureNow : null,
+      target: typeof z.heatSet === 'number' ? z.heatSet : null,
+      on: z.operationStatus === 1
+    }))
+  };
 }
 
 const PCC_MODES = { auto: 0, dry: 1, cool: 2, heat: 3, fan: 4 };
@@ -1697,6 +1730,7 @@ async function pccGetStatus(guid) {
   return {
     power: p.operate === 1,
     mode: PCC_MODE_NAMES[p.operationMode] || null,
+    eco: typeof p.ecoMode === 'number' ? p.ecoMode : null, // 0 auto, 1 výkonný, 2 tichý
     targetTemp: pccTemp(p.temperatureSet),
     insideTemp: pccTemp(p.insideTemperature),
     outsideTemp: pccTemp(p.outTemperature)
@@ -1710,7 +1744,7 @@ async function pollAircon() {
   if (!panasonicEnabled || airconPollRunning) return;
   airconPollRunning = true;
   try {
-    const devices = await pccQueued(() => pccGetDevices());
+    const { list: devices, aquarea } = await pccQueued(() => pccGetDevices());
     const out = [];
     for (const d of devices) {
       try {
@@ -1721,14 +1755,31 @@ async function pollAircon() {
       }
       await delay(500);
     }
-    state.aircon = { devices: out, error: null, fetchedAt: new Date().toISOString() };
+
+    const aquaOut = [];
+    for (const a of aquarea) {
+      try {
+        const status = await pccQueued(() => pccGetAquareaStatus(a.guid, 1));
+        aquaOut.push({ guid: a.guid, name: status.name || a.name, ...status });
+      } catch {
+        try {
+          const status = await pccQueued(() => pccGetAquareaStatus(a.guid, 0));
+          aquaOut.push({ guid: a.guid, name: status.name || a.name, ...status });
+        } catch {
+          aquaOut.push({ guid: a.guid, name: a.name, tankTemp: null });
+        }
+      }
+      await delay(500);
+    }
+
+    state.aircon = { devices: out, aquarea: aquaOut, error: null, fetchedAt: new Date().toISOString() };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
-      addLog(`Klima: připojeno k Panasonic (${out.length} jednotek)`);
+      addLog(`Klima: připojeno k Panasonic (${out.length + aquaOut.length} zařízení)`);
     }
     broadcast('aircon', { aircon: state.aircon });
   } catch (err) {
-    state.aircon = { devices: state.aircon.devices || [], error: err.message };
+    state.aircon = { devices: state.aircon.devices || [], aquarea: state.aircon.aquarea || [], error: err.message };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
       addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140));
@@ -1766,6 +1817,13 @@ app.post('/api/aircon/set', async (req, res) => {
     parameters.operationMode = PCC_MODES[mode];
     actions.push(`režim ${mode}`);
   }
+  const PCC_ECO = { auto: 0, powerful: 1, quiet: 2 };
+  const eco = req.body && req.body.eco;
+  if (eco !== undefined) {
+    if (PCC_ECO[eco] === undefined) return res.status(400).json({ error: 'Neznámý eco režim.' });
+    parameters.ecoMode = PCC_ECO[eco];
+    actions.push(eco === 'quiet' ? 'tichý režim' : (eco === 'powerful' ? 'výkonný režim' : 'běžný režim'));
+  }
   if (!Object.keys(parameters).length) return res.status(400).json({ error: 'Žádný parametr ke změně.' });
 
   try {
@@ -1780,6 +1838,7 @@ app.post('/api/aircon/set', async (req, res) => {
       if (parameters.operate !== undefined) dev.power = parameters.operate === 1;
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
       if (parameters.operationMode !== undefined) dev.mode = mode;
+      if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
       broadcast('aircon', { aircon: state.aircon });
       addLog(`${dev.name}: ${actions.join(', ')}`);
     }
@@ -1788,6 +1847,69 @@ app.post('/api/aircon/set', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
+
+// ---------- Časovače klimatizací (jednorázové zapnutí/vypnutí v daný čas) ----------
+
+let airconTimers = [];
+let airconTimerSeq = 1;
+
+app.post('/api/aircon/timer', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { guid, time, action } = req.body || {};
+  if (typeof guid !== 'string' || !/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) {
+    return res.status(400).json({ error: 'Chybí guid, time (HH:MM) nebo action (on/off).' });
+  }
+  if (airconTimers.length >= 10) {
+    return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
+  }
+  const dev = state.aircon.devices.find(d => d.guid === guid);
+  const timer = { id: airconTimerSeq++, guid, name: (dev && dev.name) || 'Klima', time, action };
+  airconTimers.push(timer);
+  airconTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
+  broadcast('airconTimers', { timers: airconTimers });
+  res.json({ timers: airconTimers });
+});
+
+app.post('/api/aircon/timer/delete', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { id } = req.body || {};
+  const timer = airconTimers.find(t => t.id === id);
+  if (timer) {
+    airconTimers = airconTimers.filter(t => t.id !== id);
+    addLog(`Časovač zrušen: ${timer.name} v ${timer.time}`);
+    broadcast('airconTimers', { timers: airconTimers });
+  }
+  res.json({ timers: airconTimers });
+});
+
+setInterval(async () => {
+  if (!airconTimers.length) return;
+  const p = pragueTime();
+  const pad2 = n => String(n).padStart(2, '0');
+  const current = `${pad2(p.hour)}:${pad2(p.minute)}`;
+  const due = airconTimers.filter(t => t.time === current);
+  if (!due.length) return;
+  // Odebrat před vykonáním, ať se v rámci minuty nespustí dvakrát
+  airconTimers = airconTimers.filter(t => t.time !== current);
+  broadcast('airconTimers', { timers: airconTimers });
+  for (const t of due) {
+    try {
+      await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+        method: 'POST',
+        body: JSON.stringify({ deviceGuid: t.guid, parameters: { operate: t.action === 'on' ? 1 : 0 } })
+      }));
+      const dev = state.aircon.devices.find(d => d.guid === t.guid);
+      if (dev) {
+        dev.power = t.action === 'on';
+        broadcast('aircon', { aircon: state.aircon });
+      }
+      addLog(`${t.name}: ${t.action === 'on' ? 'zapnuto' : 'vypnuto'} (časovač ${t.time})`);
+    } catch (err) {
+      addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
+    }
+  }
+}, 30000);
 
 // ---------- Keep-alive a start ----------
 
