@@ -421,8 +421,28 @@
     padding-bottom:6px;
   }
   .blind-item:last-child{border-bottom:none;padding-bottom:0;}
-  .blind-btn.blind-on{background:var(--green);font-size:10px;font-weight:700;}
-  .blind-btn.blind-off{background:var(--red);font-size:10px;font-weight:700;}
+  .blind-btn.blind-btn-txt{font-size:10px;font-weight:700;}
+  .blind-btn-spacer{width:34px;height:34px;flex-shrink:0;}
+  #timelineChart{
+    width:100%;
+    height:150px;
+    display:block;
+  }
+  .timeline-legend{
+    display:flex;
+    justify-content:center;
+    gap:14px;
+    margin-top:6px;
+    font-size:11px;
+    color:var(--grey-text);
+  }
+  .timeline-legend i{
+    display:inline-block;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    margin-right:5px;
+  }
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -623,7 +643,49 @@
     </div>
   </div>
 
-  <!-- Slide 2: Devices -->
+  <!-- Slide 2: Rolety -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Rolety</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="blindsList1">
+          <div class="log-empty">Načítám rolety…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 3: Rolety 2 -->
+  <div class="slide" id="blindsSlide2">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Rolety</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="blindsList2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 4: Ovládání -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -678,7 +740,7 @@
     </div>
   </div>
 
-  <!-- Slide 3: Světla -->
+  <!-- Slide 5: Světla -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -740,21 +802,7 @@
     </div>
   </div>
 
-  <!-- Slide 4: Log -->
-  <div class="slide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Log</div>
-      </div>
-      <div class="card log-card">
-        <div class="log-list" id="logList">
-          <div class="log-empty">Zatím žádné záznamy</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Slide 5: Přehled -->
+  <!-- Slide 6: Přehled -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -789,47 +837,29 @@
         <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
         <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
       </div>
-    </div>
-  </div>
 
-  <!-- Slide 6: Rolety -->
-  <div class="slide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Rolety</div>
-      </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card lockable blinds-card">
-        <div class="blinds-list" id="blindsList1">
-          <div class="log-empty">Načítám rolety…</div>
+      <div class="card stats-card">
+        <div class="graph-title">Kdy co běželo (8:00–24:00)</div>
+        <canvas id="timelineChart"></canvas>
+        <div class="timeline-legend">
+          <span><i style="background:#e5534b"></i>Bojler</span>
+          <span><i style="background:#3b82c4"></i>Bazén</span>
+          <span><i style="background:#3fb950"></i>Solinátor</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Slide 7: Rolety 2 -->
-  <div class="slide" id="blindsSlide2">
+  <!-- Slide 7: Log -->
+  <div class="slide">
     <div class="page">
       <div class="topbar">
-        <div class="title">Rolety</div>
+        <div class="title">Log</div>
       </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card lockable blinds-card">
-        <div class="blinds-list" id="blindsList2"></div>
+      <div class="card log-card">
+        <div class="log-list" id="logList">
+          <div class="log-empty">Zatím žádné záznamy</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1371,6 +1401,148 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
   } catch {}
 }
 
+// ---------- Časová osa: kdy běžel bojler / bazén / solinátor (2 dny) ----------
+
+const timelineCanvas = document.getElementById('timelineChart');
+const TIMELINE_KEYS = ['shelly', 'pool', 'solinator'];
+const TIMELINE_COLORS = { shelly: '#e5534b', pool: '#3b82c4', solinator: '#3fb950' };
+let timelineData = { shelly: [], pool: [], solinator: [] };
+
+function pruneTimelineLocal(tl) {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const out = {};
+  for (const k of TIMELINE_KEYS) {
+    out[k] = (Array.isArray(tl && tl[k]) ? tl[k] : [])
+      .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number' && s.to >= cutoff)
+      .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
+  }
+  return out;
+}
+
+function saveTimelineLocal() {
+  try {
+    localStorage.setItem('timelineData', JSON.stringify(pruneTimelineLocal(timelineData)));
+  } catch {}
+}
+
+function loadTimelineLocal() {
+  try {
+    return pruneTimelineLocal(JSON.parse(localStorage.getItem('timelineData') || 'null'));
+  } catch {
+    return pruneTimelineLocal(null);
+  }
+}
+
+function mergeTimelineSegs(a, b) {
+  const segs = a.concat(b).slice().sort((x, y) => x.from - y.from);
+  const out = [];
+  for (const s of segs) {
+    const last = out[out.length - 1];
+    if (last && s.from - last.to <= 6 * 60 * 1000) {
+      if (s.to > last.to) last.to = s.to;
+    } else {
+      out.push({ from: s.from, to: s.to });
+    }
+  }
+  return out;
+}
+
+async function maybeRestoreTimelineToServer(serverTl, localTl) {
+  const hasExtra = TIMELINE_KEYS.some(k => {
+    const local = localTl[k] || [];
+    if (!local.length) return false;
+    const server = (serverTl && serverTl[k]) || [];
+    const serverOldest = server.length ? server[0].from : Infinity;
+    return local[0].from < serverOldest - 60000;
+  });
+  if (!hasExtra) return;
+  try {
+    await fetch('/api/timeline/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timeline: localTl })
+    });
+  } catch {}
+}
+
+function renderTimeline() {
+  if (!timelineCanvas) return;
+  const ctx = timelineCanvas.getContext('2d');
+  const w = timelineCanvas.clientWidth || 300;
+  const h = timelineCanvas.clientHeight || 150;
+  const dpr = window.devicePixelRatio || 1;
+  timelineCanvas.width = w * dpr;
+  timelineCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 44, padR = 8, padB = 16, padT = 4;
+  const laneH = 6, laneGap = 5;
+  const dayGap = 14;
+  const dayBlockH = TIMELINE_KEYS.length * laneH + (TIMELINE_KEYS.length - 1) * laneGap;
+
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  // Den = okno 8:00–24:00; index 0 = dnes, 1 = včera
+  const days = [];
+  for (let d = 0; d < 2; d++) {
+    const start = new Date();
+    start.setHours(8, 0, 0, 0);
+    start.setDate(start.getDate() - d);
+    days.push({ start: start.getTime(), end: start.getTime() + 16 * 60 * 60 * 1000, label: d === 0 ? 'Dnes' : 'Včera' });
+  }
+
+  const x = frac => padL + frac * (w - padL - padR);
+
+  // Svislá mřížka + popisky hodin (8–24 po 4 h)
+  ctx.textAlign = 'center';
+  for (let hh = 8; hh <= 24; hh += 4) {
+    const fx = x((hh - 8) / 16);
+    ctx.strokeStyle = 'rgba(44,62,80,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(fx, padT);
+    ctx.lineTo(fx, h - padB);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(44,62,80,0.4)';
+    ctx.fillText(hh + ':00', fx, h - 4);
+  }
+
+  days.forEach((day, d) => {
+    const blockTop = padT + d * (dayBlockH + dayGap) + 8;
+    ctx.fillStyle = 'rgba(44,62,80,0.55)';
+    ctx.textAlign = 'left';
+    ctx.fillText(day.label, 2, blockTop + dayBlockH / 2 + 3);
+
+    TIMELINE_KEYS.forEach((k, i) => {
+      const y = blockTop + i * (laneH + laneGap) + laneH / 2;
+      // Slabá linka celé dráhy
+      ctx.strokeStyle = 'rgba(44,62,80,0.06)';
+      ctx.lineWidth = laneH;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x(0), y);
+      ctx.lineTo(x(1), y);
+      ctx.stroke();
+      // Segmenty zapnutí
+      ctx.strokeStyle = TIMELINE_COLORS[k];
+      for (const s of timelineData[k] || []) {
+        const from = Math.max(s.from, day.start);
+        const to = Math.min(s.to, day.end);
+        if (to <= from) continue;
+        const x1 = x((from - day.start) / (day.end - day.start));
+        const x2 = x((to - day.start) / (day.end - day.start));
+        ctx.beginPath();
+        ctx.moveTo(x1, y);
+        ctx.lineTo(Math.max(x2, x1 + 2), y);
+        ctx.stroke();
+      }
+    });
+  });
+}
+
+window.addEventListener('resize', renderTimeline);
+
 // ---------- Rolety (TaHoma) — bloky podle místností na dvou stránkách ----------
 
 const blindsList1El = document.getElementById('blindsList1');
@@ -1473,15 +1645,25 @@ function renderBlindRow(b) {
   const btns = document.createElement('div');
   btns.className = 'blind-btns';
 
+  const spacer = () => {
+    const sp = document.createElement('span');
+    sp.className = 'blind-btn-spacer';
+    return sp;
+  };
+
   if (b.type === 'switch') {
-    // Světlo apod. — ON/OFF místo šipek, bez prostředního tlačítka
-    btns.appendChild(makeBlindBtn('blind-btn blind-on', 'ON', btn => blindCommand(b.deviceURL, 'on', null, btn)));
-    btns.appendChild(makeBlindBtn('blind-btn blind-off', 'OFF', btn => blindCommand(b.deviceURL, 'off', null, btn)));
+    // Světlo apod. — ON/OFF místo šipek; prostřední pozice zůstává prázdná,
+    // aby tlačítka lícovala se sloupci šipek u rolet
+    btns.appendChild(makeBlindBtn('blind-btn blind-btn-txt', 'ON', btn => blindCommand(b.deviceURL, 'on', null, btn)));
+    btns.appendChild(spacer());
+    btns.appendChild(makeBlindBtn('blind-btn blind-btn-txt', 'OFF', btn => blindCommand(b.deviceURL, 'off', null, btn)));
   } else {
     btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', null, btn)));
-    // Garáž (a zařízení bez povelu stop) prostřední tlačítko nemají
+    // Garáž (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
     if (b.hasStop && b.uiClass !== 'GarageDoor') {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', null, btn)));
+    } else {
+      btns.appendChild(spacer());
     }
     btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, 'down', null, btn)));
   }
@@ -1618,6 +1800,14 @@ function applySnapshot(snap) {
   saveRuntimeLocal();
   maybeRestoreRuntimeToServer(serverRt, localRt);
   renderStats();
+  // Časová osa: spojíme serverová data s lokální zálohou a chybějící vrátíme serveru
+  const serverTl = pruneTimelineLocal(snap.timeline);
+  const localTl = loadTimelineLocal();
+  timelineData = {};
+  for (const k of TIMELINE_KEYS) timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
+  renderTimeline();
+  saveTimelineLocal();
+  maybeRestoreTimelineToServer(serverTl, localTl);
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
   // Server nemá nastavený APP_PIN — zámek se nepoužívá
   if (snap.lockEnabled === false) setLocked(false);
@@ -1677,6 +1867,11 @@ function connectStream() {
     runtimeData = JSON.parse(e.data).runtime;
     renderStats();
     saveRuntimeLocal();
+  });
+  es.addEventListener('timeline', e => {
+    timelineData = pruneTimelineLocal(JSON.parse(e.data).timeline);
+    renderTimeline();
+    saveTimelineLocal();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);

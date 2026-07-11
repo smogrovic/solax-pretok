@@ -85,8 +85,36 @@ const state = {
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
-  runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() } // dnešní doba běhu
+  runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
+  timeline: { shelly: [], pool: [], solinator: [] } // segmenty { from, to } zapnutí za 48 h
 };
+
+const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const TIMELINE_GAP_MS = 6 * 60 * 1000; // vzorky ~2 min od sebe → menší díra = pořád jeden běh
+
+function mergeSegments(segs) {
+  segs.sort((a, b) => a.from - b.from);
+  const out = [];
+  for (const s of segs) {
+    const last = out[out.length - 1];
+    if (last && s.from - last.to <= TIMELINE_GAP_MS) {
+      if (s.to > last.to) last.to = s.to;
+    } else {
+      out.push({ from: s.from, to: s.to });
+    }
+  }
+  return out;
+}
+
+function pruneTimeline() {
+  const cutoff = Date.now() - TIMELINE_MAX_AGE_MS;
+  for (const k of Object.keys(state.timeline)) {
+    state.timeline[k] = state.timeline[k].filter(s => s.to >= cutoff);
+    for (const s of state.timeline[k]) {
+      if (s.from < cutoff) s.from = cutoff;
+    }
+  }
+}
 
 function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
@@ -134,6 +162,7 @@ function snapshot() {
     autoEnabled: state.autoEnabled,
     weather: state.weather,
     runtime: { date: state.runtime.date, ms: state.runtime.ms },
+    timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     pushEnabled,
     lockEnabled
@@ -389,10 +418,20 @@ function updateRuntimes() {
   for (const k of Object.keys(state.runtime.ms)) {
     if (state.devices[k] && state.devices[k].isOn === true) {
       state.runtime.ms[k] += dt;
+      // Časová osa: prodloužíme běžící segment, nebo začneme nový
+      const segs = state.timeline[k];
+      const last = segs[segs.length - 1];
+      if (last && now - last.to <= TIMELINE_GAP_MS) {
+        last.to = now;
+      } else {
+        segs.push({ from: now, to: now });
+      }
     }
   }
   state.runtime.lastTs = now;
+  pruneTimeline();
   broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
+  broadcast('timeline', { timeline: state.timeline });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -567,6 +606,34 @@ app.post('/api/runtime/restore', (req, res) => {
   }
   if (changed) {
     broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
+  }
+  res.json({ ok: true });
+});
+
+// Obnova časové osy po restartu/deployi — sloučení segmentů z telefonu
+app.post('/api/timeline/restore', (req, res) => {
+  const tl = req.body && req.body.timeline;
+  if (!tl || typeof tl !== 'object') {
+    return res.status(400).json({ error: 'Chybí timeline.' });
+  }
+  const now = Date.now();
+  const cutoff = now - TIMELINE_MAX_AGE_MS;
+  let changed = false;
+  for (const k of Object.keys(state.timeline)) {
+    const incoming = Array.isArray(tl[k]) ? tl[k] : [];
+    const clean = incoming
+      .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number'
+        && s.to > s.from && s.to <= now && s.to >= cutoff)
+      .slice(0, 500)
+      .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
+    if (!clean.length) continue;
+    const before = JSON.stringify(state.timeline[k]);
+    state.timeline[k] = mergeSegments(state.timeline[k].concat(clean));
+    if (JSON.stringify(state.timeline[k]) !== before) changed = true;
+  }
+  if (changed) {
+    pruneTimeline();
+    broadcast('timeline', { timeline: state.timeline });
   }
   res.json({ ok: true });
 });
