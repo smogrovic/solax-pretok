@@ -388,11 +388,30 @@
     border-bottom:1px solid rgba(44,62,80,0.06);
   }
   .blind-row:last-child{border-bottom:none;}
+  .blind-info{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-width:0;
+  }
   .blind-label{
     font-size:13px;
     font-weight:600;
     color:var(--navy);
   }
+  .blind-pos{
+    font-size:11px;
+    color:var(--grey-text);
+  }
+  .blind-room-title{
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    color:var(--grey-text);
+    margin:12px 0 2px;
+  }
+  .blind-room-title:first-child{margin-top:0;}
   .blind-btns{display:flex;gap:8px;}
   .blind-btn{
     width:34px;
@@ -409,50 +428,6 @@
   }
   .blind-btn:active{transform:scale(0.93);}
   .blind-btn:disabled{opacity:0.5;}
-  .wake-time{
-    width:100%;
-    font-size:28px;
-    font-weight:700;
-    border:none;
-    background:var(--bg);
-    border-radius:14px;
-    padding:10px 14px;
-    color:var(--navy);
-    text-align:center;
-    font-family:inherit;
-  }
-  .wake-devices{
-    width:100%;
-    margin-top:10px;
-    display:flex;
-    flex-direction:column;
-    gap:7px;
-  }
-  .wake-dev{
-    display:flex;
-    align-items:center;
-    gap:9px;
-    font-size:13px;
-    color:var(--navy);
-  }
-  .wake-dev input{
-    width:18px;
-    height:18px;
-    accent-color:var(--orange);
-  }
-  .wake-set-btn{
-    width:100%;
-    margin-top:12px;
-    padding:12px;
-    border:none;
-    border-radius:14px;
-    background:var(--orange);
-    color:#fff;
-    font-size:15px;
-    font-weight:600;
-  }
-  .wake-set-btn:active{background:var(--orange-dark);}
-  .wake-status{margin-top:10px;min-height:14px;}
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -797,18 +772,18 @@
         <div class="lock-error"></div>
       </div>
       <div class="card lockable blinds-card">
-        <div class="blinds-list" id="blindsList">
-          <div class="log-empty" id="blindsEmpty">Načítám rolety…</div>
+        <div class="blinds-list" id="blindsList1">
+          <div class="log-empty">Načítám rolety…</div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Slide 7: Buzení -->
-  <div class="slide">
+  <!-- Slide 7: Rolety 2 -->
+  <div class="slide" id="blindsSlide2">
     <div class="page">
       <div class="topbar">
-        <div class="title">Buzení</div>
+        <div class="title">Rolety</div>
       </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -818,28 +793,15 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable">
-        <div class="graph-title">Nastavit buzení</div>
-        <input type="time" id="wakeTime" class="wake-time" value="06:30">
-        <div class="wake-devices" id="wakeDevices"></div>
-        <button class="wake-set-btn" id="wakeSetBtn">Provést</button>
-        <div class="updated wake-status" id="wakeStatus"></div>
-        <button class="notif-btn" id="wakeCancelBtn" style="display:none">Zrušit buzení</button>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="blindsList2"></div>
       </div>
     </div>
   </div>
 
 </div>
 
-<div class="page-dots" id="pageDots">
-  <span class="dot active"></span>
-  <span class="dot"></span>
-  <span class="dot"></span>
-  <span class="dot"></span>
-  <span class="dot"></span>
-  <span class="dot"></span>
-  <span class="dot"></span>
-</div>
+<div class="page-dots" id="pageDots"></div>
 
 <script>
 const fveEl = document.getElementById('fveValue');
@@ -1374,15 +1336,12 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
   } catch {}
 }
 
-// ---------- Rolety (TaHoma) ----------
+// ---------- Rolety (TaHoma) — dvě stránky, seskupené podle místností ----------
 
-const blindsListEl = document.getElementById('blindsList');
-const wakeDevicesEl = document.getElementById('wakeDevices');
+const blindsList1El = document.getElementById('blindsList1');
+const blindsList2El = document.getElementById('blindsList2');
 let blinds = [];
-
-function normalizeLabel(s) {
-  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
+let blindsReloadTimer = null;
 
 async function blindCommand(deviceURL, action, btn) {
   if (btn) btn.disabled = true;
@@ -1399,6 +1358,9 @@ async function blindCommand(deviceURL, action, btn) {
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
+    // Až roleta dojede, obnovíme zobrazené polohy
+    clearTimeout(blindsReloadTimer);
+    blindsReloadTimer = setTimeout(loadBlinds, 20000);
   } catch (err) {
     errorEl.textContent = 'Roleta: ' + err.message;
     errorEl.classList.add('show');
@@ -1406,54 +1368,104 @@ async function blindCommand(deviceURL, action, btn) {
   if (btn) btn.disabled = false;
 }
 
-function renderBlinds() {
-  blindsListEl.textContent = '';
-  if (!blinds.length) {
-    const empty = document.createElement('div');
-    empty.className = 'log-empty';
-    empty.textContent = 'Žádné rolety nenalezeny.';
-    blindsListEl.appendChild(empty);
-    return;
+function blindPositionText(b) {
+  // closure: 0 = otevřeno, 100 = zavřeno; orientation = naklopení lamel (io žaluzie)
+  const parts = [];
+  if (typeof b.closure === 'number') {
+    if (b.closure <= 0) parts.push('otevřeno');
+    else if (b.closure >= 100) parts.push('zavřeno');
+    else parts.push('zataženo ' + Math.round(b.closure) + ' %');
   }
-  for (const b of blinds) {
-    const row = document.createElement('div');
-    row.className = 'blind-row';
-    const label = document.createElement('span');
-    label.className = 'blind-label';
-    label.textContent = b.label;
-    const btns = document.createElement('div');
-    btns.className = 'blind-btns';
-    for (const [action, symbol] of [['up', '▲'], ['stop', '■'], ['down', '▼']]) {
-      const btn = document.createElement('button');
-      btn.className = 'blind-btn';
-      btn.textContent = symbol;
-      btn.addEventListener('click', () => blindCommand(b.deviceURL, action, btn));
-      btns.appendChild(btn);
-    }
-    row.appendChild(label);
-    row.appendChild(btns);
-    blindsListEl.appendChild(row);
+  if (typeof b.orientation === 'number') {
+    parts.push('naklopení ' + Math.round(b.orientation) + ' %');
+  }
+  return parts.join(' · ');
+}
+
+function blindsMessage(listEl, msg) {
+  listEl.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'log-empty';
+  empty.textContent = msg;
+  listEl.appendChild(empty);
+}
+
+function renderBlindRow(b) {
+  const row = document.createElement('div');
+  row.className = 'blind-row';
+  const info = document.createElement('div');
+  info.className = 'blind-info';
+  const label = document.createElement('span');
+  label.className = 'blind-label';
+  label.textContent = b.label;
+  info.appendChild(label);
+  const pos = blindPositionText(b);
+  if (pos) {
+    const posEl = document.createElement('span');
+    posEl.className = 'blind-pos';
+    posEl.textContent = pos;
+    info.appendChild(posEl);
+  }
+  const btns = document.createElement('div');
+  btns.className = 'blind-btns';
+  for (const [action, symbol] of [['up', '▲'], ['stop', '■'], ['down', '▼']]) {
+    const btn = document.createElement('button');
+    btn.className = 'blind-btn';
+    btn.textContent = symbol;
+    btn.addEventListener('click', () => blindCommand(b.deviceURL, action, btn));
+    btns.appendChild(btn);
+  }
+  row.appendChild(info);
+  row.appendChild(btns);
+  return row;
+}
+
+function hideBlindsSlide2() {
+  const slide2 = document.getElementById('blindsSlide2');
+  if (slide2) {
+    slide2.remove();
+    rebuildDots();
   }
 }
 
-function renderWakeDevices() {
-  wakeDevicesEl.textContent = '';
-  let saved = [];
-  try { saved = JSON.parse(localStorage.getItem('wakeDevices') || '[]'); } catch {}
-  for (const b of blinds) {
-    const row = document.createElement('label');
-    row.className = 'wake-dev';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = b.deviceURL;
-    // Předvybereme ložnici; jinak dřívější výběr uživatele
-    cb.checked = saved.length ? saved.includes(b.deviceURL) : normalizeLabel(b.label).includes('lozn');
-    const txt = document.createElement('span');
-    txt.textContent = b.label;
-    row.appendChild(cb);
-    row.appendChild(txt);
-    wakeDevicesEl.appendChild(row);
+function renderBlinds() {
+  blindsList1El.textContent = '';
+  if (blindsList2El) blindsList2El.textContent = '';
+  if (!blinds.length) {
+    blindsMessage(blindsList1El, 'Žádné rolety nenalezeny.');
+    hideBlindsSlide2();
+    return;
   }
+
+  // Seskupení podle místností (server posílá seřazené podle místnosti)
+  const rooms = [];
+  for (const b of blinds) {
+    let group = rooms[rooms.length - 1];
+    if (!group || group.room !== b.room) {
+      group = { room: b.room, items: [] };
+      rooms.push(group);
+    }
+    group.items.push(b);
+  }
+
+  // Rozdělení místností na dvě stránky zhruba napůl (podle počtu rolet)
+  const half = Math.ceil(blinds.length / 2);
+  let placed = 0;
+  for (const group of rooms) {
+    const listEl = (placed < half || !blindsList2El || !document.getElementById('blindsSlide2'))
+      ? blindsList1El
+      : blindsList2El;
+    const title = document.createElement('div');
+    title.className = 'blind-room-title';
+    title.textContent = group.room;
+    listEl.appendChild(title);
+    for (const b of group.items) {
+      listEl.appendChild(renderBlindRow(b));
+    }
+    placed += group.items.length;
+  }
+
+  if (blindsList2El && !blindsList2El.children.length) hideBlindsSlide2();
 }
 
 async function loadBlinds() {
@@ -1461,75 +1473,18 @@ async function loadBlinds() {
     const res = await fetch('/api/blinds');
     const data = await res.json();
     if (data.enabled === false) {
-      blindsListEl.textContent = '';
-      const empty = document.createElement('div');
-      empty.className = 'log-empty';
-      empty.textContent = 'TaHoma není nastavena (chybí přihlášení na serveru).';
-      blindsListEl.appendChild(empty);
+      blindsMessage(blindsList1El, 'TaHoma není nastavena (chybí přihlášení na serveru).');
+      hideBlindsSlide2();
       return;
     }
     blinds = data.blinds || [];
     renderBlinds();
-    renderWakeDevices();
   } catch {
-    blindsListEl.textContent = '';
-    const empty = document.createElement('div');
-    empty.className = 'log-empty';
-    empty.textContent = 'Rolety se nepodařilo načíst.';
-    blindsListEl.appendChild(empty);
+    blindsMessage(blindsList1El, 'Rolety se nepodařilo načíst.');
   }
 }
 
 loadBlinds();
-
-// ---------- Buzení ----------
-
-const wakeTimeEl = document.getElementById('wakeTime');
-const wakeSetBtn = document.getElementById('wakeSetBtn');
-const wakeCancelBtn = document.getElementById('wakeCancelBtn');
-const wakeStatusEl = document.getElementById('wakeStatus');
-
-function renderWake(w) {
-  if (w && w.enabled) {
-    wakeStatusEl.textContent = '⏰ Buzení nastaveno na ' + w.time;
-    wakeCancelBtn.style.display = 'block';
-  } else {
-    wakeStatusEl.textContent = '';
-    wakeCancelBtn.style.display = 'none';
-  }
-}
-
-async function setWake(enabled) {
-  const time = wakeTimeEl.value;
-  const deviceURLs = Array.from(wakeDevicesEl.querySelectorAll('input:checked')).map(cb => cb.value);
-  if (enabled) {
-    if (!time) return;
-    try { localStorage.setItem('wakeDevices', JSON.stringify(deviceURLs)); } catch {}
-  }
-  wakeSetBtn.disabled = true;
-  try {
-    const res = await fetch('/api/wake', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify(enabled ? { enabled: true, time, deviceURLs } : { enabled: false })
-    });
-    const data = await res.json();
-    if (res.status === 401) {
-      setLocked(true);
-      throw new Error(data.error || 'Ovládání je zamčené.');
-    }
-    if (!res.ok) throw new Error(data.error || 'Nepodařilo se nastavit buzení.');
-    renderWake(data.wake);
-    errorEl.classList.remove('show');
-  } catch (err) {
-    errorEl.textContent = 'Buzení: ' + err.message;
-    errorEl.classList.add('show');
-  }
-  wakeSetBtn.disabled = false;
-}
-
-wakeSetBtn.addEventListener('click', () => setWake(true));
-wakeCancelBtn.addEventListener('click', () => setWake(false));
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
@@ -1555,7 +1510,6 @@ function applySnapshot(snap) {
   maybeRestoreLogToServer(serverLog, localLog);
   renderWeather(snap.weather);
   renderAutomation(snap.autoEnabled !== false);
-  renderWake(snap.wake);
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -1634,9 +1588,6 @@ function connectStream() {
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);
-  });
-  es.addEventListener('wake', e => {
-    renderWake(JSON.parse(e.data).wake);
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';
@@ -1832,20 +1783,31 @@ async function initPush() {
 
 initPush();
 
-// Slider dots
+// Slider dots — generují se podle počtu stránek (druhá stránka rolet může zmizet)
 const sliderWrap = document.getElementById('sliderWrap');
-const dots = document.querySelectorAll('.dot');
+const pageDotsEl = document.getElementById('pageDots');
 
-sliderWrap.addEventListener('scroll', () => {
+function updateDots() {
   const idx = Math.round(sliderWrap.scrollLeft / sliderWrap.clientWidth);
-  dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-}, { passive: true });
+  pageDotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+}
 
-dots.forEach((dot, i) => {
-  dot.addEventListener('click', () => {
-    sliderWrap.scrollTo({ left: i * sliderWrap.clientWidth, behavior: 'smooth' });
-  });
-});
+function rebuildDots() {
+  const count = sliderWrap.querySelectorAll('.slide').length;
+  pageDotsEl.textContent = '';
+  for (let i = 0; i < count; i++) {
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.addEventListener('click', () => {
+      sliderWrap.scrollTo({ left: i * sliderWrap.clientWidth, behavior: 'smooth' });
+    });
+    pageDotsEl.appendChild(dot);
+  }
+  updateDots();
+}
+
+sliderWrap.addEventListener('scroll', updateDots, { passive: true });
+rebuildDots();
 </script>
 </body>
 </html>

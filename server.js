@@ -134,7 +134,6 @@ function snapshot() {
     autoEnabled: state.autoEnabled,
     weather: state.weather,
     runtime: { date: state.runtime.date, ms: state.runtime.ms },
-    wake: wakePublic(),
     blindsEnabled: tahomaEnabled,
     pushEnabled,
     lockEnabled
@@ -1074,10 +1073,22 @@ async function tahomaFetch(path, options = {}, retried) {
 let blindsCache = { ts: 0, list: [] };
 
 async function getBlinds() {
-  if (blindsCache.list.length && Date.now() - blindsCache.ts < 10 * 60 * 1000) {
+  if (blindsCache.list.length && Date.now() - blindsCache.ts < 60 * 1000) {
     return blindsCache.list;
   }
   const devices = await tahomaFetch('/setup/devices');
+
+  // Názvy místností: strom míst z TaHomy → mapa placeOID -> label
+  const placeMap = {};
+  try {
+    const flatten = place => {
+      if (!place || !place.oid) return;
+      placeMap[place.oid] = place.label;
+      for (const sub of place.subPlaces || []) flatten(sub);
+    };
+    flatten(await tahomaFetch('/setup/places'));
+  } catch {}
+
   // Bereme všechno, co umí jezdit (up/down/open/close/deploy) — rolety, screeny,
   // markýzy, pergoly… — a vylučujeme jen centrálu, ovladače a senzory
   const EXCLUDED_UI = ['Pod', 'ProtocolGateway', 'NetworkComponent', 'RemoteController',
@@ -1087,10 +1098,22 @@ async function getBlinds() {
     .map(d => {
       // RTS rolety umí up/down/stop/my, io open/close/stop, pergoly deploy/undeploy
       const cmds = new Set(((d.definition && d.definition.commands) || []).map(c => c.commandName));
+      // Poloha a naklopení: io zařízení je hlásí ve states, RTS ne (jednosměrný protokol)
+      const states = {};
+      for (const s of d.states || []) states[s.name] = s.value;
+      const closure = typeof states['core:ClosureState'] === 'number'
+        ? states['core:ClosureState']
+        : (typeof states['core:DeploymentState'] === 'number' ? states['core:DeploymentState'] : null);
+      const orientation = typeof states['core:SlateOrientationState'] === 'number'
+        ? states['core:SlateOrientationState']
+        : null;
       return {
         deviceURL: d.deviceURL,
         label: d.label,
         uiClass: d.uiClass,
+        room: placeMap[d.placeOID] || 'Ostatní',
+        closure,
+        orientation,
         commands: {
           up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : (cmds.has('deploy') ? 'deploy' : null)),
           down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : (cmds.has('undeploy') ? 'undeploy' : null)),
@@ -1100,7 +1123,7 @@ async function getBlinds() {
       };
     })
     .filter(d => !EXCLUDED_UI.includes(d.uiClass) && d.commands.up && d.commands.down)
-    .sort((a, b) => a.label.localeCompare(b.label, 'cs'));
+    .sort((a, b) => a.room.localeCompare(b.room, 'cs') || a.label.localeCompare(b.label, 'cs'));
   blindsCache = { ts: Date.now(), list };
   return list;
 }
@@ -1142,7 +1165,16 @@ app.get('/api/blinds', async (req, res) => {
   if (!tahomaEnabled) return res.json({ enabled: false, blinds: [] });
   try {
     const blinds = await getBlinds();
-    res.json({ enabled: true, blinds: blinds.map(b => ({ deviceURL: b.deviceURL, label: b.label })) });
+    res.json({
+      enabled: true,
+      blinds: blinds.map(b => ({
+        deviceURL: b.deviceURL,
+        label: b.label,
+        room: b.room,
+        closure: b.closure,
+        orientation: b.orientation
+      }))
+    });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
   }
@@ -1164,53 +1196,6 @@ app.post('/api/blinds/command', async (req, res) => {
     res.status(err.status || 502).json({ error: err.message });
   }
 });
-
-// ---------- Buzení: v nastavený čas push notifikace + otevření rolet ----------
-
-const wake = { enabled: false, time: null, deviceURLs: [], lastFired: 0 };
-
-function wakePublic() {
-  return { enabled: wake.enabled, time: wake.time, deviceURLs: wake.deviceURLs };
-}
-
-app.post('/api/wake', (req, res) => {
-  if (!requireAuth(req, res)) return;
-  const { enabled, time, deviceURLs } = req.body || {};
-  if (enabled) {
-    if (typeof time !== 'string' || !/^\d{2}:\d{2}$/.test(time)) {
-      return res.status(400).json({ error: 'Čas musí být ve formátu HH:MM.' });
-    }
-    wake.enabled = true;
-    wake.time = time;
-    wake.deviceURLs = Array.isArray(deviceURLs) ? deviceURLs.filter(u => typeof u === 'string').slice(0, 20) : [];
-    addLog(`Buzení nastaveno na ${time}`);
-  } else {
-    wake.enabled = false;
-    addLog('Buzení zrušeno');
-  }
-  broadcast('wake', { wake: wakePublic() });
-  res.json({ wake: wakePublic() });
-});
-
-setInterval(async () => {
-  if (!wake.enabled || !wake.time) return;
-  const p = pragueTime();
-  const current = String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0');
-  if (current !== wake.time) return;
-  if (Date.now() - wake.lastFired < 2 * 60 * 1000) return;
-  wake.lastFired = Date.now();
-  wake.enabled = false; // jednorázové
-  broadcast('wake', { wake: wakePublic() });
-  sendPushToAll('⏰ Vstávat!', `Je ${wake.time} — otevírám rolety.`);
-  for (const url of wake.deviceURLs) {
-    try {
-      const blind = await blindCommand(url, 'up');
-      addLog(`Roleta ${blind.label}: nahoru (buzení ${wake.time})`);
-    } catch (err) {
-      addLog(`Buzení: roletu se nepodařilo otevřít (${err.message})`);
-    }
-  }
-}, 30000);
 
 // ---------- Keep-alive a start ----------
 
