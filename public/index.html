@@ -264,6 +264,7 @@
     margin-top:6px;
     min-height:15px;
   }
+  .graph-total + .graph-total{margin-top:2px;}
   .notif-btn{
     width:100%;
     margin-top:10px;
@@ -495,6 +496,7 @@
         <div class="graph-title">Přetok za 24 h (kW)</div>
         <canvas id="feedinChart"></canvas>
         <div class="graph-total" id="feedinTotal"></div>
+        <div class="graph-total" id="importTotal"></div>
       </div>
 
       <div class="meta">
@@ -838,19 +840,69 @@ function renderPoolPower(totalPowerW) {
 
 const chartCanvas = document.getElementById('feedinChart');
 const feedinTotalEl = document.getElementById('feedinTotal');
+const importTotalEl = document.getElementById('importTotal');
 let history = [];
 
-// Vyvezená energie (kWh) = plocha pod kladnou částí křivky přetoku.
-// Mezery delší než 10 min (výpadek serveru/dat) se do součtu nepočítají.
-function computeFeedinKwh(pts) {
+// Energie (kWh) = plocha pod křivkou; valueOf vybírá kladnou (přetok)
+// nebo zápornou (odběr ze sítě) část. Mezery delší než 10 min
+// (výpadek serveru/dat) se do součtu nepočítají.
+function integrateKwh(pts, valueOf) {
   let kwh = 0;
   for (let i = 1; i < pts.length; i++) {
     const dtMs = pts[i].t - pts[i - 1].t;
     if (dtMs > 10 * 60 * 1000) continue;
-    const avgKw = (Math.max(0, pts[i - 1].kw) + Math.max(0, pts[i].kw)) / 2;
+    const avgKw = (valueOf(pts[i - 1]) + valueOf(pts[i])) / 2;
     kwh += avgKw * (dtMs / 3600000);
   }
   return kwh;
+}
+
+function formatKwh(kwh) {
+  return kwh.toFixed(1).replace('.', ',') + ' kWh';
+}
+
+// Lokální kopie historie: přežije deploy/restart serveru — appka ji serveru vrátí
+function pruneOld(arr) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return arr.filter(p => p && typeof p.t === 'number' && typeof p.kw === 'number' && p.t >= cutoff);
+}
+
+function saveHistoryLocal() {
+  try {
+    localStorage.setItem('feedinHistory', JSON.stringify(pruneOld(history)));
+  } catch {}
+}
+
+function loadHistoryLocal() {
+  try {
+    return pruneOld(JSON.parse(localStorage.getItem('feedinHistory') || '[]'));
+  } catch {
+    return [];
+  }
+}
+
+function mergeHistories(a, b) {
+  const all = pruneOld(a.concat(b)).sort((x, y) => x.t - y.t);
+  const out = [];
+  for (const p of all) {
+    if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
+  }
+  return out;
+}
+
+// Když máme starší data než server (typicky po deployi), pošleme mu je zpět
+async function maybeRestoreHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(p => p.t < serverOldest - 60000);
+  if (older.length < 2) return;
+  try {
+    await fetch('/api/history/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: older })
+    });
+  } catch {}
 }
 
 function renderChart() {
@@ -876,11 +928,14 @@ function renderChart() {
     ctx.textAlign = 'center';
     ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
     feedinTotalEl.textContent = '';
+    importTotalEl.textContent = '';
     return;
   }
 
   feedinTotalEl.textContent = 'Přetok za 24 h: '
-    + computeFeedinKwh(pts).toFixed(1).replace('.', ',') + ' kWh';
+    + formatKwh(integrateKwh(pts, p => Math.max(0, p.kw)));
+  importTotalEl.textContent = 'Odběr ze sítě za 24 h: '
+    + formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw)));
 
   const padL = 32, padR = 8, padT = 10, padB = 18;
   let min = 0, max = 0.5;
@@ -977,8 +1032,12 @@ function applySnapshot(snap) {
     if (devices[key]) renderDevice(devices[key], snap.devices[key]);
   }
   renderPoolPower(snap.poolPowerW);
-  history = snap.history || [];
+  const serverHist = snap.history || [];
+  const localHist = loadHistoryLocal();
+  history = mergeHistories(serverHist, localHist);
   renderChart();
+  saveHistoryLocal();
+  maybeRestoreHistoryToServer(serverHist, localHist);
   logEntries = snap.log || [];
   renderLog();
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
@@ -999,8 +1058,14 @@ function connectStream() {
     if (d.historyPoint) {
       history.push(d.historyPoint);
       renderChart();
+      saveHistoryLocal();
     }
     errorEl.classList.remove('show');
+  });
+  es.addEventListener('history', e => {
+    history = JSON.parse(e.data).history || [];
+    renderChart();
+    saveHistoryLocal();
   });
   es.addEventListener('solaxError', e => {
     const d = JSON.parse(e.data);

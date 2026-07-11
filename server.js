@@ -440,6 +440,33 @@ app.get('/api/pool/power', (req, res) => {
   res.json({ totalPowerW: state.poolPowerW });
 });
 
+// Obnova historie grafu po restartu/deployi: klient pošle svou kopii z localStorage
+// a server si doplní body, které mu chybí
+app.post('/api/history/restore', (req, res) => {
+  const points = req.body && Array.isArray(req.body.points) ? req.body.points : null;
+  if (!points) return res.status(400).json({ error: 'Chybí points.' });
+
+  const now = Date.now();
+  const cutoff = now - HISTORY_MAX_AGE_MS;
+  const clean = points
+    .filter(p => p && typeof p.t === 'number' && typeof p.kw === 'number'
+      && p.t >= cutoff && p.t <= now && p.kw > -100 && p.kw < 100)
+    .slice(0, 2000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.history.length;
+  const all = state.history.concat(clean).sort((a, b) => a.t - b.t);
+  const merged = [];
+  for (const p of all) {
+    if (!merged.length || p.t - merged[merged.length - 1].t > 30000) merged.push(p);
+  }
+  state.history = merged;
+  pruneHistory();
+  const added = state.history.length - before;
+  if (added > 0) broadcast('history', { history: state.history });
+  res.json({ added });
+});
+
 // Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
 app.post('/api/refresh', async (req, res) => {
   pollShelly();
