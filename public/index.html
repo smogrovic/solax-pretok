@@ -56,9 +56,9 @@
     flex-direction:column;
     align-items:center;
     padding:
-      max(20px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-top))
       max(16px, env(safe-area-inset-right))
-      max(16px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-bottom))
       max(16px, env(safe-area-inset-left));
   }
   .page{
@@ -71,10 +71,10 @@
   }
   .topbar{
     text-align:center;
-    margin-bottom:14px;
+    margin-bottom:10px;
   }
   .title{
-    font-size:21px;
+    font-size:18px;
     font-weight:700;
     color:var(--navy);
     letter-spacing:-0.01em;
@@ -82,8 +82,8 @@
   .card{
     width:100%;
     background:var(--card);
-    border-radius:28px;
-    padding:24px 20px;
+    border-radius:24px;
+    padding:18px 16px;
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -93,7 +93,7 @@
     width:100%;
     display:grid;
     grid-template-columns:repeat(2, 1fr);
-    gap:12px;
+    gap:10px;
   }
   .node.full{
     grid-column:1 / -1;
@@ -105,31 +105,31 @@
     justify-content:center;
     text-align:center;
     background:rgba(44,62,80,0.04);
-    border-radius:18px;
-    padding:12px 8px;
+    border-radius:16px;
+    padding:9px 6px;
   }
   .icon-slot{
     display:flex;
     align-items:center;
     justify-content:center;
-    margin-bottom:8px;
+    margin-bottom:6px;
   }
   .icon{
-    width:40px;
-    height:40px;
+    width:32px;
+    height:32px;
   }
   .icon-fve{
-    width:46px;
-    height:46px;
+    width:38px;
+    height:38px;
   }
   .node-label{
-    font-size:13px;
+    font-size:12px;
     font-weight:700;
     color:var(--navy);
     white-space:nowrap;
   }
   .node-value{
-    font-size:13px;
+    font-size:12px;
     color:var(--grey-text);
     margin-top:2px;
     font-weight:600;
@@ -203,21 +203,21 @@
   }
   .meta{
     text-align:center;
-    margin-top:14px;
+    margin-top:8px;
   }
   .updated{
-    font-size:12px;
+    font-size:11px;
     color:var(--grey-text);
   }
   .refresh-btn{
     width:100%;
-    margin-top:16px;
-    padding:15px;
+    margin-top:10px;
+    padding:12px;
     border:none;
     border-radius:16px;
     background:var(--orange);
     color:#fff;
-    font-size:16px;
+    font-size:15px;
     font-weight:600;
     display:flex;
     align-items:center;
@@ -240,40 +240,40 @@
     margin-top:12px;
   }
   .graph-card{
-    margin-top:12px;
-    padding:16px 14px 10px;
+    margin-top:10px;
+    padding:12px 12px 8px;
     align-items:stretch;
   }
   .graph-title{
-    font-size:13px;
+    font-size:12px;
     font-weight:700;
     color:var(--navy);
     text-align:center;
-    margin-bottom:8px;
+    margin-bottom:6px;
   }
   #feedinChart{
     width:100%;
-    height:120px;
+    height:96px;
     display:block;
   }
   .graph-total{
-    font-size:12px;
+    font-size:11px;
     font-weight:600;
     color:var(--grey-text);
     text-align:center;
-    margin-top:6px;
-    min-height:15px;
+    margin-top:4px;
+    min-height:14px;
   }
-  .graph-total + .graph-total{margin-top:2px;}
+  .graph-total + .graph-total{margin-top:1px;}
   .notif-btn{
     width:100%;
-    margin-top:10px;
-    padding:11px;
+    margin-top:8px;
+    padding:9px;
     border:none;
-    border-radius:16px;
+    border-radius:14px;
     background:rgba(44,62,80,0.06);
     color:var(--grey-text);
-    font-size:13px;
+    font-size:12px;
     font-weight:600;
     transition:opacity .15s ease;
   }
@@ -374,7 +374,7 @@
     justify-content:center;
     align-items:center;
     gap:8px;
-    padding:10px 0 max(14px, env(safe-area-inset-bottom));
+    padding:6px 0 max(10px, env(safe-area-inset-bottom));
     background:var(--bg);
   }
   .dot{
@@ -997,6 +997,54 @@ window.addEventListener('resize', renderChart);
 const logListEl = document.getElementById('logList');
 let logEntries = [];
 
+// Lokální kopie logu — přežije deploy/restart serveru, appka ji serveru vrátí
+function pruneOldLog(arr) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return arr.filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string' && e.t >= cutoff);
+}
+
+function saveLogLocal() {
+  try {
+    localStorage.setItem('appLog', JSON.stringify(pruneOldLog(logEntries)));
+  } catch {}
+}
+
+function loadLogLocal() {
+  try {
+    return pruneOldLog(JSON.parse(localStorage.getItem('appLog') || '[]'));
+  } catch {
+    return [];
+  }
+}
+
+function mergeLogs(a, b) {
+  const seen = new Set();
+  const out = [];
+  for (const e of pruneOldLog(a.concat(b))) {
+    const key = e.t + '|' + e.msg;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(e);
+    }
+  }
+  out.sort((x, y) => x.t - y.t);
+  return out;
+}
+
+async function maybeRestoreLogToServer(serverLog, localLog) {
+  if (!localLog.length) return;
+  const serverOldest = serverLog.length ? serverLog[0].t : Infinity;
+  const older = localLog.filter(e => e.t < serverOldest - 1000);
+  if (!older.length) return;
+  try {
+    await fetch('/api/log/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: older })
+    });
+  } catch {}
+}
+
 function renderLog() {
   logListEl.textContent = '';
   if (!logEntries.length) {
@@ -1038,8 +1086,12 @@ function applySnapshot(snap) {
   renderChart();
   saveHistoryLocal();
   maybeRestoreHistoryToServer(serverHist, localHist);
-  logEntries = snap.log || [];
+  const serverLog = snap.log || [];
+  const localLog = loadLogLocal();
+  logEntries = mergeLogs(serverLog, localLog);
   renderLog();
+  saveLogLocal();
+  maybeRestoreLogToServer(serverLog, localLog);
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
   // Server nemá nastavený APP_PIN — zámek se nepoužívá
   if (snap.lockEnabled === false) setLocked(false);
@@ -1084,7 +1136,13 @@ function connectStream() {
     if (d.entry) {
       logEntries.push(d.entry);
       renderLog();
+      saveLogLocal();
     }
+  });
+  es.addEventListener('logAll', e => {
+    logEntries = JSON.parse(e.data).log || [];
+    renderLog();
+    saveLogLocal();
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';

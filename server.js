@@ -467,6 +467,37 @@ app.post('/api/history/restore', (req, res) => {
   res.json({ added });
 });
 
+// Obnova logu po restartu/deployi — stejný princip jako u historie grafu
+app.post('/api/log/restore', (req, res) => {
+  const entries = req.body && Array.isArray(req.body.entries) ? req.body.entries : null;
+  if (!entries) return res.status(400).json({ error: 'Chybí entries.' });
+
+  const now = Date.now();
+  const cutoff = now - HISTORY_MAX_AGE_MS;
+  const clean = entries
+    .filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string'
+      && e.msg.length > 0 && e.msg.length <= 300 && e.t >= cutoff && e.t <= now)
+    .slice(0, 1000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.log.length;
+  const seen = new Set();
+  const merged = [];
+  for (const e of state.log.concat(clean)) {
+    const key = e.t + '|' + e.msg;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push({ t: e.t, msg: e.msg });
+    }
+  }
+  merged.sort((a, b) => a.t - b.t);
+  state.log = merged;
+  pruneHistory();
+  const added = state.log.length - before;
+  if (added > 0) broadcast('logAll', { log: state.log });
+  res.json({ added });
+});
+
 // Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
 app.post('/api/refresh', async (req, res) => {
   pollShelly();
