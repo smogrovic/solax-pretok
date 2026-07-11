@@ -1666,6 +1666,16 @@ function renderBlindRow(b) {
     return sp;
   };
 
+  // Posuvník naklopení vzniká předem, aby tlačítko ▼ znalo jeho hodnotu
+  let tiltSlider = null;
+  if (b.hasOrientation) {
+    tiltSlider = document.createElement('input');
+    tiltSlider.type = 'range';
+    tiltSlider.min = '0';
+    tiltSlider.max = '100';
+    tiltSlider.value = typeof b.orientation === 'number' ? Math.round(b.orientation) : 50;
+  }
+
   if (b.type === 'switch') {
     // Světlo apod. — ON/OFF místo šipek; prostřední pozice zůstává prázdná,
     // aby tlačítka lícovala se sloupci šipek u rolet
@@ -1680,7 +1690,10 @@ function renderBlindRow(b) {
     } else {
       btns.appendChild(spacer());
     }
-    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, 'down', null, btn)));
+    // Žaluzie po sjetí dolů skončí zavřené — s povelem dolů posíláme i cílové
+    // naklopení z posuvníku, zařízení ho nastaví samo po dojetí
+    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn =>
+      blindCommand(b.deviceURL, 'down', tiltSlider ? Number(tiltSlider.value) : null, btn)));
   }
 
   row.appendChild(info);
@@ -1705,24 +1718,19 @@ function renderBlindRow(b) {
   wrap.appendChild(row);
 
   // Naklopení lamel: posuvník 0–100 %, povel se pošle po puštění prstu
-  if (b.hasOrientation) {
+  if (tiltSlider) {
     const tilt = document.createElement('div');
     tilt.className = 'blind-tilt';
     const tiltLabel = document.createElement('span');
     tiltLabel.className = 'blind-tilt-label';
     tiltLabel.textContent = 'Naklopení';
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '100';
-    slider.value = typeof b.orientation === 'number' ? Math.round(b.orientation) : 50;
     const val = document.createElement('span');
     val.className = 'blind-tilt-val';
-    val.textContent = slider.value + ' %';
-    slider.addEventListener('input', () => { val.textContent = slider.value + ' %'; });
-    slider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(slider.value), null));
+    val.textContent = tiltSlider.value + ' %';
+    tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
+    tiltSlider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null));
     tilt.appendChild(tiltLabel);
-    tilt.appendChild(slider);
+    tilt.appendChild(tiltSlider);
     tilt.appendChild(val);
     wrap.appendChild(tilt);
   }

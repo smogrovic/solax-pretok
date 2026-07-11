@@ -1247,13 +1247,21 @@ async function blindCommand(deviceURL, action, value) {
   if (!blind) throw Object.assign(new Error('Neznámá roleta.'), { status: 400 });
   const cmd = blind.commands[action];
   if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
-  const parameters = action === 'orientation' ? [Math.round(value)] : [];
+
+  const commandList = [{ name: cmd, parameters: action === 'orientation' ? [Math.round(value)] : [] }];
+  // Žaluzie po sjetí dolů skončí vždy zavřené (naklopení 100 %) — proto při
+  // jízdě dolů zřetězíme i nastavení naklopení; zařízení povely vykoná po sobě,
+  // takže se žaluzie po dojetí sama naklopí na hodnotu z posuvníku
+  if (action === 'down' && blind.commands.orientation && Number.isFinite(value)) {
+    commandList.push({ name: blind.commands.orientation, parameters: [Math.round(value)] });
+  }
+
   await tahomaFetch('/exec/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       label: `Šmogyho FVE: ${blind.label} ${action}`,
-      actions: [{ deviceURL, commands: [{ name: cmd, parameters }] }]
+      actions: [{ deviceURL, commands: commandList }]
     })
   });
   return blind;
@@ -1295,7 +1303,7 @@ app.post('/api/blinds/command', async (req, res) => {
     return res.status(400).json({ error: 'Chybí deviceURL nebo neznámá action.' });
   }
   let v = null;
-  if (action === 'orientation') {
+  if (action === 'orientation' || (action === 'down' && value !== undefined && value !== null)) {
     v = Number(value);
     if (!Number.isFinite(v) || v < 0 || v > 100) {
       return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
@@ -1303,7 +1311,9 @@ app.post('/api/blinds/command', async (req, res) => {
   }
   try {
     const blind = await blindCommand(deviceURL, action, v);
-    const suffix = action === 'orientation' ? ` ${Math.round(v)} %` : '';
+    let suffix = '';
+    if (action === 'orientation') suffix = ` ${Math.round(v)} %`;
+    else if (action === 'down' && v !== null && blind.commands.orientation) suffix = ` + naklopení ${Math.round(v)} %`;
     addLog(`${blind.label}: ${BLIND_ACTION_LABELS[action]}${suffix}`);
     res.json({ success: true });
   } catch (err) {
