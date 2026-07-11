@@ -329,6 +329,32 @@
     min-height:15px;
     text-align:center;
   }
+  .log-card{
+    align-items:stretch;
+    padding:18px 16px;
+  }
+  .log-list{
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+  }
+  .log-entry{
+    display:flex;
+    gap:8px;
+    font-size:13px;
+    line-height:1.35;
+    color:var(--navy);
+  }
+  .log-time{
+    color:var(--grey-text);
+    font-weight:700;
+    white-space:nowrap;
+  }
+  .log-empty{
+    font-size:13px;
+    color:var(--grey-text);
+    text-align:center;
+  }
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -604,10 +630,25 @@
     </div>
   </div>
 
+  <!-- Slide 4: Log -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Log</div>
+      </div>
+      <div class="card log-card">
+        <div class="log-list" id="logList">
+          <div class="log-empty">Zatím žádné záznamy</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="page-dots" id="pageDots">
   <span class="dot active"></span>
+  <span class="dot"></span>
   <span class="dot"></span>
   <span class="dot"></span>
 </div>
@@ -896,6 +937,36 @@ function renderChart() {
 
 window.addEventListener('resize', renderChart);
 
+// ---------- Log zapínání/vypínání ----------
+
+const logListEl = document.getElementById('logList');
+let logEntries = [];
+
+function renderLog() {
+  logListEl.textContent = '';
+  if (!logEntries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'Zatím žádné záznamy';
+    logListEl.appendChild(empty);
+    return;
+  }
+  // Nejnovější nahoře
+  for (let i = logEntries.length - 1; i >= 0; i--) {
+    const e = logEntries[i];
+    const row = document.createElement('div');
+    row.className = 'log-entry';
+    const time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = new Date(e.t).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    const msg = document.createElement('span');
+    msg.textContent = e.msg;
+    row.appendChild(time);
+    row.appendChild(msg);
+    logListEl.appendChild(row);
+  }
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -908,6 +979,8 @@ function applySnapshot(snap) {
   renderPoolPower(snap.poolPowerW);
   history = snap.history || [];
   renderChart();
+  logEntries = snap.log || [];
+  renderLog();
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
   // Server nemá nastavený APP_PIN — zámek se nepoužívá
   if (snap.lockEnabled === false) setLocked(false);
@@ -940,6 +1013,13 @@ function connectStream() {
   });
   es.addEventListener('poolPower', e => {
     renderPoolPower(JSON.parse(e.data).totalPowerW);
+  });
+  es.addEventListener('log', e => {
+    const d = JSON.parse(e.data);
+    if (d.entry) {
+      logEntries.push(d.entry);
+      renderLog();
+    }
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';
