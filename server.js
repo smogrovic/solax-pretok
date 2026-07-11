@@ -42,6 +42,26 @@ const DEVICES = {
 const shellyCache = new Map();
 const CACHE_TTL_MS = 5000; // 5s cache, ať se nezahlcuje Shelly cloud při rychlém sledu dotazů
 
+// Globální fronta: každý dotaz i příkaz na Shelly cloud jde po jednom
+// s minimálně sekundovým rozestupem — poller, automatika ani ruční
+// přepnutí se tak nikdy nepotkají a nenarazí na rate limit
+let shellyQueueTail = Promise.resolve();
+let lastShellyCallTs = 0;
+
+function shellyQueued(fn) {
+  const run = shellyQueueTail.then(async () => {
+    const wait = lastShellyCallTs + SHELLY_GAP_MS - Date.now();
+    if (wait > 0) await delay(wait);
+    try {
+      return await fn();
+    } finally {
+      lastShellyCallTs = Date.now();
+    }
+  });
+  shellyQueueTail = run.catch(() => {}); // fronta pokračuje i po chybě
+  return run;
+}
+
 const POLL_INTERVAL_MS = 2 * 60 * 1000; // jak často poller obchází Solax i Shelly
 const SHELLY_GAP_MS = 1000;             // rozestup mezi dotazy na Shelly cloud (rate limit)
 const HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -234,12 +254,12 @@ async function fetchShellyStatus(serverUri, deviceId) {
     auth_key: SHELLY_AUTH_KEY
   });
 
-  const response = await fetch(url, {
+  const response = await shellyQueued(() => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
     signal: AbortSignal.timeout(10000)
-  });
+  }));
 
   if (!response.ok) {
     // Pokud máme starší cache, raději vrátíme ji než tvrdou chybu (typicky při rate limitu 429)
@@ -283,12 +303,12 @@ async function fetchShellyPowerW(deviceId) {
   try {
     const url = `https://${SHELLY_SERVER_URI}/device/status`;
     const body = new URLSearchParams({ id: deviceId, auth_key: SHELLY_AUTH_KEY });
-    const response = await fetch(url, {
+    const response = await shellyQueued(() => fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
       signal: AbortSignal.timeout(10000)
-    });
+    }));
     if (!response.ok) return null;
     const data = await response.json();
     if (!data.isok) return null;
@@ -331,15 +351,14 @@ async function pollShelly() {
   if (shellyPollRunning) return;
   shellyPollRunning = true;
   try {
+    // Rozestupy mezi dotazy hlídá globální fronta shellyQueued
     for (const key of Object.keys(DEVICES)) {
       await pollDevice(key);
-      await delay(SHELLY_GAP_MS);
     }
 
     const powers = [];
     for (let i = 0; i < POOL_PM_IDS.length; i++) {
       powers.push(await fetchShellyPowerW(POOL_PM_IDS[i]));
-      if (i < POOL_PM_IDS.length - 1) await delay(SHELLY_GAP_MS);
     }
     const valid = powers.filter(p => typeof p === 'number');
     state.poolPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
@@ -381,12 +400,12 @@ async function setShellyState(serverUri, deviceId, turn) {
     turn
   });
 
-  const response = await fetch(url, {
+  const response = await shellyQueued(() => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
     signal: AbortSignal.timeout(10000)
-  });
+  }));
 
   if (!response.ok) {
     throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
@@ -684,14 +703,23 @@ function formatKwLog(w) {
 
 async function autoSet(key, turn, reason) {
   const dev = DEVICES[key];
-  try {
-    await setShellyState(dev.serverUri, dev.deviceId, turn);
-    state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
-    broadcast('device', { key, status: state.devices[key] });
-    addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} (${reason})`);
-  } catch (err) {
-    addLog(`${DEVICE_LABELS[key]}: příkaz automatiky selhal (${err.message})`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await setShellyState(dev.serverUri, dev.deviceId, turn);
+      state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
+      broadcast('device', { key, status: state.devices[key] });
+      addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} (${reason})`);
+      return true;
+    } catch (err) {
+      if (attempt === 0) {
+        await delay(2500);
+        continue;
+      }
+      addLog(`${DEVICE_LABELS[key]}: příkaz automatiky selhal (${err.message})`);
+      return false;
+    }
   }
+  return false;
 }
 
 async function runPoolAutomation(now, prague, weather, totalW, soc) {
@@ -808,22 +836,38 @@ async function runSolinatorAutomation(now, prague, weather) {
   if (temp === null) return;
 
   // 13:00 → zapnout při venkovní teplotě nad 20 °C
+  // Pravidlo se označí za hotové až po úspěchu — po selhání příkazu
+  // (nebo neznámém stavu relé) se zopakuje v dalším 5min cyklu
   if (prague.hour === 13 && solinatorAuto.done13 !== today) {
-    solinatorAuto.done13 = today;
     if (temp > 20) {
-      if (sol && sol.isOn === false) await autoSet('solinator', 'on', `venku ${Math.round(temp)} °C`);
+      if (sol && sol.isOn === true) {
+        solinatorAuto.done13 = today; // už běží
+      } else if (sol && sol.isOn === false) {
+        if (await autoSet('solinator', 'on', `venku ${Math.round(temp)} °C`)) {
+          solinatorAuto.done13 = today;
+        }
+      }
     } else {
+      solinatorAuto.done13 = today;
       addLog(`Solinátor: nezapnut, venku jen ${Math.round(temp)} °C (limit 20 °C)`);
     }
   }
 
   // 15:00 → zapnout při venkovní teplotě nad 25 °C
   if (prague.hour === 15 && solinatorAuto.done15 !== today) {
-    solinatorAuto.done15 = today;
     if (temp > 25) {
-      if (sol && sol.isOn === false) await autoSet('solinator', 'on', `venku ${Math.round(temp)} °C`);
-    } else if (!(sol && sol.isOn)) {
-      addLog(`Solinátor: nezapnut, venku jen ${Math.round(temp)} °C (limit 25 °C)`);
+      if (sol && sol.isOn === true) {
+        solinatorAuto.done15 = today;
+      } else if (sol && sol.isOn === false) {
+        if (await autoSet('solinator', 'on', `venku ${Math.round(temp)} °C`)) {
+          solinatorAuto.done15 = today;
+        }
+      }
+    } else {
+      solinatorAuto.done15 = today;
+      if (!(sol && sol.isOn)) {
+        addLog(`Solinátor: nezapnut, venku jen ${Math.round(temp)} °C (limit 25 °C)`);
+      }
     }
   }
 }
