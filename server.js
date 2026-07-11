@@ -134,6 +134,8 @@ function snapshot() {
     autoEnabled: state.autoEnabled,
     weather: state.weather,
     runtime: { date: state.runtime.date, ms: state.runtime.ms },
+    wake: wakePublic(),
+    blindsEnabled: tahomaEnabled,
     pushEnabled,
     lockEnabled
   };
@@ -541,6 +543,33 @@ app.post('/api/log/restore', (req, res) => {
   const added = state.log.length - before;
   if (added > 0) broadcast('logAll', { log: state.log });
   res.json({ added });
+});
+
+// Obnova dnešní doby běhu po restartu/deployi — klient pošle svou kopii,
+// server si vezme vyšší hodnoty (jen pro dnešní pražské datum)
+app.post('/api/runtime/restore', (req, res) => {
+  const { date, ms } = req.body || {};
+  if (typeof date !== 'string' || !ms || typeof ms !== 'object') {
+    return res.status(400).json({ error: 'Chybí date/ms.' });
+  }
+  if (date !== pragueDateString()) return res.json({ ok: false });
+
+  if (state.runtime.date !== date) {
+    state.runtime.date = date;
+    state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
+  }
+  let changed = false;
+  for (const k of Object.keys(state.runtime.ms)) {
+    const v = Number(ms[k]);
+    if (Number.isFinite(v) && v > state.runtime.ms[k] && v <= 24 * 60 * 60 * 1000) {
+      state.runtime.ms[k] = v;
+      changed = true;
+    }
+  }
+  if (changed) {
+    broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
+  }
+  res.json({ ok: true });
 });
 
 // Hlavní vypínač automatiky (vyžaduje odemčení stejně jako ovládání relé)
@@ -995,6 +1024,170 @@ async function runAutomation() {
 
 setTimeout(runAutomation, 30000); // první běh až poté, co poller stihne načíst stavy
 setInterval(runAutomation, AUTOMATION_INTERVAL_MS);
+
+// ---------- TaHoma (Somfy rolety přes Overkiz cloud) ----------
+
+const TAHOMA_EMAIL = process.env.TAHOMA_EMAIL;
+const TAHOMA_PASSWORD = process.env.TAHOMA_PASSWORD;
+const TAHOMA_BASE = 'https://ha101-1.overkiz.com/enduser-mobile-web/enduserAPI';
+const tahomaEnabled = !!(TAHOMA_EMAIL && TAHOMA_PASSWORD);
+
+let tahomaCookie = null;
+
+async function tahomaLogin() {
+  const body = new URLSearchParams({ userId: TAHOMA_EMAIL, userPassword: TAHOMA_PASSWORD });
+  const res = await fetch(`${TAHOMA_BASE}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!res.ok) {
+    throw Object.assign(new Error(`TaHoma přihlášení selhalo (HTTP ${res.status})`), { status: 502 });
+  }
+  const setCookie = res.headers.get('set-cookie') || '';
+  const m = setCookie.match(/JSESSIONID=[^;]+/);
+  if (!m) throw Object.assign(new Error('TaHoma nevrátila session cookie.'), { status: 502 });
+  tahomaCookie = m[0];
+}
+
+async function tahomaFetch(path, options = {}, retried) {
+  if (!tahomaEnabled) {
+    throw Object.assign(new Error('TaHoma není nakonfigurována (chybí TAHOMA_EMAIL / TAHOMA_PASSWORD).'), { status: 500 });
+  }
+  if (!tahomaCookie) await tahomaLogin();
+  const res = await fetch(`${TAHOMA_BASE}${path}`, {
+    ...options,
+    headers: { ...(options.headers || {}), Cookie: tahomaCookie },
+    signal: AbortSignal.timeout(15000)
+  });
+  if (res.status === 401 && !retried) {
+    tahomaCookie = null; // session vypršela → přihlásíme se znovu
+    return tahomaFetch(path, options, true);
+  }
+  if (!res.ok) {
+    throw Object.assign(new Error(`TaHoma API HTTP ${res.status}`), { status: 502 });
+  }
+  return res.json();
+}
+
+let blindsCache = { ts: 0, list: [] };
+
+async function getBlinds() {
+  if (blindsCache.list.length && Date.now() - blindsCache.ts < 10 * 60 * 1000) {
+    return blindsCache.list;
+  }
+  const devices = await tahomaFetch('/setup/devices');
+  const list = devices
+    .filter(d => ['RollerShutter', 'Screen', 'ExteriorScreen', 'Awning'].includes(d.uiClass))
+    .map(d => {
+      // RTS rolety umí up/down/stop/my, io open/close/stop — vybereme, co zařízení podporuje
+      const cmds = new Set(((d.definition && d.definition.commands) || []).map(c => c.commandName));
+      return {
+        deviceURL: d.deviceURL,
+        label: d.label,
+        commands: {
+          up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : null),
+          down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : null),
+          stop: cmds.has('stop') ? 'stop' : (cmds.has('my') ? 'my' : null),
+          my: cmds.has('my') ? 'my' : null
+        }
+      };
+    });
+  blindsCache = { ts: Date.now(), list };
+  return list;
+}
+
+async function blindCommand(deviceURL, action) {
+  const blinds = await getBlinds();
+  const blind = blinds.find(b => b.deviceURL === deviceURL);
+  if (!blind) throw Object.assign(new Error('Neznámá roleta.'), { status: 400 });
+  const cmd = blind.commands[action];
+  if (!cmd) throw Object.assign(new Error(`Roleta ${blind.label} povel neumí.`), { status: 400 });
+  await tahomaFetch('/exec/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      label: `Šmogyho FVE: ${blind.label} ${action}`,
+      actions: [{ deviceURL, commands: [{ name: cmd, parameters: [] }] }]
+    })
+  });
+  return blind;
+}
+
+app.get('/api/blinds', async (req, res) => {
+  if (!tahomaEnabled) return res.json({ enabled: false, blinds: [] });
+  try {
+    const blinds = await getBlinds();
+    res.json({ enabled: true, blinds: blinds.map(b => ({ deviceURL: b.deviceURL, label: b.label })) });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+const BLIND_ACTION_LABELS = { up: 'nahoru', down: 'dolů', stop: 'stop', my: 'moje pozice' };
+
+app.post('/api/blinds/command', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { deviceURL, action } = req.body || {};
+  if (typeof deviceURL !== 'string' || !BLIND_ACTION_LABELS[action]) {
+    return res.status(400).json({ error: 'Chybí deviceURL nebo action (up/down/stop/my).' });
+  }
+  try {
+    const blind = await blindCommand(deviceURL, action);
+    addLog(`Roleta ${blind.label}: ${BLIND_ACTION_LABELS[action]}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+// ---------- Buzení: v nastavený čas push notifikace + otevření rolet ----------
+
+const wake = { enabled: false, time: null, deviceURLs: [], lastFired: 0 };
+
+function wakePublic() {
+  return { enabled: wake.enabled, time: wake.time, deviceURLs: wake.deviceURLs };
+}
+
+app.post('/api/wake', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { enabled, time, deviceURLs } = req.body || {};
+  if (enabled) {
+    if (typeof time !== 'string' || !/^\d{2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ error: 'Čas musí být ve formátu HH:MM.' });
+    }
+    wake.enabled = true;
+    wake.time = time;
+    wake.deviceURLs = Array.isArray(deviceURLs) ? deviceURLs.filter(u => typeof u === 'string').slice(0, 20) : [];
+    addLog(`Buzení nastaveno na ${time}`);
+  } else {
+    wake.enabled = false;
+    addLog('Buzení zrušeno');
+  }
+  broadcast('wake', { wake: wakePublic() });
+  res.json({ wake: wakePublic() });
+});
+
+setInterval(async () => {
+  if (!wake.enabled || !wake.time) return;
+  const p = pragueTime();
+  const current = String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0');
+  if (current !== wake.time) return;
+  if (Date.now() - wake.lastFired < 2 * 60 * 1000) return;
+  wake.lastFired = Date.now();
+  wake.enabled = false; // jednorázové
+  broadcast('wake', { wake: wakePublic() });
+  sendPushToAll('⏰ Vstávat!', `Je ${wake.time} — otevírám rolety.`);
+  for (const url of wake.deviceURLs) {
+    try {
+      const blind = await blindCommand(url, 'up');
+      addLog(`Roleta ${blind.label}: nahoru (buzení ${wake.time})`);
+    } catch (err) {
+      addLog(`Buzení: roletu se nepodařilo otevřít (${err.message})`);
+    }
+  }
+}, 30000);
 
 // ---------- Keep-alive a start ----------
 

@@ -378,6 +378,81 @@
     font-weight:700;
     color:var(--navy);
   }
+  .blinds-card{align-items:stretch;}
+  .blinds-list{display:flex;flex-direction:column;}
+  .blind-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 2px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+  }
+  .blind-row:last-child{border-bottom:none;}
+  .blind-label{
+    font-size:13px;
+    font-weight:600;
+    color:var(--navy);
+  }
+  .blind-btns{display:flex;gap:8px;}
+  .blind-btn{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:none;
+    background:var(--navy);
+    color:#fff;
+    font-size:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    transition:transform .15s ease, opacity .15s ease;
+  }
+  .blind-btn:active{transform:scale(0.93);}
+  .blind-btn:disabled{opacity:0.5;}
+  .wake-time{
+    width:100%;
+    font-size:28px;
+    font-weight:700;
+    border:none;
+    background:var(--bg);
+    border-radius:14px;
+    padding:10px 14px;
+    color:var(--navy);
+    text-align:center;
+    font-family:inherit;
+  }
+  .wake-devices{
+    width:100%;
+    margin-top:10px;
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+  }
+  .wake-dev{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    font-size:13px;
+    color:var(--navy);
+  }
+  .wake-dev input{
+    width:18px;
+    height:18px;
+    accent-color:var(--orange);
+  }
+  .wake-set-btn{
+    width:100%;
+    margin-top:12px;
+    padding:12px;
+    border:none;
+    border-radius:14px;
+    background:var(--orange);
+    color:#fff;
+    font-size:15px;
+    font-weight:600;
+  }
+  .wake-set-btn:active{background:var(--orange-dark);}
+  .wake-status{margin-top:10px;min-height:14px;}
   .error-banner{
     width:100%;
     margin-bottom:12px;
@@ -707,10 +782,59 @@
     </div>
   </div>
 
+  <!-- Slide 6: Rolety -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Rolety</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="blindsList">
+          <div class="log-empty" id="blindsEmpty">Načítám rolety…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 7: Buzení -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Buzení</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable">
+        <div class="graph-title">Nastavit buzení</div>
+        <input type="time" id="wakeTime" class="wake-time" value="06:30">
+        <div class="wake-devices" id="wakeDevices"></div>
+        <button class="wake-set-btn" id="wakeSetBtn">Provést</button>
+        <div class="updated wake-status" id="wakeStatus"></div>
+        <button class="notif-btn" id="wakeCancelBtn" style="display:none">Zrušit buzení</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="page-dots" id="pageDots">
   <span class="dot active"></span>
+  <span class="dot"></span>
+  <span class="dot"></span>
   <span class="dot"></span>
   <span class="dot"></span>
   <span class="dot"></span>
@@ -1217,6 +1341,196 @@ async function setAutomation(enabled) {
 autoOnBtn.addEventListener('click', () => setAutomation(true));
 autoOffBtn.addEventListener('click', () => setAutomation(false));
 
+// Lokální kopie dnešní doby běhu — po deployi ji appka vrátí serveru
+function todayStr() {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function loadRuntimeLocal() {
+  try {
+    return JSON.parse(localStorage.getItem('runtimeData') || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function saveRuntimeLocal() {
+  try {
+    if (runtimeData && runtimeData.date) localStorage.setItem('runtimeData', JSON.stringify(runtimeData));
+  } catch {}
+}
+
+async function maybeRestoreRuntimeToServer(serverRt, localRt) {
+  if (!localRt || localRt.date !== todayStr() || !localRt.ms) return;
+  const serverMs = (serverRt && serverRt.ms) || {};
+  const hasNewer = Object.keys(localRt.ms).some(k => (localRt.ms[k] || 0) > (serverMs[k] || 0));
+  if (!hasNewer) return;
+  try {
+    await fetch('/api/runtime/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(localRt)
+    });
+  } catch {}
+}
+
+// ---------- Rolety (TaHoma) ----------
+
+const blindsListEl = document.getElementById('blindsList');
+const wakeDevicesEl = document.getElementById('wakeDevices');
+let blinds = [];
+
+function normalizeLabel(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+async function blindCommand(deviceURL, action, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/blinds/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ deviceURL, action })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Roleta: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+function renderBlinds() {
+  blindsListEl.textContent = '';
+  if (!blinds.length) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'Žádné rolety nenalezeny.';
+    blindsListEl.appendChild(empty);
+    return;
+  }
+  for (const b of blinds) {
+    const row = document.createElement('div');
+    row.className = 'blind-row';
+    const label = document.createElement('span');
+    label.className = 'blind-label';
+    label.textContent = b.label;
+    const btns = document.createElement('div');
+    btns.className = 'blind-btns';
+    for (const [action, symbol] of [['up', '▲'], ['stop', '■'], ['down', '▼']]) {
+      const btn = document.createElement('button');
+      btn.className = 'blind-btn';
+      btn.textContent = symbol;
+      btn.addEventListener('click', () => blindCommand(b.deviceURL, action, btn));
+      btns.appendChild(btn);
+    }
+    row.appendChild(label);
+    row.appendChild(btns);
+    blindsListEl.appendChild(row);
+  }
+}
+
+function renderWakeDevices() {
+  wakeDevicesEl.textContent = '';
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem('wakeDevices') || '[]'); } catch {}
+  for (const b of blinds) {
+    const row = document.createElement('label');
+    row.className = 'wake-dev';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = b.deviceURL;
+    // Předvybereme ložnici; jinak dřívější výběr uživatele
+    cb.checked = saved.length ? saved.includes(b.deviceURL) : normalizeLabel(b.label).includes('lozn');
+    const txt = document.createElement('span');
+    txt.textContent = b.label;
+    row.appendChild(cb);
+    row.appendChild(txt);
+    wakeDevicesEl.appendChild(row);
+  }
+}
+
+async function loadBlinds() {
+  try {
+    const res = await fetch('/api/blinds');
+    const data = await res.json();
+    if (data.enabled === false) {
+      blindsListEl.textContent = '';
+      const empty = document.createElement('div');
+      empty.className = 'log-empty';
+      empty.textContent = 'TaHoma není nastavena (chybí přihlášení na serveru).';
+      blindsListEl.appendChild(empty);
+      return;
+    }
+    blinds = data.blinds || [];
+    renderBlinds();
+    renderWakeDevices();
+  } catch {
+    blindsListEl.textContent = '';
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'Rolety se nepodařilo načíst.';
+    blindsListEl.appendChild(empty);
+  }
+}
+
+loadBlinds();
+
+// ---------- Buzení ----------
+
+const wakeTimeEl = document.getElementById('wakeTime');
+const wakeSetBtn = document.getElementById('wakeSetBtn');
+const wakeCancelBtn = document.getElementById('wakeCancelBtn');
+const wakeStatusEl = document.getElementById('wakeStatus');
+
+function renderWake(w) {
+  if (w && w.enabled) {
+    wakeStatusEl.textContent = '⏰ Buzení nastaveno na ' + w.time;
+    wakeCancelBtn.style.display = 'block';
+  } else {
+    wakeStatusEl.textContent = '';
+    wakeCancelBtn.style.display = 'none';
+  }
+}
+
+async function setWake(enabled) {
+  const time = wakeTimeEl.value;
+  const deviceURLs = Array.from(wakeDevicesEl.querySelectorAll('input:checked')).map(cb => cb.value);
+  if (enabled) {
+    if (!time) return;
+    try { localStorage.setItem('wakeDevices', JSON.stringify(deviceURLs)); } catch {}
+  }
+  wakeSetBtn.disabled = true;
+  try {
+    const res = await fetch('/api/wake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(enabled ? { enabled: true, time, deviceURLs } : { enabled: false })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se nastavit buzení.');
+    renderWake(data.wake);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Buzení: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  wakeSetBtn.disabled = false;
+}
+
+wakeSetBtn.addEventListener('click', () => setWake(true));
+wakeCancelBtn.addEventListener('click', () => setWake(false));
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -1241,7 +1555,22 @@ function applySnapshot(snap) {
   maybeRestoreLogToServer(serverLog, localLog);
   renderWeather(snap.weather);
   renderAutomation(snap.autoEnabled !== false);
-  runtimeData = snap.runtime || null;
+  renderWake(snap.wake);
+  // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
+  const serverRt = snap.runtime || null;
+  const localRt = loadRuntimeLocal();
+  runtimeData = serverRt;
+  if (localRt && localRt.date === todayStr() && localRt.ms) {
+    if (!runtimeData || runtimeData.date !== localRt.date) {
+      runtimeData = localRt;
+    } else {
+      for (const k of Object.keys(localRt.ms)) {
+        if ((localRt.ms[k] || 0) > (runtimeData.ms[k] || 0)) runtimeData.ms[k] = localRt.ms[k];
+      }
+    }
+  }
+  saveRuntimeLocal();
+  maybeRestoreRuntimeToServer(serverRt, localRt);
   renderStats();
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
   // Server nemá nastavený APP_PIN — zámek se nepoužívá
@@ -1301,9 +1630,13 @@ function connectStream() {
   es.addEventListener('runtime', e => {
     runtimeData = JSON.parse(e.data).runtime;
     renderStats();
+    saveRuntimeLocal();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);
+  });
+  es.addEventListener('wake', e => {
+    renderWake(JSON.parse(e.data).wake);
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';
