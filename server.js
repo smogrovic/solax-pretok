@@ -87,7 +87,8 @@ const state = {
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
   runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
   timeline: { shelly: [], pool: [], solinator: [] }, // segmenty { from, to } zapnutí za 48 h
-  aircon: { devices: [], error: null } // Panasonic klimatizace
+  aircon: { devices: [], error: null }, // Panasonic klimatizace
+  wallbox: { power: null, mode: null, status: null, error: null } // Solax EV charger
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -168,6 +169,8 @@ function snapshot() {
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
     airconTimers,
+    wallbox: state.wallbox,
+    wallboxEnabled,
     pushEnabled,
     lockEnabled
   };
@@ -1675,7 +1678,9 @@ async function pccGetDevices() {
   const list = [];
   const aquarea = [];
   for (const g of (groups && groups.groupList) || []) {
-    for (const d of g.deviceList || []) {
+    // Skupina má buď deviceList, nebo (typicky u Aquarea) deviceIdList
+    const groupDevices = ('deviceList' in g ? g.deviceList : g.deviceIdList) || [];
+    for (const d of groupDevices) {
       if (!d || !d.deviceGuid) continue;
       // Klimatizace mají parameters; zařízení bez nich je Aquarea (tepelné čerpadlo)
       if (d.parameters) {
@@ -1688,6 +1693,27 @@ async function pccGetDevices() {
   pccDevCache = { ts: Date.now(), list, aquarea };
   return pccDevCache;
 }
+
+// Diagnostika: struktura skupin a zařízení z Comfort Cloudu (bez parametrů a celých GUID)
+app.get('/api/aircon/debug', async (req, res) => {
+  if (!panasonicEnabled) return res.json({ enabled: false });
+  try {
+    const groups = await pccQueued(() => pccApiFetch('/device/group'));
+    res.json((groups.groupList || []).map(g => ({
+      groupName: g.groupName,
+      keys: Object.keys(g),
+      devices: (('deviceList' in g ? g.deviceList : g.deviceIdList) || []).map(d => ({
+        name: d.deviceName,
+        guidPrefix: String(d.deviceGuid || '').slice(0, 10) + '…',
+        deviceType: d.deviceType,
+        hasParameters: !!d.parameters,
+        keys: Object.keys(d)
+      }))
+    })));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // Stav Aquarey jde přes proxy endpoint accsmart API (deviceDirect=1 čte přímo ze zařízení)
 async function pccGetAquareaStatus(guid, direct = 1) {
@@ -1910,6 +1936,155 @@ setInterval(async () => {
     }
   }
 }, 30000);
+
+// ---------- Solax wallbox (EV charger přes SolaxCloud API v2) ----------
+
+const WALLBOX_SN = process.env.WALLBOX_SN;
+const wallboxEnabled = !!(WALLBOX_SN && SOLAX_TOKEN_ID);
+
+const WB_MODES = { stop: 0, fast: 1, eco: 2, green: 3 };
+const WB_MODE_LABELS = { stop: 'Stop', fast: 'Rychlý', eco: 'Eko', green: 'Zelený' };
+const WB_MODE_NAMES = ['stop', 'fast', 'eco', 'green'];
+// Povolené nabíjecí proudy podle režimu (z API dokumentace)
+const WB_CURRENTS = { green: [3, 6], eco: [6, 10, 16, 20, 25], fast: [6, 8, 10, 13, 16, 20, 25, 32] };
+
+// Účty jsou na různých clusterech — zkoušíme oba hosty
+const WB_HOSTS = ['https://global.solaxcloud.com', 'https://www.solaxcloud.com'];
+
+async function wbPost(path, body) {
+  let lastErr = null;
+  for (const host of WB_HOSTS) {
+    try {
+      const res = await fetch(host + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000)
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) return data;
+      lastErr = new Error(`Wallbox API HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Wallbox API nedostupné.');
+}
+
+// Čtení stavu: přesný endpoint pro EV charger není veřejně zdokumentovaný,
+// zkoušíme známé kandidáty a bereme první, který vrátí data
+async function wbFetchStatus() {
+  const candidates = [
+    { name: 'v2 realtimeInfo (wifiSn)', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
+    { name: 'v2 charger realtime', run: () => wbPost('/api/v2/charger/getRealtimeInfo', { sn: WALLBOX_SN }) },
+    {
+      name: 'v6 getRealtimeInfo.do',
+      run: async () => {
+        const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        return res.json();
+      }
+    }
+  ];
+  for (const c of candidates) {
+    try {
+      const data = await c.run();
+      if (data && data.success !== false && data.result && typeof data.result === 'object') {
+        return { source: c.name, result: data.result };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function wbParseResult(r) {
+  const num = v => (typeof v === 'number' ? v : null);
+  const modeRaw = [r.workMode, r.chargeMode, r.mode].find(v => typeof v === 'number');
+  return {
+    power: num(r.chargePower) ?? num(r.acpower) ?? num(r.power),
+    energyToday: num(r.chargeEnergyToday) ?? num(r.yieldtoday),
+    mode: typeof modeRaw === 'number' ? (WB_MODE_NAMES[modeRaw] || String(modeRaw)) : null,
+    status: r.chargeState ?? r.deviceState ?? r.state ?? null,
+    uploadTime: r.uploadTime || null
+  };
+}
+
+let wallboxPollRunning = false;
+
+async function pollWallbox() {
+  if (!wallboxEnabled || wallboxPollRunning) return;
+  wallboxPollRunning = true;
+  try {
+    const found = await wbFetchStatus();
+    if (found) {
+      state.wallbox = { ...wbParseResult(found.result), source: found.source, error: null, fetchedAt: new Date().toISOString() };
+    } else {
+      state.wallbox = { ...state.wallbox, error: 'Data wallboxu se nepodařilo načíst (mrkni na /api/wallbox/debug).' };
+    }
+    broadcast('wallbox', { wallbox: state.wallbox });
+  } finally {
+    wallboxPollRunning = false;
+  }
+}
+
+if (wallboxEnabled) {
+  setTimeout(pollWallbox, 20000);
+  setInterval(pollWallbox, 5 * 60 * 1000);
+}
+
+// Diagnostika: surové odpovědi všech kandidátních endpointů
+app.get('/api/wallbox/debug', async (req, res) => {
+  if (!wallboxEnabled) return res.json({ enabled: false, hint: 'Chybí WALLBOX_SN (a SOLAX_TOKEN_ID).' });
+  const out = [];
+  const candidates = [
+    ['v2 realtimeInfo (wifiSn)', () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN })],
+    ['v2 charger getRealtimeInfo', () => wbPost('/api/v2/charger/getRealtimeInfo', { sn: WALLBOX_SN })],
+    ['v6 getRealtimeInfo.do', async () => {
+      const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      return r.json();
+    }]
+  ];
+  for (const [name, run] of candidates) {
+    try {
+      out.push({ endpoint: name, data: await run() });
+    } catch (err) {
+      out.push({ endpoint: name, error: err.message });
+    }
+  }
+  res.json(out);
+});
+
+app.post('/api/wallbox/set', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován (chybí WALLBOX_SN).' });
+  const { mode, current } = req.body || {};
+  if (WB_MODES[mode] === undefined) {
+    return res.status(400).json({ error: 'Režim musí být stop/fast/eco/green.' });
+  }
+  let amps = Number(current);
+  if (mode === 'stop') {
+    amps = 6; // u stopu se proud nepoužije, ale API ho vyžaduje
+  } else {
+    const allowed = WB_CURRENTS[mode];
+    if (!Number.isFinite(amps) || !allowed.includes(amps)) {
+      return res.status(400).json({ error: `Proud pro režim ${WB_MODE_LABELS[mode]} musí být jeden z: ${allowed.join(', ')} A.` });
+    }
+  }
+  try {
+    const data = await wbPost('/api/v2/charger/setMode', { sn: WALLBOX_SN, mode: WB_MODES[mode], current: amps });
+    if (data && data.success === false) {
+      throw new Error(data.exception || 'SolaxCloud příkaz odmítl.');
+    }
+    state.wallbox = { ...state.wallbox, mode };
+    broadcast('wallbox', { wallbox: state.wallbox });
+    addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}${mode !== 'stop' ? ` (${amps} A)` : ''}`);
+    res.json({ success: true });
+    setTimeout(pollWallbox, 20000);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // ---------- Keep-alive a start ----------
 

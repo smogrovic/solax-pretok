@@ -572,6 +572,24 @@
     font-size:11px;
     color:var(--grey-text);
   }
+  .wb-modes{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:8px;
+    margin-top:12px;
+    width:100%;
+  }
+  .wb-mode-btn{
+    border:none;
+    border-radius:12px;
+    padding:11px 4px;
+    background:rgba(44,62,80,0.08);
+    color:var(--navy);
+    font-size:12px;
+    font-weight:700;
+  }
+  .wb-mode-btn.active{background:var(--orange);color:#fff;}
+  .wb-mode-btn:disabled{opacity:0.5;}
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -967,7 +985,33 @@
     </div>
   </div>
 
-  <!-- Slide 7: Přehled -->
+  <!-- Slide 7: Wallbox -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Wallbox</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blind-label" style="text-align:center">Nabíječka</div>
+        <div class="blind-pos" id="wallboxStatus" style="text-align:center;margin-top:4px">Načítám…</div>
+        <div class="wb-modes" id="wbModes"></div>
+        <div class="timer-form-row" style="margin-top:10px">
+          <select id="wbCurrent" class="timer-select"></select>
+        </div>
+        <div class="updated" id="wbHint" style="margin-top:8px;text-align:center"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 8: Přehled -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1015,7 +1059,7 @@
     </div>
   </div>
 
-  <!-- Slide 8: Log -->
+  <!-- Slide 9: Log -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -2225,6 +2269,97 @@ timerAddBtn.addEventListener('click', async () => {
   timerAddBtn.disabled = false;
 });
 
+// ---------- Wallbox (Solax EV charger) ----------
+
+const wallboxStatusEl = document.getElementById('wallboxStatus');
+const wbModesEl = document.getElementById('wbModes');
+const wbCurrentEl = document.getElementById('wbCurrent');
+const wbHintEl = document.getElementById('wbHint');
+let wallboxData = null;
+let wallboxEnabledFlag = null;
+
+const WB_MODE_LABELS_UI = { stop: 'Stop', fast: 'Rychlý', eco: 'Eko', green: 'Zelený' };
+const WB_CURRENTS_UI = { green: [3, 6], eco: [6, 10, 16, 20, 25], fast: [6, 8, 10, 13, 16, 20, 25, 32] };
+let wbSelectedMode = 'eco';
+
+function renderWbCurrents() {
+  const allowed = WB_CURRENTS_UI[wbSelectedMode] || [];
+  const prev = Number(wbCurrentEl.value);
+  wbCurrentEl.textContent = '';
+  for (const a of allowed) {
+    const opt = document.createElement('option');
+    opt.value = a;
+    opt.textContent = a + ' A';
+    wbCurrentEl.appendChild(opt);
+  }
+  wbCurrentEl.value = allowed.includes(prev) ? prev : (wbSelectedMode === 'green' ? 6 : 16);
+  if (!wbCurrentEl.value && allowed.length) wbCurrentEl.value = allowed[0];
+  wbCurrentEl.style.display = allowed.length ? 'block' : 'none';
+}
+
+async function wbSetMode(mode, btn) {
+  wbSelectedMode = mode;
+  renderWbCurrents();
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/wallbox/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ mode, current: Number(wbCurrentEl.value) || 6 })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Wallbox: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+function renderWallbox() {
+  if (wallboxEnabledFlag === false) {
+    wallboxStatusEl.textContent = 'Wallbox není nastaven (chybí WALLBOX_SN na serveru).';
+    wbModesEl.textContent = '';
+    wbCurrentEl.style.display = 'none';
+    wbHintEl.textContent = '';
+    return;
+  }
+  const w = wallboxData || {};
+  const parts = [];
+  if (typeof w.power === 'number') parts.push('výkon ' + (w.power >= 1000 ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW' : Math.round(w.power) + ' W'));
+  if (w.mode && WB_MODE_LABELS_UI[w.mode]) parts.push('režim ' + WB_MODE_LABELS_UI[w.mode]);
+  if (typeof w.energyToday === 'number') parts.push('dnes ' + String(w.energyToday).replace('.', ',') + ' kWh');
+  wallboxStatusEl.textContent = parts.length ? parts.join(' · ') : (w.error || 'Načítám…');
+  wbHintEl.textContent = w.error && parts.length === 0 ? '' : (w.error || '');
+
+  if (!wbModesEl.children.length) {
+    for (const mode of ['stop', 'fast', 'eco', 'green']) {
+      const btn = document.createElement('button');
+      btn.className = 'wb-mode-btn';
+      btn.dataset.mode = mode;
+      btn.textContent = WB_MODE_LABELS_UI[mode];
+      btn.addEventListener('click', () => wbSetMode(mode, btn));
+      wbModesEl.appendChild(btn);
+    }
+    renderWbCurrents();
+  }
+  for (const btn of wbModesEl.children) {
+    btn.classList.toggle('active', btn.dataset.mode === w.mode);
+  }
+}
+
+wbCurrentEl.addEventListener('change', () => {
+  // Změna proudu se pošle jen pokud je zvolený režim aktivní na nabíječce
+  if (wallboxData && wallboxData.mode === wbSelectedMode && wbSelectedMode !== 'stop') {
+    wbSetMode(wbSelectedMode, null);
+  }
+});
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -2254,6 +2389,9 @@ function applySnapshot(snap) {
   renderAircon();
   airconTimersData = snap.airconTimers || [];
   renderTimers();
+  wallboxEnabledFlag = snap.wallboxEnabled !== false;
+  wallboxData = snap.wallbox || null;
+  renderWallbox();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -2350,6 +2488,10 @@ function connectStream() {
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];
     renderTimers();
+  });
+  es.addEventListener('wallbox', e => {
+    wallboxData = JSON.parse(e.data).wallbox || null;
+    renderWallbox();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);
