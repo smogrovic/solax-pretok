@@ -627,7 +627,11 @@ app.post('/api/timeline/restore', (req, res) => {
   const now = Date.now();
   const cutoff = now - TIMELINE_MAX_AGE_MS;
   let changed = false;
-  for (const k of Object.keys(state.timeline)) {
+  // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
+  const validKey = k => /^(shelly|pool|solinator|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
+  for (const k of Array.from(keys).slice(0, 16)) {
+    if (!state.timeline[k]) state.timeline[k] = [];
     const incoming = Array.isArray(tl[k]) ? tl[k] : [];
     const clean = incoming
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number'
@@ -1870,6 +1874,21 @@ async function pollAircon() {
       await delay(500);
     }
 
+    // Časová osa: segmenty běhu klimatizací (dynamické klíče ac_<guid>)
+    const nowTs = Date.now();
+    for (const d of out) {
+      const key = 'ac_' + d.guid;
+      if (!state.timeline[key]) state.timeline[key] = [];
+      if (d.power === true) {
+        const segs = state.timeline[key];
+        const last = segs[segs.length - 1];
+        if (last && nowTs - last.to <= TIMELINE_GAP_MS) last.to = nowTs;
+        else segs.push({ from: nowTs, to: nowTs });
+      }
+    }
+    pruneTimeline();
+    broadcast('timeline', { timeline: state.timeline });
+
     state.aircon = { devices: out, aquarea, error: null, fetchedAt: new Date().toISOString() };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
@@ -2043,21 +2062,33 @@ async function wbPost(path, body) {
   throw lastErr || new Error('Wallbox API nedostupné.');
 }
 
-// Čtení stavu: přesný endpoint pro EV charger není veřejně zdokumentovaný,
-// zkoušíme známé kandidáty a bereme první, který vrátí data
+// Charger API žije pod /proxyApp/proxy/api/v2/charger/… (zjištěno z API dokumentace)
+const WB_READ_PATHS = [
+  '/proxyApp/proxy/api/v2/charger/getRealtimeInfo',
+  '/proxyApp/proxy/api/v2/charger/getInfo',
+  '/proxyApp/proxy/api/v2/charger/getSetting',
+  '/api/v2/dataAccess/realtimeInfo/get'
+];
+const WB_SETMODE_PATHS = [
+  '/proxyApp/proxy/api/v2/charger/setMode',
+  '/api/v2/charger/setMode'
+];
+
+// Čtení stavu: zkoušíme známé kandidáty a bereme první, který vrátí data
 async function wbFetchStatus() {
   const reasons = [];
-  const candidates = [
-    { name: 'v2 realtimeInfo', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
-    {
-      name: 'v6 getRealtimeInfo',
-      run: async () => {
-        const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        return res.json();
-      }
+  const candidates = WB_READ_PATHS.map(p => ({
+    name: p.split('/').pop(),
+    run: () => wbPost(p, p.includes('dataAccess') ? { wifiSn: WALLBOX_SN } : { sn: WALLBOX_SN })
+  }));
+  candidates.push({
+    name: 'v6 getRealtimeInfo',
+    run: async () => {
+      const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      return res.json();
     }
-  ];
+  });
   for (const c of candidates) {
     try {
       const data = await c.run();
@@ -2110,24 +2141,24 @@ if (wallboxEnabled) {
   setInterval(pollWallbox, 5 * 60 * 1000);
 }
 
-// Diagnostika: surové odpovědi všech kandidátních endpointů
+// Diagnostika: surové odpovědi všech kandidátních endpointů, po hostech
 app.get('/api/wallbox/debug', async (req, res) => {
   if (!wallboxEnabled) return res.json({ enabled: false, hint: 'Chybí WALLBOX_SN (a SOLAX_TOKEN_ID).' });
   const out = [];
-  const candidates = [
-    ['v2 realtimeInfo (wifiSn)', () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN })],
-    ['v2 charger getRealtimeInfo', () => wbPost('/api/v2/charger/getRealtimeInfo', { sn: WALLBOX_SN })],
-    ['v6 getRealtimeInfo.do', async () => {
-      const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      return r.json();
-    }]
-  ];
-  for (const [name, run] of candidates) {
-    try {
-      out.push({ endpoint: name, data: await run() });
-    } catch (err) {
-      out.push({ endpoint: name, error: err.message });
+  for (const path of WB_READ_PATHS) {
+    for (const host of WB_HOSTS) {
+      try {
+        const r = await fetch(host + path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
+          body: JSON.stringify(path.includes('dataAccess') ? { wifiSn: WALLBOX_SN } : { sn: WALLBOX_SN }),
+          signal: AbortSignal.timeout(15000)
+        });
+        const text = await r.text();
+        out.push({ endpoint: host.replace('https://', '') + path, status: r.status, body: text.slice(0, 300) });
+      } catch (err) {
+        out.push({ endpoint: host.replace('https://', '') + path, error: err.message });
+      }
     }
   }
   res.json(out);
@@ -2150,8 +2181,18 @@ app.post('/api/wallbox/set', async (req, res) => {
     }
   }
   try {
-    const data = await wbPost('/api/v2/charger/setMode', { sn: WALLBOX_SN, mode: WB_MODES[mode], current: amps });
-    if (data && data.success === false) {
+    let data = null;
+    let lastErr = null;
+    for (const path of WB_SETMODE_PATHS) {
+      try {
+        data = await wbPost(path, { sn: WALLBOX_SN, mode: WB_MODES[mode], current: amps });
+        break; // endpoint existuje a odpověděl
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!data) throw lastErr || new Error('SolaxCloud nedostupný.');
+    if (data.success === false) {
       throw new Error(data.exception || 'SolaxCloud příkaz odmítl.');
     }
     state.wallbox = { ...state.wallbox, mode };

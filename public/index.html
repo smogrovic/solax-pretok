@@ -445,8 +445,9 @@
   }
   .timeline-legend{
     display:flex;
+    flex-wrap:wrap;
     justify-content:center;
-    gap:14px;
+    gap:6px 14px;
     margin-top:6px;
     font-size:11px;
     color:var(--grey-text);
@@ -527,6 +528,18 @@
   }
   .timer-form-row > *{flex:1;}
   .timer-time{text-align:center;font-weight:700;}
+  .timer-plus-btn{
+    flex:0 0 auto;
+    border:none;
+    border-radius:12px;
+    padding:10px 12px;
+    background:rgba(44,62,80,0.08);
+    color:var(--navy);
+    font-size:13px;
+    font-weight:700;
+    white-space:nowrap;
+  }
+  .timer-plus-btn:active{background:rgba(44,62,80,0.16);}
   .timer-add-btn{
     width:100%;
     margin-top:10px;
@@ -1016,6 +1029,7 @@
             <option value="off">Vypnout</option>
           </select>
           <input type="time" id="timerTime" class="timer-time" value="06:30">
+          <button class="timer-plus-btn" id="timerPlusBtn">+1&nbsp;h</button>
         </div>
         <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="timerList"></div>
@@ -1088,11 +1102,7 @@
       <div class="card stats-card">
         <div class="graph-title">Kdy co běželo (8:00–24:00)</div>
         <canvas id="timelineChart"></canvas>
-        <div class="timeline-legend">
-          <span><i style="background:#e5534b"></i>Bojler</span>
-          <span><i style="background:#3b82c4"></i>Bazén</span>
-          <span><i style="background:#3fb950"></i>Solinátor</span>
-        </div>
+        <div class="timeline-legend" id="timelineLegend"></div>
       </div>
     </div>
   </div>
@@ -1651,19 +1661,43 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
 // ---------- Časová osa: kdy běžel bojler / bazén / solinátor (2 dny) ----------
 
 const timelineCanvas = document.getElementById('timelineChart');
-const TIMELINE_KEYS = ['shelly', 'pool', 'solinator'];
-const TIMELINE_COLORS = { shelly: '#e5534b', pool: '#3b82c4', solinator: '#3fb950' };
+const timelineLegendEl = document.getElementById('timelineLegend');
+const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator'];
+const TIMELINE_BASE = {
+  shelly: { label: 'Bojler', color: '#e5534b' },
+  pool: { label: 'Bazén', color: '#3b82c4' },
+  solinator: { label: 'Solinátor', color: '#3fb950' }
+};
+const TIMELINE_AC_COLORS = ['#9b59d0', '#e8a13a', '#18a999', '#e05fa0', '#7f8c8d'];
 let timelineData = { shelly: [], pool: [], solinator: [] };
 
 function pruneTimelineLocal(tl) {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
   const out = {};
-  for (const k of TIMELINE_KEYS) {
-    out[k] = (Array.isArray(tl && tl[k]) ? tl[k] : [])
+  for (const k of Object.keys(tl || {})) {
+    if (!/^(shelly|pool|solinator|ac_)/.test(k)) continue;
+    out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number' && s.to >= cutoff)
       .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
   }
+  for (const k of TIMELINE_BASE_KEYS) {
+    if (!out[k]) out[k] = [];
+  }
   return out;
+}
+
+// Dráhy grafu: tři pevná zařízení + klimatizace v pořadí ze stránky Klima
+function timelineLanes() {
+  const lanes = TIMELINE_BASE_KEYS.map(k => ({ key: k, ...TIMELINE_BASE[k] }));
+  const acDevices = (airconData && airconData.devices) || [];
+  const acGuids = acDevices.map(d => d.guid);
+  const acKeys = Object.keys(timelineData).filter(k => k.startsWith('ac_'));
+  acKeys.sort((a, b) => acGuids.indexOf(a.slice(3)) - acGuids.indexOf(b.slice(3)));
+  acKeys.forEach((k, i) => {
+    const dev = acDevices.find(d => 'ac_' + d.guid === k);
+    lanes.push({ key: k, label: dev ? dev.name : 'Klima', color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] });
+  });
+  return lanes;
 }
 
 function saveTimelineLocal() {
@@ -1695,7 +1729,7 @@ function mergeTimelineSegs(a, b) {
 }
 
 async function maybeRestoreTimelineToServer(serverTl, localTl) {
-  const hasExtra = TIMELINE_KEYS.some(k => {
+  const hasExtra = Object.keys(localTl).some(k => {
     const local = localTl[k] || [];
     if (!local.length) return false;
     const server = (serverTl && serverTl[k]) || [];
@@ -1714,19 +1748,36 @@ async function maybeRestoreTimelineToServer(serverTl, localTl) {
 
 function renderTimeline() {
   if (!timelineCanvas) return;
+  const lanes = timelineLanes();
+
+  const padL = 44, padR = 8, padB = 16, padT = 4;
+  const laneH = 6, laneGap = 5;
+  const dayGap = 14;
+  const dayBlockH = lanes.length * laneH + (lanes.length - 1) * laneGap;
+
+  // Výška podle počtu drah (klimatizace přibývají dynamicky)
+  const targetH = padT + 8 + 2 * dayBlockH + dayGap + padB + 6;
+  timelineCanvas.style.height = targetH + 'px';
+
   const ctx = timelineCanvas.getContext('2d');
   const w = timelineCanvas.clientWidth || 300;
-  const h = timelineCanvas.clientHeight || 150;
+  const h = targetH;
   const dpr = window.devicePixelRatio || 1;
   timelineCanvas.width = w * dpr;
   timelineCanvas.height = h * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const padL = 44, padR = 8, padB = 16, padT = 4;
-  const laneH = 6, laneGap = 5;
-  const dayGap = 14;
-  const dayBlockH = TIMELINE_KEYS.length * laneH + (TIMELINE_KEYS.length - 1) * laneGap;
+  // Legenda
+  timelineLegendEl.textContent = '';
+  for (const lane of lanes) {
+    const span = document.createElement('span');
+    const dot = document.createElement('i');
+    dot.style.background = lane.color;
+    span.appendChild(dot);
+    span.appendChild(document.createTextNode(lane.label));
+    timelineLegendEl.appendChild(span);
+  }
 
   ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
 
@@ -1761,7 +1812,7 @@ function renderTimeline() {
     ctx.textAlign = 'left';
     ctx.fillText(day.label, 2, blockTop + dayBlockH / 2 + 3);
 
-    TIMELINE_KEYS.forEach((k, i) => {
+    lanes.forEach((lane, i) => {
       const y = blockTop + i * (laneH + laneGap) + laneH / 2;
       // Slabá linka celé dráhy
       ctx.strokeStyle = 'rgba(44,62,80,0.06)';
@@ -1772,8 +1823,8 @@ function renderTimeline() {
       ctx.lineTo(x(1), y);
       ctx.stroke();
       // Segmenty zapnutí
-      ctx.strokeStyle = TIMELINE_COLORS[k];
-      for (const s of timelineData[k] || []) {
+      ctx.strokeStyle = lane.color;
+      for (const s of timelineData[lane.key] || []) {
         const from = Math.max(s.from, day.start);
         const to = Math.min(s.to, day.end);
         if (to <= from) continue;
@@ -2041,11 +2092,14 @@ let blindTimersData = [];
 
 function renderBlindTimerDevices() {
   for (const card of blindTimerCards) {
+    // V seznamu jsou jen rolety patřící na stránku, kde časovač je
+    const page = card.closest('#blindsSlide2') ? 2 : 1;
     const sel = card.querySelector('.bt-device');
     const prev = sel.value;
     sel.textContent = '';
     for (const b of blinds) {
       if (b.type !== 'cover') continue;
+      if (roomPageIndex(b.room).page !== page) continue;
       const opt = document.createElement('option');
       opt.value = b.deviceURL;
       opt.textContent = `${b.label} (${b.room})`;
@@ -2306,15 +2360,6 @@ function renderAircon() {
       pos.textContent = 'stav nedostupný';
     }
     info.appendChild(pos);
-    for (const z of a.zones || []) {
-      const zone = document.createElement('span');
-      zone.className = 'aqua-zone';
-      const zparts = [z.name + ': ' + formatTempC(z.temp)];
-      if (typeof z.target === 'number') zparts.push('cíl ' + formatTempC(z.target));
-      zparts.push(z.on ? 'zapnuto' : 'vypnuto');
-      zone.textContent = zparts.join(' · ');
-      info.appendChild(zone);
-    }
     row.appendChild(info);
     wrap.appendChild(row);
     airconListEl.appendChild(wrap);
@@ -2377,11 +2422,22 @@ function renderTimers() {
   }
 }
 
+// Tlačítko +1 h: první klepnutí = teď + 1 h, každé další přidá hodinu
+const timerPlusBtn = document.getElementById('timerPlusBtn');
+let timerPlusCount = 0;
+timerPlusBtn.addEventListener('click', () => {
+  timerPlusCount++;
+  const t = new Date(Date.now() + timerPlusCount * 3600000);
+  timerTimeEl.value = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+});
+timerTimeEl.addEventListener('input', () => { timerPlusCount = 0; });
+
 timerAddBtn.addEventListener('click', async () => {
   const guid = timerDeviceEl.value;
   const time = timerTimeEl.value;
   const action = timerActionEl.value;
   if (!guid || !time) return;
+  timerPlusCount = 0;
   timerAddBtn.disabled = true;
   try {
     const res = await fetch('/api/aircon/timer', {
@@ -2548,7 +2604,9 @@ function applySnapshot(snap) {
   const serverTl = pruneTimelineLocal(snap.timeline);
   const localTl = loadTimelineLocal();
   timelineData = {};
-  for (const k of TIMELINE_KEYS) timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
+  for (const k of new Set([...Object.keys(serverTl), ...Object.keys(localTl)])) {
+    timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
+  }
   renderTimeline();
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
@@ -2620,6 +2678,7 @@ function connectStream() {
   es.addEventListener('aircon', e => {
     airconData = JSON.parse(e.data).aircon || { devices: [], error: null };
     renderAircon();
+    renderTimeline(); // názvy klimatizací v legendě osy
   });
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];
