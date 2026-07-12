@@ -465,7 +465,8 @@
     border-radius:4px;
     transition:height .3s ease;
   }
-  #timelineChart{
+  #timelineChart,
+  #timelineChartAc{
     width:100%;
     height:150px;
     display:block;
@@ -1384,6 +1385,12 @@
         <canvas id="timelineChart"></canvas>
         <div class="timeline-legend" id="timelineLegend"></div>
       </div>
+
+      <div class="card stats-card" id="timelineAcCard">
+        <div class="graph-title">Klimatizace (24 h)</div>
+        <canvas id="timelineChartAc"></canvas>
+        <div class="timeline-legend" id="timelineLegendAc"></div>
+      </div>
     </div>
   </div>
 
@@ -1941,6 +1948,9 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
 
 const timelineCanvas = document.getElementById('timelineChart');
 const timelineLegendEl = document.getElementById('timelineLegend');
+const timelineAcCanvas = document.getElementById('timelineChartAc');
+const timelineAcLegendEl = document.getElementById('timelineLegendAc');
+const timelineAcCard = document.getElementById('timelineAcCard');
 const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox'];
 const TIMELINE_BASE = {
   shelly: { label: 'Bojler', color: '#e5534b' },
@@ -1966,18 +1976,21 @@ function pruneTimelineLocal(tl) {
   return out;
 }
 
-// Dráhy grafu: tři pevná zařízení + klimatizace v pořadí ze stránky Klima
-function timelineLanes() {
-  const lanes = TIMELINE_BASE_KEYS.map(k => ({ key: k, ...TIMELINE_BASE[k] }));
+// Pevná zařízení: bojler, bazén, solinátor, wallbox
+function baseTimelineLanes() {
+  return TIMELINE_BASE_KEYS.map(k => ({ key: k, ...TIMELINE_BASE[k] }));
+}
+
+// Klimatizace v pořadí ze stránky Klima (samostatný graf)
+function airconTimelineLanes() {
   const acDevices = (airconData && airconData.devices) || [];
   const acGuids = acDevices.map(d => d.guid);
   const acKeys = Object.keys(timelineData).filter(k => k.startsWith('ac_'));
   acKeys.sort((a, b) => acGuids.indexOf(a.slice(3)) - acGuids.indexOf(b.slice(3)));
-  acKeys.forEach((k, i) => {
+  return acKeys.map((k, i) => {
     const dev = acDevices.find(d => 'ac_' + d.guid === k);
-    lanes.push({ key: k, label: dev ? dev.name : 'Klima', color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] });
+    return { key: k, label: dev ? dev.name : 'Klima', color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] };
   });
-  return lanes;
 }
 
 function saveTimelineLocal() {
@@ -2026,56 +2039,58 @@ async function maybeRestoreTimelineToServer(serverTl, localTl) {
   } catch {}
 }
 
-function renderTimeline() {
-  if (!timelineCanvas) return;
-  const lanes = timelineLanes();
+// Vykreslí jeden graf časové osy: dva dny (Dnes/Včera), okno od startHour
+// v délce spanHours (base = 8:00–24:00, klimatizace = 0:00–24:00).
+function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
+  if (!canvas || !legendEl) return;
 
   const padL = 44, padR = 8, padB = 16, padT = 4;
   const laneH = 6, laneGap = 5;
   const dayGap = 14;
-  const dayBlockH = lanes.length * laneH + (lanes.length - 1) * laneGap;
+  const laneCount = Math.max(lanes.length, 1);
+  const dayBlockH = laneCount * laneH + (laneCount - 1) * laneGap;
 
   // Výška podle počtu drah (klimatizace přibývají dynamicky)
   const targetH = padT + 8 + 2 * dayBlockH + dayGap + padB + 6;
-  timelineCanvas.style.height = targetH + 'px';
+  canvas.style.height = targetH + 'px';
 
-  const ctx = timelineCanvas.getContext('2d');
-  const w = timelineCanvas.clientWidth || 300;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.clientWidth || 300;
   const h = targetH;
   const dpr = window.devicePixelRatio || 1;
-  timelineCanvas.width = w * dpr;
-  timelineCanvas.height = h * dpr;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
   // Legenda
-  timelineLegendEl.textContent = '';
+  legendEl.textContent = '';
   for (const lane of lanes) {
     const span = document.createElement('span');
     const dot = document.createElement('i');
     dot.style.background = lane.color;
     span.appendChild(dot);
     span.appendChild(document.createTextNode(lane.label));
-    timelineLegendEl.appendChild(span);
+    legendEl.appendChild(span);
   }
 
   ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
 
-  // Den = okno 8:00–24:00; index 0 = dnes, 1 = včera
+  const spanMs = spanHours * 60 * 60 * 1000;
   const days = [];
   for (let d = 0; d < 2; d++) {
     const start = new Date();
-    start.setHours(8, 0, 0, 0);
+    start.setHours(startHour, 0, 0, 0);
     start.setDate(start.getDate() - d);
-    days.push({ start: start.getTime(), end: start.getTime() + 16 * 60 * 60 * 1000, label: d === 0 ? 'Dnes' : 'Včera' });
+    days.push({ start: start.getTime(), end: start.getTime() + spanMs, label: d === 0 ? 'Dnes' : 'Včera' });
   }
 
   const x = frac => padL + frac * (w - padL - padR);
 
-  // Svislá mřížka + popisky hodin (8–24 po 4 h)
+  // Svislá mřížka + popisky hodin po 4 h
   ctx.textAlign = 'center';
-  for (let hh = 8; hh <= 24; hh += 4) {
-    const fx = x((hh - 8) / 16);
+  for (let hh = startHour; hh <= startHour + spanHours; hh += 4) {
+    const fx = x((hh - startHour) / spanHours);
     ctx.strokeStyle = 'rgba(44,62,80,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -2117,6 +2132,15 @@ function renderTimeline() {
       }
     });
   });
+}
+
+function renderTimeline() {
+  // Pevná zařízení: okno 8:00–24:00
+  drawTimeline(timelineCanvas, timelineLegendEl, baseTimelineLanes(), 8, 16);
+  // Klimatizace: samostatný graf, celých 24 h (0:00–24:00)
+  const acLanes = airconTimelineLanes();
+  if (timelineAcCard) timelineAcCard.style.display = acLanes.length ? '' : 'none';
+  if (acLanes.length) drawTimeline(timelineAcCanvas, timelineAcLegendEl, acLanes, 0, 24);
 }
 
 window.addEventListener('resize', renderTimeline);
