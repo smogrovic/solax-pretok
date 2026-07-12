@@ -735,7 +735,10 @@ app.post('/api/tempauto', (req, res) => {
     const rule = TEMP_AUTO_RULES.find(r => r.key === key);
     addLog(`Teplotní automatika ${rule ? rule.room : key}: ${enabled ? 'zapnuta' : 'vypnuta'}`);
     broadcast('tempAuto', { tempAuto: state.tempAuto });
-    if (enabled && panasonicEnabled) setTimeout(pollAircon, 500); // hned vyhodnotit
+    if (enabled) {
+      delete tempAutoOffAt[key]; // ruční zapnutí automatiky ruší 30min blokaci
+      if (panasonicEnabled) setTimeout(pollAircon, 500); // hned vyhodnotit
+    }
   }
   res.json({ tempAuto: state.tempAuto });
 });
@@ -2011,12 +2014,15 @@ async function pccGetStatus(guid) {
 }
 
 // Teplotní automatika: když teplota v pokoji stoupne na onTemp, zapne chlazení
-// na onTemp °C; vypne, až klesne na offTemp °C (hystereze proti neustálému blikání).
+// na coolTemp °C (tiše); vypne, až klesne pod offTemp °C (hystereze). Po vypnutí
+// automatikou zůstane pokoj aspoň TEMP_AUTO_OFF_LOCKOUT_MS vypnutý (nezapne dřív).
 const TEMP_AUTO_RULES = [
-  { key: 'loznice', room: 'Ložnice', onTemp: 22, offTemp: 20.5, quiet: true },
-  { key: 'elenka', room: 'Elenka', onTemp: 22, offTemp: 20.5, quiet: false },
-  { key: 'miky', room: 'Miky', onTemp: 22, offTemp: 20.5, quiet: false }
+  { key: 'loznice', room: 'Ložnice', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
+  { key: 'elenka', room: 'Elenka', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
+  { key: 'miky', room: 'Miky', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true }
 ];
+const TEMP_AUTO_OFF_LOCKOUT_MS = 30 * 60 * 1000; // po vypnutí drž vypnuté aspoň 30 min
+const tempAutoOffAt = {}; // key -> čas posledního vypnutí automatikou
 
 async function evaluateTempAuto(devices) {
   for (const rule of TEMP_AUTO_RULES) {
@@ -2025,9 +2031,10 @@ async function evaluateTempAuto(devices) {
     const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
     if (!dev || typeof dev.insideTemp !== 'number') continue;
     let parameters = null, msg = null;
-    if (dev.insideTemp >= rule.onTemp && dev.power !== true) {
-      parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: rule.onTemp, ecoMode: rule.quiet ? 2 : 0 };
-      msg = `${dev.name}: zapnuto chlazení ${rule.onTemp} °C (v pokoji ${dev.insideTemp} °C)`;
+    const lockedUntil = (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_OFF_LOCKOUT_MS;
+    if (dev.insideTemp >= rule.onTemp && dev.power !== true && Date.now() >= lockedUntil) {
+      parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: rule.coolTemp, ecoMode: rule.quiet ? 2 : 0 };
+      msg = `${dev.name}: zapnuto chlazení ${rule.coolTemp} °C (v pokoji ${dev.insideTemp} °C)`;
     } else if (dev.insideTemp <= rule.offTemp && dev.power === true) {
       parameters = { operate: 0 };
       msg = `${dev.name}: vypnuto (v pokoji ${dev.insideTemp} °C)`;
@@ -2038,6 +2045,7 @@ async function evaluateTempAuto(devices) {
         method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
       }));
       dev.power = parameters.operate === 1;
+      if (parameters.operate === 0) tempAutoOffAt[rule.key] = Date.now(); // start 30min blokace
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
       if (parameters.operationMode !== undefined) dev.mode = 'cool';
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
