@@ -90,6 +90,7 @@ const state = {
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
+  tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
 
@@ -183,6 +184,7 @@ function snapshot() {
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
     airconTimers,
+    tempAuto: state.tempAuto,
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
@@ -719,6 +721,23 @@ app.post('/api/automation', (req, res) => {
     broadcast('automation', { enabled });
   }
   res.json({ enabled: state.autoEnabled });
+});
+
+// Teplotní automatika klimatizace — přepínač per pokoj (ložnice/elenka/miky)
+app.post('/api/tempauto', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { key, enabled } = req.body || {};
+  if (!Object.prototype.hasOwnProperty.call(state.tempAuto, key) || typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Neplatný požadavek.' });
+  }
+  if (state.tempAuto[key] !== enabled) {
+    state.tempAuto[key] = enabled;
+    const rule = TEMP_AUTO_RULES.find(r => r.key === key);
+    addLog(`Teplotní automatika ${rule ? rule.room : key}: ${enabled ? 'zapnuta' : 'vypnuta'}`);
+    broadcast('tempAuto', { tempAuto: state.tempAuto });
+    if (enabled && panasonicEnabled) setTimeout(pollAircon, 500); // hned vyhodnotit
+  }
+  res.json({ tempAuto: state.tempAuto });
 });
 
 // Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
@@ -1991,6 +2010,45 @@ async function pccGetStatus(guid) {
   };
 }
 
+// Teplotní automatika: když teplota v pokoji stoupne na onTemp, zapne chlazení
+// na onTemp °C; vypne, až klesne na offTemp °C (hystereze proti neustálému blikání).
+const TEMP_AUTO_RULES = [
+  { key: 'loznice', room: 'Ložnice', onTemp: 22, offTemp: 20.5, quiet: true },
+  { key: 'elenka', room: 'Elenka', onTemp: 22, offTemp: 20.5, quiet: false },
+  { key: 'miky', room: 'Miky', onTemp: 22, offTemp: 20.5, quiet: false }
+];
+
+async function evaluateTempAuto(devices) {
+  for (const rule of TEMP_AUTO_RULES) {
+    if (!state.tempAuto[rule.key]) continue;
+    const rn = cz(rule.room);
+    const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
+    if (!dev || typeof dev.insideTemp !== 'number') continue;
+    let parameters = null, msg = null;
+    if (dev.insideTemp >= rule.onTemp && dev.power !== true) {
+      parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: rule.onTemp, ecoMode: rule.quiet ? 2 : 0 };
+      msg = `${dev.name}: zapnuto chlazení ${rule.onTemp} °C (v pokoji ${dev.insideTemp} °C)`;
+    } else if (dev.insideTemp <= rule.offTemp && dev.power === true) {
+      parameters = { operate: 0 };
+      msg = `${dev.name}: vypnuto (v pokoji ${dev.insideTemp} °C)`;
+    }
+    if (!parameters) continue;
+    try {
+      await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+        method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
+      }));
+      dev.power = parameters.operate === 1;
+      if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
+      if (parameters.operationMode !== undefined) dev.mode = 'cool';
+      if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
+      addLog(`Teplotní automatika — ${msg}`);
+      broadcast('aircon', { aircon: state.aircon });
+    } catch (err) {
+      addLog(`Teplotní automatika ${rule.room}: příkaz selhal (${err.message.slice(0, 100)})`);
+    }
+  }
+}
+
 let airconPollRunning = false;
 let airconStatusLogged = false;
 
@@ -2033,6 +2091,9 @@ async function pollAircon() {
       addLog(`Klima: připojeno k Panasonic (${out.length + aquaOut.length} zařízení)`);
     }
     broadcast('aircon', { aircon: state.aircon });
+
+    // Teplotní automatika vyhodnotíme z čerstvých teplot
+    await evaluateTempAuto(out);
   } catch (err) {
     state.aircon = { devices: state.aircon.devices || [], aquarea: state.aircon.aquarea || [], error: err.message };
     if (!airconStatusLogged) {

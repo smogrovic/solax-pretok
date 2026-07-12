@@ -620,6 +620,62 @@
     font-variant-numeric:tabular-nums;
   }
   .asst-log-text{color:var(--navy);}
+  .tempauto-card{margin-top:12px;}
+  .tempauto-hint{
+    font-size:12px;
+    color:var(--grey-text);
+    line-height:1.4;
+    margin-bottom:12px;
+  }
+  .tempauto-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .tempauto-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .tempauto-name{
+    font-size:14px;
+    font-weight:600;
+    color:var(--navy);
+  }
+  .tempauto-temp{
+    font-size:12px;
+    color:var(--grey-text);
+    margin-left:6px;
+    font-weight:400;
+  }
+  .toggle-switch{
+    position:relative;
+    width:46px;
+    height:26px;
+    flex:0 0 auto;
+    border:none;
+    border-radius:13px;
+    background:rgba(44,62,80,0.18);
+    padding:0;
+    cursor:pointer;
+    transition:background .2s;
+  }
+  .toggle-switch::after{
+    content:"";
+    position:absolute;
+    top:3px;
+    left:3px;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,0.3);
+    transition:transform .2s;
+  }
+  .toggle-switch.on{background:#f5933d;}
+  .toggle-switch.on::after{transform:translateX(20px);}
+  .toggle-switch:disabled{opacity:0.5;}
   .mode-select{
     border:none;
     border-radius:12px;
@@ -1008,6 +1064,11 @@
       <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
         <div class="asst-log-title">Co asistent udělal</div>
         <div class="asst-log" id="asstLog"></div>
+      </div>
+      <div class="card lockable tempauto-card" id="tempAutoCard">
+        <div class="asst-log-title">Teplotní automatika</div>
+        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne chlazení na 22 °C. Vypne, jakmile klesne pod 20,5 °C.</div>
+        <div class="tempauto-list" id="tempAutoList"></div>
       </div>
     </div>
   </div>
@@ -3145,6 +3206,69 @@ if (asstSend) {
   asstInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAssistant(); });
 }
 
+// ---------- Teplotní automatika klimatizace ----------
+
+const TEMP_AUTO_ROOMS = [
+  { key: 'loznice', label: 'Ložnice' },
+  { key: 'elenka', label: 'Elenka' },
+  { key: 'miky', label: 'Miky' }
+];
+const tempAutoListEl = document.getElementById('tempAutoList');
+let tempAutoData = { loznice: false, elenka: false, miky: false };
+
+function roomInsideTemp(label) {
+  const devs = (airconData && airconData.devices) || [];
+  const n = label.toLowerCase();
+  const dev = devs.find(d => (d.name || '').toLowerCase().includes(n));
+  return dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null;
+}
+
+function renderTempAuto() {
+  if (!tempAutoListEl) return;
+  tempAutoListEl.textContent = '';
+  for (const room of TEMP_AUTO_ROOMS) {
+    const row = document.createElement('div');
+    row.className = 'tempauto-row';
+    const name = document.createElement('div');
+    name.className = 'tempauto-name';
+    name.textContent = room.label;
+    const t = roomInsideTemp(room.label);
+    if (t !== null) {
+      const temp = document.createElement('span');
+      temp.className = 'tempauto-temp';
+      temp.textContent = t.toFixed(1).replace('.', ',') + ' °C';
+      name.appendChild(temp);
+    }
+    const sw = document.createElement('button');
+    sw.className = 'toggle-switch' + (tempAutoData[room.key] ? ' on' : '');
+    sw.setAttribute('aria-label', room.label);
+    sw.addEventListener('click', async () => {
+      const next = !tempAutoData[room.key];
+      sw.disabled = true;
+      try {
+        const res = await fetch('/api/tempauto', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+          body: JSON.stringify({ key: room.key, enabled: next })
+        });
+        const data = await res.json();
+        if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Zamčené.'); }
+        if (!res.ok) throw new Error(data.error || 'Nepodařilo se přepnout.');
+        tempAutoData = data.tempAuto || tempAutoData;
+        errorEl.classList.remove('show');
+      } catch (err) {
+        errorEl.textContent = 'Automatika: ' + err.message;
+        errorEl.classList.add('show');
+      }
+      sw.disabled = false;
+      renderTempAuto();
+    });
+    row.appendChild(name);
+    row.appendChild(sw);
+    tempAutoListEl.appendChild(row);
+  }
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -3186,6 +3310,8 @@ function applySnapshot(snap) {
   maybeRestoreWbHistoryToServer(serverWb, localWb);
   if (snap.assistantEnabled === false) hideAssistantSlide();
   renderAssistantLog(snap.assistantLog || []);
+  if (snap.tempAuto) tempAutoData = snap.tempAuto;
+  renderTempAuto();
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   relayTimersData = snap.relayTimers || [];
@@ -3288,10 +3414,15 @@ function connectStream() {
     airconData = JSON.parse(e.data).aircon || { devices: [], error: null };
     renderAircon();
     renderTimeline(); // názvy klimatizací v legendě osy
+    renderTempAuto(); // aktuální teploty v pokojích
   });
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];
     renderTimers();
+  });
+  es.addEventListener('tempAuto', e => {
+    tempAutoData = JSON.parse(e.data).tempAuto || tempAutoData;
+    renderTempAuto();
   });
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
