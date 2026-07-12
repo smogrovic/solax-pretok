@@ -438,6 +438,18 @@
   .blind-item:last-child{border-bottom:none;padding-bottom:0;}
   .blind-btn.blind-btn-txt{font-size:10px;font-weight:700;}
   .blind-btn-spacer{width:34px;height:34px;flex-shrink:0;}
+  .blind-meter-col{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+    flex-shrink:0;
+  }
+  .blind-meter-pct{
+    font-size:9px;
+    color:var(--grey-text);
+    font-weight:600;
+  }
   .blind-meter{
     width:8px;
     height:34px;
@@ -518,6 +530,84 @@
   }
   .mode-btn:disabled{opacity:0.5;}
   .mode-btn.active{background:var(--orange);color:#fff;}
+  .asszistant-card{align-items:stretch;}
+  .asst-hint{
+    font-size:12px;
+    color:var(--grey-text);
+    text-align:center;
+    margin-bottom:10px;
+  }
+  .asst-reply{
+    font-size:14px;
+    color:var(--navy);
+    font-weight:600;
+    text-align:center;
+    min-height:20px;
+    margin-bottom:10px;
+    white-space:pre-wrap;
+  }
+  .asst-reply.err{color:var(--red);}
+  .asst-row{
+    display:flex;
+    gap:8px;
+  }
+  .asst-input{
+    flex:1;
+    padding:12px 14px;
+    border:1px solid rgba(44,62,80,0.15);
+    border-radius:14px;
+    font-size:15px;
+    background:var(--bg);
+    color:var(--navy);
+    outline:none;
+    min-width:0;
+  }
+  .asst-send{
+    flex:0 0 auto;
+    width:46px;
+    border:none;
+    border-radius:14px;
+    background:var(--orange);
+    color:#fff;
+    font-size:16px;
+    font-weight:700;
+  }
+  .asst-send:active{background:var(--orange-dark);}
+  .asst-send:disabled{opacity:0.6;}
+  .asst-send.loading{color:transparent;position:relative;}
+  .asst-send.loading::after{
+    content:"";position:absolute;top:50%;left:50%;width:16px;height:16px;
+    margin:-8px 0 0 -8px;border:2px solid rgba(255,255,255,0.4);
+    border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;
+  }
+  .asst-examples{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:12px;
+    justify-content:center;
+  }
+  .asst-chip{
+    border:none;
+    border-radius:14px;
+    padding:7px 11px;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+    font-size:12px;
+  }
+  .mode-select{
+    border:none;
+    border-radius:12px;
+    padding:8px 10px;
+    background:rgba(44,62,80,0.08);
+    color:var(--navy);
+    font-size:12px;
+    font-weight:600;
+    font-family:inherit;
+    -webkit-appearance:none;
+    appearance:none;
+    text-align:center;
+  }
   .timer-card{
     margin-top:12px;
     align-items:stretch;
@@ -671,11 +761,11 @@
     margin:0;
   }
   .blind-tilt-val{
-    font-size:11px;
+    font-size:9px;
     font-weight:700;
-    color:var(--navy);
-    min-width:36px;
-    text-align:right;
+    color:var(--grey-text);
+    min-width:30px;
+    text-align:left;
   }
   .blind-btns{display:flex;gap:8px;}
   .blind-btn{
@@ -867,11 +957,37 @@
     </div>
   </div>
 
-  <!-- Slide 2: Rolety -->
+  <!-- Slide 2: Asistent -->
+  <div class="slide" id="assistantSlide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Asistent</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable asszistant-card">
+        <div class="asst-hint">Napiš nebo nadiktuj (mikrofon na klávesnici), co mám udělat.</div>
+        <div class="asst-reply" id="asstReply"></div>
+        <div class="asst-row">
+          <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
+          <button class="asst-send" id="asstSend">▶</button>
+        </div>
+        <div class="asst-examples" id="asstExamples"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 3: Žaluzie -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
-        <div class="title">Rolety</div>
+        <div class="title">Žaluzie</div>
       </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -908,11 +1024,11 @@
     </div>
   </div>
 
-  <!-- Slide 3: Rolety 2 -->
+  <!-- Slide 4: Žaluzie 2 -->
   <div class="slide" id="blindsSlide2">
     <div class="page">
       <div class="topbar">
-        <div class="title">Rolety</div>
+        <div class="title">Žaluzie</div>
       </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -947,7 +1063,7 @@
     </div>
   </div>
 
-  <!-- Slide 4: Klima -->
+  <!-- Slide 5: Klima -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -972,8 +1088,8 @@
         <select id="timerDevice" class="timer-select"></select>
         <div class="timer-form-row">
           <select id="timerAction" class="timer-select">
-            <option value="on">Zapnout</option>
-            <option value="off">Vypnout</option>
+            <option value="on">ON</option>
+            <option value="off">OFF</option>
           </select>
           <button class="mode-btn" id="timerQuietBtn" type="button">Tichý</button>
           <input type="time" id="timerTime" class="timer-time" value="06:30">
@@ -985,7 +1101,7 @@
     </div>
   </div>
 
-  <!-- Slide 5: Ovládání -->
+  <!-- Slide 6: Ovládání -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1085,7 +1201,7 @@
     </div>
   </div>
 
-  <!-- Slide 6: Wallbox -->
+  <!-- Slide 7: Wallbox -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1116,7 +1232,7 @@
     </div>
   </div>
 
-  <!-- Slide 7: Přehled -->
+  <!-- Slide 8: Přehled -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1160,7 +1276,7 @@
     </div>
   </div>
 
-  <!-- Slide 8: Log -->
+  <!-- Slide 9: Log -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1932,9 +2048,12 @@ async function blindCommand(deviceURL, action, value, btn) {
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
-    // Až zařízení dojede, obnovíme zobrazené polohy
+    // Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
+    // konečný stav (Overkiz hlásí novou polohu až po zastavení pohonu)
     clearTimeout(blindsReloadTimer);
-    blindsReloadTimer = setTimeout(loadBlinds, 20000);
+    for (const delay of [8000, 18000, 30000]) {
+      blindsReloadTimer = setTimeout(loadBlinds, delay);
+    }
   } catch (err) {
     errorEl.textContent = 'Rolety: ' + err.message;
     errorEl.classList.add('show');
@@ -2036,20 +2155,28 @@ function renderBlindRow(b) {
   row.appendChild(btns);
 
   // Svislý ukazatel polohy: oranžová výplň odshora = jak moc je zataženo
-  // (0 % = prázdná dráha / otevřeno, 100 % = plná / zavřeno).
+  // (0 % = prázdná dráha / otevřeno, 100 % = plná / zavřeno). Pod ním procenta.
   // Přidává se všem řádkům kvůli zarovnání sloupců, viditelný je jen tam,
   // kde zařízení polohu hlásí (io rolety).
+  const meterCol = document.createElement('div');
+  meterCol.className = 'blind-meter-col';
   const meter = document.createElement('div');
   meter.className = 'blind-meter';
+  const meterPct = document.createElement('span');
+  meterPct.className = 'blind-meter-pct';
   if (b.type !== 'switch' && typeof b.closure === 'number') {
+    const c = Math.min(100, Math.max(0, Math.round(b.closure)));
     const fill = document.createElement('div');
     fill.className = 'blind-meter-fill';
-    fill.style.height = Math.min(100, Math.max(0, Math.round(b.closure))) + '%';
+    fill.style.height = c + '%';
     meter.appendChild(fill);
+    meterPct.textContent = c + ' %';
   } else {
-    meter.style.visibility = 'hidden';
+    meterCol.style.visibility = 'hidden';
   }
-  row.appendChild(meter);
+  meterCol.appendChild(meter);
+  meterCol.appendChild(meterPct);
+  row.appendChild(meterCol);
 
   wrap.appendChild(row);
 
@@ -2066,8 +2193,8 @@ function renderBlindRow(b) {
     tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
     tiltSlider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null));
     tilt.appendChild(tiltLabel);
-    tilt.appendChild(tiltSlider);
     tilt.appendChild(val);
+    tilt.appendChild(tiltSlider);
     wrap.appendChild(tilt);
   }
 
@@ -2404,15 +2531,19 @@ function renderAircon() {
     stepper.appendChild(tempVal);
     stepper.appendChild(plus);
 
-    const modeBtn = document.createElement('button');
-    modeBtn.className = 'mode-btn';
-    modeBtn.textContent = AIRCON_MODE_LABELS[d.mode] || 'Režim';
-    modeBtn.addEventListener('click', () => {
-      const idx = AIRCON_MODE_ORDER.indexOf(d.mode);
-      const next = AIRCON_MODE_ORDER[(idx + 1) % AIRCON_MODE_ORDER.length];
-      d.mode = next;
-      modeBtn.textContent = AIRCON_MODE_LABELS[next];
-      airconSet(d.guid, { mode: next }, modeBtn);
+    // Režim jako rolovací volba (bez proklikávání)
+    const modeSel = document.createElement('select');
+    modeSel.className = 'mode-select';
+    for (const m of AIRCON_MODE_ORDER) {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = AIRCON_MODE_LABELS[m];
+      modeSel.appendChild(opt);
+    }
+    if (d.mode) modeSel.value = d.mode;
+    modeSel.addEventListener('change', () => {
+      d.mode = modeSel.value;
+      airconSet(d.guid, { mode: modeSel.value }, null);
     });
 
     // Tichý režim: přepíná ecoMode tichý ↔ běžný
@@ -2427,7 +2558,7 @@ function renderAircon() {
     });
 
     controls.appendChild(stepper);
-    controls.appendChild(modeBtn);
+    controls.appendChild(modeSel);
     controls.appendChild(quietBtn);
     wrap.appendChild(controls);
 
@@ -2646,6 +2777,64 @@ function renderWallbox() {
   }
 }
 
+// ---------- AI asistent ----------
+
+const asstInput = document.getElementById('asstInput');
+const asstSend = document.getElementById('asstSend');
+const asstReply = document.getElementById('asstReply');
+const asstExamples = document.getElementById('asstExamples');
+
+const ASST_EXAMPLES = ['Zapni bojler', 'Zhasni všechna světla', 'Zatáhni žaluzie v ložnici', 'Nastav klima v obýváku na 23 a chlazení'];
+
+function hideAssistantSlide() {
+  const slide = document.getElementById('assistantSlide');
+  if (slide) { slide.remove(); rebuildDots(); }
+}
+
+if (asstExamples) {
+  for (const ex of ASST_EXAMPLES) {
+    const chip = document.createElement('button');
+    chip.className = 'asst-chip';
+    chip.textContent = ex;
+    chip.addEventListener('click', () => { asstInput.value = ex; sendAssistant(); });
+    asstExamples.appendChild(chip);
+  }
+}
+
+async function sendAssistant() {
+  const text = asstInput.value.trim();
+  if (!text) return;
+  asstSend.disabled = true;
+  asstSend.classList.add('loading');
+  asstReply.classList.remove('err');
+  asstReply.textContent = '';
+  try {
+    const res = await fetch('/api/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Asistent selhal.');
+    asstReply.textContent = data.reply || 'Hotovo.';
+    asstInput.value = '';
+  } catch (err) {
+    asstReply.classList.add('err');
+    asstReply.textContent = err.message;
+  }
+  asstSend.disabled = false;
+  asstSend.classList.remove('loading');
+}
+
+if (asstSend) {
+  asstSend.addEventListener('click', sendAssistant);
+  asstInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAssistant(); });
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -2678,6 +2867,7 @@ function applySnapshot(snap) {
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
   renderWallbox();
+  if (snap.assistantEnabled === false) hideAssistantSlide();
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data

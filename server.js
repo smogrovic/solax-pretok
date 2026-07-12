@@ -172,6 +172,7 @@ function snapshot() {
     airconTimers,
     wallbox: state.wallbox,
     wallboxEnabled,
+    assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     pushEnabled,
     lockEnabled
   };
@@ -1286,6 +1287,9 @@ async function blindCommand(deviceURL, action, value) {
       actions: [{ deviceURL, commands: commandList }]
     })
   });
+  // Zneplatníme cache, ať se po dojetí načte čerstvá poloha (jinak by /api/blinds
+  // vracelo starý closure z 60s cache a ukazatel by se neaktualizoval)
+  blindsCache = { ts: 0, list: [] };
   return blind;
 }
 
@@ -2147,6 +2151,286 @@ app.post('/api/wallbox/set', async (req, res) => {
     setTimeout(pollWallbox, 3000);
   } catch (err) {
     res.status(502).json({ error: err.message });
+  }
+});
+
+// ---------- AI asistent (Claude API, ovládání v přirozené řeči) ----------
+
+const Anthropic = require('@anthropic-ai/sdk');
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const assistantEnabled = !!ANTHROPIC_API_KEY;
+const anthropic = assistantEnabled ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
+
+function cz(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// Relé: klíč DEVICES -> česká synonyma pro rozpoznání
+const RELAY_ALIASES = {
+  shelly: ['bojler'],
+  pool: ['bazen', 'bazén', 'filtrace'],
+  solinator: ['solinator', 'solinátor'],
+  lightDole: ['zahrada dole', 'svetlo zahrada dole', 'dolni zahrada'],
+  lightNahore: ['zahrada nahore', 'svetlo zahrada nahore', 'horni zahrada'],
+  lightBazen: ['svetlo bazen', 'světlo bazén', 'bazenove svetlo'],
+  lightNocni: ['nocni', 'noční', 'nocni svetla', 'noční světla']
+};
+
+function findRelayKey(name) {
+  const n = cz(name);
+  for (const [key, aliases] of Object.entries(RELAY_ALIASES)) {
+    if (aliases.some(a => cz(a).includes(n) || n.includes(cz(a)))) return key;
+    if (cz(DEVICE_LABELS[key]).includes(n) || n.includes(cz(DEVICE_LABELS[key]))) return key;
+  }
+  return null;
+}
+
+async function assistantSetRelay(name, stateOn) {
+  const key = findRelayKey(name);
+  if (!key) return `Zařízení „${name}" neznám.`;
+  const dev = DEVICES[key];
+  const turn = stateOn ? 'on' : 'off';
+  await setShellyState(dev.serverUri, dev.deviceId, turn);
+  const prev = state.devices[key] || {};
+  state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
+  broadcast('device', { key, status: state.devices[key] });
+  addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'} (asistent)`);
+  setTimeout(() => pollDevice(key), 1500);
+  return `${DEVICE_LABELS[key]} ${stateOn ? 'zapnuto' : 'vypnuto'}.`;
+}
+
+function findAircon(room) {
+  const n = cz(room);
+  return (state.aircon.devices || []).find(d => cz(d.name).includes(n) || n.includes(cz(d.name)));
+}
+
+async function assistantSetAircon({ room, power, mode, temperature, quiet }) {
+  const dev = findAircon(room);
+  if (!dev) return `Klimatizaci „${room}" nenašel.`;
+  const parameters = {};
+  const done = [];
+  if (power === 'on' || power === 'off') { parameters.operate = power === 'on' ? 1 : 0; done.push(power === 'on' ? 'zapnuto' : 'vypnuto'); }
+  if (typeof temperature === 'number') {
+    const t = Math.min(30, Math.max(16, temperature));
+    parameters.temperatureSet = t; done.push(`${t} °C`);
+  }
+  if (mode && PCC_MODES[mode] !== undefined) { parameters.operationMode = PCC_MODES[mode]; done.push(`režim ${mode}`); }
+  if (typeof quiet === 'boolean') { parameters.ecoMode = quiet ? 2 : 0; }
+  if (!Object.keys(parameters).length) return `U ${dev.name} nebylo co nastavit.`;
+  await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+    method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
+  }));
+  if (parameters.operate !== undefined) dev.power = parameters.operate === 1;
+  if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
+  if (parameters.operationMode !== undefined) dev.mode = mode;
+  if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
+  broadcast('aircon', { aircon: state.aircon });
+  if (parameters.operate !== undefined || parameters.operationMode !== undefined) {
+    addLog(`${dev.name}: ${done.filter(x => !x.includes('°C')).join(', ') || 'nastaveno'} (asistent)`);
+  }
+  return `${dev.name}: ${done.join(', ')}.`;
+}
+
+async function assistantControlBlinds({ target, action, orientation }) {
+  const blinds = await getBlinds();
+  const covers = blinds.filter(b => b.type === 'cover');
+  const n = cz(target);
+  let matched;
+  if (['vse', 'vsechno', 'vsechny', 'cely dum'].some(a => n.includes(cz(a)))) {
+    matched = covers;
+  } else {
+    matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
+  }
+  if (!matched.length) return `Žaluzie „${target}" nenašel.`;
+  const tilt = typeof orientation === 'number' ? orientation : null;
+  let ok = 0;
+  for (const b of matched) {
+    try { await blindCommand(b.deviceURL, action, tilt); ok++; } catch {}
+    await delay(400);
+  }
+  const label = matched.length > 1 ? `${matched.length} žaluzií` : matched[0].label;
+  const act = action === 'up' ? 'vytaženo' : (action === 'down' ? 'zataženo' : 'zastaveno');
+  return `${label}: ${act}${tilt !== null ? `, naklopení ${tilt} %` : ''}.`;
+}
+
+async function assistantSetWallbox(mode) {
+  if (!wallboxEnabled) return 'Wallbox není nastaven.';
+  if (WB_MODES[mode] === undefined) return `Režim „${mode}" neznám.`;
+  await wbSetMode(mode);
+  state.wallbox = { ...state.wallbox, mode };
+  broadcast('wallbox', { wallbox: state.wallbox });
+  addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]} (asistent)`);
+  setTimeout(pollWallbox, 3000);
+  return `Wallbox: režim ${WB_MODE_LABELS[mode]}.`;
+}
+
+function assistantAddAirconTimer({ room, time, action, quiet }) {
+  if (!/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  const dev = findAircon(room);
+  const timer = { id: airconTimerSeq++, guid: dev ? dev.guid : room, name: dev ? dev.name : room, time, action, quiet: action === 'on' && !!quiet };
+  airconTimers.push(timer);
+  airconTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
+  broadcast('airconTimers', { timers: airconTimers });
+  return `Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}.`;
+}
+
+async function assistantAddBlindTimer({ target, time, action, orientation }) {
+  if (!/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  const blinds = await getBlinds();
+  const covers = blinds.filter(b => b.type === 'cover');
+  const n = cz(target);
+  let matched;
+  if (['vse', 'vsechno', 'cely dum'].some(a => n.includes(cz(a)))) matched = covers;
+  else matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
+  if (!matched.length) return `Žaluzie „${target}" nenašel.`;
+  const tilt = typeof orientation === 'number' ? orientation : null;
+  const name = matched.length > 1 ? `${matched[0].room} +${matched.length - 1}` : matched[0].label;
+  const timer = { id: blindTimerSeq++, deviceURLs: matched.map(b => b.deviceURL), name, time, action, orientation: tilt };
+  blindTimers.push(timer);
+  blindTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${name} ${action === 'up' ? 'vytáhnout' : 'zatáhnout'} v ${time}`);
+  broadcast('blindTimers', { timers: blindTimers });
+  return `Časovač: ${name} ${action === 'up' ? 'vytáhnout' : 'zatáhnout'} v ${time}.`;
+}
+
+const ASSISTANT_TOOLS = [
+  {
+    name: 'set_relay',
+    description: 'Zapne/vypne Shelly relé: bojler, bazén (filtrace), solinátor, nebo světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        device: { type: 'string', description: 'Název zařízení, např. "bojler", "bazén", "solinátor", "zahrada dole", "noční světla".' },
+        state: { type: 'string', enum: ['on', 'off'], description: 'on = zapnout, off = vypnout.' }
+      },
+      required: ['device', 'state']
+    }
+  },
+  {
+    name: 'set_aircon',
+    description: 'Nastaví klimatizaci v pokoji (Obývák, Ložnice, Miky, Elenka). Lze zapnout/vypnout, změnit režim, teplotu, tichý režim.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        room: { type: 'string', description: 'Pokoj: obývák, ložnice, miky, elenka.' },
+        power: { type: 'string', enum: ['on', 'off'] },
+        mode: { type: 'string', enum: ['cool', 'heat', 'auto', 'dry', 'fan'], description: 'cool=chlazení, heat=topení, auto, dry=vysoušení, fan=ventilátor.' },
+        temperature: { type: 'number', description: 'Cílová teplota 16–30 °C.' },
+        quiet: { type: 'boolean', description: 'true = zapnout tichý režim.' }
+      },
+      required: ['room']
+    }
+  },
+  {
+    name: 'control_blinds',
+    description: 'Ovládá žaluzie/rolety v pokoji (Obývák, Terasa, Garáž, Ložnice, Miky, Elenka, Hosté) nebo "vše" pro celý dům. Akce nahoru/dolů/stop, volitelně naklopení lamel 0–100 %.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Pokoj nebo "vše".' },
+        action: { type: 'string', enum: ['up', 'down', 'stop'], description: 'up=vytáhnout/nahoru, down=zatáhnout/dolů, stop.' },
+        orientation: { type: 'number', description: 'Naklopení lamel 0–100 % (nepovinné).' }
+      },
+      required: ['target', 'action']
+    }
+  },
+  {
+    name: 'set_wallbox',
+    description: 'Nastaví režim nabíječky auta (wallbox): stop, fast (rychlý), eco, green (zelený – jen z přebytku FVE).',
+    input_schema: {
+      type: 'object',
+      properties: { mode: { type: 'string', enum: ['stop', 'fast', 'eco', 'green'] } },
+      required: ['mode']
+    }
+  },
+  {
+    name: 'add_aircon_timer',
+    description: 'Naplánuje jednorázový časovač pro klimatizaci na daný čas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        room: { type: 'string' },
+        time: { type: 'string', description: 'Čas HH:MM (24h).' },
+        action: { type: 'string', enum: ['on', 'off'] },
+        quiet: { type: 'boolean' }
+      },
+      required: ['room', 'time', 'action']
+    }
+  },
+  {
+    name: 'add_blind_timer',
+    description: 'Naplánuje jednorázový časovač pro žaluzie na daný čas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'Pokoj nebo "vše".' },
+        time: { type: 'string', description: 'Čas HH:MM (24h).' },
+        action: { type: 'string', enum: ['up', 'down'] },
+        orientation: { type: 'number' }
+      },
+      required: ['target', 'time', 'action']
+    }
+  }
+];
+
+async function runAssistantTool(name, input) {
+  switch (name) {
+    case 'set_relay': return assistantSetRelay(input.device, input.state === 'on');
+    case 'set_aircon': return assistantSetAircon(input);
+    case 'control_blinds': return assistantControlBlinds(input);
+    case 'set_wallbox': return assistantSetWallbox(input.mode);
+    case 'add_aircon_timer': return assistantAddAirconTimer(input);
+    case 'add_blind_timer': return assistantAddBlindTimer(input);
+    default: return `Neznámý nástroj ${name}.`;
+  }
+}
+
+app.post('/api/assistant', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!assistantEnabled) return res.status(503).json({ error: 'Asistent není nastaven (chybí ANTHROPIC_API_KEY).' });
+  const text = (req.body && req.body.text || '').toString().slice(0, 500).trim();
+  if (!text) return res.status(400).json({ error: 'Chybí text.' });
+
+  const prague = pragueTime();
+  const system = `Jsi hlasový asistent chytré domácnosti "Šmogyho FVE". Uživatel mluví česky. `
+    + `Aktuální čas je ${String(prague.hour).padStart(2, '0')}:${String(prague.minute).padStart(2, '0')}. `
+    + `Podle jeho pokynu zavolej správné nástroje a proveď akci. Můžeš zavolat i více nástrojů najednou (např. "zhasni všechna světla"). `
+    + `Zařízení: bojler, bazén (filtrace), solinátor, světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla), `
+    + `klimatizace v pokojích Obývák/Ložnice/Miky/Elenka, žaluzie v pokojích Obývák/Terasa/Garáž/Ložnice/Miky/Elenka/Hosté, wallbox (nabíječka auta). `
+    + `Když pokyn nedává smysl nebo zařízení neznáš, stručně to řekni a nic neprováděj. `
+    + `Po provedení odpověz jednou krátkou větou česky, co jsi udělal. Neptej se na potvrzení, prováděj rovnou.`;
+
+  try {
+    const messages = [{ role: 'user', content: text }];
+    let finalText = '';
+    for (let step = 0; step < 4; step++) {
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        system,
+        tools: ASSISTANT_TOOLS,
+        messages
+      });
+      const toolUses = response.content.filter(b => b.type === 'tool_use');
+      const textBlocks = response.content.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+      if (textBlocks) finalText = textBlocks;
+      if (response.stop_reason !== 'tool_use' || !toolUses.length) break;
+
+      messages.push({ role: 'assistant', content: response.content });
+      const results = [];
+      for (const tu of toolUses) {
+        let out;
+        try { out = await runAssistantTool(tu.name, tu.input || {}); }
+        catch (err) { out = 'Chyba: ' + err.message; }
+        results.push({ type: 'tool_result', tool_use_id: tu.id, content: String(out) });
+      }
+      messages.push({ role: 'user', content: results });
+    }
+    res.json({ reply: finalText || 'Hotovo.' });
+  } catch (err) {
+    console.error('Asistent:', err.message);
+    res.status(502).json({ error: 'Asistent selhal: ' + err.message });
   }
 });
 
