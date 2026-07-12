@@ -177,6 +177,7 @@ function snapshot() {
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     blindTimers,
+    relayTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
     airconTimers,
@@ -1437,6 +1438,69 @@ setInterval(async () => {
   }
 }, 30000);
 
+// ---------- Časovače relé (bojler, bazén, solinátor, světla) ----------
+
+let relayTimers = [];
+let relayTimerSeq = 1;
+
+async function actuateRelay(key, stateOn, reason) {
+  const dev = DEVICES[key];
+  await setShellyState(dev.serverUri, dev.deviceId, stateOn ? 'on' : 'off');
+  const prev = state.devices[key] || {};
+  state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
+  broadcast('device', { key, status: state.devices[key] });
+  addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
+  setTimeout(() => pollDevice(key), 1500);
+}
+
+app.post('/api/relay/timer', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { key, time, action } = req.body || {};
+  if (!DEVICES[key] || !/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) {
+    return res.status(400).json({ error: 'Chybí zařízení, time (HH:MM) nebo action (on/off).' });
+  }
+  if (relayTimers.length >= 10) {
+    return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
+  }
+  const timer = { id: relayTimerSeq++, key, name: DEVICE_LABELS[key], time, action };
+  relayTimers.push(timer);
+  relayTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
+  broadcast('relayTimers', { timers: relayTimers });
+  res.json({ timers: relayTimers });
+});
+
+app.post('/api/relay/timer/delete', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { id } = req.body || {};
+  const timer = relayTimers.find(t => t.id === id);
+  if (timer) {
+    relayTimers = relayTimers.filter(t => t.id !== id);
+    addLog(`Časovač zrušen: ${timer.name} v ${timer.time}`);
+    broadcast('relayTimers', { timers: relayTimers });
+  }
+  res.json({ timers: relayTimers });
+});
+
+setInterval(async () => {
+  if (!relayTimers.length) return;
+  const p = pragueTime();
+  const pad2 = n => String(n).padStart(2, '0');
+  const current = `${pad2(p.hour)}:${pad2(p.minute)}`;
+  const due = relayTimers.filter(t => t.time === current);
+  if (!due.length) return;
+  relayTimers = relayTimers.filter(t => t.time !== current);
+  broadcast('relayTimers', { timers: relayTimers });
+  for (const t of due) {
+    try {
+      await actuateRelay(t.key, t.action === 'on', `časovač ${t.time}`);
+    } catch (err) {
+      addLog(`Časovač ${t.name}: příkaz selhal (${err.message.slice(0, 100)})`);
+    }
+    await delay(500);
+  }
+}, 30000);
+
 // ---------- Panasonic Comfort Cloud (klimatizace) ----------
 // Neoficiální API appky Comfort Cloud — stejné používá Home Assistant a Homebridge.
 // Přihlášení: Auth0 PKCE flow, pak accsmart.panasonic.com s podepsanými hlavičkami.
@@ -2199,15 +2263,21 @@ function findRelayKey(name) {
 async function assistantSetRelay(name, stateOn) {
   const key = findRelayKey(name);
   if (!key) return `Zařízení „${name}" neznám.`;
-  const dev = DEVICES[key];
-  const turn = stateOn ? 'on' : 'off';
-  await setShellyState(dev.serverUri, dev.deviceId, turn);
-  const prev = state.devices[key] || {};
-  state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
-  broadcast('device', { key, status: state.devices[key] });
-  addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'} (asistent)`);
-  setTimeout(() => pollDevice(key), 1500);
+  await actuateRelay(key, stateOn, 'asistent');
   return `${DEVICE_LABELS[key]} ${stateOn ? 'zapnuto' : 'vypnuto'}.`;
+}
+
+function assistantAddRelayTimer({ device, time, action }) {
+  const key = findRelayKey(device || '');
+  if (!key) return `Zařízení „${device}" neznám.`;
+  if (!/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  if (relayTimers.length >= 10) return 'Je nastaveno maximum časovačů (10).';
+  const timer = { id: relayTimerSeq++, key, name: DEVICE_LABELS[key], time, action };
+  relayTimers.push(timer);
+  relayTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
+  broadcast('relayTimers', { timers: relayTimers });
+  return `Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}.`;
 }
 
 function findAircon(room) {
@@ -2392,6 +2462,19 @@ const ASSISTANT_TOOLS = [
       },
       required: ['target', 'time', 'action']
     }
+  },
+  {
+    name: 'add_relay_timer',
+    description: 'Naplánuje jednorázový časovač pro relé/světla (bojler, bazén, solinátor, zahrada dole, zahrada nahoře, světlo bazén, noční světla) na daný čas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        device: { type: 'string', description: 'Název zařízení, např. "bojler", "noční světla", "zahrada dole".' },
+        time: { type: 'string', description: 'Čas HH:MM (24h).' },
+        action: { type: 'string', enum: ['on', 'off'] }
+      },
+      required: ['device', 'time', 'action']
+    }
   }
 ];
 
@@ -2403,6 +2486,7 @@ async function runAssistantTool(name, input) {
     case 'set_wallbox': return assistantSetWallbox(input.mode);
     case 'add_aircon_timer': return assistantAddAirconTimer(input);
     case 'add_blind_timer': return assistantAddBlindTimer(input);
+    case 'add_relay_timer': return assistantAddRelayTimer(input);
     default: return `Neznámý nástroj ${name}.`;
   }
 }
@@ -2423,6 +2507,9 @@ app.post('/api/assistant', async (req, res) => {
     + `Žaluzie u kuchyně jsou v pokoji Obývák (mají štítek "Kuchyň", "Obývák Okno", "Obývák Dveře") — pro kuchyň použij target "Obývák" nebo "Kuchyň". `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
+    + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `
+    + `Pokud neřekne jinak, u spaní NESAHEJ na noční světla ani na klimatizaci. `
+    + `Výjimka: když jde spát konkrétně do LOŽNICE, navíc vypni noční světla (set_relay noční světla off). `
     + `Nedoptávej se, pokud si dokážeš rozumně poradit — rovnou proveď akci. Zeptej se jen když je pokyn opravdu nejasný nebo zařízení vůbec neexistuje. `
     + `Po provedení odpověz jednou krátkou větou česky, co jsi udělal.`;
 

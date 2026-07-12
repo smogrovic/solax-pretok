@@ -1226,6 +1226,21 @@
           </div>
         </div>
       </div>
+
+      <div class="card lockable timer-card">
+        <div class="graph-title">Časovač</div>
+        <select id="relayTimerDevice" class="timer-select"></select>
+        <div class="timer-form-row">
+          <select id="relayTimerAction" class="timer-select">
+            <option value="on">ON</option>
+            <option value="off">OFF</option>
+          </select>
+          <input type="time" id="relayTimerTime" class="timer-time" value="22:00">
+          <button class="timer-plus-btn" id="relayTimerPlusBtn">+1&nbsp;h</button>
+        </div>
+        <button class="timer-add-btn" id="relayTimerAddBtn">Přidat časovač</button>
+        <div class="timer-list" id="relayTimerList"></div>
+      </div>
     </div>
   </div>
 
@@ -2736,6 +2751,101 @@ timerAddBtn.addEventListener('click', async () => {
   timerAddBtn.disabled = false;
 });
 
+// ---------- Časovače relé / světel (stránka Ovládání) ----------
+
+const RELAY_TIMER_DEVICES = [
+  { key: 'shelly', label: 'Bojler' },
+  { key: 'pool', label: 'Bazén' },
+  { key: 'solinator', label: 'Solinátor' },
+  { key: 'lightDole', label: 'Zahrada dole' },
+  { key: 'lightNahore', label: 'Zahrada nahoře' },
+  { key: 'lightBazen', label: 'Světlo bazén' },
+  { key: 'lightNocni', label: 'Noční světla' }
+];
+
+const relayTimerDeviceEl = document.getElementById('relayTimerDevice');
+const relayTimerActionEl = document.getElementById('relayTimerAction');
+const relayTimerTimeEl = document.getElementById('relayTimerTime');
+const relayTimerAddBtn = document.getElementById('relayTimerAddBtn');
+const relayTimerListEl = document.getElementById('relayTimerList');
+let relayTimersData = [];
+
+for (const d of RELAY_TIMER_DEVICES) {
+  const opt = document.createElement('option');
+  opt.value = d.key;
+  opt.textContent = d.label;
+  relayTimerDeviceEl.appendChild(opt);
+}
+
+function renderRelayTimers() {
+  relayTimerListEl.textContent = '';
+  for (const t of relayTimersData) {
+    const row = document.createElement('div');
+    row.className = 'timer-row';
+    const time = document.createElement('span');
+    time.className = 'timer-row-time';
+    time.textContent = t.time;
+    const text = document.createElement('span');
+    text.className = 'timer-row-text';
+    text.textContent = `${t.name} — ${t.action === 'on' ? 'zapnout' : 'vypnout'}`;
+    const del = document.createElement('button');
+    del.className = 'timer-del';
+    del.textContent = '✕';
+    del.addEventListener('click', async () => {
+      del.disabled = true;
+      try {
+        const res = await fetch('/api/relay/timer/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+          body: JSON.stringify({ id: t.id })
+        });
+        if (res.status === 401) setLocked(true);
+      } catch {}
+      del.disabled = false;
+    });
+    row.appendChild(time);
+    row.appendChild(text);
+    row.appendChild(del);
+    relayTimerListEl.appendChild(row);
+  }
+}
+
+const relayTimerPlusBtn = document.getElementById('relayTimerPlusBtn');
+let relayTimerPlusCount = 0;
+relayTimerPlusBtn.addEventListener('click', () => {
+  relayTimerPlusCount++;
+  const t = new Date(Date.now() + relayTimerPlusCount * 3600000);
+  relayTimerTimeEl.value = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+});
+relayTimerTimeEl.addEventListener('input', () => { relayTimerPlusCount = 0; });
+
+relayTimerAddBtn.addEventListener('click', async () => {
+  const key = relayTimerDeviceEl.value;
+  const time = relayTimerTimeEl.value;
+  const action = relayTimerActionEl.value;
+  if (!key || !time) return;
+  relayTimerPlusCount = 0;
+  relayTimerAddBtn.disabled = true;
+  try {
+    const res = await fetch('/api/relay/timer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ key, time, action })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Časovač se nepodařilo přidat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Časovač: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  relayTimerAddBtn.disabled = false;
+});
+
 // ---------- Wallbox (Solax EV charger) ----------
 
 const wbPowerEl = document.getElementById('wbPower');
@@ -2923,6 +3033,8 @@ function applySnapshot(snap) {
   renderAssistantLog(snap.assistantLog || []);
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
+  relayTimersData = snap.relayTimers || [];
+  renderRelayTimers();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -3033,6 +3145,10 @@ function connectStream() {
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];
     renderBlindTimers();
+  });
+  es.addEventListener('relayTimers', e => {
+    relayTimersData = JSON.parse(e.data).timers || [];
+    renderRelayTimers();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);
