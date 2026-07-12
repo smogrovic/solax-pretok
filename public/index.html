@@ -2296,9 +2296,12 @@ function renderAircon() {
     if (typeof a.tankTemp === 'number') {
       const parts = ['nádrž ' + formatTempC(a.tankTemp)];
       if (typeof a.tankTarget === 'number') parts.push('cíl ' + formatTempC(a.tankTarget));
+      if (a.tankOn) parts.push('ohřev běží');
       if (typeof a.outdoorTemp === 'number') parts.push('venku ' + formatTempC(a.outdoorTemp));
       if (a.quiet) parts.push('tichý');
       pos.textContent = parts.join(' · ');
+    } else if (a.online === false) {
+      pos.textContent = 'offline';
     } else {
       pos.textContent = 'stav nedostupný';
     }

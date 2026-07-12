@@ -1752,12 +1752,35 @@ async function pccGetDevices() {
       if (d.parameters) {
         list.push({ guid: d.deviceGuid, name: d.deviceName || d.deviceGuid });
       } else {
-        aquarea.push({ guid: d.deviceGuid, name: d.deviceName || 'Tepelné čerpadlo' });
+        // Stav Aquarey (nádrž, zóny) je rovnou v záznamu skupiny
+        aquarea.push({ guid: d.deviceGuid, name: d.deviceName || 'Tepelné čerpadlo', ...pccAquareaFromGroup(d) });
       }
     }
   }
   pccDevCache = { ts: Date.now(), list, aquarea };
   return pccDevCache;
+}
+
+function aquaNum(v) {
+  return typeof v === 'number' && v !== PCC_INVALID_TEMP && v !== 255 ? v : null;
+}
+
+function pccAquareaFromGroup(d) {
+  const tankRaw = Array.isArray(d.tankStatus) ? d.tankStatus[0] : d.tankStatus;
+  const zonesRaw = Array.isArray(d.zoneStatus) ? d.zoneStatus : [];
+  const t = tankRaw || {};
+  return {
+    online: d.connectionStatus === undefined ? null : d.connectionStatus === 1 || d.connectionStatus === '1',
+    tankTemp: aquaNum(t.temperatureNow !== undefined ? t.temperatureNow : t.temparatureNow),
+    tankTarget: aquaNum(t.heatSet),
+    tankOn: t.operationStatus === 1,
+    zones: zonesRaw.map(z => ({
+      name: z.zoneName || ('Zóna ' + (z.zoneId !== undefined ? z.zoneId : '')),
+      temp: aquaNum(z.temperatureNow !== undefined ? z.temperatureNow : z.temparatureNow),
+      target: aquaNum(z.heatSet),
+      on: z.operationStatus === 1
+    }))
+  };
 }
 
 // Diagnostika: struktura skupin a zařízení z Comfort Cloudu (bez parametrů a celých GUID)
@@ -1805,33 +1828,6 @@ app.get('/api/aircon/debug', async (req, res) => {
   }
 });
 
-// Stav Aquarey jde přes proxy endpoint accsmart API (deviceDirect=1 čte přímo ze zařízení)
-async function pccGetAquareaStatus(guid, direct = 1) {
-  const data = await pccApiFetch('/remote/v1/app/common/transfer', {
-    method: 'POST',
-    body: JSON.stringify({
-      apiName: `/remote/v1/api/devices?gwid=${guid}&deviceDirect=${direct}`,
-      requestMethod: 'GET'
-    })
-  });
-  const st = (data && data.status) || {};
-  const tank = st.tankStatus || {};
-  const zones = Array.isArray(st.zoneStatus) ? st.zoneStatus : [];
-  return {
-    name: (data && data.a2wName) || null,
-    outdoorTemp: typeof st.outdoorNow === 'number' ? st.outdoorNow : null,
-    quiet: st.quietMode === 1,
-    tankTemp: typeof tank.temperatureNow === 'number' ? tank.temperatureNow : null,
-    tankTarget: typeof tank.heatSet === 'number' ? tank.heatSet : null,
-    tankOn: tank.operationStatus === 1,
-    zones: zones.map(z => ({
-      name: z.zoneName || 'Zóna',
-      temp: typeof z.temperatureNow === 'number' ? z.temperatureNow : null,
-      target: typeof z.heatSet === 'number' ? z.heatSet : null,
-      on: z.operationStatus === 1
-    }))
-  };
-}
 
 const PCC_MODES = { auto: 0, dry: 1, cool: 2, heat: 3, fan: 4 };
 const PCC_MODE_NAMES = ['auto', 'dry', 'cool', 'heat', 'fan'];
@@ -1860,6 +1856,8 @@ async function pollAircon() {
   if (!panasonicEnabled || airconPollRunning) return;
   airconPollRunning = true;
   try {
+    // Skupiny čteme čerstvé — nesou i aktuální stav Aquarey (nádrž, zóny)
+    pccDevCache.ts = 0;
     const { list: devices, aquarea } = await pccQueued(() => pccGetDevices());
     const out = [];
     for (const d of devices) {
@@ -1872,23 +1870,7 @@ async function pollAircon() {
       await delay(500);
     }
 
-    const aquaOut = [];
-    for (const a of aquarea) {
-      try {
-        const status = await pccQueued(() => pccGetAquareaStatus(a.guid, 1));
-        aquaOut.push({ guid: a.guid, name: status.name || a.name, ...status });
-      } catch {
-        try {
-          const status = await pccQueued(() => pccGetAquareaStatus(a.guid, 0));
-          aquaOut.push({ guid: a.guid, name: status.name || a.name, ...status });
-        } catch {
-          aquaOut.push({ guid: a.guid, name: a.name, tankTemp: null });
-        }
-      }
-      await delay(500);
-    }
-
-    state.aircon = { devices: out, aquarea: aquaOut, error: null, fetchedAt: new Date().toISOString() };
+    state.aircon = { devices: out, aquarea, error: null, fetchedAt: new Date().toISOString() };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
       addLog(`Klima: připojeno k Panasonic (${out.length + aquaOut.length} zařízení)`);
