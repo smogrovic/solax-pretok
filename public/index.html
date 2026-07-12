@@ -173,8 +173,8 @@
     color:var(--navy);
   }
   .power-btn{
-    width:38px;
-    height:38px;
+    width:34px;
+    height:34px;
     border-radius:50%;
     border:none;
     display:flex;
@@ -183,13 +183,12 @@
     font-size:10px;
     font-weight:700;
     color:#fff;
+    background:var(--navy);
     transition:transform .15s ease, opacity .15s ease;
   }
   .power-btn:active{transform:scale(0.93);}
-  .power-btn.on-btn{background:var(--green);}
-  .power-btn.off-btn{background:var(--red);}
   .power-btn:disabled{opacity:0.5;}
-  .power-btn.active-state{box-shadow:0 0 0 3px rgba(44,62,80,0.18);}
+  .power-btn.active-state{box-shadow:0 0 0 3px rgba(245,147,61,0.55);}
   .device-power{
     font-size:12px;
     color:var(--grey-text);
@@ -948,7 +947,45 @@
     </div>
   </div>
 
-  <!-- Slide 4: Ovládání -->
+  <!-- Slide 4: Klima -->
+  <div class="slide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Klima</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable blinds-card">
+        <div class="blinds-list" id="airconList">
+          <div class="log-empty">Načítám klimatizace…</div>
+        </div>
+      </div>
+
+      <div class="card lockable timer-card">
+        <div class="graph-title">Časovač</div>
+        <select id="timerDevice" class="timer-select"></select>
+        <div class="timer-form-row">
+          <select id="timerAction" class="timer-select">
+            <option value="on">Zapnout</option>
+            <option value="off">Vypnout</option>
+          </select>
+          <button class="mode-btn" id="timerQuietBtn" type="button">Tichý</button>
+          <input type="time" id="timerTime" class="timer-time" value="06:30">
+          <button class="timer-plus-btn" id="timerPlusBtn">+1&nbsp;h</button>
+        </div>
+        <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
+        <div class="timer-list" id="timerList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 5: Ovládání -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1044,44 +1081,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Slide 5: Klima -->
-  <div class="slide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Klima</div>
-      </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card lockable blinds-card">
-        <div class="blinds-list" id="airconList">
-          <div class="log-empty">Načítám klimatizace…</div>
-        </div>
-      </div>
-
-      <div class="card lockable timer-card">
-        <div class="graph-title">Časovač</div>
-        <select id="timerDevice" class="timer-select"></select>
-        <div class="timer-form-row">
-          <select id="timerAction" class="timer-select">
-            <option value="on">Zapnout</option>
-            <option value="off">Vypnout</option>
-          </select>
-          <button class="mode-btn" id="timerQuietBtn" type="button">Tichý</button>
-          <input type="time" id="timerTime" class="timer-time" value="06:30">
-          <button class="timer-plus-btn" id="timerPlusBtn">+1&nbsp;h</button>
-        </div>
-        <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
-        <div class="timer-list" id="timerList"></div>
       </div>
     </div>
   </div>
@@ -2173,14 +2172,14 @@ function blindTimerOptions(page) {
       });
     } else {
       for (const b of group.items) {
-        options.push({ value: b.deviceURL, label: `${b.label} (${group.room})` });
+        options.push({ value: b.deviceURL, label: b.label });
       }
     }
   }
   // Na první stránce nabídneme i "Vše" — všechny rolety v domě najednou
   if (page === 1) {
     const all = blinds.filter(b => b.type === 'cover').map(b => b.deviceURL);
-    if (all.length) options.push({ value: all.join('|'), label: 'Vše (celý dům)' });
+    if (all.length) options.push({ value: all.join('|'), label: 'Vše' });
   }
   return options;
 }
@@ -2331,16 +2330,23 @@ function renderAircon() {
     row.className = 'blind-row';
     const info = document.createElement('div');
     info.className = 'blind-info';
+    // Řádek se semaforem stavu a názvem
+    const nameRow = document.createElement('div');
+    nameRow.className = 'shelly-row';
+    const dot = document.createElement('div');
+    dot.className = 'traffic-light' + (d.power === true ? ' on' : (d.power === false ? ' off' : ''));
     const label = document.createElement('span');
     label.className = 'blind-label';
     label.textContent = d.name;
-    info.appendChild(label);
+    nameRow.appendChild(dot);
+    nameRow.appendChild(label);
+    info.appendChild(nameRow);
     const pos = document.createElement('span');
     pos.className = 'blind-pos';
     if (d.power === null || d.power === undefined) {
       pos.textContent = 'stav neznámý';
     } else {
-      const parts = [d.power ? 'zapnuto' : 'vypnuto'];
+      const parts = [];
       if (typeof d.insideTemp === 'number') parts.push('uvnitř ' + formatTempC(d.insideTemp));
       if (d.power && d.mode) parts.push(AIRCON_MODE_LABELS[d.mode] || d.mode);
       if (d.power && d.eco === 2) parts.push('tichý');
@@ -2495,7 +2501,7 @@ function renderTimers() {
     const text = document.createElement('span');
     text.className = 'timer-row-text';
     let desc = `${t.name} — ${t.action === 'on' ? 'zapnout' : 'vypnout'}`;
-    if (t.action === 'on' && t.quiet) desc += ' (tichý)';
+    if (t.action === 'on' && t.quiet) desc += ', tichý';
     text.textContent = desc;
     const del = document.createElement('button');
     del.className = 'timer-del';
