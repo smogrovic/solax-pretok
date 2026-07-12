@@ -86,9 +86,10 @@ const state = {
   autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
   runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
-  timeline: { shelly: [], pool: [], solinator: [] }, // segmenty { from, to } zapnutí za 48 h
+  timeline: { shelly: [], pool: [], solinator: [], wallbox: [] }, // segmenty { from, to } zapnutí za 48 h
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
+  wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
 
@@ -145,6 +146,7 @@ function pruneHistory() {
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   while (state.history.length && state.history[0].t < cutoff) state.history.shift();
   while (state.log.length && state.log[0].t < cutoff) state.log.shift();
+  while (state.wallboxHistory.length && state.wallboxHistory[0].t < cutoff) state.wallboxHistory.shift();
 }
 
 function addLog(msg) {
@@ -183,6 +185,7 @@ function snapshot() {
     airconTimers,
     wallbox: state.wallbox,
     wallboxEnabled,
+    wallboxHistory: state.wallboxHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
     pushEnabled,
@@ -452,6 +455,17 @@ function updateRuntimes() {
       }
     }
   }
+  // Wallbox: aktivní kdykoli výkon > 0 W (nepočítá se do doby běhu relé)
+  const wbW = state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power : 0;
+  if (wbW > 0) {
+    const segs = state.timeline.wallbox;
+    const last = segs[segs.length - 1];
+    if (last && now - last.to <= TIMELINE_GAP_MS) {
+      last.to = now;
+    } else {
+      segs.push({ from: now, to: now });
+    }
+  }
   state.runtime.lastTs = now;
   pruneTimeline();
   broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
@@ -576,6 +590,32 @@ app.post('/api/history/restore', (req, res) => {
   res.json({ added });
 });
 
+// Obnova historie výkonu wallboxu po restartu/deployi — stejný princip jako u přetoku
+app.post('/api/wallbox-history/restore', (req, res) => {
+  const points = req.body && Array.isArray(req.body.points) ? req.body.points : null;
+  if (!points) return res.status(400).json({ error: 'Chybí points.' });
+
+  const now = Date.now();
+  const cutoff = now - HISTORY_MAX_AGE_MS;
+  const clean = points
+    .filter(p => p && typeof p.t === 'number' && typeof p.w === 'number'
+      && p.t >= cutoff && p.t <= now && p.w >= 0 && p.w < 100000)
+    .slice(0, 2000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.wallboxHistory.length;
+  const all = state.wallboxHistory.concat(clean).sort((a, b) => a.t - b.t);
+  const merged = [];
+  for (const p of all) {
+    if (!merged.length || p.t - merged[merged.length - 1].t > 30000) merged.push(p);
+  }
+  state.wallboxHistory = merged;
+  pruneHistory();
+  const added = state.wallboxHistory.length - before;
+  if (added > 0) broadcast('wallboxHistory', { history: state.wallboxHistory });
+  res.json({ added });
+});
+
 // Obnova logu po restartu/deployi — stejný princip jako u historie grafu
 app.post('/api/log/restore', (req, res) => {
   const entries = req.body && Array.isArray(req.body.entries) ? req.body.entries : null;
@@ -644,7 +684,7 @@ app.post('/api/timeline/restore', (req, res) => {
   const cutoff = now - TIMELINE_MAX_AGE_MS;
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
-  const validKey = k => /^(shelly|pool|solinator|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const validKey = k => /^(shelly|pool|solinator|wallbox|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
@@ -2173,6 +2213,16 @@ async function pollWallbox() {
     const result = await wbFetchStatus();
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
     broadcast('wallbox', { wallbox: state.wallbox });
+    // Bod do historie výkonu (max. 1× za 30 s), ať máme graf za 24 h
+    if (typeof state.wallbox.power === 'number') {
+      const last = state.wallboxHistory[state.wallboxHistory.length - 1];
+      if (!last || Date.now() - last.t > 30000) {
+        const point = { t: Date.now(), w: state.wallbox.power };
+        state.wallboxHistory.push(point);
+        pruneHistory();
+        broadcast('wallboxHistory', { point });
+      }
+    }
   } catch (err) {
     state.wallbox = { ...state.wallbox, error: err.message };
     broadcast('wallbox', { wallbox: state.wallbox });

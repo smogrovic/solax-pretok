@@ -269,7 +269,8 @@
     text-align:center;
     margin-bottom:6px;
   }
-  #feedinChart{
+  #feedinChart,
+  #wbChart{
     width:100%;
     height:96px;
     display:block;
@@ -1272,6 +1273,12 @@
         <div class="wb-modes" id="wbModes"></div>
         <div class="updated" id="wbHint" style="margin-top:10px;text-align:center"></div>
       </div>
+
+      <div class="card graph-card">
+        <div class="graph-title">Výkon za 24 h (kW)</div>
+        <canvas id="wbChart"></canvas>
+        <div class="graph-total" id="wbEnergyTotal"></div>
+      </div>
     </div>
   </div>
 
@@ -1873,20 +1880,21 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
 
 const timelineCanvas = document.getElementById('timelineChart');
 const timelineLegendEl = document.getElementById('timelineLegend');
-const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator'];
+const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox'];
 const TIMELINE_BASE = {
   shelly: { label: 'Bojler', color: '#e5534b' },
   pool: { label: 'Bazén', color: '#3b82c4' },
-  solinator: { label: 'Solinátor', color: '#3fb950' }
+  solinator: { label: 'Solinátor', color: '#3fb950' },
+  wallbox: { label: 'Wallbox', color: '#f5933d' }
 };
 const TIMELINE_AC_COLORS = ['#9b59d0', '#e8a13a', '#18a999', '#e05fa0', '#7f8c8d'];
-let timelineData = { shelly: [], pool: [], solinator: [] };
+let timelineData = { shelly: [], pool: [], solinator: [], wallbox: [] };
 
 function pruneTimelineLocal(tl) {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|ac_)/.test(k)) continue;
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number' && s.to >= cutoff)
       .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
@@ -2915,6 +2923,146 @@ function renderWallbox() {
   }
 }
 
+// ---------- Graf výkonu wallboxu za 24 h ----------
+
+const wbChartCanvas = document.getElementById('wbChart');
+const wbEnergyTotalEl = document.getElementById('wbEnergyTotal');
+let wallboxHistory = [];
+
+function pruneOldWb(arr) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return arr.filter(p => p && typeof p.t === 'number' && typeof p.w === 'number' && p.t >= cutoff);
+}
+
+function saveWallboxHistoryLocal() {
+  try { localStorage.setItem('wallboxHistory', JSON.stringify(pruneOldWb(wallboxHistory))); } catch {}
+}
+
+function loadWallboxHistoryLocal() {
+  try { return pruneOldWb(JSON.parse(localStorage.getItem('wallboxHistory') || '[]')); } catch { return []; }
+}
+
+function mergeWbHistories(a, b) {
+  const all = pruneOldWb(a.concat(b)).sort((x, y) => x.t - y.t);
+  const out = [];
+  for (const p of all) {
+    if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
+  }
+  return out;
+}
+
+async function maybeRestoreWbHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(p => p.t < serverOldest - 60000);
+  if (older.length < 2) return;
+  try {
+    await fetch('/api/wallbox-history/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: older })
+    });
+  } catch {}
+}
+
+// Energie (kWh) = plocha pod křivkou výkonu; mezery delší než 10 min se nepočítají
+function integrateWbKwh(pts) {
+  let kwh = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dtMs = pts[i].t - pts[i - 1].t;
+    if (dtMs > 10 * 60 * 1000) continue;
+    const avgW = (pts[i - 1].w + pts[i].w) / 2;
+    kwh += (avgW / 1000) * (dtMs / 3600000);
+  }
+  return kwh;
+}
+
+function renderWallboxChart() {
+  if (!wbChartCanvas) return;
+  const ctx = wbChartCanvas.getContext('2d');
+  const w = wbChartCanvas.clientWidth || 300;
+  const h = wbChartCanvas.clientHeight || 120;
+  const dpr = window.devicePixelRatio || 1;
+  wbChartCanvas.width = w * dpr;
+  wbChartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now();
+  const start = now - 24 * 60 * 60 * 1000;
+  const pts = wallboxHistory.filter(p => p.t >= start);
+
+  const grey = 'rgba(44,62,80,0.4)';
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  if (pts.length < 2) {
+    ctx.fillStyle = grey;
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    if (wbEnergyTotalEl) wbEnergyTotalEl.textContent = '';
+    return;
+  }
+
+  if (wbEnergyTotalEl) {
+    wbEnergyTotalEl.textContent = 'Celková spotřeba za 24 h: '
+      + integrateWbKwh(pts).toFixed(1).replace('.', ',') + ' kWh';
+  }
+
+  const padL = 32, padR = 8, padT = 10, padB = 18;
+  let max = 0.5;
+  for (const p of pts) {
+    const kw = p.w / 1000;
+    if (kw > max) max = kw;
+  }
+
+  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
+  const y = kw => padT + (1 - kw / max) * (h - padT - padB);
+
+  // Nulová linka
+  ctx.strokeStyle = 'rgba(44,62,80,0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, y(0));
+  ctx.lineTo(w - padR, y(0));
+  ctx.stroke();
+
+  // Popisky osy Y
+  ctx.fillStyle = grey;
+  ctx.textAlign = 'right';
+  ctx.fillText(max.toFixed(1).replace('.', ','), padL - 5, y(max) + 8);
+  ctx.fillText('0', padL - 5, y(0) + 3);
+
+  // Časové značky po 6 hodinách
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const t = start + i * 6 * 60 * 60 * 1000;
+    const d = new Date(t);
+    ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
+  }
+
+  // Výplň pod křivkou
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].w / 1000));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.w / 1000));
+  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
+  ctx.lineTo(x(pts[0].t), y(0));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(245,147,61,0.18)';
+  ctx.fill();
+
+  // Křivka
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].w / 1000));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.w / 1000));
+  ctx.strokeStyle = '#f5933d';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+window.addEventListener('resize', renderWallboxChart);
+
 // ---------- AI asistent ----------
 
 const asstInput = document.getElementById('asstInput');
@@ -3029,6 +3177,13 @@ function applySnapshot(snap) {
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
   renderWallbox();
+  // Historie výkonu wallboxu: spojíme server + lokální zálohu, chybějící vrátíme serveru
+  const serverWb = snap.wallboxHistory || [];
+  const localWb = loadWallboxHistoryLocal();
+  wallboxHistory = mergeWbHistories(serverWb, localWb);
+  renderWallboxChart();
+  saveWallboxHistoryLocal();
+  maybeRestoreWbHistoryToServer(serverWb, localWb);
   if (snap.assistantEnabled === false) hideAssistantSlide();
   renderAssistantLog(snap.assistantLog || []);
   blindTimersData = snap.blindTimers || [];
@@ -3141,6 +3296,13 @@ function connectStream() {
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
     renderWallbox();
+  });
+  es.addEventListener('wallboxHistory', e => {
+    const d = JSON.parse(e.data);
+    if (Array.isArray(d.history)) wallboxHistory = mergeWbHistories(d.history, []);
+    else if (d.point) wallboxHistory = mergeWbHistories(wallboxHistory, [d.point]);
+    renderWallboxChart();
+    saveWallboxHistoryLocal();
   });
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];
