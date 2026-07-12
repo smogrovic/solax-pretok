@@ -1345,9 +1345,13 @@ let blindTimerSeq = 1;
 
 app.post('/api/blinds/timer', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { deviceURL, time, action, orientation } = req.body || {};
-  if (typeof deviceURL !== 'string' || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) {
-    return res.status(400).json({ error: 'Chybí deviceURL, time (HH:MM) nebo action (up/down).' });
+  const { deviceURL, deviceURLs, time, action, orientation, label } = req.body || {};
+  // Časovač může ovládat i skupinu rolet najednou (Miky/Elenka mají po dvou)
+  const urls = Array.isArray(deviceURLs)
+    ? deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 4)
+    : (typeof deviceURL === 'string' && deviceURL ? [deviceURL] : []);
+  if (!urls.length || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) {
+    return res.status(400).json({ error: 'Chybí rolety, time (HH:MM) nebo action (up/down).' });
   }
   let tilt = null;
   if (orientation !== undefined && orientation !== null) {
@@ -1359,12 +1363,17 @@ app.post('/api/blinds/timer', async (req, res) => {
   if (blindTimers.length >= 10) {
     return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
   }
-  let name = 'Roleta';
-  try {
-    const blind = (await getBlinds()).find(b => b.deviceURL === deviceURL);
-    if (blind) name = blind.label;
-  } catch {}
-  const timer = { id: blindTimerSeq++, deviceURL, name, time, action, orientation: tilt };
+  let name = typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : '';
+  if (!name) {
+    try {
+      const blind = (await getBlinds()).find(b => b.deviceURL === urls[0]);
+      name = blind ? blind.label : 'Roleta';
+      if (urls.length > 1) name += ` +${urls.length - 1}`;
+    } catch {
+      name = 'Roleta';
+    }
+  }
+  const timer = { id: blindTimerSeq++, deviceURLs: urls, name, time, action, orientation: tilt };
   blindTimers.push(timer);
   blindTimers.sort((a, b) => a.time.localeCompare(b.time));
   addLog(`Časovač: ${name} ${action === 'up' ? 'vytáhnout' : 'zatáhnout'} v ${time}`);
@@ -1394,11 +1403,18 @@ setInterval(async () => {
   blindTimers = blindTimers.filter(t => t.time !== current);
   broadcast('blindTimers', { timers: blindTimers });
   for (const t of due) {
-    try {
-      await blindCommand(t.deviceURL, t.action, t.orientation);
+    let ok = 0;
+    for (const url of t.deviceURLs || []) {
+      try {
+        await blindCommand(url, t.action, t.orientation);
+        ok++;
+      } catch (err) {
+        addLog(`Časovač ${t.name}: roleta selhala (${err.message.slice(0, 100)})`);
+      }
+      await delay(500);
+    }
+    if (ok > 0) {
       addLog(`${t.name}: ${t.action === 'up' ? 'vytaženo' : 'zataženo'} (časovač ${t.time})`);
-    } catch (err) {
-      addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
     }
   }
 }, 30000);
@@ -2062,43 +2078,66 @@ async function wbPost(path, body) {
   throw lastErr || new Error('Wallbox API nedostupné.');
 }
 
-// Charger API žije pod /proxyApp/proxy/api/v2/charger/… (zjištěno z API dokumentace)
-const WB_READ_PATHS = [
-  '/proxyApp/proxy/api/v2/charger/getRealtimeInfo',
-  '/proxyApp/proxy/api/v2/charger/getInfo',
-  '/proxyApp/proxy/api/v2/charger/getSetting',
-  '/api/v2/dataAccess/realtimeInfo/get'
-];
 const WB_SETMODE_PATHS = [
-  '/proxyApp/proxy/api/v2/charger/setMode',
-  '/api/v2/charger/setMode'
+  '/api/v2/charger/setMode',
+  '/proxyApp/proxy/api/v2/charger/setMode'
 ];
 
-// Čtení stavu: zkoušíme známé kandidáty a bereme první, který vrátí data
-async function wbFetchStatus() {
-  const reasons = [];
-  const candidates = WB_READ_PATHS.map(p => ({
-    name: p.split('/').pop(),
-    run: () => wbPost(p, p.includes('dataAccess') ? { wifiSn: WALLBOX_SN } : { sn: WALLBOX_SN })
-  }));
-  candidates.push({
+async function wbGet(path) {
+  let lastErr = null;
+  for (const host of WB_HOSTS) {
+    try {
+      const res = await fetch(host + path, {
+        headers: { tokenId: SOLAX_TOKEN_ID },
+        signal: AbortSignal.timeout(15000)
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) return data;
+      lastErr = new Error(`Wallbox API HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Wallbox API nedostupné.');
+}
+
+// Kandidáti čtení stavu: dataAccess se správným registračním číslem funguje
+// (dřív hlásil jen rate limit), getInfo existuje ale chce GET (405 na POST)
+const wbReadCandidates = [
+  { name: 'v2 dataAccess', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
+  { name: 'charger getInfo', run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(WALLBOX_SN)}`) },
+  {
     name: 'v6 getRealtimeInfo',
     run: async () => {
       const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       return res.json();
     }
-  });
-  for (const c of candidates) {
+  }
+];
+
+// Jakmile jednou najdeme funkční zdroj, ptáme se už jen jeho —
+// SolaxCloud má limit dotazů za minutu na token
+let wbPreferredSource = null;
+
+async function wbFetchStatus() {
+  const reasons = [];
+  const ordered = wbPreferredSource
+    ? [...wbReadCandidates].sort((a, b) => (b.name === wbPreferredSource) - (a.name === wbPreferredSource))
+    : wbReadCandidates;
+  for (const c of ordered) {
     try {
       const data = await c.run();
       if (data && data.success !== false && data.result && typeof data.result === 'object') {
+        wbPreferredSource = c.name;
         return { source: c.name, result: data.result };
       }
       reasons.push(`${c.name}: ${(data && (data.exception || data.result)) || 'bez dat'}`);
     } catch (err) {
       reasons.push(`${c.name}: ${err.message}`);
     }
+    if (wbPreferredSource) break; // preferovaný zdroj selhal → počkáme na další poll
+    await delay(1500); // rozestup kvůli minutovému limitu tokenu
   }
   return { error: reasons.join(' · ') };
 }
@@ -2141,25 +2180,37 @@ if (wallboxEnabled) {
   setInterval(pollWallbox, 5 * 60 * 1000);
 }
 
-// Diagnostika: surové odpovědi všech kandidátních endpointů, po hostech
+// Diagnostika: surové odpovědi kandidátů (s rozestupy kvůli minutovému limitu tokenu)
 app.get('/api/wallbox/debug', async (req, res) => {
   if (!wallboxEnabled) return res.json({ enabled: false, hint: 'Chybí WALLBOX_SN (a SOLAX_TOKEN_ID).' });
   const out = [];
-  for (const path of WB_READ_PATHS) {
-    for (const host of WB_HOSTS) {
-      try {
-        const r = await fetch(host + path, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
-          body: JSON.stringify(path.includes('dataAccess') ? { wifiSn: WALLBOX_SN } : { sn: WALLBOX_SN }),
-          signal: AbortSignal.timeout(15000)
-        });
-        const text = await r.text();
-        out.push({ endpoint: host.replace('https://', '') + path, status: r.status, body: text.slice(0, 300) });
-      } catch (err) {
-        out.push({ endpoint: host.replace('https://', '') + path, error: err.message });
-      }
+  const probes = [
+    ['POST v2 dataAccess (wifiSn)', () => fetch(WB_HOSTS[0] + '/api/v2/dataAccess/realtimeInfo/get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
+      body: JSON.stringify({ wifiSn: WALLBOX_SN }),
+      signal: AbortSignal.timeout(15000)
+    })],
+    ['GET charger getInfo (token v hlavičce)', () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(WALLBOX_SN)}`, {
+      headers: { tokenId: SOLAX_TOKEN_ID },
+      signal: AbortSignal.timeout(15000)
+    })],
+    ['GET charger getInfo (token v query)', () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`, {
+      signal: AbortSignal.timeout(15000)
+    })],
+    ['GET v6 getRealtimeInfo.do', () => fetch(`${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`, {
+      signal: AbortSignal.timeout(15000)
+    })]
+  ];
+  for (const [name, run] of probes) {
+    try {
+      const r = await run();
+      const text = await r.text();
+      out.push({ endpoint: name, status: r.status, body: text.slice(0, 400) });
+    } catch (err) {
+      out.push({ endpoint: name, error: err.message });
     }
+    await delay(2000);
   }
   res.json(out);
 });

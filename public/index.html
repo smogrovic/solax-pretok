@@ -2090,6 +2090,39 @@ loadBlinds();
 const blindTimerCards = Array.from(document.querySelectorAll('.blind-timer-card'));
 let blindTimersData = [];
 
+// Pokoje, kde časovač ovládá vždy obě rolety najednou
+const TIMER_GROUPED_ROOMS = ['miky', 'elenka'];
+
+function blindTimerOptions(page) {
+  // Stejné řazení místností jako na stránkách s ovládáním
+  const roomsMap = new Map();
+  for (const b of blinds) {
+    if (b.type !== 'cover') continue;
+    if (!roomsMap.has(b.room)) roomsMap.set(b.room, []);
+    roomsMap.get(b.room).push(b);
+  }
+  const rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
+  rooms.sort((a, b) => a.page - b.page || a.order - b.order || a.room.localeCompare(b.room, 'cs'));
+
+  const options = [];
+  for (const group of rooms) {
+    if (group.page !== page) continue;
+    const n = normalizeName(group.room);
+    if (group.items.length > 1 && TIMER_GROUPED_ROOMS.some(r => n.includes(r))) {
+      // Skupina: jedna položka pro celý pokoj
+      options.push({
+        value: group.items.map(b => b.deviceURL).join('|'),
+        label: `${group.room} — obě rolety`
+      });
+    } else {
+      for (const b of group.items) {
+        options.push({ value: b.deviceURL, label: `${b.label} (${group.room})` });
+      }
+    }
+  }
+  return options;
+}
+
 function renderBlindTimerDevices() {
   for (const card of blindTimerCards) {
     // V seznamu jsou jen rolety patřící na stránku, kde časovač je
@@ -2097,12 +2130,10 @@ function renderBlindTimerDevices() {
     const sel = card.querySelector('.bt-device');
     const prev = sel.value;
     sel.textContent = '';
-    for (const b of blinds) {
-      if (b.type !== 'cover') continue;
-      if (roomPageIndex(b.room).page !== page) continue;
+    for (const o of blindTimerOptions(page)) {
       const opt = document.createElement('option');
-      opt.value = b.deviceURL;
-      opt.textContent = `${b.label} (${b.room})`;
+      opt.value = o.value;
+      opt.textContent = o.label;
       sel.appendChild(opt);
     }
     if (prev) sel.value = prev;
@@ -2154,16 +2185,18 @@ for (const card of blindTimerCards) {
 
   const addBtn = card.querySelector('.bt-add');
   addBtn.addEventListener('click', async () => {
-    const deviceURL = card.querySelector('.bt-device').value;
+    const sel = card.querySelector('.bt-device');
     const time = card.querySelector('.bt-time').value;
     const action = card.querySelector('.bt-action').value;
-    if (!deviceURL || !time) return;
+    if (!sel.value || !time) return;
+    const deviceURLs = sel.value.split('|');
+    const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
     addBtn.disabled = true;
     try {
       const res = await fetch('/api/blinds/timer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ deviceURL, time, action, orientation: Number(tilt.value) })
+        body: JSON.stringify({ deviceURLs, label, time, action, orientation: Number(tilt.value) })
       });
       const data = await res.json();
       if (res.status === 401) {
