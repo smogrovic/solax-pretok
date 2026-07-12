@@ -166,6 +166,7 @@ function snapshot() {
     runtime: { date: state.runtime.date, ms: state.runtime.ms },
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
+    blindTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
     airconTimers,
@@ -1333,6 +1334,71 @@ app.post('/api/blinds/command', async (req, res) => {
   }
 });
 
+// ---------- Časovače rolet (jednorázové vytažení/zatažení v daný čas) ----------
+
+let blindTimers = [];
+let blindTimerSeq = 1;
+
+app.post('/api/blinds/timer', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { deviceURL, time, action, orientation } = req.body || {};
+  if (typeof deviceURL !== 'string' || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) {
+    return res.status(400).json({ error: 'Chybí deviceURL, time (HH:MM) nebo action (up/down).' });
+  }
+  let tilt = null;
+  if (orientation !== undefined && orientation !== null) {
+    tilt = Number(orientation);
+    if (!Number.isFinite(tilt) || tilt < 0 || tilt > 100) {
+      return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
+    }
+  }
+  if (blindTimers.length >= 10) {
+    return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
+  }
+  let name = 'Roleta';
+  try {
+    const blind = (await getBlinds()).find(b => b.deviceURL === deviceURL);
+    if (blind) name = blind.label;
+  } catch {}
+  const timer = { id: blindTimerSeq++, deviceURL, name, time, action, orientation: tilt };
+  blindTimers.push(timer);
+  blindTimers.sort((a, b) => a.time.localeCompare(b.time));
+  addLog(`Časovač: ${name} ${action === 'up' ? 'vytáhnout' : 'zatáhnout'} v ${time}`);
+  broadcast('blindTimers', { timers: blindTimers });
+  res.json({ timers: blindTimers });
+});
+
+app.post('/api/blinds/timer/delete', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { id } = req.body || {};
+  const timer = blindTimers.find(t => t.id === id);
+  if (timer) {
+    blindTimers = blindTimers.filter(t => t.id !== id);
+    addLog(`Časovač zrušen: ${timer.name} v ${timer.time}`);
+    broadcast('blindTimers', { timers: blindTimers });
+  }
+  res.json({ timers: blindTimers });
+});
+
+setInterval(async () => {
+  if (!blindTimers.length) return;
+  const p = pragueTime();
+  const pad2 = n => String(n).padStart(2, '0');
+  const current = `${pad2(p.hour)}:${pad2(p.minute)}`;
+  const due = blindTimers.filter(t => t.time === current);
+  if (!due.length) return;
+  blindTimers = blindTimers.filter(t => t.time !== current);
+  broadcast('blindTimers', { timers: blindTimers });
+  for (const t of due) {
+    try {
+      await blindCommand(t.deviceURL, t.action, t.orientation);
+      addLog(`${t.name}: ${t.action === 'up' ? 'vytaženo' : 'zataženo'} (časovač ${t.time})`);
+    } catch (err) {
+      addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
+    }
+  }
+}, 30000);
+
 // ---------- Panasonic Comfort Cloud (klimatizace) ----------
 // Neoficiální API appky Comfort Cloud — stejné používá Home Assistant a Homebridge.
 // Přihlášení: Auth0 PKCE flow, pak accsmart.panasonic.com s podepsanými hlavičkami.
@@ -1836,7 +1902,7 @@ app.post('/api/aircon/set', async (req, res) => {
     const t = Number(temperature);
     if (!Number.isFinite(t) || t < 8 || t > 32) return res.status(400).json({ error: 'Teplota musí být 8–32 °C.' });
     parameters.temperatureSet = t;
-    actions.push(`cíl ${String(t).replace('.', ',')} °C`);
+    // Změny teploty se do logu nezapisují
   }
   if (mode !== undefined) {
     if (PCC_MODES[mode] === undefined) return res.status(400).json({ error: 'Neznámý režim.' });
@@ -1866,7 +1932,7 @@ app.post('/api/aircon/set', async (req, res) => {
       if (parameters.operationMode !== undefined) dev.mode = mode;
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
       broadcast('aircon', { aircon: state.aircon });
-      addLog(`${dev.name}: ${actions.join(', ')}`);
+      if (actions.length) addLog(`${dev.name}: ${actions.join(', ')}`);
     }
     res.json({ success: true });
   } catch (err) {

@@ -809,6 +809,25 @@
           <div class="log-empty">Načítám rolety…</div>
         </div>
       </div>
+
+      <div class="card lockable timer-card blind-timer-card">
+        <div class="graph-title">Časovač rolet</div>
+        <select class="timer-select bt-device"></select>
+        <div class="timer-form-row">
+          <select class="timer-select bt-action">
+            <option value="up">Vytáhnout</option>
+            <option value="down">Zatáhnout</option>
+          </select>
+          <input type="time" class="timer-time bt-time" value="21:00">
+        </div>
+        <div class="blind-tilt" style="margin-top:10px;padding-bottom:0">
+          <span class="blind-tilt-label">Naklopení</span>
+          <input type="range" min="0" max="100" value="50" class="bt-tilt">
+          <span class="blind-tilt-val bt-tilt-val">50 %</span>
+        </div>
+        <button class="timer-add-btn bt-add">Přidat časovač</button>
+        <div class="timer-list bt-list"></div>
+      </div>
     </div>
   </div>
 
@@ -828,6 +847,25 @@
       </div>
       <div class="card lockable blinds-card">
         <div class="blinds-list" id="blindsList2"></div>
+      </div>
+
+      <div class="card lockable timer-card blind-timer-card">
+        <div class="graph-title">Časovač rolet</div>
+        <select class="timer-select bt-device"></select>
+        <div class="timer-form-row">
+          <select class="timer-select bt-action">
+            <option value="up">Vytáhnout</option>
+            <option value="down">Zatáhnout</option>
+          </select>
+          <input type="time" class="timer-time bt-time" value="21:00">
+        </div>
+        <div class="blind-tilt" style="margin-top:10px;padding-bottom:0">
+          <span class="blind-tilt-label">Naklopení</span>
+          <input type="range" min="0" max="100" value="50" class="bt-tilt">
+          <span class="blind-tilt-val bt-tilt-val">50 %</span>
+        </div>
+        <button class="timer-add-btn bt-add">Přidat časovač</button>
+        <div class="timer-list bt-list"></div>
       </div>
     </div>
   </div>
@@ -1988,12 +2026,105 @@ async function loadBlinds() {
     }
     blinds = data.blinds || [];
     renderBlinds();
+    renderBlindTimerDevices();
   } catch {
     blindsMessage(blindsList1El, 'Rolety se nepodařilo načíst.');
   }
 }
 
 loadBlinds();
+
+// ---------- Časovače rolet (na obou stránkách rolet stejný seznam) ----------
+
+const blindTimerCards = Array.from(document.querySelectorAll('.blind-timer-card'));
+let blindTimersData = [];
+
+function renderBlindTimerDevices() {
+  for (const card of blindTimerCards) {
+    const sel = card.querySelector('.bt-device');
+    const prev = sel.value;
+    sel.textContent = '';
+    for (const b of blinds) {
+      if (b.type !== 'cover') continue;
+      const opt = document.createElement('option');
+      opt.value = b.deviceURL;
+      opt.textContent = `${b.label} (${b.room})`;
+      sel.appendChild(opt);
+    }
+    if (prev) sel.value = prev;
+  }
+}
+
+function renderBlindTimers() {
+  for (const card of blindTimerCards) {
+    const list = card.querySelector('.bt-list');
+    list.textContent = '';
+    for (const t of blindTimersData) {
+      const row = document.createElement('div');
+      row.className = 'timer-row';
+      const time = document.createElement('span');
+      time.className = 'timer-row-time';
+      time.textContent = t.time;
+      const text = document.createElement('span');
+      text.className = 'timer-row-text';
+      let desc = `${t.name} — ${t.action === 'up' ? 'vytáhnout' : 'zatáhnout'}`;
+      if (typeof t.orientation === 'number') desc += `, naklopení ${t.orientation} %`;
+      text.textContent = desc;
+      const del = document.createElement('button');
+      del.className = 'timer-del';
+      del.textContent = '✕';
+      del.addEventListener('click', async () => {
+        del.disabled = true;
+        try {
+          const res = await fetch('/api/blinds/timer/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+            body: JSON.stringify({ id: t.id })
+          });
+          if (res.status === 401) setLocked(true);
+        } catch {}
+        del.disabled = false;
+      });
+      row.appendChild(time);
+      row.appendChild(text);
+      row.appendChild(del);
+      list.appendChild(row);
+    }
+  }
+}
+
+for (const card of blindTimerCards) {
+  const tilt = card.querySelector('.bt-tilt');
+  const tiltVal = card.querySelector('.bt-tilt-val');
+  tilt.addEventListener('input', () => { tiltVal.textContent = tilt.value + ' %'; });
+
+  const addBtn = card.querySelector('.bt-add');
+  addBtn.addEventListener('click', async () => {
+    const deviceURL = card.querySelector('.bt-device').value;
+    const time = card.querySelector('.bt-time').value;
+    const action = card.querySelector('.bt-action').value;
+    if (!deviceURL || !time) return;
+    addBtn.disabled = true;
+    try {
+      const res = await fetch('/api/blinds/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ deviceURL, time, action, orientation: Number(tilt.value) })
+      });
+      const data = await res.json();
+      if (res.status === 401) {
+        setLocked(true);
+        throw new Error(data.error || 'Ovládání je zamčené.');
+      }
+      if (!res.ok) throw new Error(data.error || 'Časovač se nepodařilo přidat.');
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Časovač rolet: ' + err.message;
+      errorEl.classList.add('show');
+    }
+    addBtn.disabled = false;
+  });
+}
 
 // ---------- Klima (Panasonic Comfort Cloud) ----------
 
@@ -2392,6 +2523,8 @@ function applySnapshot(snap) {
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
   renderWallbox();
+  blindTimersData = snap.blindTimers || [];
+  renderBlindTimers();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -2492,6 +2625,10 @@ function connectStream() {
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
     renderWallbox();
+  });
+  es.addEventListener('blindTimers', e => {
+    blindTimersData = JSON.parse(e.data).timers || [];
+    renderBlindTimers();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).enabled);
