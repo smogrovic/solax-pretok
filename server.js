@@ -1761,11 +1761,12 @@ async function pccGetDevices() {
 }
 
 // Diagnostika: struktura skupin a zařízení z Comfort Cloudu (bez parametrů a celých GUID)
+// + surové odpovědi Aquarea stavu pro ladění Tepelka
 app.get('/api/aircon/debug', async (req, res) => {
   if (!panasonicEnabled) return res.json({ enabled: false });
   try {
     const groups = await pccQueued(() => pccApiFetch('/device/group'));
-    res.json((groups.groupList || []).map(g => ({
+    const groupsOut = (groups.groupList || []).map(g => ({
       groupName: g.groupName,
       keys: Object.keys(g),
       devices: (('deviceList' in g ? g.deviceList : g.deviceIdList) || []).map(d => ({
@@ -1775,7 +1776,30 @@ app.get('/api/aircon/debug', async (req, res) => {
         hasParameters: !!d.parameters,
         keys: Object.keys(d)
       }))
-    })));
+    }));
+
+    const aquaTests = [];
+    for (const g of groups.groupList || []) {
+      for (const d of (('deviceList' in g ? g.deviceList : g.deviceIdList) || [])) {
+        if (!d || !d.deviceGuid || d.parameters) continue;
+        for (const direct of [1, 0]) {
+          try {
+            const raw = await pccQueued(() => pccApiFetch('/remote/v1/app/common/transfer', {
+              method: 'POST',
+              body: JSON.stringify({
+                apiName: `/remote/v1/api/devices?gwid=${d.deviceGuid}&deviceDirect=${direct}`,
+                requestMethod: 'GET'
+              })
+            }));
+            aquaTests.push({ device: d.deviceName, direct, data: raw });
+          } catch (err) {
+            aquaTests.push({ device: d.deviceName, direct, error: err.message });
+          }
+        }
+      }
+    }
+
+    res.json({ groups: groupsOut, aquarea: aquaTests });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -2040,11 +2064,11 @@ async function wbPost(path, body) {
 // Čtení stavu: přesný endpoint pro EV charger není veřejně zdokumentovaný,
 // zkoušíme známé kandidáty a bereme první, který vrátí data
 async function wbFetchStatus() {
+  const reasons = [];
   const candidates = [
-    { name: 'v2 realtimeInfo (wifiSn)', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
-    { name: 'v2 charger realtime', run: () => wbPost('/api/v2/charger/getRealtimeInfo', { sn: WALLBOX_SN }) },
+    { name: 'v2 realtimeInfo', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
     {
-      name: 'v6 getRealtimeInfo.do',
+      name: 'v6 getRealtimeInfo',
       run: async () => {
         const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
         const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
@@ -2058,9 +2082,12 @@ async function wbFetchStatus() {
       if (data && data.success !== false && data.result && typeof data.result === 'object') {
         return { source: c.name, result: data.result };
       }
-    } catch {}
+      reasons.push(`${c.name}: ${(data && (data.exception || data.result)) || 'bez dat'}`);
+    } catch (err) {
+      reasons.push(`${c.name}: ${err.message}`);
+    }
   }
-  return null;
+  return { error: reasons.join(' · ') };
 }
 
 function wbParseResult(r) {
@@ -2082,10 +2109,13 @@ async function pollWallbox() {
   wallboxPollRunning = true;
   try {
     const found = await wbFetchStatus();
-    if (found) {
+    if (found && found.result) {
       state.wallbox = { ...wbParseResult(found.result), source: found.source, error: null, fetchedAt: new Date().toISOString() };
     } else {
-      state.wallbox = { ...state.wallbox, error: 'Data wallboxu se nepodařilo načíst (mrkni na /api/wallbox/debug).' };
+      const hint = (found && /no auth/i.test(found.error || ''))
+        ? ' — token na tohle SN nemá oprávnění; zkontroluj, že WALLBOX_SN je registrační číslo (SN modulu) nabíječky ze SolaxCloudu'
+        : '';
+      state.wallbox = { ...state.wallbox, error: `SolaxCloud: ${(found && found.error) || 'bez odpovědi'}${hint}` };
     }
     broadcast('wallbox', { wallbox: state.wallbox });
   } finally {
