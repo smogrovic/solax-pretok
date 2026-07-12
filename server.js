@@ -2046,8 +2046,10 @@ setInterval(async () => {
 
 // ---------- Solax wallbox (EV charger přes SolaxCloud API v2) ----------
 
-const WALLBOX_SN = process.env.WALLBOX_SN;
-const wallboxEnabled = !!(WALLBOX_SN && SOLAX_TOKEN_ID);
+// WALLBOX_SN může obsahovat víc kandidátů oddělených čárkou (registrační číslo
+// i výrobní SN) — server si sám najde a zapamatuje funkční kombinaci
+const WALLBOX_SNS = (process.env.WALLBOX_SN || '').split(',').map(s => s.trim()).filter(Boolean);
+const wallboxEnabled = !!(WALLBOX_SNS.length && SOLAX_TOKEN_ID);
 
 const WB_MODES = { stop: 0, fast: 1, eco: 2, green: 3 };
 const WB_MODE_LABELS = { stop: 'Stop', fast: 'Rychlý', eco: 'Eko', green: 'Zelený' };
@@ -2101,44 +2103,54 @@ async function wbGet(path) {
   throw lastErr || new Error('Wallbox API nedostupné.');
 }
 
-// Kandidáti čtení stavu: dataAccess se správným registračním číslem funguje
-// (dřív hlásil jen rate limit), getInfo existuje ale chce GET (405 na POST)
-const wbReadCandidates = [
-  { name: 'v2 dataAccess', run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: WALLBOX_SN }) },
-  { name: 'charger getInfo', run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(WALLBOX_SN)}`) },
-  {
-    name: 'v6 getRealtimeInfo',
-    run: async () => {
-      const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      return res.json();
-    }
+// Kandidáti čtení: kombinace endpoint × SN × název parametru.
+// dataAccess chce registrační číslo (wifiSn), charger getInfo možná výrobní SN.
+function wbReadCandidates() {
+  const out = [];
+  for (const sn of WALLBOX_SNS) {
+    const tail = sn.slice(-4);
+    out.push({ name: `dataAccess(…${tail})`, sn, run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: sn }) });
+    out.push({ name: `getInfo sn(…${tail})`, sn, run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(sn)}`) });
+    out.push({ name: `getInfo deviceSn(…${tail})`, sn, run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?deviceSn=${encodeURIComponent(sn)}`) });
+    out.push({
+      name: `v6(…${tail})`,
+      sn,
+      run: async () => {
+        const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(sn)}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        return res.json();
+      }
+    });
   }
-];
+  return out;
+}
 
 // Jakmile jednou najdeme funkční zdroj, ptáme se už jen jeho —
 // SolaxCloud má limit dotazů za minutu na token
 let wbPreferredSource = null;
+let wbWorkingSn = null;
 
 async function wbFetchStatus() {
   const reasons = [];
+  const all = wbReadCandidates();
   const ordered = wbPreferredSource
-    ? [...wbReadCandidates].sort((a, b) => (b.name === wbPreferredSource) - (a.name === wbPreferredSource))
-    : wbReadCandidates;
+    ? all.filter(c => c.name === wbPreferredSource)
+    : all;
   for (const c of ordered) {
     try {
       const data = await c.run();
       if (data && data.success !== false && data.result && typeof data.result === 'object') {
         wbPreferredSource = c.name;
+        wbWorkingSn = c.sn;
         return { source: c.name, result: data.result };
       }
       reasons.push(`${c.name}: ${(data && (data.exception || data.result)) || 'bez dat'}`);
     } catch (err) {
       reasons.push(`${c.name}: ${err.message}`);
     }
-    if (wbPreferredSource) break; // preferovaný zdroj selhal → počkáme na další poll
     await delay(1500); // rozestup kvůli minutovému limitu tokenu
   }
+  if (wbPreferredSource) wbPreferredSource = null; // preferovaný zdroj přestal fungovat
   return { error: reasons.join(' · ') };
 }
 
@@ -2165,7 +2177,7 @@ async function pollWallbox() {
       state.wallbox = { ...wbParseResult(found.result), source: found.source, error: null, fetchedAt: new Date().toISOString() };
     } else {
       const hint = (found && /no auth/i.test(found.error || ''))
-        ? ' — token na tohle SN nemá oprávnění; zkontroluj, že WALLBOX_SN je registrační číslo (SN modulu) nabíječky ze SolaxCloudu'
+        ? ' — token na zadaná SN nemá oprávnění; do WALLBOX_SN dej obě čísla oddělená čárkou (registrační i výrobní)'
         : '';
       state.wallbox = { ...state.wallbox, error: `SolaxCloud: ${(found && found.error) || 'bez odpovědi'}${hint}` };
     }
@@ -2184,24 +2196,24 @@ if (wallboxEnabled) {
 app.get('/api/wallbox/debug', async (req, res) => {
   if (!wallboxEnabled) return res.json({ enabled: false, hint: 'Chybí WALLBOX_SN (a SOLAX_TOKEN_ID).' });
   const out = [];
-  const probes = [
-    ['POST v2 dataAccess (wifiSn)', () => fetch(WB_HOSTS[0] + '/api/v2/dataAccess/realtimeInfo/get', {
+  const probes = [];
+  for (const sn of WALLBOX_SNS) {
+    const tail = '…' + sn.slice(-4);
+    probes.push([`POST dataAccess wifiSn ${tail}`, () => fetch(WB_HOSTS[0] + '/api/v2/dataAccess/realtimeInfo/get', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
-      body: JSON.stringify({ wifiSn: WALLBOX_SN }),
+      body: JSON.stringify({ wifiSn: sn }),
       signal: AbortSignal.timeout(15000)
-    })],
-    ['GET charger getInfo (token v hlavičce)', () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(WALLBOX_SN)}`, {
+    })]);
+    probes.push([`GET getInfo sn ${tail}`, () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(sn)}`, {
       headers: { tokenId: SOLAX_TOKEN_ID },
       signal: AbortSignal.timeout(15000)
-    })],
-    ['GET charger getInfo (token v query)', () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`, {
+    })]);
+    probes.push([`GET getInfo deviceSn ${tail}`, () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?deviceSn=${encodeURIComponent(sn)}`, {
+      headers: { tokenId: SOLAX_TOKEN_ID },
       signal: AbortSignal.timeout(15000)
-    })],
-    ['GET v6 getRealtimeInfo.do', () => fetch(`${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(WALLBOX_SN)}`, {
-      signal: AbortSignal.timeout(15000)
-    })]
-  ];
+    })]);
+  }
   for (const [name, run] of probes) {
     try {
       const r = await run();
@@ -2232,20 +2244,29 @@ app.post('/api/wallbox/set', async (req, res) => {
     }
   }
   try {
+    // Zkoušíme cesty × SN; preferujeme SN, které funguje pro čtení
+    const sns = wbWorkingSn
+      ? [wbWorkingSn, ...WALLBOX_SNS.filter(s => s !== wbWorkingSn)]
+      : WALLBOX_SNS;
     let data = null;
     let lastErr = null;
-    for (const path of WB_SETMODE_PATHS) {
-      try {
-        data = await wbPost(path, { sn: WALLBOX_SN, mode: WB_MODES[mode], current: amps });
-        break; // endpoint existuje a odpověděl
-      } catch (err) {
-        lastErr = err;
+    outer:
+    for (const sn of sns) {
+      for (const path of WB_SETMODE_PATHS) {
+        try {
+          const resp = await wbPost(path, { sn, mode: WB_MODES[mode], current: amps });
+          if (resp && resp.success !== false) {
+            data = resp;
+            break outer;
+          }
+          lastErr = new Error(resp.exception || 'SolaxCloud příkaz odmítl.');
+        } catch (err) {
+          lastErr = err;
+        }
+        await delay(1200);
       }
     }
     if (!data) throw lastErr || new Error('SolaxCloud nedostupný.');
-    if (data.success === false) {
-      throw new Error(data.exception || 'SolaxCloud příkaz odmítl.');
-    }
     state.wallbox = { ...state.wallbox, mode };
     broadcast('wallbox', { wallbox: state.wallbox });
     addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}${mode !== 'stop' ? ` (${amps} A)` : ''}`);
