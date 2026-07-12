@@ -88,7 +88,7 @@ const state = {
   runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
   timeline: { shelly: [], pool: [], solinator: [] }, // segmenty { from, to } zapnutí za 48 h
   aircon: { devices: [], error: null }, // Panasonic klimatizace
-  wallbox: { power: null, mode: null, status: null, error: null } // Solax EV charger
+  wallbox: { power: null, energy: null, mode: null, status: null, error: null } // Solax EV charger
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -232,13 +232,16 @@ async function fetchSolax() {
   const batPower = typeof r.batPower === 'number' ? r.batPower : 0;
   // Spotřeba domu = výroba FVE - výkon spotřebovaný na nabíjení baterie - přetok do sítě
   // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného čísla spotřebu zvýší - správně)
-  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0)) / 1000);
+  // Wallbox odečteme, ať v "spotřebě domu" nefiguruje nabíjení auta
+  const wallboxW = (state.wallbox && typeof state.wallbox.power === 'number') ? state.wallbox.power : 0;
+  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
 
   return {
     fveKw,
     feedinKw,
     houseKw,
+    wallboxKw: wallboxW / 1000,
     batterySoc,
     batPowerKw: batPower / 1000,
     uploadTime: r.uploadTime,
@@ -1348,7 +1351,7 @@ app.post('/api/blinds/timer', async (req, res) => {
   const { deviceURL, deviceURLs, time, action, orientation, label } = req.body || {};
   // Časovač může ovládat i skupinu rolet najednou (Miky/Elenka mají po dvou)
   const urls = Array.isArray(deviceURLs)
-    ? deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 4)
+    ? deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 20)
     : (typeof deviceURL === 'string' && deviceURL ? [deviceURL] : []);
   if (!urls.length || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) {
     return res.status(400).json({ error: 'Chybí rolety, time (HH:MM) nebo action (up/down).' });
@@ -1955,7 +1958,7 @@ app.post('/api/aircon/set', async (req, res) => {
   if (eco !== undefined) {
     if (PCC_ECO[eco] === undefined) return res.status(400).json({ error: 'Neznámý eco režim.' });
     parameters.ecoMode = PCC_ECO[eco];
-    actions.push(eco === 'quiet' ? 'tichý režim' : (eco === 'powerful' ? 'výkonný režim' : 'běžný režim'));
+    // tichý/výkonný režim se do logu nezapisuje
   }
   if (!Object.keys(parameters).length) return res.status(400).json({ error: 'Žádný parametr ke změně.' });
 
@@ -1988,7 +1991,7 @@ let airconTimerSeq = 1;
 
 app.post('/api/aircon/timer', (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { guid, time, action } = req.body || {};
+  const { guid, time, action, quiet } = req.body || {};
   if (typeof guid !== 'string' || !/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) {
     return res.status(400).json({ error: 'Chybí guid, time (HH:MM) nebo action (on/off).' });
   }
@@ -1996,7 +1999,7 @@ app.post('/api/aircon/timer', (req, res) => {
     return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
   }
   const dev = state.aircon.devices.find(d => d.guid === guid);
-  const timer = { id: airconTimerSeq++, guid, name: (dev && dev.name) || 'Klima', time, action };
+  const timer = { id: airconTimerSeq++, guid, name: (dev && dev.name) || 'Klima', time, action, quiet: action === 'on' && !!quiet };
   airconTimers.push(timer);
   airconTimers.sort((a, b) => a.time.localeCompare(b.time));
   addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
@@ -2028,141 +2031,57 @@ setInterval(async () => {
   broadcast('airconTimers', { timers: airconTimers });
   for (const t of due) {
     try {
+      const params = { operate: t.action === 'on' ? 1 : 0 };
+      // Při zapnutí s tichým režimem rovnou nastavíme ecoMode = tichý (2)
+      if (t.action === 'on' && t.quiet) params.ecoMode = 2;
       await pccQueued(() => pccApiFetch('/deviceStatus/control', {
         method: 'POST',
-        body: JSON.stringify({ deviceGuid: t.guid, parameters: { operate: t.action === 'on' ? 1 : 0 } })
+        body: JSON.stringify({ deviceGuid: t.guid, parameters: params })
       }));
       const dev = state.aircon.devices.find(d => d.guid === t.guid);
       if (dev) {
         dev.power = t.action === 'on';
+        if (t.action === 'on' && t.quiet) dev.eco = 2;
         broadcast('aircon', { aircon: state.aircon });
       }
-      addLog(`${t.name}: ${t.action === 'on' ? 'zapnuto' : 'vypnuto'} (časovač ${t.time})`);
+      addLog(`${t.name}: ${t.action === 'on' ? 'zapnuto' : 'vypnuto'}${t.action === 'on' && t.quiet ? ' (tichý)' : ''} (časovač ${t.time})`);
     } catch (err) {
       addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
     }
   }
 }, 30000);
 
-// ---------- Solax wallbox (EV charger přes SolaxCloud API v2) ----------
+// ---------- Solax wallbox (EV charger přes SolaxCloud pileInfo/pileCmd) ----------
 
-// WALLBOX_SN může obsahovat víc kandidátů oddělených čárkou (registrační číslo
-// i výrobní SN) — server si sám najde a zapamatuje funkční kombinaci
-const WALLBOX_SNS = (process.env.WALLBOX_SN || '').split(',').map(s => s.trim()).filter(Boolean);
-const wallboxEnabled = !!(WALLBOX_SNS.length && SOLAX_TOKEN_ID);
+const WALLBOX_SN = process.env.WALLBOX_SN;
+const wallboxEnabled = !!(WALLBOX_SN && SOLAX_TOKEN_ID);
+const WB_HOST = 'https://www.solaxcloud.com';
 
 const WB_MODES = { stop: 0, fast: 1, eco: 2, green: 3 };
-const WB_MODE_LABELS = { stop: 'Stop', fast: 'Rychlý', eco: 'Eko', green: 'Zelený' };
 const WB_MODE_NAMES = ['stop', 'fast', 'eco', 'green'];
-// Povolené nabíjecí proudy podle režimu (z API dokumentace)
-const WB_CURRENTS = { green: [3, 6], eco: [6, 10, 16, 20, 25], fast: [6, 8, 10, 13, 16, 20, 25, 32] };
+const WB_MODE_LABELS = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
+// chargerStatus: 0 neznámý, 1 nabíjí, 2 porucha, 3 připraven
+const WB_STATUS_LABELS = { 0: 'Neznámý', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
 
-// Účty jsou na různých clusterech — zkoušíme oba hosty
-const WB_HOSTS = ['https://global.solaxcloud.com', 'https://www.solaxcloud.com'];
-
-async function wbPost(path, body) {
-  let lastErr = null;
-  for (const host of WB_HOSTS) {
-    try {
-      const res = await fetch(host + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000)
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data) return data;
-      lastErr = new Error(`Wallbox API HTTP ${res.status}`);
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr || new Error('Wallbox API nedostupné.');
-}
-
-const WB_SETMODE_PATHS = [
-  '/api/v2/charger/setMode',
-  '/proxyApp/proxy/api/v2/charger/setMode'
-];
-
-async function wbGet(path) {
-  let lastErr = null;
-  for (const host of WB_HOSTS) {
-    try {
-      const res = await fetch(host + path, {
-        headers: { tokenId: SOLAX_TOKEN_ID },
-        signal: AbortSignal.timeout(15000)
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data) return data;
-      lastErr = new Error(`Wallbox API HTTP ${res.status}`);
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr || new Error('Wallbox API nedostupné.');
-}
-
-// Kandidáti čtení: kombinace endpoint × SN × název parametru.
-// dataAccess chce registrační číslo (wifiSn), charger getInfo možná výrobní SN.
-function wbReadCandidates() {
-  const out = [];
-  for (const sn of WALLBOX_SNS) {
-    const tail = sn.slice(-4);
-    out.push({ name: `dataAccess(…${tail})`, sn, run: () => wbPost('/api/v2/dataAccess/realtimeInfo/get', { wifiSn: sn }) });
-    out.push({ name: `getInfo sn(…${tail})`, sn, run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(sn)}`) });
-    out.push({ name: `getInfo deviceSn(…${tail})`, sn, run: () => wbGet(`/proxyApp/proxy/api/v2/charger/getInfo?deviceSn=${encodeURIComponent(sn)}`) });
-    out.push({
-      name: `v6(…${tail})`,
-      sn,
-      run: async () => {
-        const url = `${SOLAX_URL}?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&sn=${encodeURIComponent(sn)}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        return res.json();
-      }
-    });
-  }
-  return out;
-}
-
-// Jakmile jednou najdeme funkční zdroj, ptáme se už jen jeho —
-// SolaxCloud má limit dotazů za minutu na token
-let wbPreferredSource = null;
-let wbWorkingSn = null;
-
+// Čtení stavu: getPileInfo (GET, tokenId + pileSn v query)
 async function wbFetchStatus() {
-  const reasons = [];
-  const all = wbReadCandidates();
-  const ordered = wbPreferredSource
-    ? all.filter(c => c.name === wbPreferredSource)
-    : all;
-  for (const c of ordered) {
-    try {
-      const data = await c.run();
-      if (data && data.success !== false && data.result && typeof data.result === 'object') {
-        wbPreferredSource = c.name;
-        wbWorkingSn = c.sn;
-        return { source: c.name, result: data.result };
-      }
-      reasons.push(`${c.name}: ${(data && (data.exception || data.result)) || 'bez dat'}`);
-    } catch (err) {
-      reasons.push(`${c.name}: ${err.message}`);
-    }
-    await delay(1500); // rozestup kvůli minutovému limitu tokenu
+  const url = `${WB_HOST}/proxyApp/proxy/api/getPileInfo?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}&pileSn=${encodeURIComponent(WALLBOX_SN)}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`getPileInfo HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || data.success === false || !data.result) {
+    throw new Error((data && data.exception) || 'getPileInfo bez výsledku.');
   }
-  if (wbPreferredSource) wbPreferredSource = null; // preferovaný zdroj přestal fungovat
-  return { error: reasons.join(' · ') };
+  return data.result;
 }
 
 function wbParseResult(r) {
   const num = v => (typeof v === 'number' ? v : null);
-  const modeRaw = [r.workMode, r.chargeMode, r.mode].find(v => typeof v === 'number');
   return {
-    power: num(r.chargePower) ?? num(r.acpower) ?? num(r.power),
-    energyToday: num(r.chargeEnergyToday) ?? num(r.yieldtoday),
-    mode: typeof modeRaw === 'number' ? (WB_MODE_NAMES[modeRaw] || String(modeRaw)) : null,
-    status: r.chargeState ?? r.deviceState ?? r.state ?? null,
-    uploadTime: r.uploadTime || null
+    power: num(r.chargingPower),
+    energy: num(r.chargeEnergy),
+    mode: WB_MODE_NAMES[r.chargingMode] || null,
+    status: typeof r.chargerStatus === 'number' ? r.chargerStatus : null
   };
 }
 
@@ -2172,15 +2091,11 @@ async function pollWallbox() {
   if (!wallboxEnabled || wallboxPollRunning) return;
   wallboxPollRunning = true;
   try {
-    const found = await wbFetchStatus();
-    if (found && found.result) {
-      state.wallbox = { ...wbParseResult(found.result), source: found.source, error: null, fetchedAt: new Date().toISOString() };
-    } else {
-      const hint = (found && /no auth/i.test(found.error || ''))
-        ? ' — token na zadaná SN nemá oprávnění; do WALLBOX_SN dej obě čísla oddělená čárkou (registrační i výrobní)'
-        : '';
-      state.wallbox = { ...state.wallbox, error: `SolaxCloud: ${(found && found.error) || 'bez odpovědi'}${hint}` };
-    }
+    const result = await wbFetchStatus();
+    state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
+    broadcast('wallbox', { wallbox: state.wallbox });
+  } catch (err) {
+    state.wallbox = { ...state.wallbox, error: err.message };
     broadcast('wallbox', { wallbox: state.wallbox });
   } finally {
     wallboxPollRunning = false;
@@ -2189,89 +2104,47 @@ async function pollWallbox() {
 
 if (wallboxEnabled) {
   setTimeout(pollWallbox, 20000);
-  setInterval(pollWallbox, 5 * 60 * 1000);
+  setInterval(pollWallbox, 60 * 1000); // 1 dotaz/min — bezpečně pod limitem 10/min
 }
 
-// Diagnostika: surové odpovědi kandidátů (s rozestupy kvůli minutovému limitu tokenu)
-app.get('/api/wallbox/debug', async (req, res) => {
-  if (!wallboxEnabled) return res.json({ enabled: false, hint: 'Chybí WALLBOX_SN (a SOLAX_TOKEN_ID).' });
-  const out = [];
-  const probes = [];
-  for (const sn of WALLBOX_SNS) {
-    const tail = '…' + sn.slice(-4);
-    probes.push([`POST dataAccess wifiSn ${tail}`, () => fetch(WB_HOSTS[0] + '/api/v2/dataAccess/realtimeInfo/get', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID },
-      body: JSON.stringify({ wifiSn: sn }),
-      signal: AbortSignal.timeout(15000)
-    })]);
-    probes.push([`GET getInfo sn ${tail}`, () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?sn=${encodeURIComponent(sn)}`, {
-      headers: { tokenId: SOLAX_TOKEN_ID },
-      signal: AbortSignal.timeout(15000)
-    })]);
-    probes.push([`GET getInfo deviceSn ${tail}`, () => fetch(WB_HOSTS[0] + `/proxyApp/proxy/api/v2/charger/getInfo?deviceSn=${encodeURIComponent(sn)}`, {
-      headers: { tokenId: SOLAX_TOKEN_ID },
-      signal: AbortSignal.timeout(15000)
-    })]);
+// Přepnutí režimu: pileCmd (POST, rwType 2 = zápis, cmdType 1 = režim nabíjení)
+async function wbSetMode(mode) {
+  const res = await fetch(`${WB_HOST}/proxyApp/proxy/api/pileCmd`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tokenId: SOLAX_TOKEN_ID,
+      rwType: '2',
+      cmdType: '1',
+      cmdValue: String(WB_MODES[mode]),
+      sns: [WALLBOX_SN],
+      callbackUrl: ''
+    }),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!res.ok) throw new Error(`pileCmd HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || data.success === false) {
+    throw new Error((data && data.exception) || 'SolaxCloud příkaz odmítl.');
   }
-  for (const [name, run] of probes) {
-    try {
-      const r = await run();
-      const text = await r.text();
-      out.push({ endpoint: name, status: r.status, body: text.slice(0, 400) });
-    } catch (err) {
-      out.push({ endpoint: name, error: err.message });
-    }
-    await delay(2000);
-  }
-  res.json(out);
-});
+  return data;
+}
 
 app.post('/api/wallbox/set', async (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován (chybí WALLBOX_SN).' });
-  const { mode, current } = req.body || {};
+  const { mode } = req.body || {};
   if (WB_MODES[mode] === undefined) {
     return res.status(400).json({ error: 'Režim musí být stop/fast/eco/green.' });
   }
-  let amps = Number(current);
-  if (mode === 'stop') {
-    amps = 6; // u stopu se proud nepoužije, ale API ho vyžaduje
-  } else {
-    const allowed = WB_CURRENTS[mode];
-    if (!Number.isFinite(amps) || !allowed.includes(amps)) {
-      return res.status(400).json({ error: `Proud pro režim ${WB_MODE_LABELS[mode]} musí být jeden z: ${allowed.join(', ')} A.` });
-    }
-  }
   try {
-    // Zkoušíme cesty × SN; preferujeme SN, které funguje pro čtení
-    const sns = wbWorkingSn
-      ? [wbWorkingSn, ...WALLBOX_SNS.filter(s => s !== wbWorkingSn)]
-      : WALLBOX_SNS;
-    let data = null;
-    let lastErr = null;
-    outer:
-    for (const sn of sns) {
-      for (const path of WB_SETMODE_PATHS) {
-        try {
-          const resp = await wbPost(path, { sn, mode: WB_MODES[mode], current: amps });
-          if (resp && resp.success !== false) {
-            data = resp;
-            break outer;
-          }
-          lastErr = new Error(resp.exception || 'SolaxCloud příkaz odmítl.');
-        } catch (err) {
-          lastErr = err;
-        }
-        await delay(1200);
-      }
-    }
-    if (!data) throw lastErr || new Error('SolaxCloud nedostupný.');
+    await wbSetMode(mode);
     state.wallbox = { ...state.wallbox, mode };
     broadcast('wallbox', { wallbox: state.wallbox });
-    addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}${mode !== 'stop' ? ` (${amps} A)` : ''}`);
+    addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}`);
     res.json({ success: true });
-    setTimeout(pollWallbox, 20000);
+    // Po 3 s obnovíme stav, ať se ukáže potvrzený režim
+    setTimeout(pollWallbox, 3000);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

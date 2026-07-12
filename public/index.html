@@ -69,10 +69,6 @@
     align-items:center;
     margin:auto;
   }
-  /* První stránku posunout dolů o výšku nadpisu, ať je obsah na středu */
-  .slide-stats .page{
-    transform:translateY(30px);
-  }
   .topbar{
     text-align:center;
     margin-bottom:10px;
@@ -240,6 +236,25 @@
     from{transform:rotate(0deg);}
     to{transform:rotate(360deg);}
   }
+  .lights-grid{
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:14px 10px;
+  }
+  .light-cell{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    text-align:center;
+    gap:8px;
+  }
+  .light-cell .shelly-label{
+    font-size:13px;
+    font-weight:600;
+    color:var(--navy);
+  }
+  .light-cell .power-buttons{margin-top:0;}
   .pool-card{
     margin-top:12px;
   }
@@ -585,24 +600,60 @@
     font-size:11px;
     color:var(--grey-text);
   }
+  .wb-stats{
+    display:flex;
+    width:100%;
+    gap:12px;
+  }
+  .wb-stat{
+    flex:1;
+    background:rgba(44,62,80,0.04);
+    border-radius:16px;
+    padding:14px 8px;
+    text-align:center;
+  }
+  .wb-stat-label{
+    font-size:12px;
+    color:var(--grey-text);
+    font-weight:600;
+  }
+  .wb-stat-val{
+    font-size:20px;
+    font-weight:700;
+    color:var(--navy);
+    margin-top:4px;
+  }
   .wb-modes{
     display:grid;
     grid-template-columns:repeat(4, 1fr);
     gap:8px;
-    margin-top:12px;
+    margin-top:14px;
     width:100%;
   }
   .wb-mode-btn{
     border:none;
     border-radius:12px;
-    padding:11px 4px;
+    padding:13px 4px;
     background:rgba(44,62,80,0.08);
     color:var(--navy);
     font-size:12px;
     font-weight:700;
+    position:relative;
   }
   .wb-mode-btn.active{background:var(--orange);color:#fff;}
-  .wb-mode-btn:disabled{opacity:0.5;}
+  .wb-mode-btn:disabled{opacity:0.6;}
+  .wb-mode-btn.loading{color:transparent;}
+  .wb-mode-btn.loading::after{
+    content:"";
+    position:absolute;
+    top:50%;left:50%;
+    width:14px;height:14px;
+    margin:-7px 0 0 -7px;
+    border:2px solid rgba(44,62,80,0.3);
+    border-top-color:var(--navy);
+    border-radius:50%;
+    animation:spin 0.8s linear infinite;
+  }
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -767,7 +818,7 @@
             <div class="node-value" id="batteryValue">– %</div>
           </div>
 
-          <div class="node full">
+          <div class="node">
             <div class="icon-slot">
               <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
                 <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -775,6 +826,20 @@
             </div>
             <div class="node-label">Přetok</div>
             <div class="node-value" id="feedinValue">– kW</div>
+          </div>
+
+          <div class="node">
+            <div class="icon-slot">
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="18" y="8" width="26" height="48" rx="4"/>
+                <line x1="24" y1="20" x2="38" y2="20"/>
+                <path d="M33 28 L26 40 L33 40 L29 50 L40 36 L33 36 Z" fill="var(--orange)" stroke="none"/>
+                <line x1="44" y1="30" x2="52" y2="30"/>
+                <path d="M52 30 V44 a5 5 0 0 0 10 0 V26"/>
+              </svg>
+            </div>
+            <div class="node-label">Wallbox</div>
+            <div class="node-value" id="wallboxValue">– kW</div>
           </div>
         </div>
       </div>
@@ -901,7 +966,7 @@
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="shellyLight"></div>
-            <div class="shelly-label">Bojler: <span class="state" id="shellyState">–</span></div>
+            <div class="shelly-label">Bojler</div>
           </div>
           <div class="power-buttons">
             <button class="power-btn on-btn" id="onBtn">ON</button>
@@ -915,7 +980,7 @@
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="poolLight"></div>
-            <div class="shelly-label">Bazén: <span class="state" id="poolState">–</span></div>
+            <div class="shelly-label">Bazén</div>
           </div>
           <div class="power-buttons">
             <button class="power-btn on-btn" id="poolOnBtn">ON</button>
@@ -926,7 +991,7 @@
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="solinatorLight"></div>
-            <div class="shelly-label">Solinátor: <span class="state" id="solinatorState">–</span></div>
+            <div class="shelly-label">Solinátor</div>
           </div>
           <div class="power-buttons">
             <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
@@ -935,72 +1000,55 @@
           <div class="device-power" id="poolTotalPower"></div>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- Slide 5: Světla -->
-  <div class="slide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Světla</div>
-      </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card lockable">
-        <div class="device-block">
-          <div class="shelly-row">
-            <div class="traffic-light" id="lightDoleLight"></div>
-            <div class="shelly-label">Zahrada dole: <span class="state" id="lightDoleState">–</span></div>
+      <div class="card pool-card lockable">
+        <div class="lights-grid">
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="lightDoleLight"></div>
+              <div class="shelly-label">Zahrada dole</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="lightDoleOnBtn">ON</button>
+              <button class="power-btn off-btn" id="lightDoleOffBtn">OFF</button>
+            </div>
           </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="lightDoleOnBtn">ON</button>
-            <button class="power-btn off-btn" id="lightDoleOffBtn">OFF</button>
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="lightNahoreLight"></div>
+              <div class="shelly-label">Zahrada nahoře</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="lightNahoreOnBtn">ON</button>
+              <button class="power-btn off-btn" id="lightNahoreOffBtn">OFF</button>
+            </div>
           </div>
-        </div>
-
-        <div class="device-block">
-          <div class="shelly-row">
-            <div class="traffic-light" id="lightNahoreLight"></div>
-            <div class="shelly-label">Zahrada nahoře: <span class="state" id="lightNahoreState">–</span></div>
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="lightBazenLight"></div>
+              <div class="shelly-label">Světlo bazén</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="lightBazenOnBtn">ON</button>
+              <button class="power-btn off-btn" id="lightBazenOffBtn">OFF</button>
+            </div>
           </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="lightNahoreOnBtn">ON</button>
-            <button class="power-btn off-btn" id="lightNahoreOffBtn">OFF</button>
-          </div>
-        </div>
-
-        <div class="device-block">
-          <div class="shelly-row">
-            <div class="traffic-light" id="lightBazenLight"></div>
-            <div class="shelly-label">Světlo bazén: <span class="state" id="lightBazenState">–</span></div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="lightBazenOnBtn">ON</button>
-            <button class="power-btn off-btn" id="lightBazenOffBtn">OFF</button>
-          </div>
-        </div>
-
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="lightNocniLight"></div>
-            <div class="shelly-label">Noční světla: <span class="state" id="lightNocniState">–</span></div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="lightNocniOnBtn">ON</button>
-            <button class="power-btn off-btn" id="lightNocniOffBtn">OFF</button>
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="lightNocniLight"></div>
+              <div class="shelly-label">Noční světla</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="lightNocniOnBtn">ON</button>
+              <button class="power-btn off-btn" id="lightNocniOffBtn">OFF</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Slide 6: Klima -->
+  <!-- Slide 5: Klima -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1028,6 +1076,7 @@
             <option value="on">Zapnout</option>
             <option value="off">Vypnout</option>
           </select>
+          <button class="mode-btn" id="timerQuietBtn" type="button">Tichý</button>
           <input type="time" id="timerTime" class="timer-time" value="06:30">
           <button class="timer-plus-btn" id="timerPlusBtn">+1&nbsp;h</button>
         </div>
@@ -1037,7 +1086,7 @@
     </div>
   </div>
 
-  <!-- Slide 7: Wallbox -->
+  <!-- Slide 6: Wallbox -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1051,19 +1100,24 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable blinds-card">
-        <div class="blind-label" style="text-align:center">Nabíječka</div>
-        <div class="blind-pos" id="wallboxStatus" style="text-align:center;margin-top:4px">Načítám…</div>
-        <div class="wb-modes" id="wbModes"></div>
-        <div class="timer-form-row" style="margin-top:10px">
-          <select id="wbCurrent" class="timer-select"></select>
+      <div class="card lockable">
+        <div class="wb-stats">
+          <div class="wb-stat">
+            <div class="wb-stat-label">Výkon</div>
+            <div class="wb-stat-val" id="wbPower">–</div>
+          </div>
+          <div class="wb-stat">
+            <div class="wb-stat-label">Stav</div>
+            <div class="wb-stat-val" id="wbStatusVal">–</div>
+          </div>
         </div>
-        <div class="updated" id="wbHint" style="margin-top:8px;text-align:center"></div>
+        <div class="wb-modes" id="wbModes"></div>
+        <div class="updated" id="wbHint" style="margin-top:10px;text-align:center"></div>
       </div>
     </div>
   </div>
 
-  <!-- Slide 8: Přehled -->
+  <!-- Slide 7: Přehled -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1107,7 +1161,7 @@
     </div>
   </div>
 
-  <!-- Slide 9: Log -->
+  <!-- Slide 8: Log -->
   <div class="slide">
     <div class="page">
       <div class="topbar">
@@ -1133,6 +1187,7 @@ const batteryEl = document.getElementById('batteryValue');
 const batPowerEl = document.getElementById('batPowerValue');
 const batPowerLabel = document.getElementById('batPowerLabel');
 const poolTotalPowerEl = document.getElementById('poolTotalPower');
+const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
 const btn = document.getElementById('refreshBtn');
@@ -1244,9 +1299,9 @@ const devices = {
 };
 
 function renderDevice(device, data) {
+  // Stav (zapnuto/vypnuto/neznámý) ukazuje semafor, textově se nepíše
   if (!data || data.isOn === null || data.isOn === undefined) {
     device.light.className = 'traffic-light';
-    device.state.textContent = 'neznámý';
     device.onBtn.classList.remove('active-state');
     device.offBtn.classList.remove('active-state');
     if (device.powerEl) device.powerEl.textContent = '';
@@ -1254,12 +1309,10 @@ function renderDevice(device, data) {
   }
   if (data.isOn) {
     device.light.className = 'traffic-light on';
-    device.state.textContent = 'zapnuto';
     device.onBtn.classList.add('active-state');
     device.offBtn.classList.remove('active-state');
   } else {
     device.light.className = 'traffic-light off';
-    device.state.textContent = 'vypnuto';
     device.offBtn.classList.add('active-state');
     device.onBtn.classList.remove('active-state');
   }
@@ -1850,7 +1903,7 @@ let blindsReloadTimer = null;
 
 // Rozložení místností: co nesedí do seznamů, přijde na konec druhé stránky
 const BLINDS_PAGE1 = ['obyvak', 'terasa', 'garaz'];
-const BLINDS_PAGE2 = ['hoste', 'miky', 'elenka', 'loznice'];
+const BLINDS_PAGE2 = ['loznice', 'miky', 'elenka', 'hoste'];
 
 function normalizeName(s) {
   return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -2092,6 +2145,8 @@ let blindTimersData = [];
 
 // Pokoje, kde časovač ovládá vždy obě rolety najednou
 const TIMER_GROUPED_ROOMS = ['miky', 'elenka'];
+// Místnosti, které v časovači nechceme (nedávají smysl na plán)
+const TIMER_EXCLUDED_ROOMS = ['terasa', 'garaz'];
 
 function blindTimerOptions(page) {
   // Stejné řazení místností jako na stránkách s ovládáním
@@ -2108,6 +2163,8 @@ function blindTimerOptions(page) {
   for (const group of rooms) {
     if (group.page !== page) continue;
     const n = normalizeName(group.room);
+    // Pergola (terasa) a garáž z časovače vynecháme
+    if (TIMER_EXCLUDED_ROOMS.some(r => n.includes(r))) continue;
     if (group.items.length > 1 && TIMER_GROUPED_ROOMS.some(r => n.includes(r))) {
       // Skupina: jedna položka pro celý pokoj
       options.push({
@@ -2119,6 +2176,11 @@ function blindTimerOptions(page) {
         options.push({ value: b.deviceURL, label: `${b.label} (${group.room})` });
       }
     }
+  }
+  // Na první stránce nabídneme i "Vše" — všechny rolety v domě najednou
+  if (page === 1) {
+    const all = blinds.filter(b => b.type === 'cover').map(b => b.deviceURL);
+    if (all.length) options.push({ value: all.join('|'), label: 'Vše (celý dům)' });
   }
   return options;
 }
@@ -2432,7 +2494,9 @@ function renderTimers() {
     time.textContent = t.time;
     const text = document.createElement('span');
     text.className = 'timer-row-text';
-    text.textContent = `${t.name} — ${t.action === 'on' ? 'zapnout' : 'vypnout'}`;
+    let desc = `${t.name} — ${t.action === 'on' ? 'zapnout' : 'vypnout'}`;
+    if (t.action === 'on' && t.quiet) desc += ' (tichý)';
+    text.textContent = desc;
     const del = document.createElement('button');
     del.className = 'timer-del';
     del.textContent = '✕';
@@ -2455,6 +2519,21 @@ function renderTimers() {
   }
 }
 
+// Přepínač tichého režimu pro časovač (jen když se má zapínat)
+const timerQuietBtn = document.getElementById('timerQuietBtn');
+let timerQuiet = false;
+function updateTimerQuietBtn() {
+  const isOn = timerActionEl.value === 'on';
+  timerQuietBtn.style.display = isOn ? '' : 'none';
+  timerQuietBtn.classList.toggle('active', timerQuiet && isOn);
+}
+timerQuietBtn.addEventListener('click', () => {
+  timerQuiet = !timerQuiet;
+  updateTimerQuietBtn();
+});
+timerActionEl.addEventListener('change', updateTimerQuietBtn);
+updateTimerQuietBtn();
+
 // Tlačítko +1 h: první klepnutí = teď + 1 h, každé další přidá hodinu
 const timerPlusBtn = document.getElementById('timerPlusBtn');
 let timerPlusCount = 0;
@@ -2476,7 +2555,7 @@ timerAddBtn.addEventListener('click', async () => {
     const res = await fetch('/api/aircon/timer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ guid, time, action })
+      body: JSON.stringify({ guid, time, action, quiet: action === 'on' && timerQuiet })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -2494,41 +2573,23 @@ timerAddBtn.addEventListener('click', async () => {
 
 // ---------- Wallbox (Solax EV charger) ----------
 
-const wallboxStatusEl = document.getElementById('wallboxStatus');
+const wbPowerEl = document.getElementById('wbPower');
+const wbStatusValEl = document.getElementById('wbStatusVal');
 const wbModesEl = document.getElementById('wbModes');
-const wbCurrentEl = document.getElementById('wbCurrent');
 const wbHintEl = document.getElementById('wbHint');
 let wallboxData = null;
 let wallboxEnabledFlag = null;
 
-const WB_MODE_LABELS_UI = { stop: 'Stop', fast: 'Rychlý', eco: 'Eko', green: 'Zelený' };
-const WB_CURRENTS_UI = { green: [3, 6], eco: [6, 10, 16, 20, 25], fast: [6, 8, 10, 13, 16, 20, 25, 32] };
-let wbSelectedMode = 'eco';
-
-function renderWbCurrents() {
-  const allowed = WB_CURRENTS_UI[wbSelectedMode] || [];
-  const prev = Number(wbCurrentEl.value);
-  wbCurrentEl.textContent = '';
-  for (const a of allowed) {
-    const opt = document.createElement('option');
-    opt.value = a;
-    opt.textContent = a + ' A';
-    wbCurrentEl.appendChild(opt);
-  }
-  wbCurrentEl.value = allowed.includes(prev) ? prev : (wbSelectedMode === 'green' ? 6 : 16);
-  if (!wbCurrentEl.value && allowed.length) wbCurrentEl.value = allowed[0];
-  wbCurrentEl.style.display = allowed.length ? 'block' : 'none';
-}
+const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
+const WB_STATUS_LABELS_UI = { 0: 'Neznámý', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
 
 async function wbSetMode(mode, btn) {
-  wbSelectedMode = mode;
-  renderWbCurrents();
-  if (btn) btn.disabled = true;
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
   try {
     const res = await fetch('/api/wallbox/set', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ mode, current: Number(wbCurrentEl.value) || 6 })
+      body: JSON.stringify({ mode })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -2541,24 +2602,28 @@ async function wbSetMode(mode, btn) {
     errorEl.textContent = 'Wallbox: ' + err.message;
     errorEl.classList.add('show');
   }
-  if (btn) btn.disabled = false;
+  if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
 }
 
 function renderWallbox() {
   if (wallboxEnabledFlag === false) {
-    wallboxStatusEl.textContent = 'Wallbox není nastaven (chybí WALLBOX_SN na serveru).';
-    wbModesEl.textContent = '';
-    wbCurrentEl.style.display = 'none';
-    wbHintEl.textContent = '';
+    wbPowerEl.textContent = '–';
+    wbStatusValEl.textContent = '–';
+    wbHintEl.textContent = 'Wallbox není nastaven (chybí WALLBOX_SN na serveru).';
     return;
   }
   const w = wallboxData || {};
-  const parts = [];
-  if (typeof w.power === 'number') parts.push('výkon ' + (w.power >= 1000 ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW' : Math.round(w.power) + ' W'));
-  if (w.mode && WB_MODE_LABELS_UI[w.mode]) parts.push('režim ' + WB_MODE_LABELS_UI[w.mode]);
-  if (typeof w.energyToday === 'number') parts.push('dnes ' + String(w.energyToday).replace('.', ',') + ' kWh');
-  wallboxStatusEl.textContent = parts.length ? parts.join(' · ') : (w.error || 'Načítám…');
-  wbHintEl.textContent = w.error && parts.length === 0 ? '' : (w.error || '');
+  wbPowerEl.textContent = typeof w.power === 'number'
+    ? (w.power >= 1000 ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW' : Math.round(w.power) + ' W')
+    : '–';
+  // Spotřeba wallboxu i na první stránce (dlaždice vedle Přetoku)
+  if (wallboxValueEl) {
+    wallboxValueEl.textContent = typeof w.power === 'number'
+      ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW'
+      : '– kW';
+  }
+  wbStatusValEl.textContent = (typeof w.status === 'number' && WB_STATUS_LABELS_UI[w.status]) || '–';
+  wbHintEl.textContent = w.error || '';
 
   if (!wbModesEl.children.length) {
     for (const mode of ['stop', 'fast', 'eco', 'green']) {
@@ -2569,19 +2634,11 @@ function renderWallbox() {
       btn.addEventListener('click', () => wbSetMode(mode, btn));
       wbModesEl.appendChild(btn);
     }
-    renderWbCurrents();
   }
   for (const btn of wbModesEl.children) {
     btn.classList.toggle('active', btn.dataset.mode === w.mode);
   }
 }
-
-wbCurrentEl.addEventListener('change', () => {
-  // Změna proudu se pošle jen pokud je zvolený režim aktivní na nabíječce
-  if (wallboxData && wallboxData.mode === wbSelectedMode && wbSelectedMode !== 'stop') {
-    wbSetMode(wbSelectedMode, null);
-  }
-});
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
