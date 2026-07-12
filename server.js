@@ -88,7 +88,8 @@ const state = {
   runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
   timeline: { shelly: [], pool: [], solinator: [] }, // segmenty { from, to } zapnutí za 48 h
   aircon: { devices: [], error: null }, // Panasonic klimatizace
-  wallbox: { power: null, energy: null, mode: null, status: null, error: null } // Solax EV charger
+  wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
+  assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -153,6 +154,15 @@ function addLog(msg) {
   broadcast('log', { entry });
 }
 
+function addAssistantLog(text) {
+  if (!text) return;
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  state.assistantLog = state.assistantLog.filter(e => e.t >= cutoff);
+  state.assistantLog.push({ t: Date.now(), text });
+  if (state.assistantLog.length > 30) state.assistantLog = state.assistantLog.slice(-30);
+  broadcast('assistantLog', { log: state.assistantLog });
+}
+
 function snapshot() {
   pruneHistory();
   return {
@@ -173,6 +183,7 @@ function snapshot() {
     wallbox: state.wallbox,
     wallboxEnabled,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
+    assistantLog: state.assistantLog,
     pushEnabled,
     lockEnabled
   };
@@ -2211,13 +2222,21 @@ async function assistantSetAircon({ room, power, mode, temperature, quiet }) {
   if (!dev) return `Klimatizaci „${room}" nenašel.`;
   const parameters = {};
   const done = [];
+  const turningOn = power === 'on';
   if (power === 'on' || power === 'off') { parameters.operate = power === 'on' ? 1 : 0; done.push(power === 'on' ? 'zapnuto' : 'vypnuto'); }
   if (typeof temperature === 'number') {
     const t = Math.min(30, Math.max(16, temperature));
     parameters.temperatureSet = t; done.push(`${t} °C`);
+  } else if (turningOn) {
+    // Defaultně 22 °C, pokud teplotu neurčí
+    parameters.temperatureSet = 22; done.push('22 °C');
   }
   if (mode && PCC_MODES[mode] !== undefined) { parameters.operationMode = PCC_MODES[mode]; done.push(`režim ${mode}`); }
   if (typeof quiet === 'boolean') { parameters.ecoMode = quiet ? 2 : 0; }
+  else if (turningOn && cz(dev.name).includes('loznice')) {
+    // Klima v ložnici defaultně v tichém režimu
+    parameters.ecoMode = 2;
+  }
   if (!Object.keys(parameters).length) return `U ${dev.name} nebylo co nastavit.`;
   await pccQueued(() => pccApiFetch('/deviceStatus/control', {
     method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
@@ -2429,6 +2448,7 @@ app.post('/api/assistant', async (req, res) => {
         let out;
         try { out = await runAssistantTool(tu.name, tu.input || {}); }
         catch (err) { out = 'Chyba: ' + err.message; }
+        addAssistantLog(String(out));
         results.push({ type: 'tool_result', tool_use_id: tu.id, content: String(out) });
       }
       messages.push({ role: 'user', content: results });

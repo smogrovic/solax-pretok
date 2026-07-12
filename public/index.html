@@ -595,6 +595,30 @@
     color:var(--grey-text);
     font-size:12px;
   }
+  .asst-log-card{margin-top:12px;}
+  .asst-log-title{
+    font-size:12px;
+    font-weight:600;
+    color:var(--grey-text);
+    margin-bottom:8px;
+  }
+  .asst-log{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .asst-log-row{
+    display:flex;
+    gap:8px;
+    font-size:12px;
+    line-height:1.35;
+  }
+  .asst-log-time{
+    color:var(--grey-text);
+    flex:0 0 auto;
+    font-variant-numeric:tabular-nums;
+  }
+  .asst-log-text{color:var(--navy);}
   .mode-select{
     border:none;
     border-radius:12px;
@@ -979,6 +1003,10 @@
           <button class="asst-send" id="asstSend">▶</button>
         </div>
         <div class="asst-examples" id="asstExamples"></div>
+      </div>
+      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
+        <div class="asst-log-title">Co asistent udělal</div>
+        <div class="asst-log" id="asstLog"></div>
       </div>
     </div>
   </div>
@@ -2783,8 +2811,32 @@ const asstInput = document.getElementById('asstInput');
 const asstSend = document.getElementById('asstSend');
 const asstReply = document.getElementById('asstReply');
 const asstExamples = document.getElementById('asstExamples');
+const asstLog = document.getElementById('asstLog');
+const asstLogCard = document.getElementById('asstLogCard');
 
 const ASST_EXAMPLES = ['Zapni bojler', 'Zhasni všechna světla', 'Zatáhni žaluzie v ložnici', 'Nastav klima v obýváku na 23 a chlazení'];
+
+function renderAssistantLog(entries) {
+  if (!asstLog || !asstLogCard) return;
+  const list = (entries || []).slice().sort((a, b) => b.t - a.t);
+  if (!list.length) { asstLogCard.style.display = 'none'; asstLog.innerHTML = ''; return; }
+  asstLogCard.style.display = '';
+  asstLog.innerHTML = '';
+  for (const e of list) {
+    const row = document.createElement('div');
+    row.className = 'asst-log-row';
+    const time = document.createElement('span');
+    time.className = 'asst-log-time';
+    const d = new Date(e.t);
+    time.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const txt = document.createElement('span');
+    txt.className = 'asst-log-text';
+    txt.textContent = e.text;
+    row.appendChild(time);
+    row.appendChild(txt);
+    asstLog.appendChild(row);
+  }
+}
 
 function hideAssistantSlide() {
   const slide = document.getElementById('assistantSlide');
@@ -2868,6 +2920,7 @@ function applySnapshot(snap) {
   wallboxData = snap.wallbox || null;
   renderWallbox();
   if (snap.assistantEnabled === false) hideAssistantSlide();
+  renderAssistantLog(snap.assistantLog || []);
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
@@ -2950,6 +3003,9 @@ function connectStream() {
   });
   es.addEventListener('weather', e => {
     renderWeather(JSON.parse(e.data).weather);
+  });
+  es.addEventListener('assistantLog', e => {
+    renderAssistantLog(JSON.parse(e.data).log || []);
   });
   es.addEventListener('runtime', e => {
     runtimeData = JSON.parse(e.data).runtime;
