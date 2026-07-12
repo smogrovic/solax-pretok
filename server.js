@@ -2200,7 +2200,9 @@ async function assistantSetRelay(name, stateOn) {
 }
 
 function findAircon(room) {
-  const n = cz(room);
+  let n = cz(room);
+  // Kuchyň je otevřeně spojená s obývákem — klima Obývák řeší i kuchyň
+  if (n.includes('kuchyn')) n = 'obyvak';
   return (state.aircon.devices || []).find(d => cz(d.name).includes(n) || n.includes(cz(d.name)));
 }
 
@@ -2398,8 +2400,12 @@ app.post('/api/assistant', async (req, res) => {
     + `Podle jeho pokynu zavolej správné nástroje a proveď akci. Můžeš zavolat i více nástrojů najednou (např. "zhasni všechna světla"). `
     + `Zařízení: bojler, bazén (filtrace), solinátor, světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla), `
     + `klimatizace v pokojích Obývák/Ložnice/Miky/Elenka, žaluzie v pokojích Obývák/Terasa/Garáž/Ložnice/Miky/Elenka/Hosté, wallbox (nabíječka auta). `
-    + `Když pokyn nedává smysl nebo zařízení neznáš, stručně to řekni a nic neprováděj. `
-    + `Po provedení odpověz jednou krátkou větou česky, co jsi udělal. Neptej se na potvrzení, prováděj rovnou.`;
+    + `DŮLEŽITÉ – dispozice: Kuchyň je otevřeně spojená s Obývákem. Klimatizace "Obývák" chladí i topí i v kuchyni. `
+    + `Žaluzie u kuchyně jsou v pokoji Obývák (mají štítek "Kuchyň", "Obývák Okno", "Obývák Dveře") — pro kuchyň použij target "Obývák" nebo "Kuchyň". `
+    + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
+    + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
+    + `Nedoptávej se, pokud si dokážeš rozumně poradit — rovnou proveď akci. Zeptej se jen když je pokyn opravdu nejasný nebo zařízení vůbec neexistuje. `
+    + `Po provedení odpověz jednou krátkou větou česky, co jsi udělal.`;
 
   try {
     const messages = [{ role: 'user', content: text }];
