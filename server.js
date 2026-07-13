@@ -190,6 +190,8 @@ function snapshot() {
     wallboxHistory: state.wallboxHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
+    vacuumEnabled,
+    nukiEnabled,
     pushEnabled,
     lockEnabled
   };
@@ -2725,6 +2727,151 @@ app.post('/api/assistant', async (req, res) => {
   } catch (err) {
     console.error('Asistent:', err.message);
     res.status(502).json({ error: 'Asistent selhal: ' + err.message });
+  }
+});
+
+// ---------- Xiaomi vysavač (Mi Cloud) + Nuki zámek ----------
+// Tajné údaje jen z env — nikdy v kódu/repu.
+
+const XIAOMI_EMAIL = process.env.XIAOMI_EMAIL;
+const XIAOMI_PASSWORD = process.env.XIAOMI_PASSWORD;
+const XIAOMI_REGION = (process.env.XIAOMI_REGION || 'de').toLowerCase();
+const XIAOMI_START_METHOD = process.env.XIAOMI_START_METHOD || 'app_start';
+let miDid = process.env.XIAOMI_DID || null;
+const vacuumEnabled = !!(XIAOMI_EMAIL && XIAOMI_PASSWORD);
+
+const NUKI_TOKEN = process.env.NUKI_TOKEN;
+let nukiLockId = process.env.NUKI_SMARTLOCK_ID || null;
+const nukiEnabled = !!NUKI_TOKEN;
+
+// ---- Mi Cloud: přihlášení + podepsané volání (neoficiální API, jako HA/miio) ----
+let miCred = null; // { ssecurity, userId, serviceToken, ts }
+const MI_UA = 'Android-7.1.1-1.0.0-ONEPLUS A3010-136-AB123456 APP/xiaomi.smarthome APP-VERSION/62.4.03';
+
+function miNonce() {
+  const buf = Buffer.allocUnsafe(12);
+  crypto.randomBytes(8).copy(buf, 0);
+  buf.writeInt32BE(Math.floor(Date.now() / 60000), 8);
+  return buf.toString('base64');
+}
+function miSignedNonce(ssec, nonce) {
+  return crypto.createHash('sha256')
+    .update(Buffer.concat([Buffer.from(ssec, 'base64'), Buffer.from(nonce, 'base64')]))
+    .digest('base64');
+}
+function miSignature(path, signedNonce, nonce, dataStr) {
+  const str = [path, signedNonce, nonce, 'data=' + dataStr].join('&');
+  return crypto.createHmac('sha256', Buffer.from(signedNonce, 'base64')).update(str).digest('base64');
+}
+
+async function miLogin() {
+  const deviceId = crypto.randomBytes(8).toString('hex').toUpperCase();
+  const cookie = `sdkVersion=accountsdk-18.8.15; deviceId=${deviceId};`;
+  const r1 = await fetch('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true', {
+    headers: { 'User-Agent': MI_UA, Cookie: cookie }, signal: AbortSignal.timeout(15000)
+  });
+  const j1 = JSON.parse((await r1.text()).replace(/^&&&START&&&/, ''));
+  const hash = crypto.createHash('md5').update(XIAOMI_PASSWORD).digest('hex').toUpperCase();
+  const form = new URLSearchParams({
+    sid: 'xiaomiio', hash, callback: j1.callback || 'https://sts.api.io.mi.com/sts',
+    qs: j1.qs || '%3Fsid%3Dxiaomiio%26_json%3Dtrue', user: XIAOMI_EMAIL, _sign: j1._sign, _json: 'true'
+  });
+  const r2 = await fetch('https://account.xiaomi.com/pass/serviceLoginAuth2', {
+    method: 'POST', headers: { 'User-Agent': MI_UA, Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(), signal: AbortSignal.timeout(15000)
+  });
+  const j2 = JSON.parse((await r2.text()).replace(/^&&&START&&&/, ''));
+  if (!j2.ssecurity || !j2.location) throw new Error('Přihlášení k Mi účtu selhalo (možná 2FA nebo špatné heslo).');
+  const r3 = await fetch(j2.location, { headers: { 'User-Agent': MI_UA }, redirect: 'manual', signal: AbortSignal.timeout(15000) });
+  const cookies = (r3.headers.getSetCookie && r3.headers.getSetCookie()) || [];
+  const st = cookies.map(c => /serviceToken=([^;]+)/.exec(c)).find(Boolean);
+  if (!st) throw new Error('Mi Cloud nevrátil serviceToken.');
+  miCred = { ssecurity: j2.ssecurity, userId: j2.userId, serviceToken: st[1], ts: Date.now() };
+  return miCred;
+}
+
+async function miApi(path, dataObj, retry = true) {
+  if (!miCred || Date.now() - miCred.ts > 60 * 60 * 1000) await miLogin();
+  const cred = miCred;
+  const nonce = miNonce();
+  const sNonce = miSignedNonce(cred.ssecurity, nonce);
+  const dataStr = JSON.stringify(dataObj);
+  const signature = miSignature(path, sNonce, nonce, dataStr);
+  const host = XIAOMI_REGION === 'cn' ? 'https://api.io.mi.com/app' : `https://${XIAOMI_REGION}.api.io.mi.com/app`;
+  const body = new URLSearchParams({ _nonce: nonce, data: dataStr, signature });
+  const r = await fetch(host + path, {
+    method: 'POST',
+    headers: {
+      'User-Agent': MI_UA,
+      'x-xiaomi-protocal-flag-cli': 'PROTOCAL-HTTP2',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Cookie: `userId=${cred.userId}; serviceToken=${cred.serviceToken}; yetAnotherServiceToken=${cred.serviceToken}; locale=en_GB;`
+    },
+    body: body.toString(), signal: AbortSignal.timeout(15000)
+  });
+  let json = null;
+  try { json = JSON.parse(await r.text()); } catch {}
+  if ((!json || json.code === 2) && retry) { miCred = null; return miApi(path, dataObj, false); } // token vypršel
+  if (!json) throw new Error(`Mi Cloud vrátil neplatnou odpověď (HTTP ${r.status}).`);
+  return json;
+}
+
+async function vacuumStart() {
+  if (!miDid) {
+    const resp = await miApi('/home/device_list', { getVirtualModel: false, getHuamiDevices: 0 });
+    const list = (resp.result && resp.result.list) || [];
+    const vac = list.find(d => /vacuum|robot|roborock|viomi|dreame|rockrobo/i.test(d.model || ''));
+    if (!vac) throw new Error('Vysavač v Mi účtu nenalezen — nastav XIAOMI_DID.');
+    miDid = vac.did;
+  }
+  const resp = await miApi(`/home/rpc/${miDid}`, { id: Date.now() % 100000, method: XIAOMI_START_METHOD, params: [] });
+  if (resp.code && resp.code !== 0) throw new Error(resp.message || `Mi Cloud kód ${resp.code}`);
+  return 'Vysavač spuštěn.';
+}
+
+// ---- Nuki Web API (oficiální) ----
+async function nukiSmartlockId() {
+  if (nukiLockId) return nukiLockId;
+  const r = await fetch('https://api.nuki.io/smartlock', {
+    headers: { Authorization: `Bearer ${NUKI_TOKEN}` }, signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok) throw new Error(`Nuki HTTP ${r.status}`);
+  const list = await r.json();
+  if (!Array.isArray(list) || !list.length) throw new Error('Nuki nevrátil žádný zámek.');
+  nukiLockId = String(list[0].smartlockId);
+  return nukiLockId;
+}
+
+async function nukiLock() {
+  const id = await nukiSmartlockId();
+  const r = await fetch(`https://api.nuki.io/smartlock/${id}/action/lock`, {
+    method: 'POST', headers: { Authorization: `Bearer ${NUKI_TOKEN}` }, signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`Nuki HTTP ${r.status}`);
+  return 'Zamčeno.';
+}
+
+app.post('/api/vacuum/start', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!vacuumEnabled) return res.status(503).json({ error: 'Vysavač není nastaven.' });
+  try {
+    const msg = await vacuumStart();
+    addLog('Vysavač: spuštěn úklid (ručně)');
+    res.json({ success: true, message: msg });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/nuki/lock', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!nukiEnabled) return res.status(503).json({ error: 'Nuki není nastaven.' });
+  try {
+    const msg = await nukiLock();
+    addLog('Nuki: zamčeno (ručně)');
+    res.json({ success: true, message: msg });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 

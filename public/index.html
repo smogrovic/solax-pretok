@@ -677,6 +677,40 @@
   .toggle-switch.on{background:#f5933d;}
   .toggle-switch.on::after{transform:translateX(20px);}
   .toggle-switch:disabled{opacity:0.5;}
+  .home-actions{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .home-btn{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    width:100%;
+    border:none;
+    border-radius:16px;
+    padding:18px 16px;
+    background:var(--navy);
+    color:#fff;
+    font-size:16px;
+    font-weight:600;
+    font-family:inherit;
+    cursor:pointer;
+    transition:opacity .15s, transform .1s;
+  }
+  .home-btn:active{transform:scale(0.98);}
+  .home-btn:disabled{opacity:0.55;}
+  .home-btn.loading{opacity:0.6;}
+  .home-btn-ico{font-size:20px;}
+  .home-msg{
+    margin-top:12px;
+    text-align:center;
+    font-size:13px;
+    color:var(--grey-text);
+    min-height:16px;
+  }
+  .home-msg.err{color:#e5534b;}
   .mode-select{
     border:none;
     border-radius:12px;
@@ -1303,6 +1337,30 @@
         </div>
         <button class="timer-add-btn" id="relayTimerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="relayTimerList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide: Dům (vysavač + zámek) -->
+  <div class="slide" id="homeSlide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Dům</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable">
+        <div class="home-actions">
+          <button class="home-btn" id="vacuumBtn"><span class="home-btn-ico">🧹</span>Spustit vysavač</button>
+          <button class="home-btn" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
+        </div>
+        <div class="home-msg" id="homeMsg"></div>
       </div>
     </div>
   </div>
@@ -3297,6 +3355,39 @@ function renderTempAuto() {
   }
 }
 
+// ---------- Dům: vysavač + Nuki zámek ----------
+
+const vacuumBtn = document.getElementById('vacuumBtn');
+const nukiLockBtn = document.getElementById('nukiLockBtn');
+const homeMsg = document.getElementById('homeMsg');
+const homeSlide = document.getElementById('homeSlide');
+
+async function homeAction(btn, url, okText) {
+  if (!btn) return;
+  btn.disabled = true; btn.classList.add('loading');
+  homeMsg.classList.remove('err'); homeMsg.textContent = '…';
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
+    homeMsg.textContent = data.message || okText;
+  } catch (err) {
+    homeMsg.classList.add('err'); homeMsg.textContent = err.message;
+  }
+  btn.disabled = false; btn.classList.remove('loading');
+}
+
+if (vacuumBtn) vacuumBtn.addEventListener('click', () => homeAction(vacuumBtn, '/api/vacuum/start', 'Vysavač spuštěn.'));
+if (nukiLockBtn) nukiLockBtn.addEventListener('click', () => homeAction(nukiLockBtn, '/api/nuki/lock', 'Zamčeno.'));
+
+function applyHomeFlags(snap) {
+  if (vacuumBtn) vacuumBtn.style.display = snap.vacuumEnabled ? '' : 'none';
+  if (nukiLockBtn) nukiLockBtn.style.display = snap.nukiEnabled ? '' : 'none';
+  // Když není zapnuté ani jedno, stránku úplně schováme
+  if (homeSlide && !snap.vacuumEnabled && !snap.nukiEnabled) { homeSlide.remove(); rebuildDots(); }
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -3340,6 +3431,7 @@ function applySnapshot(snap) {
   renderAssistantLog(snap.assistantLog || []);
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   renderTempAuto();
+  applyHomeFlags(snap);
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   relayTimersData = snap.relayTimers || [];
