@@ -2441,21 +2441,29 @@ async function assistantSetAircon({ room, power, mode, temperature, quiet }) {
   return `${dev.name}: ${done.join(', ')}.`;
 }
 
+// Vybere žaluzie podle cíle. Párování po slovech na štítek: cíl musí být
+// podmnožinou štítku, takže "Obývák" chytne obě obývákové žaluzie ("Obývák
+// Okno" + "Obývák Dveře"), "Kuchyň" jen kuchyňskou a "Obývák Dveře" jen tu
+// jednu. Fallback na název pokoje pro místnosti bez popisného štítku.
+function matchBlinds(covers, target) {
+  const n = cz(target || '');
+  if (['vse', 'vsechno', 'vsechny', 'cely dum'].some(a => n.includes(cz(a)))) return covers;
+  const words = n.split(/[^a-z0-9]+/).filter(Boolean);
+  if (!words.length) return [];
+  // 1) štítek obsahuje VŠECHNA slova cíle
+  let m = covers.filter(b => { const lab = cz(b.label); return words.every(w => lab.includes(w)); });
+  if (m.length) return m;
+  // 2) cíl obsahuje celý štítek (např. „žaluzie obývák dveře")
+  m = covers.filter(b => cz(b.label) && n.includes(cz(b.label)));
+  if (m.length) return m;
+  // 3) fallback na název pokoje
+  return covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)));
+}
+
 async function assistantControlBlinds({ target, action, orientation }) {
   const blinds = await getBlinds();
   const covers = blinds.filter(b => b.type === 'cover');
-  const n = cz(target);
-  let matched;
-  if (['vse', 'vsechno', 'vsechny', 'cely dum'].some(a => n.includes(cz(a)))) {
-    matched = covers;
-  } else {
-    // Nejdřív přesná shoda na štítek konkrétní žaluzie (např. „Obývák Dveře"),
-    // ať jde adresovat jednu žaluzii, ne celý pokoj. Jinak fallback na pokoj/štítek.
-    matched = covers.filter(b => cz(b.label) === n);
-    if (!matched.length) {
-      matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
-    }
-  }
+  const matched = matchBlinds(covers, target);
   if (!matched.length) return `Žaluzie „${target}" nenašel.`;
   const tilt = typeof orientation === 'number' ? orientation : null;
   let ok = 0;
@@ -2494,10 +2502,7 @@ async function assistantAddBlindTimer({ target, time, action, orientation }) {
   if (!/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) return 'Neplatný čas nebo akce časovače.';
   const blinds = await getBlinds();
   const covers = blinds.filter(b => b.type === 'cover');
-  const n = cz(target);
-  let matched;
-  if (['vse', 'vsechno', 'cely dum'].some(a => n.includes(cz(a)))) matched = covers;
-  else matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
+  const matched = matchBlinds(covers, target);
   if (!matched.length) return `Žaluzie „${target}" nenašel.`;
   const tilt = typeof orientation === 'number' ? orientation : null;
   const name = matched.length > 1 ? `${matched[0].room} +${matched.length - 1}` : matched[0].label;
@@ -2627,8 +2632,8 @@ app.post('/api/assistant', async (req, res) => {
     + `Podle jeho pokynu zavolej správné nástroje a proveď akci. Můžeš zavolat i více nástrojů najednou (např. "zhasni všechna světla"). `
     + `Zařízení: bojler, bazén (filtrace), solinátor, světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla), `
     + `klimatizace v pokojích Obývák/Ložnice/Miky/Elenka, žaluzie v pokojích Obývák/Terasa/Garáž/Ložnice/Miky/Elenka/Hosté, wallbox (nabíječka auta). `
-    + `DŮLEŽITÉ – dispozice: Kuchyň je otevřeně spojená s Obývákem. Klimatizace "Obývák" chladí i topí i v kuchyni. `
-    + `Žaluzie u kuchyně jsou v pokoji Obývák (mají štítek "Kuchyň", "Obývák Okno", "Obývák Dveře") — pro kuchyň použij target "Obývák" nebo "Kuchyň". `
+    + `DŮLEŽITÉ – dispozice: Kuchyň je otevřeně spojená s Obývákem. Klimatizace "Obývák" chladí i topí i v kuchyni — ať uživatel řekne kuchyň nebo obývák, jde o stejnou klimatizaci (target "Obývák"). `
+    + `Žaluzie: v obýváku jsou dvě se štítky "Obývák Okno" a "Obývák Dveře", kuchyňská žaluzie má štítek "Kuchyň". Pro obývák použij target "Obývák" (ovládne obě obývákové), pro kuchyň target "Kuchyň" (jen kuchyňskou), pro jednu konkrétní použij přesný štítek, např. "Obývák Dveře". `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `
