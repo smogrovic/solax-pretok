@@ -1341,23 +1341,14 @@
     </div>
   </div>
 
-  <!-- Slide: Dům (vysavač + zámek) -->
+  <!-- Slide: Dům (Nuki zámek) -->
   <div class="slide" id="homeSlide">
     <div class="page">
       <div class="topbar">
         <div class="title">Dům</div>
       </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
       <div class="card lockable">
         <div class="home-actions">
-          <button class="home-btn" id="vacuumBtn"><span class="home-btn-ico">🧹</span>Spustit vysavač</button>
           <button class="home-btn" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
         </div>
         <div class="home-msg" id="homeMsg"></div>
@@ -3357,7 +3348,6 @@ function renderTempAuto() {
 
 // ---------- Dům: vysavač + Nuki zámek ----------
 
-const vacuumBtn = document.getElementById('vacuumBtn');
 const nukiLockBtn = document.getElementById('nukiLockBtn');
 const homeMsg = document.getElementById('homeMsg');
 const homeSlide = document.getElementById('homeSlide');
@@ -3378,14 +3368,12 @@ async function homeAction(btn, url, okText) {
   btn.disabled = false; btn.classList.remove('loading');
 }
 
-if (vacuumBtn) vacuumBtn.addEventListener('click', () => homeAction(vacuumBtn, '/api/vacuum/start', 'Vysavač spuštěn.'));
 if (nukiLockBtn) nukiLockBtn.addEventListener('click', () => homeAction(nukiLockBtn, '/api/nuki/lock', 'Zamčeno.'));
 
 function applyHomeFlags(snap) {
-  if (vacuumBtn) vacuumBtn.style.display = snap.vacuumEnabled ? '' : 'none';
   if (nukiLockBtn) nukiLockBtn.style.display = snap.nukiEnabled ? '' : 'none';
-  // Když není zapnuté ani jedno, stránku úplně schováme
-  if (homeSlide && !snap.vacuumEnabled && !snap.nukiEnabled) { homeSlide.remove(); rebuildDots(); }
+  // Bez Nuki nemá stránka co ukázat — schováme ji
+  if (homeSlide && !snap.nukiEnabled) { homeSlide.remove(); rebuildDots(); }
 }
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
