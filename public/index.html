@@ -2277,14 +2277,18 @@ function renderBlindRow(b) {
     // s každým pohybovým povelem (i stopem) proto posíláme cílové naklopení
     // z posuvníku a zařízení ho nastaví samo, jakmile zastaví
     const tiltValue = () => (tiltSlider ? Number(tiltSlider.value) : null);
-    btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', tiltValue(), btn)));
+    // Pergola má povely nahoru/dolů obráceně — prohodíme je, ikony zůstávají
+    const isPergola = normalizeName(b.label).includes('pergola');
+    const upCmd = isPergola ? 'down' : 'up';
+    const downCmd = isPergola ? 'up' : 'down';
+    btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, upCmd, tiltValue(), btn)));
     // Garáž, pergola (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
-    if (b.hasStop && b.uiClass !== 'GarageDoor' && !normalizeName(b.label).includes('pergola')) {
+    if (b.hasStop && b.uiClass !== 'GarageDoor' && !isPergola) {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
     } else {
       btns.appendChild(spacer());
     }
-    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, 'down', tiltValue(), btn)));
+    btns.appendChild(makeBlindBtn('blind-btn', '▼', btn => blindCommand(b.deviceURL, downCmd, tiltValue(), btn)));
   }
 
   row.appendChild(info);

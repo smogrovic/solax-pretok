@@ -2468,7 +2468,12 @@ async function assistantControlBlinds({ target, action, orientation }) {
   const tilt = typeof orientation === 'number' ? orientation : null;
   let ok = 0;
   for (const b of matched) {
-    try { await blindCommand(b.deviceURL, action, tilt); ok++; } catch {}
+    // Pergola má nahoru/dolů obráceně — prohodíme povel (stop zůstává)
+    let act = action;
+    if ((act === 'up' || act === 'down') && cz(b.label).includes('pergola')) {
+      act = act === 'up' ? 'down' : 'up';
+    }
+    try { await blindCommand(b.deviceURL, act, tilt); ok++; } catch {}
     await delay(400);
   }
   const label = matched.length > 1 ? `${matched.length} žaluzií` : matched[0].label;
