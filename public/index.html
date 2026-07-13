@@ -532,7 +532,6 @@
   }
   .mode-btn:disabled{opacity:0.5;}
   .mode-btn.active{background:var(--orange);color:#fff;}
-  .timer-quiet-btn{width:100%;margin-top:8px;padding:10px 12px;font-size:13px;}
   .asszistant-card{align-items:stretch;}
   .asst-hint{
     font-size:12px;
@@ -1225,10 +1224,10 @@
             <option value="on">ON</option>
             <option value="off">OFF</option>
           </select>
+          <button class="mode-btn" id="timerQuietBtn" type="button">Tichý</button>
           <input type="time" id="timerTime" class="timer-time" value="06:30">
           <button class="timer-plus-btn" id="timerPlusBtn">+1&nbsp;h</button>
         </div>
-        <button class="mode-btn timer-quiet-btn" id="timerQuietBtn" type="button">🔇 Tichý režim</button>
         <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="timerList"></div>
       </div>
