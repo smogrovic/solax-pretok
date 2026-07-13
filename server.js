@@ -2449,7 +2449,12 @@ async function assistantControlBlinds({ target, action, orientation }) {
   if (['vse', 'vsechno', 'vsechny', 'cely dum'].some(a => n.includes(cz(a)))) {
     matched = covers;
   } else {
-    matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
+    // Nejdřív přesná shoda na štítek konkrétní žaluzie (např. „Obývák Dveře"),
+    // ať jde adresovat jednu žaluzii, ne celý pokoj. Jinak fallback na pokoj/štítek.
+    matched = covers.filter(b => cz(b.label) === n);
+    if (!matched.length) {
+      matched = covers.filter(b => cz(b.room).includes(n) || n.includes(cz(b.room)) || cz(b.label).includes(n));
+    }
   }
   if (!matched.length) return `Žaluzie „${target}" nenašel.`;
   const tilt = typeof orientation === 'number' ? orientation : null;
@@ -2629,6 +2634,10 @@ app.post('/api/assistant', async (req, res) => {
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `
     + `Pokud neřekne jinak, u spaní NESAHEJ na noční světla ani na klimatizaci. `
     + `Výjimka: když jde spát konkrétně do LOŽNICE, navíc vypni noční světla (set_relay noční světla off). `
+    + `PŘÍCHOD DOMŮ: Když uživatel řekne, že je/jsou doma (např. "jsem doma", "jsme doma", "přišel jsem domů"), proveď: `
+    + `1) všechny žaluzie nakloň na 30 % (control_blinds target "vše", action "down", orientation 30), `
+    + `2) pak žaluzii u dveří do obýváku vytáhni nahoru (control_blinds target "Obývák Dveře", action "up"), `
+    + `3) zapni noční světla (set_relay noční světla on). `
     + `Nedoptávej se, pokud si dokážeš rozumně poradit — rovnou proveď akci. Zeptej se jen když je pokyn opravdu nejasný nebo zařízení vůbec neexistuje. `
     + `Po provedení odpověz jednou krátkou větou česky, co jsi udělal.`;
 
