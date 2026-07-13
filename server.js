@@ -2379,7 +2379,32 @@ function findRelayKey(name) {
   return null;
 }
 
+// Světlo u pergoly/terasy je TaHoma spínač (ne Shelly relé)
+async function assistantSetTerasaLight(on) {
+  const blinds = await getBlinds();
+  const sw = blinds.find(b => b.type === 'switch' && (cz(b.label).includes('terasa') || cz(b.label).includes('pergola')));
+  if (!sw) return 'Světlo u pergoly jsem nenašel.';
+  await blindCommand(sw.deviceURL, on ? 'on' : 'off');
+  addLog(`${sw.label}: ${on ? 'zapnuto' : 'vypnuto'} (asistent)`);
+  return `${sw.label}: ${on ? 'rozsvíceno' : 'zhasnuto'}.`;
+}
+
 async function assistantSetRelay(name, stateOn) {
+  const n = cz(name);
+  // Skupina „komplet venek": zahrada nahoře + dole + bazén + pergola
+  if (n.includes('venek') || n.includes('venku') || n.includes('venkov')) {
+    for (const key of ['lightNahore', 'lightDole', 'lightBazen']) await actuateRelay(key, stateOn, 'asistent');
+    try { await assistantSetTerasaLight(stateOn); } catch {}
+    return `Venek (zahrada, bazén, pergola): ${stateOn ? 'rozsvíceno' : 'zhasnuto'}.`;
+  }
+  // Skupina „zahrada": nahoře + dole (pokud není určeno dole/nahoře zvlášť)
+  if (n.includes('zahrad') && !n.includes('dole') && !n.includes('nahor')) {
+    for (const key of ['lightNahore', 'lightDole']) await actuateRelay(key, stateOn, 'asistent');
+    return `Zahrada (nahoře i dole): ${stateOn ? 'rozsvíceno' : 'zhasnuto'}.`;
+  }
+  // Světlo u pergoly/terasy (TaHoma spínač)
+  if (n.includes('terasa') || n.includes('pergola')) return assistantSetTerasaLight(stateOn);
+  // Jednotlivé Shelly relé
   const key = findRelayKey(name);
   if (!key) return `Zařízení „${name}" neznám.`;
   await actuateRelay(key, stateOn, 'asistent');
@@ -2522,11 +2547,11 @@ async function assistantAddBlindTimer({ target, time, action, orientation }) {
 const ASSISTANT_TOOLS = [
   {
     name: 'set_relay',
-    description: 'Zapne/vypne Shelly relé: bojler, bazén (filtrace), solinátor, nebo světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla).',
+    description: 'Zapne/vypne spotřebiče a světla: bojler, bazén (filtrace), solinátor, jednotlivá světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla, světlo terasa/pergola). Umí i skupiny: "zahrada" = obě zahradní světla; "komplet venek" = zahradní světla + bazén + pergola.',
     input_schema: {
       type: 'object',
       properties: {
-        device: { type: 'string', description: 'Název zařízení, např. "bojler", "bazén", "solinátor", "zahrada dole", "noční světla".' },
+        device: { type: 'string', description: 'Název zařízení nebo skupiny, např. "bojler", "zahrada dole", "světlo terasa", "zahrada" (obě zahradní), "komplet venek" (všechna venkovní světla vč. pergoly).' },
         state: { type: 'string', enum: ['on', 'off'], description: 'on = zapnout, off = vypnout.' }
       },
       required: ['device', 'state']
@@ -2639,7 +2664,8 @@ app.post('/api/assistant', async (req, res) => {
     + `klimatizace v pokojích Obývák/Ložnice/Miky/Elenka, žaluzie v pokojích Obývák/Terasa/Garáž/Ložnice/Miky/Elenka/Hosté, wallbox (nabíječka auta). `
     + `DŮLEŽITÉ – dispozice: Kuchyň je otevřeně spojená s Obývákem. Klimatizace "Obývák" chladí i topí i v kuchyni — ať uživatel řekne kuchyň nebo obývák, jde o stejnou klimatizaci (target "Obývák"). `
     + `Žaluzie: v obýváku jsou dvě se štítky "Obývák Okno" a "Obývák Dveře", kuchyňská žaluzie má štítek "Kuchyň". Pro obývák použij target "Obývák" (ovládne obě obývákové), pro kuchyň target "Kuchyň" (jen kuchyňskou), pro jednu konkrétní použij přesný štítek, např. "Obývák Dveře". `
-    + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Když uživatel mluví o pergole, ovládni tohle. `
+    + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Pergola má i vlastní SVĚTLO: "rozsviť/zhasni pergolu" nebo "světlo u pergoly" → set_relay device "světlo terasa" (NE zahradní světla!). Rozliš: "zatáhni/otevři pergolu" = žaluzie (control_blinds), "rozsviť pergolu" = světlo (set_relay). `
+    + `SVĚTLA VENKU: "rozsviť/zhasni zahradu" → set_relay device "zahrada" (obě zahradní světla nahoře i dole). "rozsviť/zhasni komplet venek" (celý venek) → set_relay device "komplet venek" (zahrada nahoře + dole + světlo bazén + pergola). Platí i pro zhasínání. `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `
