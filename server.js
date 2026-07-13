@@ -2634,6 +2634,7 @@ app.post('/api/assistant', async (req, res) => {
     + `klimatizace v pokojích Obývák/Ložnice/Miky/Elenka, žaluzie v pokojích Obývák/Terasa/Garáž/Ložnice/Miky/Elenka/Hosté, wallbox (nabíječka auta). `
     + `DŮLEŽITÉ – dispozice: Kuchyň je otevřeně spojená s Obývákem. Klimatizace "Obývák" chladí i topí i v kuchyni — ať uživatel řekne kuchyň nebo obývák, jde o stejnou klimatizaci (target "Obývák"). `
     + `Žaluzie: v obýváku jsou dvě se štítky "Obývák Okno" a "Obývák Dveře", kuchyňská žaluzie má štítek "Kuchyň". Pro obývák použij target "Obývák" (ovládne obě obývákové), pro kuchyň target "Kuchyň" (jen kuchyňskou), pro jednu konkrétní použij přesný štítek, např. "Obývák Dveře". `
+    + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Když uživatel mluví o pergole, ovládni tohle. `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `

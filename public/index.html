@@ -2278,8 +2278,8 @@ function renderBlindRow(b) {
     // z posuvníku a zařízení ho nastaví samo, jakmile zastaví
     const tiltValue = () => (tiltSlider ? Number(tiltSlider.value) : null);
     btns.appendChild(makeBlindBtn('blind-btn', '▲', btn => blindCommand(b.deviceURL, 'up', tiltValue(), btn)));
-    // Garáž (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
-    if (b.hasStop && b.uiClass !== 'GarageDoor') {
+    // Garáž, pergola (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
+    if (b.hasStop && b.uiClass !== 'GarageDoor' && !normalizeName(b.label).includes('pergola')) {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
     } else {
       btns.appendChild(spacer());
