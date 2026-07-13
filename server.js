@@ -770,9 +770,9 @@ app.post('/api/refresh', async (req, res) => {
 
 // ---------- Zámek ovládání (PIN) ----------
 
-// Bez APP_PIN je ovládání odemčené jako dřív; s ním vyžadují /set endpointy token
+// Zamykání appky je vypnuté (na přání) — appka jede vždy odemčená, nezávisle na APP_PIN.
 const APP_PIN = process.env.APP_PIN;
-const lockEnabled = !!APP_PIN;
+const lockEnabled = false;
 // Token je odvozený z PINu — přežije restart serveru a při změně PINu přestane platit
 const UNLOCK_TOKEN = lockEnabled
   ? crypto.createHmac('sha256', APP_PIN).update('solax-unlock-v1').digest('hex')
@@ -2777,27 +2777,42 @@ function miSignature(path, signedNonce, nonce, dataStr) {
   return crypto.createHmac('sha256', Buffer.from(signedNonce, 'base64')).update(str).digest('base64');
 }
 
+function miCookies(r) {
+  const arr = (r.headers.getSetCookie && r.headers.getSetCookie()) || [];
+  return arr.map(c => c.split(';')[0]).filter(Boolean);
+}
+
 async function miLogin() {
   const deviceId = crypto.randomBytes(8).toString('hex').toUpperCase();
-  const cookie = `sdkVersion=accountsdk-18.8.15; deviceId=${deviceId};`;
+  let jar = [`sdkVersion=accountsdk-18.8.15`, `deviceId=${deviceId}`];
+  // krok 1 — získat _sign a cookies
   const r1 = await fetch('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true', {
-    headers: { 'User-Agent': MI_UA, Cookie: cookie }, signal: AbortSignal.timeout(15000)
+    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; ') }, signal: AbortSignal.timeout(15000)
   });
   const j1 = JSON.parse((await r1.text()).replace(/^&&&START&&&/, ''));
+  jar = jar.concat(miCookies(r1)); // přeneseme cookies z kroku 1 dál
+  // krok 2 — přihlášení heslem
   const hash = crypto.createHash('md5').update(XIAOMI_PASSWORD).digest('hex').toUpperCase();
   const form = new URLSearchParams({
     sid: 'xiaomiio', hash, callback: j1.callback || 'https://sts.api.io.mi.com/sts',
     qs: j1.qs || '%3Fsid%3Dxiaomiio%26_json%3Dtrue', user: XIAOMI_EMAIL, _sign: j1._sign, _json: 'true'
   });
   const r2 = await fetch('https://account.xiaomi.com/pass/serviceLoginAuth2', {
-    method: 'POST', headers: { 'User-Agent': MI_UA, Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
+    method: 'POST',
+    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; '), 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form.toString(), signal: AbortSignal.timeout(15000)
   });
   const j2 = JSON.parse((await r2.text()).replace(/^&&&START&&&/, ''));
-  if (!j2.ssecurity || !j2.location) throw new Error('Přihlášení k Mi účtu selhalo (možná 2FA nebo špatné heslo).');
-  const r3 = await fetch(j2.location, { headers: { 'User-Agent': MI_UA }, redirect: 'manual', signal: AbortSignal.timeout(15000) });
-  const cookies = (r3.headers.getSetCookie && r3.headers.getSetCookie()) || [];
-  const st = cookies.map(c => /serviceToken=([^;]+)/.exec(c)).find(Boolean);
+  if (!j2.ssecurity || !j2.location) {
+    if (j2.notificationUrl) throw new Error('Mi účet vyžaduje ověření nového přihlášení (2FA) — z cloudu to Xiaomi blokuje.');
+    throw new Error(`Přihlášení k Mi účtu selhalo (kód ${j2.code != null ? j2.code : '?'}, možná špatné heslo).`);
+  }
+  jar = jar.concat(miCookies(r2));
+  // krok 3 — získat serviceToken
+  const r3 = await fetch(j2.location, {
+    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; ') }, redirect: 'manual', signal: AbortSignal.timeout(15000)
+  });
+  const st = miCookies(r3).map(c => /^serviceToken=(.+)/.exec(c)).find(Boolean);
   if (!st) throw new Error('Mi Cloud nevrátil serviceToken.');
   miCred = { ssecurity: j2.ssecurity, userId: j2.userId, serviceToken: st[1], ts: Date.now() };
   return miCred;
