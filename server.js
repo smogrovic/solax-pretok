@@ -190,7 +190,6 @@ function snapshot() {
     wallboxHistory: state.wallboxHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
-    vacuumEnabled,
     nukiEnabled,
     pushEnabled,
     lockEnabled
@@ -2409,6 +2408,12 @@ async function assistantSetTerasaLight(on) {
 
 async function assistantSetRelay(name, stateOn) {
   const n = cz(name);
+  // Skupina „všechna světla": všechna venkovní + noční + pergola
+  if (n === 'svetla' || n.includes('vsechna svetla') || n.includes('vsechny svetla') || n.includes('vsechno svetla') || n.includes('vse svetla')) {
+    for (const key of ['lightNahore', 'lightDole', 'lightBazen', 'lightNocni']) await actuateRelay(key, stateOn, 'asistent');
+    try { await assistantSetTerasaLight(stateOn); } catch {}
+    return `Všechna světla: ${stateOn ? 'rozsvíceno' : 'zhasnuto'}.`;
+  }
   // Skupina „komplet venek": zahrada nahoře + dole + bazén + pergola
   if (n.includes('venek') || n.includes('venku') || n.includes('venkov')) {
     for (const key of ['lightNahore', 'lightDole', 'lightBazen']) await actuateRelay(key, stateOn, 'asistent');
@@ -2691,6 +2696,7 @@ app.post('/api/assistant', async (req, res) => {
     + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Pergola má i vlastní SVĚTLO: "rozsviť/zhasni pergolu" nebo "světlo u pergoly" → set_relay device "světlo terasa" (NE zahradní světla!). Rozliš: "zatáhni/otevři pergolu" = žaluzie (control_blinds), "rozsviť pergolu" = světlo (set_relay). `
     + `SVĚTLA VENKU: "rozsviť/zhasni zahradu" → set_relay device "zahrada" (obě zahradní světla nahoře i dole). "rozsviť/zhasni komplet venek" (celý venek) → set_relay device "komplet venek" (zahrada nahoře + dole + světlo bazén + pergola). Platí i pro zhasínání. `
     + `Umíš taky zamknout dům/vchodové dveře (lock_house). `
+    + `LOCKDOWN: Když uživatel řekne "lockdown" (nebo "zabezpeč dům", "odcházím a zabezpeč"), proveď najednou: zhasni všechna světla (set_relay device "všechna světla", state "off"), zatáhni všechny žaluzie (control_blinds target "vše", action "down") a zamkni dům (lock_house). `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `
@@ -2737,119 +2743,12 @@ app.post('/api/assistant', async (req, res) => {
   }
 });
 
-// ---------- Xiaomi vysavač (Mi Cloud) + Nuki zámek ----------
+// ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.
-
-const XIAOMI_EMAIL = process.env.XIAOMI_EMAIL;
-const XIAOMI_PASSWORD = process.env.XIAOMI_PASSWORD;
-const XIAOMI_REGION = (process.env.XIAOMI_REGION || 'de').toLowerCase();
-const XIAOMI_START_METHOD = process.env.XIAOMI_START_METHOD || 'app_start';
-let miDid = process.env.XIAOMI_DID || null;
-const vacuumEnabled = !!(XIAOMI_EMAIL && XIAOMI_PASSWORD);
 
 const NUKI_TOKEN = process.env.NUKI_TOKEN;
 let nukiLockId = process.env.NUKI_SMARTLOCK_ID || null;
 const nukiEnabled = !!NUKI_TOKEN;
-
-// ---- Mi Cloud: přihlášení + podepsané volání (neoficiální API, jako HA/miio) ----
-let miCred = null; // { ssecurity, userId, serviceToken, ts }
-const MI_UA = 'Android-7.1.1-1.0.0-ONEPLUS A3010-136-AB123456 APP/xiaomi.smarthome APP-VERSION/62.4.03';
-
-function miNonce() {
-  const buf = Buffer.allocUnsafe(12);
-  crypto.randomBytes(8).copy(buf, 0);
-  buf.writeInt32BE(Math.floor(Date.now() / 60000), 8);
-  return buf.toString('base64');
-}
-function miSignedNonce(ssec, nonce) {
-  return crypto.createHash('sha256')
-    .update(Buffer.concat([Buffer.from(ssec, 'base64'), Buffer.from(nonce, 'base64')]))
-    .digest('base64');
-}
-function miSignature(path, signedNonce, nonce, dataStr) {
-  const str = [path, signedNonce, nonce, 'data=' + dataStr].join('&');
-  return crypto.createHmac('sha256', Buffer.from(signedNonce, 'base64')).update(str).digest('base64');
-}
-
-function miCookies(r) {
-  const arr = (r.headers.getSetCookie && r.headers.getSetCookie()) || [];
-  return arr.map(c => c.split(';')[0]).filter(Boolean);
-}
-
-async function miLogin() {
-  const deviceId = crypto.randomBytes(8).toString('hex').toUpperCase();
-  let jar = [`sdkVersion=accountsdk-18.8.15`, `deviceId=${deviceId}`];
-  // krok 1 — získat _sign a cookies
-  const r1 = await fetch('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true', {
-    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; ') }, signal: AbortSignal.timeout(15000)
-  });
-  const j1 = JSON.parse((await r1.text()).replace(/^&&&START&&&/, ''));
-  jar = jar.concat(miCookies(r1)); // přeneseme cookies z kroku 1 dál
-  // krok 2 — přihlášení heslem
-  const hash = crypto.createHash('md5').update(XIAOMI_PASSWORD).digest('hex').toUpperCase();
-  const form = new URLSearchParams({
-    sid: 'xiaomiio', hash, callback: j1.callback || 'https://sts.api.io.mi.com/sts',
-    qs: j1.qs || '%3Fsid%3Dxiaomiio%26_json%3Dtrue', user: XIAOMI_EMAIL, _sign: j1._sign, _json: 'true'
-  });
-  const r2 = await fetch('https://account.xiaomi.com/pass/serviceLoginAuth2', {
-    method: 'POST',
-    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; '), 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form.toString(), signal: AbortSignal.timeout(15000)
-  });
-  const j2 = JSON.parse((await r2.text()).replace(/^&&&START&&&/, ''));
-  if (!j2.ssecurity || !j2.location) {
-    if (j2.notificationUrl) throw new Error('Mi účet vyžaduje ověření nového přihlášení (2FA) — z cloudu to Xiaomi blokuje.');
-    throw new Error(`Přihlášení k Mi účtu selhalo (kód ${j2.code != null ? j2.code : '?'}, možná špatné heslo).`);
-  }
-  jar = jar.concat(miCookies(r2));
-  // krok 3 — získat serviceToken
-  const r3 = await fetch(j2.location, {
-    headers: { 'User-Agent': MI_UA, Cookie: jar.join('; ') }, redirect: 'manual', signal: AbortSignal.timeout(15000)
-  });
-  const st = miCookies(r3).map(c => /^serviceToken=(.+)/.exec(c)).find(Boolean);
-  if (!st) throw new Error('Mi Cloud nevrátil serviceToken.');
-  miCred = { ssecurity: j2.ssecurity, userId: j2.userId, serviceToken: st[1], ts: Date.now() };
-  return miCred;
-}
-
-async function miApi(path, dataObj, retry = true) {
-  if (!miCred || Date.now() - miCred.ts > 60 * 60 * 1000) await miLogin();
-  const cred = miCred;
-  const nonce = miNonce();
-  const sNonce = miSignedNonce(cred.ssecurity, nonce);
-  const dataStr = JSON.stringify(dataObj);
-  const signature = miSignature(path, sNonce, nonce, dataStr);
-  const host = XIAOMI_REGION === 'cn' ? 'https://api.io.mi.com/app' : `https://${XIAOMI_REGION}.api.io.mi.com/app`;
-  const body = new URLSearchParams({ _nonce: nonce, data: dataStr, signature });
-  const r = await fetch(host + path, {
-    method: 'POST',
-    headers: {
-      'User-Agent': MI_UA,
-      'x-xiaomi-protocal-flag-cli': 'PROTOCAL-HTTP2',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: `userId=${cred.userId}; serviceToken=${cred.serviceToken}; yetAnotherServiceToken=${cred.serviceToken}; locale=en_GB;`
-    },
-    body: body.toString(), signal: AbortSignal.timeout(15000)
-  });
-  let json = null;
-  try { json = JSON.parse(await r.text()); } catch {}
-  if ((!json || json.code === 2) && retry) { miCred = null; return miApi(path, dataObj, false); } // token vypršel
-  if (!json) throw new Error(`Mi Cloud vrátil neplatnou odpověď (HTTP ${r.status}).`);
-  return json;
-}
-
-async function vacuumStart() {
-  if (!miDid) {
-    const resp = await miApi('/home/device_list', { getVirtualModel: false, getHuamiDevices: 0 });
-    const list = (resp.result && resp.result.list) || [];
-    const vac = list.find(d => /vacuum|robot|roborock|viomi|dreame|rockrobo/i.test(d.model || ''));
-    if (!vac) throw new Error('Vysavač v Mi účtu nenalezen — nastav XIAOMI_DID.');
-    miDid = vac.did;
-  }
-  const resp = await miApi(`/home/rpc/${miDid}`, { id: Date.now() % 100000, method: XIAOMI_START_METHOD, params: [] });
-  if (resp.code && resp.code !== 0) throw new Error(resp.message || `Mi Cloud kód ${resp.code}`);
-  return 'Vysavač spuštěn.';
-}
 
 // ---- Nuki Web API (oficiální) ----
 async function nukiSmartlockId() {
@@ -2872,18 +2771,6 @@ async function nukiLock() {
   if (!r.ok && r.status !== 204) throw new Error(`Nuki HTTP ${r.status}`);
   return 'Zamčeno.';
 }
-
-app.post('/api/vacuum/start', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  if (!vacuumEnabled) return res.status(503).json({ error: 'Vysavač není nastaven.' });
-  try {
-    const msg = await vacuumStart();
-    addLog('Vysavač: spuštěn úklid (ručně)');
-    res.json({ success: true, message: msg });
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
 
 app.post('/api/nuki/lock', async (req, res) => {
   if (!requireAuth(req, res)) return;
