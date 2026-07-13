@@ -2248,8 +2248,8 @@ const WB_HOST = 'https://www.solaxcloud.com';
 const WB_MODES = { stop: 0, fast: 1, eco: 2, green: 3 };
 const WB_MODE_NAMES = ['stop', 'fast', 'eco', 'green'];
 const WB_MODE_LABELS = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
-// chargerStatus: 0 neznámý, 1 nabíjí, 2 porucha, 3 připraven
-const WB_STATUS_LABELS = { 0: 'Neznámý', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
+// chargerStatus: 0 nepřipojeno (žádné auto), 1 nabíjí, 2 porucha, 3 připraven
+const WB_STATUS_LABELS = { 0: 'Nepřipojeno', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
 
 // Čtení stavu: getPileInfo (GET, tokenId + pileSn v query)
 async function wbFetchStatus() {
