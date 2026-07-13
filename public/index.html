@@ -1324,6 +1324,13 @@
         </div>
       </div>
 
+      <div class="card lockable" id="vacuumCard">
+        <div class="home-actions">
+          <button class="home-btn" id="vacuumBtn"><span class="home-btn-ico">🧹</span>Spustit vysavač</button>
+        </div>
+        <div class="home-msg" id="vacuumMsg"></div>
+      </div>
+
       <div class="card lockable timer-card">
         <div class="graph-title">Časovač</div>
         <select id="relayTimerDevice" class="timer-select"></select>
@@ -3351,29 +3358,35 @@ function renderTempAuto() {
 const nukiLockBtn = document.getElementById('nukiLockBtn');
 const homeMsg = document.getElementById('homeMsg');
 const homeSlide = document.getElementById('homeSlide');
+const vacuumBtn = document.getElementById('vacuumBtn');
+const vacuumMsg = document.getElementById('vacuumMsg');
+const vacuumCard = document.getElementById('vacuumCard');
 
-async function homeAction(btn, url, okText) {
+async function homeAction(btn, url, okText, msgEl) {
   if (!btn) return;
   btn.disabled = true; btn.classList.add('loading');
-  homeMsg.classList.remove('err'); homeMsg.textContent = '…';
+  if (msgEl) { msgEl.classList.remove('err'); msgEl.textContent = '…'; }
   try {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
     if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
-    homeMsg.textContent = data.message || okText;
+    if (msgEl) msgEl.textContent = data.message || okText;
   } catch (err) {
-    homeMsg.classList.add('err'); homeMsg.textContent = err.message;
+    if (msgEl) { msgEl.classList.add('err'); msgEl.textContent = err.message; }
   }
   btn.disabled = false; btn.classList.remove('loading');
 }
 
-if (nukiLockBtn) nukiLockBtn.addEventListener('click', () => homeAction(nukiLockBtn, '/api/nuki/lock', 'Zamčeno.'));
+if (nukiLockBtn) nukiLockBtn.addEventListener('click', () => homeAction(nukiLockBtn, '/api/nuki/lock', 'Zamčeno.', homeMsg));
+if (vacuumBtn) vacuumBtn.addEventListener('click', () => homeAction(vacuumBtn, '/api/vacuum/start', 'Vysavač spuštěn.', vacuumMsg));
 
 function applyHomeFlags(snap) {
   if (nukiLockBtn) nukiLockBtn.style.display = snap.nukiEnabled ? '' : 'none';
-  // Bez Nuki nemá stránka co ukázat — schováme ji
+  // Bez Nuki nemá stránka Dům co ukázat — schováme ji
   if (homeSlide && !snap.nukiEnabled) { homeSlide.remove(); rebuildDots(); }
+  // Vysavač (na stránce Ovládání) — karta se ukáže jen když je nastavený
+  if (vacuumCard) vacuumCard.style.display = snap.vacuumEnabled ? '' : 'none';
 }
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
