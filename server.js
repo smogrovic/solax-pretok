@@ -2652,6 +2652,16 @@ const ASSISTANT_TOOLS = [
       },
       required: ['device', 'time', 'action']
     }
+  },
+  {
+    name: 'start_vacuum',
+    description: 'Spustí úklid robotického vysavače Xiaomi (např. "spusť vysavač", "povysávej").',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'lock_house',
+    description: 'Zamkne vchodové dveře domu (Nuki zámek) — např. "zamkni dům", "zamkni dveře".',
+    input_schema: { type: 'object', properties: {} }
   }
 ];
 
@@ -2664,6 +2674,8 @@ async function runAssistantTool(name, input) {
     case 'add_aircon_timer': return assistantAddAirconTimer(input);
     case 'add_blind_timer': return assistantAddBlindTimer(input);
     case 'add_relay_timer': return assistantAddRelayTimer(input);
+    case 'start_vacuum': return vacuumEnabled ? vacuumStart() : 'Vysavač není nastaven.';
+    case 'lock_house': return nukiEnabled ? nukiLock() : 'Zámek není nastaven.';
     default: return `Neznámý nástroj ${name}.`;
   }
 }
@@ -2684,6 +2696,7 @@ app.post('/api/assistant', async (req, res) => {
     + `Žaluzie: v obýváku jsou dvě se štítky "Obývák Okno" a "Obývák Dveře", kuchyňská žaluzie má štítek "Kuchyň". Pro obývák použij target "Obývák" (ovládne obě obývákové), pro kuchyň target "Kuchyň" (jen kuchyňskou), pro jednu konkrétní použij přesný štítek, např. "Obývák Dveře". `
     + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Pergola má i vlastní SVĚTLO: "rozsviť/zhasni pergolu" nebo "světlo u pergoly" → set_relay device "světlo terasa" (NE zahradní světla!). Rozliš: "zatáhni/otevři pergolu" = žaluzie (control_blinds), "rozsviť pergolu" = světlo (set_relay). `
     + `SVĚTLA VENKU: "rozsviť/zhasni zahradu" → set_relay device "zahrada" (obě zahradní světla nahoře i dole). "rozsviť/zhasni komplet venek" (celý venek) → set_relay device "komplet venek" (zahrada nahoře + dole + světlo bazén + pergola). Platí i pro zhasínání. `
+    + `Umíš taky spustit robotický vysavač (start_vacuum) a zamknout dům/vchodové dveře (lock_house). `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
     + `SPANÍ: Když uživatel řekne, že jde spát do nějakého pokoje, defaultně v tom pokoji zataženě žaluzie DOLŮ a nakloň lamely do zavření (control_blinds action "down", orientation 100). `

@@ -938,6 +938,41 @@
 
 <div class="slider-wrap" id="sliderWrap">
 
+  <!-- Asistent (první stránka) -->
+  <div class="slide" id="assistantSlide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Asistent</div>
+      </div>
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card lockable asszistant-card">
+        <div class="asst-hint">Napiš nebo nadiktuj (mikrofon na klávesnici), co mám udělat.</div>
+        <div class="asst-reply" id="asstReply"></div>
+        <div class="asst-row">
+          <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
+          <button class="asst-send" id="asstSend">▶</button>
+        </div>
+        <div class="asst-examples" id="asstExamples"></div>
+      </div>
+      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
+        <div class="asst-log-title">Co asistent udělal</div>
+        <div class="asst-log" id="asstLog"></div>
+      </div>
+      <div class="card lockable tempauto-card" id="tempAutoCard">
+        <div class="asst-log-title">Teplotní automatika</div>
+        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne tiché chlazení na 20 °C. Vypne, jakmile klesne pod 20,5 °C — a pak zůstane aspoň 30 min vypnuté.</div>
+        <div class="tempauto-list" id="tempAutoList"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Slide 1: Stats -->
   <div class="slide slide-stats">
     <div class="page">
@@ -1070,41 +1105,6 @@
       </button>
 
       <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
-    </div>
-  </div>
-
-  <!-- Slide 2: Asistent -->
-  <div class="slide" id="assistantSlide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Asistent</div>
-      </div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card lockable asszistant-card">
-        <div class="asst-hint">Napiš nebo nadiktuj (mikrofon na klávesnici), co mám udělat.</div>
-        <div class="asst-reply" id="asstReply"></div>
-        <div class="asst-row">
-          <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
-          <button class="asst-send" id="asstSend">▶</button>
-        </div>
-        <div class="asst-examples" id="asstExamples"></div>
-      </div>
-      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
-        <div class="asst-log-title">Co asistent udělal</div>
-        <div class="asst-log" id="asstLog"></div>
-      </div>
-      <div class="card lockable tempauto-card" id="tempAutoCard">
-        <div class="asst-log-title">Teplotní automatika</div>
-        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne tiché chlazení na 20 °C. Vypne, jakmile klesne pod 20,5 °C — a pak zůstane aspoň 30 min vypnuté.</div>
-        <div class="tempauto-list" id="tempAutoList"></div>
-      </div>
     </div>
   </div>
 
