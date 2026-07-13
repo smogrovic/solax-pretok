@@ -702,6 +702,7 @@
   .home-btn:active{transform:scale(0.98);}
   .home-btn:disabled{opacity:0.55;}
   .home-btn.loading{opacity:0.6;}
+  .home-btn-sm{padding:9px 16px;font-size:15px;border-radius:14px;}
   .home-btn-ico{font-size:20px;}
   .home-msg{
     margin-top:12px;
@@ -1324,6 +1325,11 @@
         </div>
       </div>
 
+      <div class="card lockable" id="nukiCard">
+        <button class="home-btn home-btn-sm" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
+        <div class="home-msg" id="homeMsg"></div>
+      </div>
+
       <div class="card lockable timer-card">
         <div class="graph-title">Časovač</div>
         <select id="relayTimerDevice" class="timer-select"></select>
@@ -1337,21 +1343,6 @@
         </div>
         <button class="timer-add-btn" id="relayTimerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="relayTimerList"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Slide: Dům (Nuki zámek) -->
-  <div class="slide" id="homeSlide">
-    <div class="page">
-      <div class="topbar">
-        <div class="title">Dům</div>
-      </div>
-      <div class="card lockable">
-        <div class="home-actions">
-          <button class="home-btn" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
-        </div>
-        <div class="home-msg" id="homeMsg"></div>
       </div>
     </div>
   </div>
@@ -3350,7 +3341,7 @@ function renderTempAuto() {
 
 const nukiLockBtn = document.getElementById('nukiLockBtn');
 const homeMsg = document.getElementById('homeMsg');
-const homeSlide = document.getElementById('homeSlide');
+const nukiCard = document.getElementById('nukiCard');
 
 async function homeAction(btn, url, okText, msgEl) {
   if (!btn) return;
@@ -3371,9 +3362,8 @@ async function homeAction(btn, url, okText, msgEl) {
 if (nukiLockBtn) nukiLockBtn.addEventListener('click', () => homeAction(nukiLockBtn, '/api/nuki/lock', 'Zamčeno.', homeMsg));
 
 function applyHomeFlags(snap) {
-  if (nukiLockBtn) nukiLockBtn.style.display = snap.nukiEnabled ? '' : 'none';
-  // Bez Nuki nemá stránka Dům co ukázat — schováme ji
-  if (homeSlide && !snap.nukiEnabled) { homeSlide.remove(); rebuildDots(); }
+  // Kartu se zámkem na Ovládání ukážeme jen když je Nuki nastavené
+  if (nukiCard) nukiCard.style.display = snap.nukiEnabled ? '' : 'none';
 }
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
