@@ -506,25 +506,41 @@ async function setShellyState(serverUri, deviceId, turn) {
     turn
   });
 
-  const response = await shellyQueued(() => fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-    signal: AbortSignal.timeout(10000)
-  }));
+  // Shelly Cloud občas příkaz přechodně odmítne (401 při throttlu, 429, 5xx).
+  // Manuální i asistentův příkaz jdou stejnou cestou — pár pokusů s odstupem
+  // to spolehlivě dotáhne, místo aby to asistent rovnou vzdal.
+  const TRANSIENT = [401, 408, 429, 500, 502, 503, 504];
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(1200 * attempt);
+    let response;
+    try {
+      response = await shellyQueued(() => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10000)
+      }));
+    } catch (err) {
+      lastErr = Object.assign(new Error(err.name === 'TimeoutError' ? 'Shelly API neodpovědělo včas.' : err.message), { status: 502 });
+      continue; // síťová chyba/timeout — zkusit znovu
+    }
 
-  if (!response.ok) {
-    throw Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.isok) {
+        // Po úspěšném přepnutí zneplatníme cache, ať se hned ukáže nový stav
+        shellyCache.delete(deviceId);
+        return;
+      }
+      lastErr = Object.assign(new Error('Shelly API odmítlo příkaz.'), { status: 502 });
+      continue; // isok=false bývá taky přechodné — zkusit znovu
+    }
+
+    lastErr = Object.assign(new Error(`Shelly API HTTP ${response.status}`), { status: 502 });
+    if (!TRANSIENT.includes(response.status)) break; // trvalá chyba — nemá smysl opakovat
   }
-
-  const data = await response.json();
-
-  if (!data.isok) {
-    throw Object.assign(new Error('Shelly API odmítlo příkaz.'), { status: 502 });
-  }
-
-  // Po úspěšném přepnutí zneplatníme cache pro toto zařízení, ať se hned ukáže nový stav
-  shellyCache.delete(deviceId);
+  throw lastErr;
 }
 
 function registerSetEndpoint(key) {
