@@ -711,7 +711,14 @@
     color:var(--grey-text);
     min-height:16px;
   }
+  .home-msg:empty{display:none;}
   .home-msg.err{color:#e5534b;}
+  /* Box se zámkem na Ovládání: stejná mezera nad ním jako u ostatních karet,
+     a tlačítko pěkně vycentrované uvnitř */
+  #nukiCard{
+    margin-top:12px;
+    justify-content:center;
+  }
   .mode-select{
     border:none;
     border-radius:12px;
