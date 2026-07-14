@@ -713,6 +713,36 @@
   }
   .home-msg:empty{display:none;}
   .home-msg.err{color:#e5534b;}
+  .infigy-card{align-items:center;}
+  .infigy-temp{
+    font-size:52px;
+    font-weight:800;
+    color:var(--orange);
+    letter-spacing:-0.02em;
+    line-height:1.1;
+  }
+  .infigy-temp-label{
+    font-size:13px;
+    color:var(--grey-text);
+    margin-top:2px;
+  }
+  .infigy-rows{
+    width:100%;
+    margin-top:18px;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .infigy-row{
+    display:flex;
+    justify-content:space-between;
+    padding:9px 2px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+    font-size:14px;
+  }
+  .infigy-row:last-child{border-bottom:none;}
+  .infigy-row-label{color:var(--grey-text);}
+  .infigy-row-val{color:var(--navy);font-weight:600;}
   /* Box se zámkem na Ovládání: stejná mezera nad ním jako u ostatních karet,
      a tlačítko pěkně vycentrované uvnitř */
   #nukiCard{
@@ -1437,6 +1467,21 @@
         <div class="graph-title">Klimatizace (24 h)</div>
         <canvas id="timelineChartAc"></canvas>
         <div class="timeline-legend" id="timelineLegendAc"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide: Infigy (teplota bojleru) -->
+  <div class="slide" id="infigySlide">
+    <div class="page">
+      <div class="topbar">
+        <div class="title">Bojler</div>
+      </div>
+      <div class="card infigy-card">
+        <div class="infigy-temp" id="infigyTemp">– °C</div>
+        <div class="infigy-temp-label">teplota bojleru</div>
+        <div class="infigy-rows" id="infigyRows"></div>
+        <div class="updated" id="infigyHint" style="margin-top:12px;text-align:center"></div>
       </div>
     </div>
   </div>
@@ -3373,6 +3418,42 @@ function applyHomeFlags(snap) {
   if (nukiCard) nukiCard.style.display = snap.nukiEnabled ? '' : 'none';
 }
 
+// ---------- Infigy (teplota bojleru) ----------
+
+const infigySlide = document.getElementById('infigySlide');
+const infigyTempEl = document.getElementById('infigyTemp');
+const infigyRowsEl = document.getElementById('infigyRows');
+const infigyHintEl = document.getElementById('infigyHint');
+
+function renderInfigy(inf) {
+  if (!infigyTempEl) return;
+  inf = inf || {};
+  infigyTempEl.textContent = typeof inf.hwTemp === 'number' ? inf.hwTemp.toFixed(1).replace('.', ',') + ' °C' : '– °C';
+  const rows = [];
+  if (typeof inf.hwSetTemp === 'number') rows.push(['Cílová teplota', inf.hwSetTemp + ' °C']);
+  if (typeof inf.hwCapacity === 'number') rows.push(['Objem', inf.hwCapacity + ' l']);
+  if (typeof inf.hwOn === 'boolean') rows.push(['Bojler', inf.hwOn ? 'zapnutý' : 'vypnutý']);
+  if (typeof inf.hwHeat === 'boolean') rows.push(['Ohřívá', inf.hwHeat ? 'ano' : 'ne']);
+  if (typeof inf.hwEnergyTotal === 'number') rows.push(['Naohříváno celkem', inf.hwEnergyTotal.toFixed(1).replace('.', ',') + ' kWh']);
+  if (typeof inf.spotPrice === 'number') rows.push(['Spotová cena', inf.spotPrice.toFixed(2).replace('.', ',') + ' Kč/kWh']);
+  if (inf.status) rows.push(['Stav systému', inf.status]);
+  infigyRowsEl.innerHTML = '';
+  for (const [label, val] of rows) {
+    const row = document.createElement('div');
+    row.className = 'infigy-row';
+    const l = document.createElement('span'); l.className = 'infigy-row-label'; l.textContent = label;
+    const v = document.createElement('span'); v.className = 'infigy-row-val'; v.textContent = val;
+    row.appendChild(l); row.appendChild(v);
+    infigyRowsEl.appendChild(row);
+  }
+  infigyHintEl.textContent = inf.error ? ('Chyba: ' + inf.error) : '';
+}
+
+function applyInfigyFlags(snap) {
+  if (infigySlide && snap.infigyEnabled === false) { infigySlide.remove(); rebuildDots(); return; }
+  renderInfigy(snap.infigy);
+}
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -3417,6 +3498,7 @@ function applySnapshot(snap) {
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   renderTempAuto();
   applyHomeFlags(snap);
+  applyInfigyFlags(snap);
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   relayTimersData = snap.relayTimers || [];
@@ -3532,6 +3614,9 @@ function connectStream() {
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
     renderWallbox();
+  });
+  es.addEventListener('infigy', e => {
+    renderInfigy(JSON.parse(e.data).infigy);
   });
   es.addEventListener('wallboxHistory', e => {
     const d = JSON.parse(e.data);

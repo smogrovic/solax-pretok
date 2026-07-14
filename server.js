@@ -90,6 +90,7 @@ const state = {
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
+  infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
@@ -188,6 +189,8 @@ function snapshot() {
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
+    infigy: state.infigy,
+    infigyEnabled,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
     nukiEnabled,
@@ -2742,6 +2745,103 @@ app.post('/api/assistant', async (req, res) => {
     res.status(502).json({ error: 'Asistent selhal: ' + err.message });
   }
 });
+
+// ---------- Infigy (řízení energie) — teplota bojleru atd. ----------
+// Přihlášení jde přes Supabase (login → sb-auth-token cookie → /portal/enter
+// vrátí portal cookie → socket.io /core/socket.io pošle 'store:snapshot').
+// Heslo je jen z env; anon klíč a ID zařízení nejsou tajné (jsou i v appce).
+
+const INFIGY_EMAIL = process.env.INFIGY_EMAIL;
+const INFIGY_PASSWORD = process.env.INFIGY_PASSWORD;
+const INFIGY_REF = process.env.INFIGY_SUPABASE_REF || 'jclxwzbylxakraflrdje';
+const INFIGY_DEVICE_ID = process.env.INFIGY_DEVICE_ID || '100000003b293bd8';
+const INFIGY_ANON = process.env.INFIGY_SUPABASE_ANON
+  || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjbHh3emJ5bHhha3JhZmxyZGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NjY2MzYxMzgsImV4cCI6MTk4MjIxMjEzOH0.o9rDmjPAJhRKgM9Ddaw69jej0LEDntR9bPhxmRaY7ZY';
+const infigyEnabled = !!(INFIGY_EMAIL && INFIGY_PASSWORD);
+
+const INFIGY_UA = 'Mozilla/5.0 (compatible; SmogyFVE/1.0)';
+
+async function infigyLogin() {
+  const r = await fetch(`https://${INFIGY_REF}.supabase.co/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: INFIGY_ANON, Authorization: `Bearer ${INFIGY_ANON}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: INFIGY_EMAIL, password: INFIGY_PASSWORD, gotrue_meta_security: {} }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const session = await r.json().catch(() => null);
+  if (!r.ok || !session || !session.access_token) {
+    throw new Error(`Infigy přihlášení selhalo (HTTP ${r.status}${session && session.error_description ? ': ' + session.error_description : ''}).`);
+  }
+  return session;
+}
+
+async function infigyPortalEnter(sbCookie) {
+  const r = await fetch(`https://app.infigy.cz/portal/enter/${INFIGY_DEVICE_ID}?t=${Date.now()}`, {
+    headers: { Cookie: sbCookie, 'User-Agent': INFIGY_UA }, redirect: 'manual', signal: AbortSignal.timeout(15000)
+  });
+  const cookies = (r.headers.getSetCookie && r.headers.getSetCookie()) || [];
+  const portal = cookies.map(c => /^portal=([^;]+)/.exec(c)).find(Boolean);
+  if (!portal) throw new Error(`Infigy: nepodařilo se otevřít portál zařízení (HTTP ${r.status}).`);
+  return portal[1];
+}
+
+function infigyFetchSnapshot(cookieHeader) {
+  const { io } = require('socket.io-client');
+  return new Promise((resolve, reject) => {
+    const socket = io('https://app.infigy.cz', {
+      path: '/core/socket.io',
+      extraHeaders: { Cookie: cookieHeader, 'User-Agent': INFIGY_UA },
+      reconnection: false, timeout: 20000, forceNew: true
+    });
+    const done = (err, store) => {
+      clearTimeout(timer);
+      try { socket.disconnect(); } catch {}
+      err ? reject(err) : resolve(store);
+    };
+    const timer = setTimeout(() => done(new Error('Infigy: snapshot nedorazil včas.')), 25000);
+    socket.on('store:snapshot', (payload) => done(null, (payload && payload.store) || payload || {}));
+    socket.on('connect_error', (e) => done(new Error('Infigy socket: ' + (e && e.message || e))));
+    socket.on('error', (e) => done(new Error('Infigy socket chyba: ' + (e && e.message || e))));
+  });
+}
+
+let infigyPollRunning = false;
+
+async function pollInfigy() {
+  if (!infigyEnabled || infigyPollRunning) return;
+  infigyPollRunning = true;
+  try {
+    const session = await infigyLogin();
+    const sbCookie = `sb-auth-token=${encodeURIComponent(JSON.stringify(session))}`;
+    const portal = await infigyPortalEnter(sbCookie);
+    const store = await infigyFetchSnapshot(`${sbCookie}; portal=${portal}`);
+    const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+    const round1 = v => (typeof v === 'number' && isFinite(v) ? Math.round(v * 10) / 10 : null);
+    state.infigy = {
+      hwTemp: round1(store.HW_TEMP),
+      hwSetTemp: num(store.HW_SET_TEMP),
+      hwCapacity: num(store.HW_CAPACITY),
+      hwOn: !!store.HW_ON,
+      hwHeat: !!store.HW_HEAT,
+      hwEnergyTotal: round1(store.HW_ENERGY_PRODUCED_TOTAL),
+      status: typeof store.STATUS_INFO === 'string' ? store.STATUS_INFO : null,
+      spotPrice: num(store.SP_ACTUAL_PRICE),
+      error: null,
+      fetchedAt: new Date().toISOString()
+    };
+    broadcast('infigy', { infigy: state.infigy });
+  } catch (err) {
+    state.infigy = { ...state.infigy, error: err.message, fetchedAt: new Date().toISOString() };
+    broadcast('infigy', { infigy: state.infigy });
+  } finally {
+    infigyPollRunning = false;
+  }
+}
+
+if (infigyEnabled) {
+  setTimeout(pollInfigy, 12000);
+  setInterval(pollInfigy, 5 * 60 * 1000);
+}
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.

@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
     "express": "^4.19.2",
+    "socket.io-client": "^4.8.1",
     "web-push": "^3.6.7"
   }
 }
