@@ -266,6 +266,7 @@ async function fetchSolax() {
     wallboxKw: wallboxW / 1000,
     batterySoc,
     batPowerKw: batPower / 1000,
+    yieldToday: typeof r.yieldtoday === 'number' ? r.yieldtoday : null, // skutečná výroba FVE za dnešek (kWh)
     uploadTime: r.uploadTime,
     fetchedAt: new Date().toISOString()
   };
@@ -2826,6 +2827,14 @@ async function pollInfigy() {
       hwEnergyTotal: round1(store.HW_ENERGY_PRODUCED_TOTAL),
       status: typeof store.STATUS_INFO === 'string' ? store.STATUS_INFO : null,
       spotPrice: num(store.SP_ACTUAL_PRICE),
+      // Předpokládaná výroba FVE dnes (kWh)
+      forecastPv: round1(store.SP_FORECAST_PV),
+      // Wallbox z pohledu Infigy
+      wbOn: !!store.WB_ON,
+      wbPower: round1(store.WB_ACTUAL_POWER),
+      wbState: num(store.WB_STATE),
+      wbStateSolax: num(store.WB_STATE_SOLAX),
+      wbMaxCurrent: num(store.WB_MAX_CURRENT),
       error: null,
       fetchedAt: new Date().toISOString()
     };

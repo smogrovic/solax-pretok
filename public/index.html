@@ -743,6 +743,35 @@
   .infigy-row:last-child{border-bottom:none;}
   .infigy-row-label{color:var(--grey-text);}
   .infigy-row-val{color:var(--navy);font-weight:600;}
+  .boilers-card{
+    flex-direction:row;
+    align-items:stretch;
+    padding:16px 12px;
+  }
+  .boiler-cell{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+  }
+  .boiler-sep{
+    width:1px;
+    background:rgba(44,62,80,0.1);
+    margin:0 6px;
+  }
+  .boiler-name{
+    font-size:12px;
+    color:var(--grey-text);
+    text-align:center;
+  }
+  .boiler-temp{
+    font-size:26px;
+    font-weight:800;
+    color:var(--orange);
+    letter-spacing:-0.02em;
+  }
   /* Box se zámkem na Ovládání: stejná mezera nad ním jako u ostatních karet,
      a tlačítko pěkně vycentrované uvnitř */
   #nukiCard{
@@ -1015,7 +1044,7 @@
   <div class="slide slide-stats">
     <div class="page">
       <div class="topbar">
-        <div class="title">Šmogyho FVE</div>
+        <div class="title">FVE</div>
       </div>
       <div class="error-banner" id="errorBanner"></div>
       <div class="card">
@@ -1119,6 +1148,18 @@
             <div class="node-label">Wallbox</div>
             <div class="node-value" id="wallboxValue">– kW</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card boilers-card">
+        <div class="boiler-cell">
+          <div class="boiler-name">Bojler 1 (TČ)</div>
+          <div class="boiler-temp" id="boiler1Temp">– °C</div>
+        </div>
+        <div class="boiler-sep"></div>
+        <div class="boiler-cell">
+          <div class="boiler-name">Bojler 2</div>
+          <div class="boiler-temp" id="boiler2Temp">– °C</div>
         </div>
       </div>
 
@@ -1418,6 +1459,11 @@
         <canvas id="wbChart"></canvas>
         <div class="graph-total" id="wbEnergyTotal"></div>
       </div>
+
+      <div class="card stats-card" id="infigyWbCard">
+        <div class="graph-title">Wallbox z Infigy (na porovnání)</div>
+        <div class="infigy-rows" id="infigyWbRows"></div>
+      </div>
     </div>
   </div>
 
@@ -1455,6 +1501,18 @@
         <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojler">–</span></div>
         <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
         <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
+      </div>
+
+      <div class="card boilers-card" id="prodCard">
+        <div class="boiler-cell">
+          <div class="boiler-name">Odhad výroby (Infigy)</div>
+          <div class="boiler-temp" id="prodForecast">– kWh</div>
+        </div>
+        <div class="boiler-sep"></div>
+        <div class="boiler-cell">
+          <div class="boiler-name">Skutečnost (Solax)</div>
+          <div class="boiler-temp" id="prodActual">– kWh</div>
+        </div>
       </div>
 
       <div class="card stats-card">
@@ -1540,8 +1598,11 @@ function formatTime(iso) {
   return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
 }
 
+let lastSolaxData = null;
 function renderSolax(data) {
   if (!data) return;
+  lastSolaxData = data;
+  renderProduction();
   fveEl.textContent = formatKw(data.fveKw);
   feedinEl.textContent = formatKw(data.feedinKw);
   houseEl.textContent = formatKw(data.houseKw);
@@ -2797,37 +2858,9 @@ function renderAircon() {
     airconListEl.appendChild(wrap);
   }
 
-  // Tepelko (Aquarea) — zatím jen náhled stavu
-  for (const a of airconData.aquarea || []) {
-    const wrap = document.createElement('div');
-    wrap.className = 'blind-item';
-    const row = document.createElement('div');
-    row.className = 'blind-row';
-    const info = document.createElement('div');
-    info.className = 'blind-info';
-    const label = document.createElement('span');
-    label.className = 'blind-label';
-    label.textContent = a.name;
-    info.appendChild(label);
-    const pos = document.createElement('span');
-    pos.className = 'blind-pos';
-    if (typeof a.tankTemp === 'number') {
-      const parts = ['nádrž ' + formatTempC(a.tankTemp)];
-      if (typeof a.tankTarget === 'number') parts.push('cíl ' + formatTempC(a.tankTarget));
-      if (a.tankOn) parts.push('ohřev běží');
-      if (typeof a.outdoorTemp === 'number') parts.push('venku ' + formatTempC(a.outdoorTemp));
-      if (a.quiet) parts.push('tichý');
-      pos.textContent = parts.join(' · ');
-    } else if (a.online === false) {
-      pos.textContent = 'offline';
-    } else {
-      pos.textContent = 'stav nedostupný';
-    }
-    info.appendChild(pos);
-    row.appendChild(info);
-    wrap.appendChild(row);
-    airconListEl.appendChild(wrap);
-  }
+  // Tepelné čerpadlo (Aquarea) se na stránce Klima nezobrazuje —
+  // teplota nádrže bojleru je na stránce FVE jako „Bojler 1 (TČ)".
+  renderBoilers();
 
   renderTimerDeviceOptions();
 }
@@ -3425,9 +3458,15 @@ const infigyTempEl = document.getElementById('infigyTemp');
 const infigyRowsEl = document.getElementById('infigyRows');
 const infigyHintEl = document.getElementById('infigyHint');
 
+let infigyData = null;
 function renderInfigy(inf) {
+  infigyData = inf || {};
+  // tyhle běží nezávisle na stránce Bojler (jsou na FVE / Wallboxu / Přehledu)
+  renderBoilers();
+  renderProduction();
+  renderInfigyWallbox();
   if (!infigyTempEl) return;
-  inf = inf || {};
+  inf = infigyData;
   infigyTempEl.textContent = typeof inf.hwTemp === 'number' ? inf.hwTemp.toFixed(1).replace('.', ',') + ' °C' : '– °C';
   const rows = [];
   if (typeof inf.hwSetTemp === 'number') rows.push(['Cílová teplota', inf.hwSetTemp + ' °C']);
@@ -3450,8 +3489,51 @@ function renderInfigy(inf) {
 }
 
 function applyInfigyFlags(snap) {
-  if (infigySlide && snap.infigyEnabled === false) { infigySlide.remove(); rebuildDots(); return; }
+  if (infigySlide && snap.infigyEnabled === false) { infigySlide.remove(); rebuildDots(); }
   renderInfigy(snap.infigy);
+}
+
+// Dva bojlery na stránce FVE: Bojler 1 = nádrž tepelného čerpadla (Panasonic), Bojler 2 = Infigy
+const boiler1El = document.getElementById('boiler1Temp');
+const boiler2El = document.getElementById('boiler2Temp');
+function fmtTemp(t) { return typeof t === 'number' ? t.toFixed(1).replace('.', ',') + ' °C' : '– °C'; }
+function renderBoilers() {
+  if (boiler1El) {
+    const aq = (airconData && airconData.aquarea || [])[0];
+    boiler1El.textContent = fmtTemp(aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null);
+  }
+  if (boiler2El) boiler2El.textContent = fmtTemp(infigyData && typeof infigyData.hwTemp === 'number' ? infigyData.hwTemp : null);
+}
+
+// Odhad vs. skutečná výroba FVE (Přehled)
+const prodForecastEl = document.getElementById('prodForecast');
+const prodActualEl = document.getElementById('prodActual');
+function fmtKwh(v) { return typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' kWh' : '– kWh'; }
+function renderProduction() {
+  if (prodForecastEl) prodForecastEl.textContent = fmtKwh(infigyData && typeof infigyData.forecastPv === 'number' ? infigyData.forecastPv : null);
+  if (prodActualEl) prodActualEl.textContent = fmtKwh(lastSolaxData && typeof lastSolaxData.yieldToday === 'number' ? lastSolaxData.yieldToday : null);
+}
+
+// Wallbox z Infigy (na porovnání se Solaxem) — Wallbox stránka
+const infigyWbRowsEl = document.getElementById('infigyWbRows');
+function renderInfigyWallbox() {
+  if (!infigyWbRowsEl) return;
+  const inf = infigyData || {};
+  const rows = [];
+  if (typeof inf.wbPower === 'number') rows.push(['Výkon', inf.wbPower.toFixed(1).replace('.', ',') + ' kW']);
+  if (typeof inf.wbOn === 'boolean') rows.push(['Zapnutý', inf.wbOn ? 'ano' : 'ne']);
+  if (typeof inf.wbState === 'number') rows.push(['Stav (WB_STATE)', String(inf.wbState)]);
+  if (typeof inf.wbStateSolax === 'number') rows.push(['Stav Solax', String(inf.wbStateSolax)]);
+  if (typeof inf.wbMaxCurrent === 'number') rows.push(['Max. proud', inf.wbMaxCurrent + ' A']);
+  infigyWbRowsEl.innerHTML = '';
+  for (const [label, val] of rows) {
+    const row = document.createElement('div');
+    row.className = 'infigy-row';
+    const l = document.createElement('span'); l.className = 'infigy-row-label'; l.textContent = label;
+    const v = document.createElement('span'); v.className = 'infigy-row-val'; v.textContent = val;
+    row.appendChild(l); row.appendChild(v);
+    infigyWbRowsEl.appendChild(row);
+  }
 }
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
