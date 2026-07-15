@@ -93,6 +93,8 @@ const state = {
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
+  wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
+  wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (za 48 h)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
@@ -192,6 +194,8 @@ function snapshot() {
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
+    wbAuto: state.wbAuto,
+    wbModeHistory: state.wbModeHistory,
     infigy: state.infigy,
     infigyEnabled,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
@@ -2297,6 +2301,17 @@ function wbParseResult(r) {
   };
 }
 
+// Zaznamená změnu režimu wallboxu do historie (pro graf „kdy jaký režim")
+function recordWbMode(mode) {
+  if (!mode) return;
+  const last = state.wbModeHistory[state.wbModeHistory.length - 1];
+  if (last && last.mode === mode) return; // beze změny
+  const cutoff = Date.now() - TIMELINE_MAX_AGE_MS;
+  state.wbModeHistory = state.wbModeHistory.filter(e => e.t >= cutoff);
+  state.wbModeHistory.push({ t: Date.now(), mode });
+  broadcast('wbModeHistory', { history: state.wbModeHistory });
+}
+
 let wallboxPollRunning = false;
 
 async function pollWallbox() {
@@ -2305,6 +2320,7 @@ async function pollWallbox() {
   try {
     const result = await wbFetchStatus();
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
+    recordWbMode(state.wallbox.mode);
     broadcast('wallbox', { wallbox: state.wallbox });
     // Bod do historie výkonu (max. 1× za 30 s), ať máme graf za 24 h
     if (typeof state.wallbox.power === 'number') {
@@ -2364,6 +2380,7 @@ app.post('/api/wallbox/set', async (req, res) => {
   try {
     await wbSetMode(mode);
     state.wallbox = { ...state.wallbox, mode };
+    recordWbMode(mode);
     broadcast('wallbox', { wallbox: state.wallbox });
     addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}`);
     res.json({ success: true });
@@ -2373,6 +2390,57 @@ app.post('/api/wallbox/set', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
+
+// Automatika wallboxu (fix tarif, priorita auto):
+//  - noc 22:00–07:00 → FAST
+//  - den → GREEN jen když (předpokládaná výroba − již vyrobeno) > 20 kWh, jinak FAST
+//  - když je přepnuto na FAST, drží se FAST
+let wbControlRunning = false;
+function wbTargetMode() {
+  if (!state.wbAuto) return 'fast'; // pevně FAST
+  const p = pragueTime();
+  if (p.hour >= 22 || p.hour < 7) return 'fast'; // noc
+  const forecast = state.infigy && typeof state.infigy.forecastPv === 'number' ? state.infigy.forecastPv : null;
+  const produced = state.solax && typeof state.solax.yieldToday === 'number' ? state.solax.yieldToday : null;
+  if (forecast === null || produced === null) return 'green'; // bez dat radši jen přebytek
+  return (forecast - produced) > 20 ? 'green' : 'fast';
+}
+
+async function applyWallboxControl() {
+  if (!wallboxEnabled || wbControlRunning) return;
+  wbControlRunning = true;
+  try {
+    const target = wbTargetMode();
+    if (target && state.wallbox.mode !== target) {
+      await wbSetMode(target);
+      state.wallbox = { ...state.wallbox, mode: target };
+      recordWbMode(target);
+      broadcast('wallbox', { wallbox: state.wallbox });
+      addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
+    }
+  } catch (err) {
+    addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`);
+  } finally {
+    wbControlRunning = false;
+  }
+}
+
+app.post('/api/wallbox/auto', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován.' });
+  const { auto } = req.body || {};
+  if (typeof auto !== 'boolean') return res.status(400).json({ error: 'auto musí být true/false.' });
+  state.wbAuto = auto;
+  broadcast('wbAuto', { wbAuto: state.wbAuto });
+  addLog(`Wallbox: přepnuto na ${auto ? 'AUTO' : 'FAST'}`);
+  res.json({ wbAuto: state.wbAuto });
+  applyWallboxControl(); // aplikuj hned
+});
+
+if (wallboxEnabled) {
+  setTimeout(applyWallboxControl, 30000);
+  setInterval(applyWallboxControl, 5 * 60 * 1000);
+}
 
 // ---------- AI asistent (Claude API, ovládání v přirozené řeči) ----------
 

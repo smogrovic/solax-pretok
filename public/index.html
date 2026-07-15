@@ -927,6 +927,25 @@
     border-radius:50%;
     animation:spin 0.8s linear infinite;
   }
+  .wb-mode-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    margin-top:16px;
+    width:100%;
+  }
+  .wb-mode-opt{
+    font-size:14px;
+    font-weight:700;
+    color:var(--grey-text);
+    transition:color .2s;
+  }
+  .wb-mode-opt.active{color:var(--navy);}
+  #wbModeChart{
+    width:100%;
+    display:block;
+  }
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -1449,7 +1468,11 @@
             <div class="wb-stat-val" id="wbStatusVal">–</div>
           </div>
         </div>
-        <div class="wb-modes" id="wbModes"></div>
+        <div class="wb-mode-toggle">
+          <span class="wb-mode-opt" id="wbModeFast">FAST</span>
+          <button class="toggle-switch" id="wbAutoSwitch" aria-label="Přepnout FAST/AUTO"></button>
+          <span class="wb-mode-opt" id="wbModeAuto">AUTO</span>
+        </div>
         <div class="updated" id="wbHint" style="margin-top:10px;text-align:center"></div>
       </div>
 
@@ -1459,9 +1482,10 @@
         <div class="graph-total" id="wbEnergyTotal"></div>
       </div>
 
-      <div class="card stats-card" id="infigyWbCard">
-        <div class="graph-title">Wallbox z Infigy (na porovnání)</div>
-        <div class="infigy-rows" id="infigyWbRows"></div>
+      <div class="card stats-card">
+        <div class="graph-title">Historie režimů (24 h)</div>
+        <canvas id="wbModeChart"></canvas>
+        <div class="timeline-legend" id="wbModeLegend"></div>
       </div>
     </div>
   </div>
@@ -1500,6 +1524,7 @@
         <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojler">–</span></div>
         <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
         <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
+        <div class="stat-row"><span>Wallbox nyní</span><span class="stat-val" id="wbOverview">– kW</span></div>
       </div>
 
       <div class="card boilers-card" id="prodCard">
@@ -3064,21 +3089,26 @@ relayTimerAddBtn.addEventListener('click', async () => {
 
 const wbPowerEl = document.getElementById('wbPower');
 const wbStatusValEl = document.getElementById('wbStatusVal');
-const wbModesEl = document.getElementById('wbModes');
 const wbHintEl = document.getElementById('wbHint');
+const wbAutoSwitchEl = document.getElementById('wbAutoSwitch');
+const wbModeFastEl = document.getElementById('wbModeFast');
+const wbModeAutoEl = document.getElementById('wbModeAuto');
+const wbOverviewEl = document.getElementById('wbOverview');
 let wallboxData = null;
 let wallboxEnabledFlag = null;
+let wbAutoData = true;
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
 
-async function wbSetMode(mode, btn) {
-  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+// Přepínač FAST (vlevo) / AUTO (vpravo) — AUTO = zapnutá automatika (green/fast dle výroby)
+async function wbSetAuto(auto) {
+  if (wbAutoSwitchEl) wbAutoSwitchEl.disabled = true;
   try {
-    const res = await fetch('/api/wallbox/set', {
+    const res = await fetch('/api/wallbox/auto', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ mode })
+      body: JSON.stringify({ auto })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -3086,12 +3116,33 @@ async function wbSetMode(mode, btn) {
       throw new Error(data.error || 'Ovládání je zamčené.');
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    if (typeof data.wbAuto === 'boolean') wbAutoData = data.wbAuto;
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Wallbox: ' + err.message;
     errorEl.classList.add('show');
   }
-  if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+  if (wbAutoSwitchEl) wbAutoSwitchEl.disabled = false;
+  renderWbAuto();
+}
+
+if (wbAutoSwitchEl) {
+  wbAutoSwitchEl.addEventListener('click', () => wbSetAuto(!wbAutoData));
+}
+
+function renderWbAuto() {
+  if (wbAutoSwitchEl) wbAutoSwitchEl.classList.toggle('on', !!wbAutoData);
+  if (wbModeAutoEl) wbModeAutoEl.classList.toggle('active', !!wbAutoData);
+  if (wbModeFastEl) wbModeFastEl.classList.toggle('active', !wbAutoData);
+}
+
+// Výkon wallboxu: přednostně z Infigy (živější), jinak ze Solaxu; vrací kW
+function wbPowerKw() {
+  const inf = infigyData || {};
+  if (typeof inf.wbPower === 'number') return inf.wbPower;
+  const w = wallboxData || {};
+  if (typeof w.power === 'number') return w.power / 1000;
+  return null;
 }
 
 function renderWallbox() {
@@ -3099,34 +3150,19 @@ function renderWallbox() {
     wbPowerEl.textContent = '–';
     wbStatusValEl.textContent = '–';
     wbHintEl.textContent = 'Wallbox není nastaven (chybí WALLBOX_SN na serveru).';
+    if (wbOverviewEl) wbOverviewEl.textContent = '– kW';
     return;
   }
   const w = wallboxData || {};
-  wbPowerEl.textContent = typeof w.power === 'number'
-    ? (w.power >= 1000 ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW' : Math.round(w.power) + ' W')
-    : '–';
-  // Spotřeba wallboxu i na první stránce (dlaždice vedle Přetoku)
-  if (wallboxValueEl) {
-    wallboxValueEl.textContent = typeof w.power === 'number'
-      ? (w.power / 1000).toFixed(1).replace('.', ',') + ' kW'
-      : '– kW';
-  }
+  const kw = wbPowerKw();
+  const kwStr = kw !== null ? kw.toFixed(1).replace('.', ',') + ' kW' : '– kW';
+  wbPowerEl.textContent = kw !== null ? kw.toFixed(1).replace('.', ',') + ' kW' : '–';
+  // Spotřeba wallboxu i na první stránce (dlaždice) a na Přehledu
+  if (wallboxValueEl) wallboxValueEl.textContent = kwStr;
+  if (wbOverviewEl) wbOverviewEl.textContent = kwStr;
   wbStatusValEl.textContent = (typeof w.status === 'number' && WB_STATUS_LABELS_UI[w.status]) || '–';
   wbHintEl.textContent = w.error || '';
-
-  if (!wbModesEl.children.length) {
-    for (const mode of ['stop', 'fast', 'eco', 'green']) {
-      const btn = document.createElement('button');
-      btn.className = 'wb-mode-btn';
-      btn.dataset.mode = mode;
-      btn.textContent = WB_MODE_LABELS_UI[mode];
-      btn.addEventListener('click', () => wbSetMode(mode, btn));
-      wbModesEl.appendChild(btn);
-    }
-  }
-  for (const btn of wbModesEl.children) {
-    btn.classList.toggle('active', btn.dataset.mode === w.mode);
-  }
+  renderWbAuto();
 }
 
 // ---------- Graf výkonu wallboxu za 24 h ----------
@@ -3268,6 +3304,88 @@ function renderWallboxChart() {
 }
 
 window.addEventListener('resize', renderWallboxChart);
+
+// ---------- Graf historie režimů wallboxu (24 h) ----------
+
+const WB_MODE_COLORS = { fast: '#f5933d', green: '#27ae60', eco: '#3498db', stop: 'rgba(44,62,80,0.35)' };
+const wbModeChartCanvas = document.getElementById('wbModeChart');
+const wbModeLegendEl = document.getElementById('wbModeLegend');
+let wbModeHistoryData = [];
+
+function renderWbModeChart() {
+  if (!wbModeChartCanvas || !wbModeLegendEl) return;
+  const targetH = 46;
+  wbModeChartCanvas.style.height = targetH + 'px';
+  const ctx = wbModeChartCanvas.getContext('2d');
+  const w = wbModeChartCanvas.clientWidth || 300;
+  const h = targetH;
+  const dpr = window.devicePixelRatio || 1;
+  wbModeChartCanvas.width = w * dpr;
+  wbModeChartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now();
+  const start = now - 24 * 60 * 60 * 1000;
+  const padL = 8, padR = 8, padT = 6, padB = 16;
+  const barTop = padT, barH = h - padT - padB;
+  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
+
+  // Ze záznamů změn režimu poskládáme souvislé segmenty (mode aktivní do další změny / do teď)
+  const hist = (wbModeHistoryData || [])
+    .filter(e => e && typeof e.t === 'number' && e.mode)
+    .sort((a, b) => a.t - b.t);
+  const segs = [];
+  for (let i = 0; i < hist.length; i++) {
+    segs.push({ from: hist[i].t, to: i + 1 < hist.length ? hist[i + 1].t : now, mode: hist[i].mode });
+  }
+
+  // Pozadí dráhy
+  ctx.fillStyle = 'rgba(44,62,80,0.06)';
+  ctx.fillRect(padL, barTop, w - padL - padR, barH);
+
+  let any = false;
+  const seen = [];
+  for (const s of segs) {
+    const from = Math.max(s.from, start);
+    const to = Math.min(s.to, now);
+    if (to <= from) continue;
+    any = true;
+    if (!seen.includes(s.mode)) seen.push(s.mode);
+    ctx.fillStyle = WB_MODE_COLORS[s.mode] || 'rgba(44,62,80,0.35)';
+    const x1 = x(from), x2 = x(to);
+    ctx.fillRect(x1, barTop, Math.max(x2 - x1, 1), barH);
+  }
+
+  // Časové značky po 6 h
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.fillStyle = 'rgba(44,62,80,0.4)';
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const t = start + i * 6 * 60 * 60 * 1000;
+    const d = new Date(t);
+    ctx.fillText(d.getHours() + ':00', x(t), h - 4);
+  }
+
+  if (!any) {
+    ctx.fillStyle = 'rgba(44,62,80,0.4)';
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillText('Zatím žádná data', w / 2, barTop + barH / 2 + 4);
+  }
+
+  // Legenda jen pro režimy, které se v okně objevily
+  wbModeLegendEl.textContent = '';
+  for (const m of ['fast', 'green', 'eco', 'stop'].filter(m => seen.includes(m))) {
+    const span = document.createElement('span');
+    const dot = document.createElement('i');
+    dot.style.background = WB_MODE_COLORS[m];
+    span.appendChild(dot);
+    span.appendChild(document.createTextNode(WB_MODE_LABELS_UI[m]));
+    wbModeLegendEl.appendChild(span);
+  }
+}
+
+window.addEventListener('resize', renderWbModeChart);
 
 // ---------- AI asistent ----------
 
@@ -3451,7 +3569,7 @@ function renderInfigy(inf) {
   infigyData = inf || {};
   renderBoilers();
   renderProduction();
-  renderInfigyWallbox();
+  renderWallbox(); // výkon wallboxu bereme z Infigy
 }
 
 function applyInfigyFlags(snap) {
@@ -3477,28 +3595,6 @@ function fmtKwh(v) { return typeof v === 'number' ? v.toFixed(1).replace('.', ',
 function renderProduction() {
   if (prodForecastEl) prodForecastEl.textContent = fmtKwh(infigyData && typeof infigyData.forecastPv === 'number' ? infigyData.forecastPv : null);
   if (prodActualEl) prodActualEl.textContent = fmtKwh(lastSolaxData && typeof lastSolaxData.yieldToday === 'number' ? lastSolaxData.yieldToday : null);
-}
-
-// Wallbox z Infigy (na porovnání se Solaxem) — Wallbox stránka
-const infigyWbRowsEl = document.getElementById('infigyWbRows');
-function renderInfigyWallbox() {
-  if (!infigyWbRowsEl) return;
-  const inf = infigyData || {};
-  const rows = [];
-  if (typeof inf.wbPower === 'number') rows.push(['Výkon', inf.wbPower.toFixed(1).replace('.', ',') + ' kW']);
-  if (typeof inf.wbOn === 'boolean') rows.push(['Zapnutý', inf.wbOn ? 'ano' : 'ne']);
-  if (typeof inf.wbState === 'number') rows.push(['Stav (WB_STATE)', String(inf.wbState)]);
-  if (typeof inf.wbStateSolax === 'number') rows.push(['Stav Solax', String(inf.wbStateSolax)]);
-  if (typeof inf.wbMaxCurrent === 'number') rows.push(['Max. proud', inf.wbMaxCurrent + ' A']);
-  infigyWbRowsEl.innerHTML = '';
-  for (const [label, val] of rows) {
-    const row = document.createElement('div');
-    row.className = 'infigy-row';
-    const l = document.createElement('span'); l.className = 'infigy-row-label'; l.textContent = label;
-    const v = document.createElement('span'); v.className = 'infigy-row-val'; v.textContent = val;
-    row.appendChild(l); row.appendChild(v);
-    infigyWbRowsEl.appendChild(row);
-  }
 }
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
@@ -3532,7 +3628,10 @@ function applySnapshot(snap) {
   renderTimers();
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
+  wbAutoData = snap.wbAuto !== false;
   renderWallbox();
+  wbModeHistoryData = snap.wbModeHistory || [];
+  renderWbModeChart();
   // Historie výkonu wallboxu: spojíme server + lokální zálohu, chybějící vrátíme serveru
   const serverWb = snap.wallboxHistory || [];
   const localWb = loadWallboxHistoryLocal();
@@ -3671,6 +3770,14 @@ function connectStream() {
     else if (d.point) wallboxHistory = mergeWbHistories(wallboxHistory, [d.point]);
     renderWallboxChart();
     saveWallboxHistoryLocal();
+  });
+  es.addEventListener('wbAuto', e => {
+    wbAutoData = JSON.parse(e.data).wbAuto !== false;
+    renderWbAuto();
+  });
+  es.addEventListener('wbModeHistory', e => {
+    wbModeHistoryData = JSON.parse(e.data).history || [];
+    renderWbModeChart();
   });
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];
