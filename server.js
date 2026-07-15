@@ -95,7 +95,9 @@ const state = {
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
   wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (za 48 h)
+  wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
+  boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
@@ -198,6 +200,7 @@ function snapshot() {
     wbModeHistory: state.wbModeHistory,
     infigy: state.infigy,
     infigyEnabled,
+    boilerHistory: state.boilerHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
     nukiEnabled,
@@ -2411,8 +2414,12 @@ async function applyWallboxControl() {
   wbControlRunning = true;
   try {
     const target = wbTargetMode();
-    if (target && state.wallbox.mode !== target) {
+    // Přepínáme jen když se ZMĚNÍ rozhodnutí (den↔noc, překročení prahu výroby),
+    // ne pořád dokola. Když se pak wallbox sám dá do STOP (třeba dobil), nevadí —
+    // nebudeme to znovu přepínat, dokud se cíl reálně nezmění.
+    if (target && state.wbLastTarget !== target) {
       await wbSetMode(target);
+      state.wbLastTarget = target;
       state.wallbox = { ...state.wallbox, mode: target };
       recordWbMode(target);
       broadcast('wallbox', { wallbox: state.wallbox });
@@ -2434,6 +2441,7 @@ app.post('/api/wallbox/auto', async (req, res) => {
   broadcast('wbAuto', { wbAuto: state.wbAuto });
   addLog(`Wallbox: přepnuto na ${auto ? 'AUTO' : 'FAST'}`);
   res.json({ wbAuto: state.wbAuto });
+  state.wbLastTarget = null; // ruční přepnutí = vynuť okamžité nastavení
   applyWallboxControl(); // aplikuj hned
 });
 
@@ -2924,6 +2932,23 @@ if (infigyEnabled) {
   setTimeout(pollInfigy, 12000);
   setInterval(pollInfigy, 5 * 60 * 1000);
 }
+
+// ---------- Historie teplot bojlerů (graf na stránce FVE) ----------
+// Bojler 1 = nádrž tepelného čerpadla (Panasonic Aquarea), Bojler 2 = Infigy (HW_TEMP)
+function recordBoilerTemps() {
+  const aq = (state.aircon && state.aircon.aquarea || [])[0];
+  const b1 = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
+  const b2 = state.infigy && typeof state.infigy.hwTemp === 'number' ? state.infigy.hwTemp : null;
+  if (b1 === null && b2 === null) return; // ještě nemáme co ukládat
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  state.boilerHistory = state.boilerHistory.filter(p => p.t >= cutoff);
+  const point = { t: Date.now(), b1, b2 };
+  state.boilerHistory.push(point);
+  broadcast('boilerHistory', { point });
+}
+
+setTimeout(recordBoilerTemps, 30000);
+setInterval(recordBoilerTemps, 5 * 60 * 1000);
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.
