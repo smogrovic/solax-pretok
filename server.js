@@ -2348,8 +2348,6 @@ async function wbSetMode(mode) {
   });
   if (!res.ok) throw new Error(`pileCmd HTTP ${res.status}`);
   const data = await res.json();
-  // Diagnostika: co Solax na přepnutí režimu odpověděl (reverzní API)
-  addLog('Wallbox pileCmd: ' + JSON.stringify(data).slice(0, 200));
   if (!data || data.success === false) {
     throw new Error((data && data.exception) || 'SolaxCloud příkaz odmítl.');
   }
