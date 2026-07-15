@@ -3070,7 +3070,7 @@ let wallboxData = null;
 let wallboxEnabledFlag = null;
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
-const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
+const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
 
 async function wbSetMode(mode, btn) {
   if (btn) { btn.disabled = true; btn.classList.add('loading'); }

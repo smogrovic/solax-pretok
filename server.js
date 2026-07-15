@@ -2272,8 +2272,8 @@ const WB_HOST = 'https://www.solaxcloud.com';
 const WB_MODES = { stop: 0, fast: 1, eco: 2, green: 3 };
 const WB_MODE_NAMES = ['stop', 'fast', 'eco', 'green'];
 const WB_MODE_LABELS = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
-// chargerStatus: 0 nepřipojeno (žádné auto), 1 nabíjí, 2 porucha, 3 připraven
-const WB_STATUS_LABELS = { 0: 'Nepřipojeno', 1: 'Nabíjí', 2: 'Porucha', 3: 'Připraven' };
+// chargerStatus (Solax): 0 nepřipojeno, 1 připraveno, 2 nabíjí, 3 dokončeno, 4 porucha, 5 nedostupné
+const WB_STATUS_LABELS = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
 
 // Čtení stavu: getPileInfo (GET, tokenId + pileSn v query)
 async function wbFetchStatus() {
@@ -2346,6 +2346,8 @@ async function wbSetMode(mode) {
   });
   if (!res.ok) throw new Error(`pileCmd HTTP ${res.status}`);
   const data = await res.json();
+  // Diagnostika: co Solax na přepnutí režimu odpověděl (reverzní API)
+  addLog('Wallbox pileCmd: ' + JSON.stringify(data).slice(0, 200));
   if (!data || data.success === false) {
     throw new Error((data && data.exception) || 'SolaxCloud příkaz odmítl.');
   }
