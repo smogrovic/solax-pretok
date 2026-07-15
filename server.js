@@ -2331,9 +2331,11 @@ if (wallboxEnabled) {
 
 // Přepnutí režimu: pileCmd (POST, rwType 2 = zápis, cmdType 1 = režim nabíjení)
 async function wbSetMode(mode) {
-  const res = await fetch(`${WB_HOST}/proxyApp/proxy/api/pileCmd`, {
+  // tokenId musí být v URL (a pro jistotu i v hlavičce) — jinak Solax hlásí „token is empty!"
+  const url = `${WB_HOST}/proxyApp/proxy/api/pileCmd?tokenId=${encodeURIComponent(SOLAX_TOKEN_ID)}`;
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', tokenId: SOLAX_TOKEN_ID, token: SOLAX_TOKEN_ID },
     body: JSON.stringify({
       tokenId: SOLAX_TOKEN_ID,
       rwType: '2',
