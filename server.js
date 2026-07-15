@@ -1,3 +1,6 @@
+// Na Renderu jdou proměnné z prostředí; na NASu/lokálně z volitelného .env souboru
+try { require('dotenv').config(); } catch {}
+
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
