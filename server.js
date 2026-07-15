@@ -266,7 +266,11 @@ async function fetchSolax() {
   // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného čísla spotřebu zvýší - správně)
   // Wallbox odečteme, ať v "spotřebě domu" nefiguruje nabíjení auta
   const wallboxW = (state.wallbox && typeof state.wallbox.power === 'number') ? state.wallbox.power : 0;
-  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW) / 1000);
+  // Bojlery měříme zvlášť (Bojler 1 = Shelly, Bojler 2 = Infigy) — odečteme je,
+  // ať nejsou ve "spotřebě domu" započítané dvakrát
+  const boiler1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
+  const boiler2W = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower * 1000 : 0;
+  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW - boiler1W - boiler2W) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
 
   return {
@@ -2323,7 +2327,9 @@ async function pollWallbox() {
   try {
     const result = await wbFetchStatus();
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
-    recordWbMode(state.wallbox.mode);
+    // Do grafu režimů NEzaznamenáváme skutečný stav nabíječky (ta se sama dá do STOP,
+    // když auto není připojené / je dobito). Zaznamenáváme jen změny NASTAVENÉHO režimu
+    // (viz applyWallboxControl a /api/wallbox/set), ať čára FAST/GREEN běží dál i přes STOP.
     broadcast('wallbox', { wallbox: state.wallbox });
     // Bod do historie výkonu (max. 1× za 30 s), ať máme graf za 24 h
     if (typeof state.wallbox.power === 'number') {
