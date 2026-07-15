@@ -271,7 +271,8 @@
   }
   #feedinChart,
   #wbChart,
-  #boilerChart{
+  #boilerChart,
+  #batteryChart{
     width:100%;
     height:96px;
     display:block;
@@ -774,6 +775,11 @@
     color:var(--orange);
     letter-spacing:-0.02em;
   }
+  .boiler-power{
+    font-size:13px;
+    font-weight:700;
+    color:var(--grey-text);
+  }
   /* Box se zámkem na Ovládání: stejná mezera nad ním jako u ostatních karet,
      a tlačítko pěkně vycentrované uvnitř */
   #nukiCard{
@@ -1184,11 +1190,13 @@
         <div class="boiler-cell">
           <div class="boiler-name">Bojler 1 (TČ)</div>
           <div class="boiler-temp" id="boiler1Temp">– °C</div>
+          <div class="boiler-power" id="boiler1Power">– kW</div>
         </div>
         <div class="boiler-sep"></div>
         <div class="boiler-cell">
           <div class="boiler-name">Bojler 2</div>
           <div class="boiler-temp" id="boiler2Temp">– °C</div>
+          <div class="boiler-power" id="boiler2Power">– kW</div>
         </div>
       </div>
 
@@ -1196,6 +1204,11 @@
         <div class="graph-title">Teplota bojlerů za 24 h (°C)</div>
         <canvas id="boilerChart"></canvas>
         <div class="timeline-legend" id="boilerLegend"></div>
+      </div>
+
+      <div class="card graph-card">
+        <div class="graph-title">Baterie za 24 h (%)</div>
+        <canvas id="batteryChart"></canvas>
       </div>
 
       <div class="card graph-card">
@@ -1709,6 +1722,7 @@ function renderDevice(device, data) {
     device.onBtn.classList.remove('active-state');
     device.offBtn.classList.remove('active-state');
     if (device.powerEl) device.powerEl.textContent = '';
+    if (device === devices.shelly) { lastShellyPowerW = (data && typeof data.powerW === 'number') ? data.powerW : null; renderBoilerPower(); }
     return;
   }
   if (data.isOn) {
@@ -1724,6 +1738,10 @@ function renderDevice(device, data) {
     device.powerEl.textContent = typeof data.powerW === 'number'
       ? Math.round(data.powerW) + ' W'
       : '';
+  }
+  if (device === devices.shelly) {
+    lastShellyPowerW = typeof data.powerW === 'number' ? data.powerW : null;
+    renderBoilerPower();
   }
 }
 
@@ -3600,14 +3618,92 @@ function applyInfigyFlags(snap) {
 // Dva bojlery na stránce FVE: Bojler 1 = nádrž tepelného čerpadla (Panasonic), Bojler 2 = Infigy
 const boiler1El = document.getElementById('boiler1Temp');
 const boiler2El = document.getElementById('boiler2Temp');
+const boiler1PowerEl = document.getElementById('boiler1Power');
+const boiler2PowerEl = document.getElementById('boiler2Power');
+let lastShellyPowerW = null; // odběr bojleru 1 ze Shelly (W) — plní renderDevice
 function fmtTemp(t) { return typeof t === 'number' ? t.toFixed(1).replace('.', ',') + ' °C' : '– °C'; }
+function fmtKwVal(kw) { return typeof kw === 'number' ? kw.toFixed(1).replace('.', ',') + ' kW' : '– kW'; }
 function renderBoilers() {
   if (boiler1El) {
     const aq = (airconData && airconData.aquarea || [])[0];
     boiler1El.textContent = fmtTemp(aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null);
   }
   if (boiler2El) boiler2El.textContent = fmtTemp(infigyData && typeof infigyData.hwTemp === 'number' ? infigyData.hwTemp : null);
+  renderBoilerPower();
 }
+
+// Odběr bojlerů: Bojler 1 ze Shelly (W→kW), Bojler 2 z Infigy (HW_ACTUAL_POWER, kW)
+function renderBoilerPower() {
+  if (boiler1PowerEl) boiler1PowerEl.textContent = fmtKwVal(typeof lastShellyPowerW === 'number' ? lastShellyPowerW / 1000 : null);
+  if (boiler2PowerEl) boiler2PowerEl.textContent = fmtKwVal(infigyData && typeof infigyData.hwPower === 'number' ? infigyData.hwPower : null);
+}
+
+// Graf nabití baterie za 24 h (stránka FVE) — čte pole `history` (body { t, kw, soc })
+const batteryChartCanvas = document.getElementById('batteryChart');
+function renderBatteryChart() {
+  if (!batteryChartCanvas) return;
+  const ctx = batteryChartCanvas.getContext('2d');
+  const w = batteryChartCanvas.clientWidth || 300;
+  const h = batteryChartCanvas.clientHeight || 96;
+  const dpr = window.devicePixelRatio || 1;
+  batteryChartCanvas.width = w * dpr;
+  batteryChartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now();
+  const start = now - 24 * 60 * 60 * 1000;
+  const pts = (history || []).filter(p => p && typeof p.t === 'number' && typeof p.soc === 'number' && p.t >= start);
+  const grey = 'rgba(44,62,80,0.4)';
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  if (pts.length < 2) {
+    ctx.fillStyle = grey;
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    return;
+  }
+
+  const padL = 26, padR = 8, padT = 10, padB = 18;
+  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
+  const y = soc => padT + (1 - soc / 100) * (h - padT - padB);
+
+  // Popisky osy Y (0 / 100 %)
+  ctx.fillStyle = grey;
+  ctx.textAlign = 'right';
+  ctx.fillText('100', padL - 4, y(100) + 8);
+  ctx.fillText('0', padL - 4, y(0) + 3);
+
+  // Časové značky po 6 h
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const t = start + i * 6 * 60 * 60 * 1000;
+    const d = new Date(t);
+    ctx.fillText(d.getHours() + ':00', x(t), h - 5);
+  }
+
+  // Výplň pod křivkou
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].soc));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.soc));
+  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
+  ctx.lineTo(x(pts[0].t), y(0));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(39,174,96,0.16)';
+  ctx.fill();
+
+  // Křivka
+  ctx.beginPath();
+  ctx.moveTo(x(pts[0].t), y(pts[0].soc));
+  for (const p of pts) ctx.lineTo(x(p.t), y(p.soc));
+  ctx.strokeStyle = '#27ae60';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+window.addEventListener('resize', renderBatteryChart);
 
 // Graf teploty bojlerů za 24 h (stránka FVE)
 const BOILER_COLORS = { b1: '#f5933d', b2: '#3498db' };
@@ -3727,6 +3823,7 @@ function applySnapshot(snap) {
   const localHist = loadHistoryLocal();
   history = mergeHistories(serverHist, localHist);
   renderChart();
+  renderBatteryChart();
   saveHistoryLocal();
   maybeRestoreHistoryToServer(serverHist, localHist);
   const serverLog = snap.log || [];
@@ -3811,6 +3908,7 @@ function connectStream() {
     if (d.historyPoint) {
       history.push(d.historyPoint);
       renderChart();
+      renderBatteryChart();
       saveHistoryLocal();
     }
     errorEl.classList.remove('show');
@@ -3818,6 +3916,7 @@ function connectStream() {
   es.addEventListener('history', e => {
     history = JSON.parse(e.data).history || [];
     renderChart();
+    renderBatteryChart();
     saveHistoryLocal();
   });
   es.addEventListener('solaxError', e => {

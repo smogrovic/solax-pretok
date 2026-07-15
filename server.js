@@ -302,7 +302,7 @@ async function pollSolax() {
     let historyPoint = null;
     const last = state.history[state.history.length - 1];
     if (!last || Date.now() - last.t > 30000) {
-      historyPoint = { t: Date.now(), kw: data.feedinKw };
+      historyPoint = { t: Date.now(), kw: data.feedinKw, soc: data.batterySoc };
       state.history.push(historyPoint);
       pruneHistory();
     }
@@ -2905,6 +2905,7 @@ async function pollInfigy() {
       hwCapacity: num(store.HW_CAPACITY),
       hwOn: !!store.HW_ON,
       hwHeat: !!store.HW_HEAT,
+      hwPower: round1(store.HW_ACTUAL_POWER), // aktuální odběr bojleru 2 (kW)
       hwEnergyTotal: round1(store.HW_ENERGY_PRODUCED_TOTAL),
       status: typeof store.STATUS_INFO === 'string' ? store.STATUS_INFO : null,
       spotPrice: num(store.SP_ACTUAL_PRICE),
