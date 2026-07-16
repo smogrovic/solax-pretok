@@ -2484,7 +2484,7 @@ const EC = {
   BOILER_NEED: 2.0,   // reálný příkon bojleru
   LOAD_MIN_ON_S: 600, // min. doba běhu spotřebiče (anti-cyklování)
   LOAD_MIN_OFF_S: 300,
-  LOAD_ORDER: ['boiler', 'pool'] // pořadí po autu (první = vyšší priorita)
+  LOAD_ORDER: ['pool', 'boiler'] // pořadí po autu (první = vyšší priorita): bazén → bojler
 };
 
 let wbControlRunning = false;
