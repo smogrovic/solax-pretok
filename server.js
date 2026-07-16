@@ -262,17 +262,20 @@ async function fetchSolax() {
 
   // batPower: kladné = baterie se nabíjí (odebírá výkon), záporné = baterie se vybíjí (dodává výkon)
   const batPower = typeof r.batPower === 'number' ? r.batPower : 0;
-  // Spotřeba domu = výroba FVE - výkon spotřebovaný na nabíjení baterie - přetok do sítě
-  // (pokud baterie vybíjí, batPower je záporné, takže odečtení záporného čísla spotřebu zvýší - správně)
-  // Wallbox odečteme, ať v "spotřebě domu" nefiguruje nabíjení auta
+  const inf = state.infigy || {};
+  // Odběry, které mají vlastní dlaždici — měříme je zvlášť a odečteme, ať nejsou ve
+  // "spotřebě domu" započítané dvakrát (Bojler 1 = Shelly, Bojler 2 = Infigy, bazén, wallbox)
   const wallboxW = (state.wallbox && typeof state.wallbox.power === 'number') ? state.wallbox.power : 0;
-  // Bojlery měříme zvlášť (Bojler 1 = Shelly, Bojler 2 = Infigy) — odečteme je,
-  // ať nejsou ve "spotřebě domu" započítané dvakrát
   const boiler1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
-  const boiler2W = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower * 1000 : 0;
-  // Bazén měříme zvlášť (samostatná dlaždice) — taky odečteme, ať není dvakrát ve spotřebě domu
+  const boiler2W = (typeof inf.hwPower === 'number') ? inf.hwPower * 1000 : 0;
   const poolW = (typeof state.poolPowerW === 'number') ? state.poolPowerW : 0;
-  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW - boiler1W - boiler2W - poolW) / 1000);
+
+  // Spotřeba domu (zbytek baráku) = výroba − do baterie − přetok − oba bojlery − bazén − wallbox.
+  // Výrobu a tok baterie bereme přednostně z Infigy (shodné s dlaždicemi, živější), přetok ze Solaxu.
+  const pvW = (typeof inf.pvPower === 'number') ? inf.pvPower * 1000 : (dc1 + dc2 + dc3 + dc4);
+  const chargeW = (typeof inf.batteryPower === 'number') ? (-inf.batteryPower * 1000) : batPower; // kladné = nabíjení
+  const wallboxSubW = (typeof inf.wbPower === 'number') ? inf.wbPower * 1000 : wallboxW;
+  const houseKw = Math.max(0, (pvW - chargeW - (r.feedinpower || 0) - wallboxSubW - boiler1W - boiler2W - poolW) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
 
   return {
@@ -3016,8 +3019,9 @@ function recordBoilerTemps() {
   broadcast('boilerHistory', { point });
 }
 
-setTimeout(recordBoilerTemps, 30000);
-setInterval(recordBoilerTemps, 5 * 60 * 1000);
+// Vzorkujeme často (1×/min), ať graf rychle nabíhá a přežije i časté deploye
+setTimeout(recordBoilerTemps, 10000);
+setInterval(recordBoilerTemps, 60 * 1000);
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.
