@@ -3634,7 +3634,8 @@ function renderInfigyFve() {
     const dir = b < -0.05 ? 'nabíjí' : (b > 0.05 ? 'vybíjí' : 'klid');
     rows.push(['Tok baterie', Math.abs(b).toFixed(1).replace('.', ',') + ' kW (' + dir + ')']);
   } else rows.push(['Tok baterie', '–']);
-  rows.push(['Spotřeba domu', kw(inf.homePower)]);
+  // Spotřeba domu z Infigy (HOME_ACTUAL_POWER) je nespolehlivá — často lagne na 0
+  // a bez elektroměru sítě se nedá dopočítat, proto ji tu neukazujeme (zůstává na Solaxu).
   rows.push(['Baterie', typeof inf.soc === 'number' ? inf.soc.toFixed(1).replace('.', ',') + ' %' : '–']);
   rows.push(['Wallbox', kw(inf.wbPower)]);
   infigyFveRowsEl.innerHTML = '';
