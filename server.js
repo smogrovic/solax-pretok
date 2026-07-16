@@ -2465,8 +2465,9 @@ app.post('/api/wallbox/set', async (req, res) => {
 });
 
 // ---------- Energetický řídicí systém (wallbox + priorita auta + bazén/bojler) ----------
-// CÍL: přes den nabíjet auto ze slunce (ECO), v noci z domácí baterky (FAST). Auto má
-// PŘEDNOST — bazén a bojler jedou jen z přebytku, který zbyde po autu.
+// CÍL: přes den nabíjet auto ze slunce (ECO — hodinu po východu do hodiny před západem),
+// v noci z domácí baterky (FAST). Auto má PŘEDNOST — bazén a bojler jedou jen z přebytku,
+// který zbyde po autu.
 //
 // MIMO KÓD (nastavit jednou ručně v appce střídače/wallboxu):
 //  - Wallbox: ECO úroveň = Level1 6A
@@ -2475,9 +2476,9 @@ app.post('/api/wallbox/set', async (req, res) => {
 //
 // PARAMETRY (kW / s) — klidně dolaď:
 const EC = {
-  PV_DAY_ON: 0.5,     // výroba nad → "den" → ECO
-  PV_DAY_OFF: 0.2,    // výroba pod → "noc" → FAST (mezi = hystereze, drží stávající)
-  DEBOUNCE_S: 180,    // debounce pro režim wallboxu a pro ZAPNUTÍ spotřebičů
+  SUN_ECO_AFTER_SUNRISE_S: 3600, // hodinu po východu slunce → ECO
+  SUN_FAST_BEFORE_SUNSET_S: 3600, // hodinu před západem slunce → FAST
+  DEBOUNCE_S: 180,    // debounce pro ZAPNUTÍ spotřebičů
   CAR_FULL_PWR: 0.2,  // připojené auto pod tímto příkonem = bereme jako nabité
   CAR_MAX_PWR: 3.3,   // nad tímto je auto na svém maximu (auto zvládá max 3,4 kW)
   LOAD_ORDER: ['pool', 'boiler'], // pořadí po autu (první = vyšší priorita): bazén → bojler
@@ -2502,16 +2503,17 @@ function ecStable(key, cond, sec, now) {
   return cond && (now - s.since) >= sec * 1000;
 }
 
-// Cílový režim wallboxu podle výroby (jen v AUTO; v FAST režimu pevně FAST)
-function ecWallboxTarget(now) {
+// Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST):
+//  - hodinu po východu slunce → ECO (den, nabíjí z přebytku)
+//  - hodinu před západem slunce → FAST (a přes noc, baterka se přelije do auta)
+function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
-  const pv = (state.infigy && typeof state.infigy.pvPower === 'number')
-    ? state.infigy.pvPower
-    : (state.solax && typeof state.solax.fveKw === 'number' ? state.solax.fveKw : null);
-  if (pv === null) return null; // bez dat neměníme
-  if (ecStable('pvDay', pv > EC.PV_DAY_ON, EC.DEBOUNCE_S, now)) return 'eco';
-  if (ecStable('pvNight', pv < EC.PV_DAY_OFF, EC.DEBOUNCE_S, now)) return 'fast';
-  return null; // v pásmu hystereze necháme stávající režim
+  const w = weatherCache.data;
+  if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return null; // bez dat neměníme
+  const now = Date.now();
+  const ecoStart = w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
+  const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  return (now >= ecoStart && now < fastStart) ? 'eco' : 'fast';
 }
 
 async function runEnergyControl() {
@@ -2522,8 +2524,8 @@ async function runEnergyControl() {
   wbControlRunning = true;
   const now = Date.now();
   try {
-    // 1) REŽIM WALLBOXU: ECO ve dne / FAST v noci (s hysterezí)
-    const target = ecWallboxTarget(now);
+    // 1) REŽIM WALLBOXU: ECO hodinu po východu slunce, FAST hodinu před západem (a v noci)
+    const target = ecWallboxTarget();
     if (target && state.wbLastTarget !== target) {
       try {
         await wbSetMode(target);
