@@ -3636,10 +3636,6 @@ function renderInfigyFve() {
   } else rows.push(['Tok baterie', '–']);
   rows.push(['Spotřeba domu', kw(inf.homePower)]);
   rows.push(['Baterie', typeof inf.soc === 'number' ? inf.soc.toFixed(1).replace('.', ',') + ' %' : '–']);
-  if (typeof inf.gridPower === 'number') {
-    const g = inf.gridPower;
-    rows.push(['Přetok', Math.abs(g).toFixed(1).replace('.', ',') + ' kW (' + (g >= 0 ? 'přetok' : 'odběr') + ')']);
-  } else rows.push(['Přetok', '–']);
   rows.push(['Wallbox', kw(inf.wbPower)]);
   infigyFveRowsEl.innerHTML = '';
   for (const [label, val] of rows) {

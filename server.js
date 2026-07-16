@@ -2917,10 +2917,8 @@ async function pollInfigy() {
       batteryPower: round1(store.PV_ACTUAL_POWER_BATTERY), // tok baterie (záporné = nabíjení)
       homePower: round1(store.HOME_ACTUAL_POWER),        // spotřeba domu
       soc: round1(store.PV_ACTUAL_SOC),                  // nabití baterie (%)
-      gridPower: (() => {                                // přetok (+) / odběr ze sítě (−)
-        const pv = num(store.PV_ACTUAL_POWER), bat = num(store.PV_ACTUAL_POWER_BATTERY), home = num(store.HOME_ACTUAL_POWER);
-        return (pv !== null && bat !== null && home !== null) ? Math.round((pv + bat - home) * 10) / 10 : null;
-      })(),
+      // Přetok Infigy pro tento systém neposílá (nemá elektroměr sítě) — nedopočítáváme ho,
+      // dopočet z „PV + baterie − dům" byl zavádějící, když dům občas lagne na 0.
       hwEnergyTotal: round1(store.HW_ENERGY_PRODUCED_TOTAL),
       status: typeof store.STATUS_INFO === 'string' ? store.STATUS_INFO : null,
       spotPrice: num(store.SP_ACTUAL_PRICE),
