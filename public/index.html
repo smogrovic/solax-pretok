@@ -3407,9 +3407,10 @@ async function maybeRestoreWbModeHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
-// Dvě oddělené dráhy (FAST nahoře, GREEN dole) — jako časová osa na Přehledu
+// Tři oddělené dráhy (FAST / ECO / GREEN) — jako časová osa na Přehledu
 const WB_MODE_LANES = [
   { key: 'fast', label: 'FAST', color: WB_MODE_COLORS.fast },
+  { key: 'eco', label: 'ECO', color: WB_MODE_COLORS.eco },
   { key: 'green', label: 'GREEN', color: WB_MODE_COLORS.green }
 ];
 

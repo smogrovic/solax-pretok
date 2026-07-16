@@ -1047,6 +1047,8 @@ async function autoSet(key, turn, reason) {
   return false;
 }
 
+// POZN.: runPoolAutomation a runBoilerAutomation už nejsou volané — bazén i bojler
+// řídí runEnergyControl (priorita auta). Ponecháno pro referenci / snadný návrat.
 async function runPoolAutomation(now, prague, weather, totalW, soc) {
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
@@ -1266,12 +1268,7 @@ async function runAutomation() {
 
     const now = Date.now();
     const prague = pragueTime();
-    // "Přebytek" = přetok do sítě + výkon nabíjející baterii (stejně jako v původních skriptech)
-    const totalW = Math.round((state.solax.feedinKw + state.solax.batPowerKw) * 1000);
-    const soc = state.solax.batterySoc;
-
-    await runPoolAutomation(now, prague, weather, totalW, soc);
-    await runBoilerAutomation(now, prague, weather, totalW, soc);
+    // Bazén a bojler nově řídí runEnergyControl (priorita auta, ECO/FAST). Tady zůstává jen solinátor.
     await runSolinatorAutomation(now, prague, weather);
   } catch (err) {
     console.error('Automatika:', err.message);
@@ -2396,7 +2393,7 @@ async function pollWallbox() {
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
     // Do grafu režimů NEzaznamenáváme skutečný stav nabíječky (ta se sama dá do STOP,
     // když auto není připojené / je dobito). Zaznamenáváme jen změny NASTAVENÉHO režimu
-    // (viz applyWallboxControl a /api/wallbox/set), ať čára FAST/GREEN běží dál i přes STOP.
+    // (viz runEnergyControl a /api/wallbox/set), ať čára FAST/ECO/GREEN běží dál i přes STOP.
     broadcast('wallbox', { wallbox: state.wallbox });
     // Bod do historie výkonu (max. 1× za 30 s), ať máme graf za 24 h
     if (typeof state.wallbox.power === 'number') {
@@ -2467,39 +2464,113 @@ app.post('/api/wallbox/set', async (req, res) => {
   }
 });
 
-// Automatika wallboxu (fix tarif, priorita auto):
-//  - noc 22:00–07:00 → FAST
-//  - den → GREEN jen když (předpokládaná výroba − již vyrobeno) > 20 kWh, jinak FAST
-//  - když je přepnuto na FAST, drží se FAST
+// ---------- Energetický řídicí systém (wallbox + priorita auta + bazén/bojler) ----------
+// CÍL: přes den nabíjet auto ze slunce (ECO), v noci z domácí baterky (FAST). Auto má
+// PŘEDNOST — bazén a bojler jedou jen z přebytku, který zbyde po autu.
+//
+// MIMO KÓD (nastavit jednou ručně v appce střídače/wallboxu):
+//  - Wallbox: ECO úroveň = Level1 6A
+//  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme)
+//  - Střídač: Min SOC nízko (např. 10 %)     (aby se baterka večer skoro vyprázdnila)
+//
+// PARAMETRY (kW / s) — klidně dolaď:
+const EC = {
+  PV_DAY_ON: 0.5,     // výroba nad → "den" → ECO
+  PV_DAY_OFF: 0.2,    // výroba pod → "noc" → FAST (mezi = hystereze, drží stávající)
+  DEBOUNCE_S: 180,    // podmínka musí platit takto dlouho (proti cvakání při mráčku)
+  CAR_FULL_PWR: 0.2,  // připojené auto pod tímto příkonem = bereme jako nabité
+  CAR_MAX_PWR: 3.3,   // nad tímto je auto na svém maximu
+  POOL_NEED: 1.85,    // reálný příkon bazénového čerpadla (dle staré prahové hodnoty)
+  BOILER_NEED: 2.0,   // reálný příkon bojleru
+  LOAD_MIN_ON_S: 600, // min. doba běhu spotřebiče (anti-cyklování)
+  LOAD_MIN_OFF_S: 300,
+  LOAD_ORDER: ['boiler', 'pool'] // pořadí po autu (první = vyšší priorita)
+};
+
 let wbControlRunning = false;
-function wbTargetMode() {
-  if (!state.wbAuto) return 'fast'; // pevně FAST
-  const p = pragueTime();
-  if (p.hour >= 22 || p.hour < 7) return 'fast'; // noc
-  const forecast = state.infigy && typeof state.infigy.forecastPv === 'number' ? state.infigy.forecastPv : null;
-  const produced = state.solax && typeof state.solax.yieldToday === 'number' ? state.solax.yieldToday : null;
-  if (forecast === null || produced === null) return 'green'; // bez dat radši jen přebytek
-  return (forecast - produced) > 20 ? 'green' : 'fast';
+const ecCond = {}; // klíč podmínky -> { val, since } pro hysterezi/debounce
+const ecLoad = { boiler: { onAt: 0, offAt: 0 }, pool: { onAt: 0, offAt: 0 } };
+
+// Podmínka musí nepřetržitě platit aspoň `sec` sekund (stable() z pseudokódu)
+function ecStable(key, cond, sec, now) {
+  let s = ecCond[key];
+  if (!s || s.val !== cond) { s = { val: cond, since: now }; ecCond[key] = s; }
+  return cond && (now - s.since) >= sec * 1000;
 }
 
-async function applyWallboxControl() {
+// Cílový režim wallboxu podle výroby (jen v AUTO; v FAST režimu pevně FAST)
+function ecWallboxTarget(now) {
+  if (!state.wbAuto) return 'fast';
+  const pv = (state.infigy && typeof state.infigy.pvPower === 'number')
+    ? state.infigy.pvPower
+    : (state.solax && typeof state.solax.fveKw === 'number' ? state.solax.fveKw : null);
+  if (pv === null) return null; // bez dat neměníme
+  if (ecStable('pvDay', pv > EC.PV_DAY_ON, EC.DEBOUNCE_S, now)) return 'eco';
+  if (ecStable('pvNight', pv < EC.PV_DAY_OFF, EC.DEBOUNCE_S, now)) return 'fast';
+  return null; // v pásmu hystereze necháme stávající režim
+}
+
+async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
+  // Bez čerstvých dat ze střídače nerozhodujeme; respektujeme hlavní vypínač automatiky
+  if (!state.autoEnabled || !state.solax) return;
+  if (Date.now() - new Date(state.solax.fetchedAt).getTime() > 10 * 60 * 1000) return;
   wbControlRunning = true;
+  const now = Date.now();
   try {
-    const target = wbTargetMode();
-    // Přepínáme jen když se ZMĚNÍ rozhodnutí (den↔noc, překročení prahu výroby),
-    // ne pořád dokola. Když se pak wallbox sám dá do STOP (třeba dobil), nevadí —
-    // nebudeme to znovu přepínat, dokud se cíl reálně nezmění.
+    // 1) REŽIM WALLBOXU: ECO ve dne / FAST v noci (s hysterezí)
+    const target = ecWallboxTarget(now);
     if (target && state.wbLastTarget !== target) {
-      await wbSetMode(target);
-      state.wbLastTarget = target;
-      state.wallbox = { ...state.wallbox, mode: target };
-      recordWbMode(target);
-      broadcast('wallbox', { wallbox: state.wallbox });
-      addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
+      try {
+        await wbSetMode(target);
+        state.wbLastTarget = target;
+        state.wallbox = { ...state.wallbox, mode: target };
+        recordWbMode(target);
+        broadcast('wallbox', { wallbox: state.wallbox });
+        addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
+      } catch (err) { addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`); }
+    }
+
+    // 2) PRIORITA AUTA: dokud auto může přibírat, jiným spotřebičům přebytek nedáme
+    const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
+    const carPlugged = st === 1 || st === 2 || st === 3; // připraveno / nabíjí / dokončeno
+    const carPower = (state.infigy && typeof state.infigy.wbPower === 'number')
+      ? state.infigy.wbPower
+      : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
+    const carFull = carPlugged && carPower < EC.CAR_FULL_PWR;
+    const carHungry = carPlugged && !carFull && carPower < EC.CAR_MAX_PWR;
+    const allowOther = !carHungry;
+
+    // 3) BAZÉN A BOJLER jen z přebytku (přetok do sítě), který zbyde po autu
+    let surplus = (state.solax && typeof state.solax.feedinKw === 'number') ? state.solax.feedinKw : 0;
+    const aq = (state.aircon && state.aircon.aquarea || [])[0];
+    const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
+
+    for (const load of EC.LOAD_ORDER) {
+      const devKey = load === 'boiler' ? 'shelly' : 'pool';
+      const dev = state.devices[devKey];
+      if (!dev || dev.isOn === null || dev.isOn === undefined) continue; // stav neznámý → beze změny
+      const need = load === 'boiler' ? EC.BOILER_NEED : EC.POOL_NEED;
+      const lt = ecLoad[load];
+      if (lt.onAt === 0 && dev.isOn) lt.onAt = now; // fix po restartu serveru
+
+      // Bojler: nad 70 °C v nádrži vždy vypnout (ochrana, má přednost)
+      if (load === 'boiler' && tankTemp !== null && tankTemp >= 70) {
+        if (dev.isOn && await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`)) lt.offAt = now;
+        continue;
+      }
+
+      const offLongEnough = !dev.isOn && (now - lt.offAt) >= EC.LOAD_MIN_OFF_S * 1000;
+      const onLongEnough = dev.isOn && (now - lt.onAt) >= EC.LOAD_MIN_ON_S * 1000;
+
+      if (allowOther && !dev.isOn && ecStable(load + 'On', surplus >= need, EC.DEBOUNCE_S, now) && offLongEnough) {
+        if (await autoSet(devKey, 'on', `přebytek ${formatKwLog(surplus * 1000)}`)) { lt.onAt = now; surplus -= need; }
+      } else if (dev.isOn && ecStable(load + 'Off', surplus < 0, EC.DEBOUNCE_S, now) && onLongEnough) {
+        if (await autoSet(devKey, 'off', `odběr ze sítě ${formatKwLog(surplus * 1000)}`)) lt.offAt = now;
+      }
     }
   } catch (err) {
-    addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`);
+    console.error('Energetika:', err.message);
   } finally {
     wbControlRunning = false;
   }
@@ -2515,12 +2586,12 @@ app.post('/api/wallbox/auto', async (req, res) => {
   addLog(`Wallbox: přepnuto na ${auto ? 'AUTO' : 'FAST'}`);
   res.json({ wbAuto: state.wbAuto });
   state.wbLastTarget = null; // ruční přepnutí = vynuť okamžité nastavení
-  applyWallboxControl(); // aplikuj hned
+  runEnergyControl();
 });
 
 if (wallboxEnabled) {
-  setTimeout(applyWallboxControl, 30000);
-  setInterval(applyWallboxControl, 5 * 60 * 1000);
+  setTimeout(runEnergyControl, 30000);
+  setInterval(runEnergyControl, 60 * 1000);
 }
 
 // ---------- AI asistent (Claude API, ovládání v přirozené řeči) ----------
