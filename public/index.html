@@ -1166,12 +1166,15 @@
 
           <div class="node">
             <div class="icon-slot">
-              <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
-                <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 38 q6 -6 12 0 t12 0 t12 0 t12 0"/>
+                <path d="M4 50 q6 -6 12 0 t12 0 t12 0 t12 0"/>
+                <path d="M22 40 V16 a6 6 0 0 1 12 0"/>
+                <line x1="34" y1="24" x2="46" y2="24"/>
               </svg>
             </div>
-            <div class="node-label">Přetok</div>
-            <div class="node-value" id="feedinValue">– kW</div>
+            <div class="node-label">Bazén</div>
+            <div class="node-value" id="poolValue">– kW</div>
           </div>
 
           <div class="node">
@@ -1188,17 +1191,14 @@
             <div class="node-value" id="wallboxValue">– kW</div>
           </div>
 
-          <div class="node">
+          <div class="node full">
             <div class="icon-slot">
-              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 38 q6 -6 12 0 t12 0 t12 0 t12 0"/>
-                <path d="M4 50 q6 -6 12 0 t12 0 t12 0 t12 0"/>
-                <path d="M22 40 V16 a6 6 0 0 1 12 0"/>
-                <line x1="34" y1="24" x2="46" y2="24"/>
+              <svg width="36" height="36" viewBox="0 0 34 24" fill="none">
+                <path d="M17 2 L17 18 M9 12 L17 20 L25 12" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <div class="node-label">Bazén</div>
-            <div class="node-value" id="poolValue">– kW</div>
+            <div class="node-label">Přetok</div>
+            <div class="node-value" id="feedinValue">– kW</div>
           </div>
         </div>
       </div>
@@ -3373,6 +3373,40 @@ const wbModeChartCanvas = document.getElementById('wbModeChart');
 const wbModeLegendEl = document.getElementById('wbModeLegend');
 let wbModeHistoryData = [];
 
+// Záloha historie režimů wallboxu v telefonu — přežije nový deploy serveru
+function pruneWbMode(arr) {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const valid = ['fast', 'green', 'eco', 'stop'];
+  return (arr || []).filter(e => e && typeof e.t === 'number' && valid.includes(e.mode) && e.t >= cutoff);
+}
+function saveWbModeHistoryLocal() {
+  try { localStorage.setItem('wbModeHistory', JSON.stringify(pruneWbMode(wbModeHistoryData))); } catch {}
+}
+function loadWbModeHistoryLocal() {
+  try { return pruneWbMode(JSON.parse(localStorage.getItem('wbModeHistory') || '[]')); } catch { return []; }
+}
+function mergeWbModeHistories(a, b) {
+  const all = pruneWbMode((a || []).concat(b || [])).sort((x, y) => x.t - y.t);
+  const out = [];
+  for (const e of all) {
+    const last = out[out.length - 1];
+    if (!last || last.mode !== e.mode) out.push(e); // po sobě jdoucí stejné režimy sloučíme
+  }
+  return out;
+}
+async function maybeRestoreWbModeHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(e => e.t < serverOldest - 60000);
+  if (!older.length) return;
+  try {
+    await fetch('/api/wb-mode-history/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: older })
+    });
+  } catch {}
+}
+
 // Dvě oddělené dráhy (FAST nahoře, GREEN dole) — jako časová osa na Přehledu
 const WB_MODE_LANES = [
   { key: 'fast', label: 'FAST', color: WB_MODE_COLORS.fast },
@@ -3753,6 +3787,34 @@ function pruneBoiler(arr) {
   return (arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff);
 }
 
+// Záloha historie teplot bojlerů v telefonu — přežije nový deploy serveru
+function saveBoilerHistoryLocal() {
+  try { localStorage.setItem('boilerHistory', JSON.stringify(pruneBoiler(boilerHistory))); } catch {}
+}
+function loadBoilerHistoryLocal() {
+  try { return pruneBoiler(JSON.parse(localStorage.getItem('boilerHistory') || '[]')); } catch { return []; }
+}
+function mergeBoilerHistories(a, b) {
+  const all = pruneBoiler((a || []).concat(b || [])).sort((x, y) => x.t - y.t);
+  const out = [];
+  for (const p of all) {
+    if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
+  }
+  return out;
+}
+async function maybeRestoreBoilerHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(p => p.t < serverOldest - 60000);
+  if (older.length < 2) return;
+  try {
+    await fetch('/api/boiler-history/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: older })
+    });
+  } catch {}
+}
+
 function renderBoilerChart() {
   if (!boilerChartCanvas) return;
   const ctx = boilerChartCanvas.getContext('2d');
@@ -3880,8 +3942,13 @@ function applySnapshot(snap) {
   wallboxData = snap.wallbox || null;
   wbAutoData = snap.wbAuto !== false;
   renderWallbox();
-  wbModeHistoryData = snap.wbModeHistory || [];
+  // Historie režimů wallboxu: server + lokální záloha (přežije deploy)
+  const serverWbMode = snap.wbModeHistory || [];
+  const localWbMode = loadWbModeHistoryLocal();
+  wbModeHistoryData = mergeWbModeHistories(serverWbMode, localWbMode);
   renderWbModeChart();
+  saveWbModeHistoryLocal();
+  maybeRestoreWbModeHistoryToServer(serverWbMode, localWbMode);
   // Historie výkonu wallboxu: spojíme server + lokální zálohu, chybějící vrátíme serveru
   const serverWb = snap.wallboxHistory || [];
   const localWb = loadWallboxHistoryLocal();
@@ -3895,8 +3962,13 @@ function applySnapshot(snap) {
   renderTempAuto();
   applyHomeFlags(snap);
   applyInfigyFlags(snap);
-  boilerHistory = pruneBoiler(snap.boilerHistory || []);
+  // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
+  const serverBoiler = snap.boilerHistory || [];
+  const localBoiler = loadBoilerHistoryLocal();
+  boilerHistory = mergeBoilerHistories(serverBoiler, localBoiler);
   renderBoilerChart();
+  saveBoilerHistoryLocal();
+  maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
   renderBlindTimers();
   relayTimersData = snap.relayTimers || [];
@@ -4020,9 +4092,10 @@ function connectStream() {
   });
   es.addEventListener('boilerHistory', e => {
     const d = JSON.parse(e.data);
-    if (Array.isArray(d.history)) boilerHistory = pruneBoiler(d.history);
-    else if (d.point) boilerHistory = pruneBoiler(boilerHistory.concat([d.point]));
+    if (Array.isArray(d.history)) boilerHistory = mergeBoilerHistories(d.history, []);
+    else if (d.point) boilerHistory = mergeBoilerHistories(boilerHistory, [d.point]);
     renderBoilerChart();
+    saveBoilerHistoryLocal();
   });
   es.addEventListener('wallboxHistory', e => {
     const d = JSON.parse(e.data);
@@ -4036,8 +4109,9 @@ function connectStream() {
     renderWbAuto();
   });
   es.addEventListener('wbModeHistory', e => {
-    wbModeHistoryData = JSON.parse(e.data).history || [];
+    wbModeHistoryData = mergeWbModeHistories(JSON.parse(e.data).history || [], []);
     renderWbModeChart();
+    saveWbModeHistoryLocal();
   });
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];

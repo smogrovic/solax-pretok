@@ -655,6 +655,59 @@ app.post('/api/wallbox-history/restore', (req, res) => {
   res.json({ added });
 });
 
+// Obnova historie teplot bojlerů po restartu/deployi (klient drží zálohu v localStorage)
+app.post('/api/boiler-history/restore', (req, res) => {
+  const points = req.body && Array.isArray(req.body.points) ? req.body.points : null;
+  if (!points) return res.status(400).json({ error: 'Chybí points.' });
+
+  const now = Date.now();
+  const cutoff = now - HISTORY_MAX_AGE_MS;
+  const okTemp = v => v === null || (typeof v === 'number' && v > -60 && v < 150);
+  const clean = points
+    .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now && okTemp(p.b1) && okTemp(p.b2)
+      && (typeof p.b1 === 'number' || typeof p.b2 === 'number'))
+    .map(p => ({ t: p.t, b1: typeof p.b1 === 'number' ? p.b1 : null, b2: typeof p.b2 === 'number' ? p.b2 : null }))
+    .slice(0, 2000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.boilerHistory.length;
+  const all = state.boilerHistory.concat(clean).sort((a, b) => a.t - b.t);
+  const merged = [];
+  for (const p of all) {
+    if (!merged.length || p.t - merged[merged.length - 1].t > 30000) merged.push(p);
+  }
+  state.boilerHistory = merged.filter(p => p.t >= now - HISTORY_MAX_AGE_MS);
+  const added = state.boilerHistory.length - before;
+  if (added > 0) broadcast('boilerHistory', { history: state.boilerHistory });
+  res.json({ added });
+});
+
+// Obnova historie režimů wallboxu po restartu/deployi (jen změny nastaveného režimu)
+app.post('/api/wb-mode-history/restore', (req, res) => {
+  const entries = req.body && Array.isArray(req.body.entries) ? req.body.entries : null;
+  if (!entries) return res.status(400).json({ error: 'Chybí entries.' });
+
+  const now = Date.now();
+  const cutoff = now - TIMELINE_MAX_AGE_MS;
+  const validModes = ['stop', 'fast', 'eco', 'green'];
+  const clean = entries
+    .filter(e => e && typeof e.t === 'number' && validModes.includes(e.mode) && e.t >= cutoff && e.t <= now)
+    .slice(0, 1000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.wbModeHistory.length;
+  const all = state.wbModeHistory.concat(clean).sort((a, b) => a.t - b.t);
+  const merged = [];
+  for (const e of all) {
+    const last = merged[merged.length - 1];
+    if (!last || last.mode !== e.mode) merged.push({ t: e.t, mode: e.mode }); // po sobě jdoucí stejné sloučíme
+  }
+  state.wbModeHistory = merged.filter(e => e.t >= now - TIMELINE_MAX_AGE_MS);
+  const added = state.wbModeHistory.length - before;
+  if (added > 0) broadcast('wbModeHistory', { history: state.wbModeHistory });
+  res.json({ added });
+});
+
 // Obnova logu po restartu/deployi — stejný princip jako u historie grafu
 app.post('/api/log/restore', (req, res) => {
   const entries = req.body && Array.isArray(req.body.entries) ? req.body.entries : null;
