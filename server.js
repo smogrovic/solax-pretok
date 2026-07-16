@@ -2477,14 +2477,18 @@ app.post('/api/wallbox/set', async (req, res) => {
 const EC = {
   PV_DAY_ON: 0.5,     // výroba nad → "den" → ECO
   PV_DAY_OFF: 0.2,    // výroba pod → "noc" → FAST (mezi = hystereze, drží stávající)
-  DEBOUNCE_S: 180,    // podmínka musí platit takto dlouho (proti cvakání při mráčku)
+  DEBOUNCE_S: 180,    // debounce pro režim wallboxu a pro ZAPNUTÍ spotřebičů
   CAR_FULL_PWR: 0.2,  // připojené auto pod tímto příkonem = bereme jako nabité
-  CAR_MAX_PWR: 3.3,   // nad tímto je auto na svém maximu
-  POOL_NEED: 1.85,    // reálný příkon bazénového čerpadla (dle staré prahové hodnoty)
-  BOILER_NEED: 2.0,   // reálný příkon bojleru
-  LOAD_MIN_ON_S: 600, // min. doba běhu spotřebiče (anti-cyklování)
-  LOAD_MIN_OFF_S: 300,
-  LOAD_ORDER: ['pool', 'boiler'] // pořadí po autu (první = vyšší priorita): bazén → bojler
+  CAR_MAX_PWR: 3.3,   // nad tímto je auto na svém maximu (auto zvládá max 3,4 kW)
+  LOAD_ORDER: ['pool', 'boiler'], // pořadí po autu (první = vyšší priorita): bazén → bojler
+  LOADS: {
+    // Bazén: čerpadlo + tepelné čerpadlo → nesmí cyklovat. Když sepne, běží min 30 min;
+    // když vypne, je vypnutý min 10 min. Vypne, až když přetok jde do mínusu aspoň 5 min
+    // A bojler je zároveň už vypnutý.
+    pool:   { dev: 'pool',   need: 1.85, minOnS: 1800, minOffS: 600, offDebounceS: 300, offAfterBoiler: true },
+    // Bojler: může cyklovat víc, stačí krátké časy (180 s).
+    boiler: { dev: 'shelly', need: 2.0,  minOnS: 180,  minOffS: 180, offDebounceS: 180, offAfterBoiler: false }
+  }
 };
 
 let wbControlRunning = false;
@@ -2547,10 +2551,9 @@ async function runEnergyControl() {
     const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
 
     for (const load of EC.LOAD_ORDER) {
-      const devKey = load === 'boiler' ? 'shelly' : 'pool';
-      const dev = state.devices[devKey];
+      const cfg = EC.LOADS[load];
+      const dev = state.devices[cfg.dev];
       if (!dev || dev.isOn === null || dev.isOn === undefined) continue; // stav neznámý → beze změny
-      const need = load === 'boiler' ? EC.BOILER_NEED : EC.POOL_NEED;
       const lt = ecLoad[load];
       if (lt.onAt === 0 && dev.isOn) lt.onAt = now; // fix po restartu serveru
 
@@ -2560,13 +2563,19 @@ async function runEnergyControl() {
         continue;
       }
 
-      const offLongEnough = !dev.isOn && (now - lt.offAt) >= EC.LOAD_MIN_OFF_S * 1000;
-      const onLongEnough = dev.isOn && (now - lt.onAt) >= EC.LOAD_MIN_ON_S * 1000;
+      const offLongEnough = !dev.isOn && (now - lt.offAt) >= cfg.minOffS * 1000;
+      const onLongEnough = dev.isOn && (now - lt.onAt) >= cfg.minOnS * 1000;
 
-      if (allowOther && !dev.isOn && ecStable(load + 'On', surplus >= need, EC.DEBOUNCE_S, now) && offLongEnough) {
-        if (await autoSet(devKey, 'on', `přebytek ${formatKwLog(surplus * 1000)}`)) { lt.onAt = now; surplus -= need; }
-      } else if (dev.isOn && ecStable(load + 'Off', surplus < 0, EC.DEBOUNCE_S, now) && onLongEnough) {
-        if (await autoSet(devKey, 'off', `odběr ze sítě ${formatKwLog(surplus * 1000)}`)) lt.offAt = now;
+      if (allowOther && !dev.isOn && ecStable(load + 'On', surplus >= cfg.need, EC.DEBOUNCE_S, now) && offLongEnough) {
+        // ZAPNOUT: je přebytek, auto ho nechce a spotřebič byl dost dlouho vypnutý
+        if (await autoSet(cfg.dev, 'on', `přebytek ${formatKwLog(surplus * 1000)}`)) { lt.onAt = now; surplus -= cfg.need; }
+      } else if (dev.isOn && onLongEnough && ecStable(load + 'Off', surplus < 0, cfg.offDebounceS, now)) {
+        // VYPNOUT: přetok jde do mínusu a spotřebič už běžel dost dlouho.
+        // Bazén navíc vypneme, až když je bojler taky vypnutý (bazén je poslední, co shazujeme).
+        const boilerOff = !(state.devices.shelly && state.devices.shelly.isOn === true);
+        if (!cfg.offAfterBoiler || boilerOff) {
+          if (await autoSet(cfg.dev, 'off', `odběr ze sítě ${formatKwLog(surplus * 1000)}`)) lt.offAt = now;
+        }
       }
     }
   } catch (err) {
