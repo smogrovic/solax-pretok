@@ -270,7 +270,9 @@ async function fetchSolax() {
   // ať nejsou ve "spotřebě domu" započítané dvakrát
   const boiler1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
   const boiler2W = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower * 1000 : 0;
-  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW - boiler1W - boiler2W) / 1000);
+  // Bazén měříme zvlášť (samostatná dlaždice) — taky odečteme, ať není dvakrát ve spotřebě domu
+  const poolW = (typeof state.poolPowerW === 'number') ? state.poolPowerW : 0;
+  const houseKw = Math.max(0, (dc1 + dc2 + dc3 + dc4 - batPower - (r.feedinpower || 0) - wallboxW - boiler1W - boiler2W - poolW) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
 
   return {

@@ -1187,12 +1187,20 @@
             <div class="node-label">Wallbox</div>
             <div class="node-value" id="wallboxValue">– kW</div>
           </div>
-        </div>
-      </div>
 
-      <div class="card stats-card" id="infigyFveCard">
-        <div class="graph-title">Data z Infigy (na porovnání)</div>
-        <div class="infigy-rows" id="infigyFveRows"></div>
+          <div class="node">
+            <div class="icon-slot">
+              <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="var(--orange)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 38 q6 -6 12 0 t12 0 t12 0 t12 0"/>
+                <path d="M4 50 q6 -6 12 0 t12 0 t12 0 t12 0"/>
+                <path d="M22 40 V16 a6 6 0 0 1 12 0"/>
+                <line x1="34" y1="24" x2="46" y2="24"/>
+              </svg>
+            </div>
+            <div class="node-label">Bazén</div>
+            <div class="node-value" id="poolValue">– kW</div>
+          </div>
+        </div>
       </div>
 
       <div class="card boilers-card">
@@ -1610,6 +1618,7 @@ const batteryEl = document.getElementById('batteryValue');
 const batPowerEl = document.getElementById('batPowerValue');
 const batPowerLabel = document.getElementById('batPowerLabel');
 const poolTotalPowerEl = document.getElementById('poolTotalPower');
+const poolValueEl = document.getElementById('poolValue');
 const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
@@ -1643,18 +1652,31 @@ function renderSolax(data) {
   if (!data) return;
   lastSolaxData = data;
   renderProduction();
-  fveEl.textContent = formatKw(data.fveKw);
+  // Přetok a spotřeba domu zůstávají ze Solaxu (Infigy je neumí spolehlivě)
   feedinEl.textContent = formatKw(data.feedinKw);
   houseEl.textContent = formatKw(data.houseKw);
-  batteryEl.textContent = formatPct(data.batterySoc);
-  const bpKw = data.batPowerKw;
-  batPowerEl.textContent = formatBatPower(bpKw);
-  if (typeof bpKw === 'number' && Math.abs(bpKw) >= 0.05) {
-    batPowerLabel.textContent = bpKw > 0 ? 'Nabíjení' : 'Vybíjení';
+  updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
+  renderEnergyTiles(); // Výroba FVE, Baterie a Nabíjení bereme přednostně z Infigy
+}
+
+// Dlaždice Výroba FVE / Baterie (SOC) / Tok baterie — přednostně z Infigy (živější), jinak Solax
+function renderEnergyTiles() {
+  const inf = infigyData || {};
+  const s = lastSolaxData || {};
+  const fve = typeof inf.pvPower === 'number' ? inf.pvPower : (typeof s.fveKw === 'number' ? s.fveKw : null);
+  fveEl.textContent = formatKw(fve);
+  const soc = typeof inf.soc === 'number' ? inf.soc : (typeof s.batterySoc === 'number' ? s.batterySoc : null);
+  batteryEl.textContent = formatPct(soc);
+  // Tok baterie: sjednotíme na "kladné = nabíjení". Infigy má záporné = nabíjení, Solax kladné = nabíjení.
+  let chargeKw = null;
+  if (typeof inf.batteryPower === 'number') chargeKw = -inf.batteryPower;
+  else if (typeof s.batPowerKw === 'number') chargeKw = s.batPowerKw;
+  batPowerEl.textContent = formatBatPower(chargeKw);
+  if (typeof chargeKw === 'number' && Math.abs(chargeKw) >= 0.05) {
+    batPowerLabel.textContent = chargeKw > 0 ? 'Nabíjení' : 'Vybíjení';
   } else {
     batPowerLabel.textContent = 'Tok baterie';
   }
-  updatedEl.textContent = 'Data ze střídače: ' + formatTime(data.uploadTime);
 }
 
 const devices = {
@@ -1788,6 +1810,11 @@ function renderPoolPower(totalPowerW) {
   poolTotalPowerEl.textContent = typeof totalPowerW === 'number'
     ? 'Bazén: ' + Math.round(totalPowerW) + ' W'
     : '';
+  if (poolValueEl) {
+    poolValueEl.textContent = typeof totalPowerW === 'number'
+      ? (totalPowerW / 1000).toFixed(1).replace('.', ',') + ' kW'
+      : '– kW';
+  }
 }
 
 // ---------- Graf přetoku za 24 h ----------
@@ -3618,35 +3645,7 @@ function renderInfigy(inf) {
   renderBoilers();
   renderProduction();
   renderWallbox(); // výkon wallboxu bereme z Infigy
-  renderInfigyFve(); // porovnávací tabulka FVE dat z Infigy
-}
-
-// Porovnávací tabulka FVE dat z Infigy (stránka FVE, vedle dat ze Solaxu)
-const infigyFveRowsEl = document.getElementById('infigyFveRows');
-function renderInfigyFve() {
-  if (!infigyFveRowsEl) return;
-  const inf = infigyData || {};
-  const kw = v => typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' kW' : '–';
-  const rows = [];
-  rows.push(['Výroba FVE', kw(inf.pvPower)]);
-  if (typeof inf.batteryPower === 'number') {
-    const b = inf.batteryPower;
-    const dir = b < -0.05 ? 'nabíjí' : (b > 0.05 ? 'vybíjí' : 'klid');
-    rows.push(['Tok baterie', Math.abs(b).toFixed(1).replace('.', ',') + ' kW (' + dir + ')']);
-  } else rows.push(['Tok baterie', '–']);
-  // Spotřeba domu z Infigy (HOME_ACTUAL_POWER) je nespolehlivá — často lagne na 0
-  // a bez elektroměru sítě se nedá dopočítat, proto ji tu neukazujeme (zůstává na Solaxu).
-  rows.push(['Baterie', typeof inf.soc === 'number' ? inf.soc.toFixed(1).replace('.', ',') + ' %' : '–']);
-  rows.push(['Wallbox', kw(inf.wbPower)]);
-  infigyFveRowsEl.innerHTML = '';
-  for (const [label, val] of rows) {
-    const row = document.createElement('div');
-    row.className = 'infigy-row';
-    const l = document.createElement('span'); l.className = 'infigy-row-label'; l.textContent = label;
-    const v = document.createElement('span'); v.className = 'infigy-row-val'; v.textContent = val;
-    row.appendChild(l); row.appendChild(v);
-    infigyFveRowsEl.appendChild(row);
-  }
+  renderEnergyTiles(); // Výroba FVE, Baterie a Nabíjení bereme přednostně z Infigy
 }
 
 function applyInfigyFlags(snap) {
