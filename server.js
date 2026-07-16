@@ -2912,6 +2912,15 @@ async function pollInfigy() {
       hwOn: !!store.HW_ON,
       hwHeat: !!store.HW_HEAT,
       hwPower: round1(store.HW_ACTUAL_POWER), // aktuální odběr bojleru 2 (kW)
+      // FVE data z Infigy (na porovnání se Solaxem) — vše v kW / %
+      pvPower: round1(store.PV_ACTUAL_POWER),            // výroba FVE
+      batteryPower: round1(store.PV_ACTUAL_POWER_BATTERY), // tok baterie (záporné = nabíjení)
+      homePower: round1(store.HOME_ACTUAL_POWER),        // spotřeba domu
+      soc: round1(store.PV_ACTUAL_SOC),                  // nabití baterie (%)
+      gridPower: (() => {                                // přetok (+) / odběr ze sítě (−)
+        const pv = num(store.PV_ACTUAL_POWER), bat = num(store.PV_ACTUAL_POWER_BATTERY), home = num(store.HOME_ACTUAL_POWER);
+        return (pv !== null && bat !== null && home !== null) ? Math.round((pv + bat - home) * 10) / 10 : null;
+      })(),
       hwEnergyTotal: round1(store.HW_ENERGY_PRODUCED_TOTAL),
       status: typeof store.STATUS_INFO === 'string' ? store.STATUS_INFO : null,
       spotPrice: num(store.SP_ACTUAL_PRICE),

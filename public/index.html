@@ -1190,6 +1190,11 @@
         </div>
       </div>
 
+      <div class="card stats-card" id="infigyFveCard">
+        <div class="graph-title">Data z Infigy (na porovnání)</div>
+        <div class="infigy-rows" id="infigyFveRows"></div>
+      </div>
+
       <div class="card boilers-card">
         <div class="boiler-cell">
           <div class="boiler-name">Bojler 1 (TČ)</div>
@@ -3613,6 +3618,38 @@ function renderInfigy(inf) {
   renderBoilers();
   renderProduction();
   renderWallbox(); // výkon wallboxu bereme z Infigy
+  renderInfigyFve(); // porovnávací tabulka FVE dat z Infigy
+}
+
+// Porovnávací tabulka FVE dat z Infigy (stránka FVE, vedle dat ze Solaxu)
+const infigyFveRowsEl = document.getElementById('infigyFveRows');
+function renderInfigyFve() {
+  if (!infigyFveRowsEl) return;
+  const inf = infigyData || {};
+  const kw = v => typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' kW' : '–';
+  const rows = [];
+  rows.push(['Výroba FVE', kw(inf.pvPower)]);
+  if (typeof inf.batteryPower === 'number') {
+    const b = inf.batteryPower;
+    const dir = b < -0.05 ? 'nabíjí' : (b > 0.05 ? 'vybíjí' : 'klid');
+    rows.push(['Tok baterie', Math.abs(b).toFixed(1).replace('.', ',') + ' kW (' + dir + ')']);
+  } else rows.push(['Tok baterie', '–']);
+  rows.push(['Spotřeba domu', kw(inf.homePower)]);
+  rows.push(['Baterie', typeof inf.soc === 'number' ? inf.soc.toFixed(1).replace('.', ',') + ' %' : '–']);
+  if (typeof inf.gridPower === 'number') {
+    const g = inf.gridPower;
+    rows.push(['Přetok', Math.abs(g).toFixed(1).replace('.', ',') + ' kW (' + (g >= 0 ? 'přetok' : 'odběr') + ')']);
+  } else rows.push(['Přetok', '–']);
+  rows.push(['Wallbox', kw(inf.wbPower)]);
+  infigyFveRowsEl.innerHTML = '';
+  for (const [label, val] of rows) {
+    const row = document.createElement('div');
+    row.className = 'infigy-row';
+    const l = document.createElement('span'); l.className = 'infigy-row-label'; l.textContent = label;
+    const v = document.createElement('span'); v.className = 'infigy-row-val'; v.textContent = val;
+    row.appendChild(l); row.appendChild(v);
+    infigyFveRowsEl.appendChild(row);
+  }
 }
 
 function applyInfigyFlags(snap) {
