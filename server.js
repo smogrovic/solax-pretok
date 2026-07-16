@@ -1128,6 +1128,15 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   // Fix po restartu serveru: bojler už topí, ale nemáme čas zapnutí
   if (boilerAuto.lastOnTime === 0 && isOn) boilerAuto.lastOnTime = now;
 
+  // Ochrana: nad 70 °C v nádrži už netopíme — vždy vypnout (má přednost před vším ostatním)
+  const aq = (state.aircon && state.aircon.aquarea || [])[0];
+  const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
+  if (tankTemp !== null && tankTemp >= 70) {
+    if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`);
+    boilerAuto.underCount = 0;
+    return;
+  }
+
   const sunsetMs = weather.sys.sunset * 1000;
   if (now >= sunsetMs - 3600000 || prague.hour < 10) {
     if (isOn) await autoSet('shelly', 'off', prague.hour < 10 ? 'ráno' : 'západ slunce');
