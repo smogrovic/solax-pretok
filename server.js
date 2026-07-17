@@ -985,6 +985,19 @@ const POOL_ON_THRESHOLD_W = 1850;
 const POOL_OFF_THRESHOLD_W = -200;
 const POOL_MIN_RUN_MS = 30 * 60 * 1000;
 
+// Auto má přednost: rezervujeme mu jeho max příkon (3,4 kW). Bazén/bojler pak
+// dostanou jen přebytek NAD autem. Když auto nabíjí méně, rezervuje se zbytek do maxima;
+// když je odpojené nebo dobité, rezerva = 0 → běží čistě původní logika.
+const CAR_MAX_KW = 3.4;
+function carReserveW() {
+  const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
+  if (st !== 1 && st !== 2) return 0; // jen připraveno/nabíjí; odpojeno/dokončeno → nerezervujeme
+  const draw = (state.infigy && typeof state.infigy.wbPower === 'number')
+    ? state.infigy.wbPower
+    : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
+  return Math.round(Math.max(0, CAR_MAX_KW - draw) * 1000);
+}
+
 const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
 const solinatorAuto = { done13: '', done15: '' };
 
@@ -1089,8 +1102,8 @@ async function runPoolAutomation(now, prague, weather, totalW, soc) {
     return;
   }
 
-  // Zapnutí: 2× po sobě nad prahem
-  if (totalW > POOL_ON_THRESHOLD_W) {
+  // Zapnutí: 2× po sobě nad prahem (+ rezerva na auto — bazén jen z přebytku nad autem)
+  if (totalW > POOL_ON_THRESHOLD_W + carReserveW()) {
     poolAuto.overCount++;
     if (poolAuto.overCount >= 2 && !isOn) {
       await autoSet('pool', 'on', `přetok ${formatKwLog(totalW)}`);
@@ -1153,10 +1166,11 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc) {
     return;
   }
 
-  // Dynamický práh přetoku podle nabití baterie
+  // Dynamický práh přetoku podle nabití baterie (+ rezerva na auto — přebytek nad autem)
   let threshold = 1400;
   if (typeof soc === 'number' && soc < 50) threshold = 2600;
   else if (typeof soc === 'number' && soc < 80) threshold = 2000;
+  threshold += carReserveW();
 
   // Zapnutí (jinak drží stav)
   if (totalW > threshold && !isOn) {
