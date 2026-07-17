@@ -133,7 +133,14 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  // HTML a service worker nikdy necachovat, ať se po deployi appka vždy načte čerstvá
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 app.use(express.json());
 
 // ---------- SSE stream pro živé aktualizace ----------
