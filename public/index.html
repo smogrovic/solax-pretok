@@ -1633,9 +1633,10 @@
         <div class="logic-sec">
           <div class="logic-h">Priorita auta (platí pro bazén i bojler)</div>
           <ul class="logic-list">
-            <li>Když je auto <b>připojené a nabíjí/připraveno</b>, rezervuje se mu jeho max příkon <b>3,4 kW</b>.</li>
-            <li>Bazén i bojler dostanou jen přebytek <b>NAD autem</b>: k jejich prahu se přičte (3,4 kW − co auto právě bere).</li>
-            <li>Auto <b>odpojené nebo dobité</b> → rezerva 0 → běží čistě prahy níže.</li>
+            <li>Auto má přednost — bazén/bojler dostanou jen přebytek <b>nad autem</b>.</li>
+            <li>Rezervuje se autu headroom (až do <b>3,4 kW</b>) jen když se <b>reálně rozjíždí</b> (přidává výkon). K prahu bazénu/bojleru se přičte (3,4 kW − co auto právě bere).</li>
+            <li>Když auto jede <b>ustáleně, klesá nebo stojí</b> (víc už nechce) → rezerva 0 → bazén/bojler jedou z přebytku nad jeho aktuálním odběrem.</li>
+            <li>Auto <b>odpojené nebo dobité</b> → rezerva 0 → čistě prahy níže.</li>
           </ul>
         </div>
 
