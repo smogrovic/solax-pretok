@@ -290,6 +290,13 @@
     min-height:14px;
   }
   .graph-total + .graph-total{margin-top:1px;}
+  .logic-card{align-items:stretch;}
+  .logic-sec{margin-top:16px;}
+  .logic-sec:first-child{margin-top:0;}
+  .logic-h{font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px;}
+  .logic-list{margin:0;padding-left:18px;}
+  .logic-list li{font-size:12.5px;line-height:1.5;color:var(--grey-text);margin-bottom:5px;}
+  .logic-list li b{color:var(--navy);font-weight:700;}
   .notif-btn{
     width:100%;
     margin-top:8px;
@@ -1603,6 +1610,86 @@
       </div>
 
       <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
+    </div>
+  </div>
+
+  <!-- Slide 10: Logika automatiky -->
+  <div class="slide">
+    <div class="page top">
+      <div class="topbar">
+        <div class="title">Logika automatiky</div>
+      </div>
+      <div class="card logic-card">
+        <div class="logic-sec">
+          <div class="logic-h">Obecné</div>
+          <ul class="logic-list">
+            <li>Automatika běží, jen když je zapnutý <b>hlavní vypínač</b> (stránka Přehled).</li>
+            <li>Rozhoduje se jen z <b>čerstvých dat</b> ze střídače (max 10 min stará).</li>
+            <li>Bazén, bojler a solinátor: přepočet <b>každých 5 min</b>. Režim wallboxu: <b>každou minutu</b>.</li>
+            <li>„Přebytek" = <b>přetok do sítě + výkon nabíjející baterii</b> (feed + bat).</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Priorita auta (platí pro bazén i bojler)</div>
+          <ul class="logic-list">
+            <li>Když je auto <b>připojené a nabíjí/připraveno</b>, rezervuje se mu jeho max příkon <b>3,4 kW</b>.</li>
+            <li>Bazén i bojler dostanou jen přebytek <b>NAD autem</b>: k jejich prahu se přičte (3,4 kW − co auto právě bere).</li>
+            <li>Auto <b>odpojené nebo dobité</b> → rezerva 0 → běží čistě prahy níže.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Wallbox (přepínač FAST / AUTO)</div>
+          <ul class="logic-list">
+            <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
+            <li><b>AUTO</b>: hodinu <b>po východu slunce → ECO</b> (nabíjí z přebytku FVE).</li>
+            <li><b>AUTO</b>: hodinu <b>před západem a přes noc → FAST</b> (baterka se přelije do auta).</li>
+            <li>Ručně ve střídači/wallboxu: ECO = Level1 6A, „Battery charge EVC" = Enable, Min SOC nízko (~10 %).</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Bazén (filtrace)</div>
+          <ul class="logic-list">
+            <li>Jen mezi <b>8:00 a hodinou před západem</b> slunce.</li>
+            <li>Ochrana baterie podle hodiny — SOC musí být aspoň: 12h <b>50 %</b>, 13h <b>60 %</b>, 14h <b>70 %</b>, 15h <b>80 %</b>, 16h <b>85 %</b>, 17h+ <b>90 %</b>.</li>
+            <li><b>Zapnout:</b> přebytek 2× po sobě nad <b>1850 W</b> (+ rezerva na auto).</li>
+            <li><b>Vypnout:</b> 3× po sobě pod <b>−200 W</b> a po min. <b>30 min</b> běhu.</li>
+            <li>Hodinu před západem slunce → vypnout.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Bojler 1 (TČ)</div>
+          <ul class="logic-list">
+            <li>Jen ve dne: <b>po 10:00</b>, hodinu před západem → vypnout.</li>
+            <li>Topí <b>jen když běží bazén</b>.</li>
+            <li><b>Nad 70 °C</b> v nádrži → vždy vypnout (má přednost).</li>
+            <li>Rychlá ochrana: odběr ze sítě pod <b>−300 W</b> → hned vypnout.</li>
+            <li><b>Zapnout:</b> přebytek nad prahem podle SOC (+ rezerva na auto): SOC&lt;50 % → <b>2600 W</b>, &lt;80 % → <b>2000 W</b>, jinak <b>1400 W</b>.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Solinátor</div>
+          <ul class="logic-list">
+            <li><b>13:00</b> → zapnout, když je venku <b>&gt; 20 °C</b>.</li>
+            <li><b>15:00</b> → zapnout, když je venku <b>&gt; 25 °C</b>.</li>
+            <li>Hodinu před západem slunce → vypnout.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Klimatizace — teplotní automatika (Ložnice, Elenka, Miky)</div>
+          <ul class="logic-list">
+            <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
+            <li>Když teplota v pokoji vystoupí na <b>22 °C</b> → zapne <b>chlazení na 20 °C</b> (tiše).</li>
+            <li><b>Vypne</b>, jakmile teplota klesne pod <b>20,5 °C</b>.</li>
+            <li>Po vypnutí automatikou zůstane vypnuto aspoň <b>30 min</b>.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   </div>
 
