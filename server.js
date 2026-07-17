@@ -984,8 +984,6 @@ const AUTOMATION_INTERVAL_MS = 5 * 60 * 1000;
 const POOL_ON_THRESHOLD_W = 1850;
 const POOL_OFF_THRESHOLD_W = -200;
 const POOL_MIN_RUN_MS = 30 * 60 * 1000;
-// Bojler: rychlá ochrana při velkém odběru ze sítě
-const BOILER_QUICK_OFF_W = -300;
 
 const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
 const solinatorAuto = { done13: '', done15: '' };
@@ -1054,8 +1052,8 @@ async function autoSet(key, turn, reason) {
   return false;
 }
 
-// POZN.: runPoolAutomation a runBoilerAutomation už nejsou volané — bazén i bojler
-// řídí runEnergyControl (priorita auta). Ponecháno pro referenci / snadný návrat.
+// Bazén (podle samostatného Shelly skriptu): zapíná z přetoku (2× nad 1850 W),
+// vypíná 3× pod −200 W po min. 30 min běhu, s ochranou baterie podle hodiny a SOC.
 async function runPoolAutomation(now, prague, weather, totalW, soc) {
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
@@ -1119,37 +1117,25 @@ async function runPoolAutomation(now, prague, weather, totalW, soc) {
   }
 }
 
-// Bojler si pamatuje svůj skutečný příkon (default 2 kW), aby se nezapínal
-// při přebytku, který ho stejně neutáhne, a nevypínal kvůli jedinému výkyvu
-const boilerAuto = { nominalW: 2000, underCount: 0, lastOnTime: 0 };
-const BOILER_HARD_OFF_W = -1500;          // okamžité vypnutí při silném odběru
-const BOILER_MIN_RUN_MS = 10 * 60 * 1000; // mírný deficit toleruje aspoň 10 min
-
+// Bojler (podle samostatného Shelly skriptu): topí jen ve dne, jen když běží bazén,
+// z dostatečného přetoku podle nabití baterie. Nad 70 °C v nádrži vždy vypne.
 async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   const boiler = state.devices.shelly;
   if (!boiler || boiler.isOn === null || boiler.isOn === undefined) return;
   const isOn = boiler.isOn;
 
-  // Zapamatujeme si reálný příkon topné spirály, když zrovna topí
-  if (isOn && typeof boiler.powerW === 'number' && boiler.powerW > 500) {
-    boilerAuto.nominalW = boiler.powerW;
-  }
-  // Fix po restartu serveru: bojler už topí, ale nemáme čas zapnutí
-  if (boilerAuto.lastOnTime === 0 && isOn) boilerAuto.lastOnTime = now;
-
-  // Ochrana: nad 70 °C v nádrži už netopíme — vždy vypnout (má přednost před vším ostatním)
+  // Ochrana: nad 70 °C v nádrži (Aquarea) vždy vypnout — má přednost
   const aq = (state.aircon && state.aircon.aquarea || [])[0];
   const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   if (tankTemp !== null && tankTemp >= 70) {
     if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`);
-    boilerAuto.underCount = 0;
     return;
   }
 
+  // Hodinu před západem slunce nebo ráno před 10:00 → vypnout natvrdo
   const sunsetMs = weather.sys.sunset * 1000;
   if (now >= sunsetMs - 3600000 || prague.hour < 10) {
     if (isOn) await autoSet('shelly', 'off', prague.hour < 10 ? 'ráno' : 'západ slunce');
-    boilerAuto.underCount = 0;
     return;
   }
 
@@ -1158,41 +1144,23 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   if (!pool.isOn) {
     if (isOn) await autoSet('shelly', 'off', 'bazén neběží');
-    boilerAuto.underCount = 0;
     return;
   }
 
-  if (isOn) {
-    if (totalW < BOILER_HARD_OFF_W) {
-      // Silný odběr (něco velkého běží) → hned vypnout
-      await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
-      boilerAuto.underCount = 0;
-      return;
-    }
-    if (totalW < BOILER_QUICK_OFF_W) {
-      // Mírný deficit: až 2× po sobě a po min. době běhu — jeden mrak bojler nevypne
-      boilerAuto.underCount++;
-      if (boilerAuto.underCount >= 2 && now - boilerAuto.lastOnTime >= BOILER_MIN_RUN_MS) {
-        await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
-        boilerAuto.underCount = 0;
-      }
-      return;
-    }
-    boilerAuto.underCount = 0;
-    return; // topí a vydělá si na sebe → drží stav
+  // Rychlá ochrana: odběr ze sítě pod −300 W → vypnout
+  if (totalW < -300) {
+    if (isOn) await autoSet('shelly', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
+    return;
   }
 
-  // Zapnutí: práh podle nabití baterie, ale vždy aspoň tolik,
-  // aby přebytek skutečný příkon bojleru pokryl (s tolerancí 300 W)
-  let socThreshold = 1400;
-  if (typeof soc === 'number' && soc < 50) socThreshold = 2600;
-  else if (typeof soc === 'number' && soc < 80) socThreshold = 2000;
-  const threshold = Math.max(socThreshold, boilerAuto.nominalW - 300);
+  // Dynamický práh přetoku podle nabití baterie
+  let threshold = 1400;
+  if (typeof soc === 'number' && soc < 50) threshold = 2600;
+  else if (typeof soc === 'number' && soc < 80) threshold = 2000;
 
-  if (totalW > threshold) {
+  // Zapnutí (jinak drží stav)
+  if (totalW > threshold && !isOn) {
     await autoSet('shelly', 'on', `přetok ${formatKwLog(totalW)}`);
-    boilerAuto.lastOnTime = now;
-    boilerAuto.underCount = 0;
   }
 }
 
@@ -1275,7 +1243,12 @@ async function runAutomation() {
 
     const now = Date.now();
     const prague = pragueTime();
-    // Bazén a bojler nově řídí runEnergyControl (priorita auta, ECO/FAST). Tady zůstává jen solinátor.
+    // "Přebytek" = přetok do sítě + výkon nabíjející baterii (feed + bat)
+    const totalW = Math.round((state.solax.feedinKw + state.solax.batPowerKw) * 1000);
+    const soc = state.solax.batterySoc;
+
+    await runPoolAutomation(now, prague, weather, totalW, soc);
+    await runBoilerAutomation(now, prague, weather, totalW, soc);
     await runSolinatorAutomation(now, prague, weather);
   } catch (err) {
     console.error('Automatika:', err.message);
@@ -2471,48 +2444,23 @@ app.post('/api/wallbox/set', async (req, res) => {
   }
 });
 
-// ---------- Energetický řídicí systém (wallbox + priorita auta + bazén/bojler) ----------
-// CÍL: přes den nabíjet auto ze slunce (ECO — hodinu po východu do hodiny před západem),
-// v noci z domácí baterky (FAST). Auto má PŘEDNOST — bazén a bojler jedou jen z přebytku,
-// který zbyde po autu.
+// ---------- Řízení režimu wallboxu (ECO ve dne / FAST v noci podle slunce) ----------
+// AUTO: hodinu po východu slunce → ECO (nabíjí z přebytku FVE), hodinu před západem
+// slunce a přes noc → FAST (baterka se přelije do auta). Přepínač FAST = pevně FAST.
+// Bazén a bojler se řídí samostatně (runPoolAutomation / runBoilerAutomation).
 //
-// MIMO KÓD (nastavit jednou ručně v appce střídače/wallboxu):
+// MIMO KÓD (ručně v appce střídače/wallboxu):
 //  - Wallbox: ECO úroveň = Level1 6A
 //  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme)
 //  - Střídač: Min SOC nízko (např. 10 %)     (aby se baterka večer skoro vyprázdnila)
-//
-// PARAMETRY (kW / s) — klidně dolaď:
 const EC = {
-  SUN_ECO_AFTER_SUNRISE_S: 3600, // hodinu po východu slunce → ECO
-  SUN_FAST_BEFORE_SUNSET_S: 3600, // hodinu před západem slunce → FAST
-  DEBOUNCE_S: 180,    // debounce pro ZAPNUTÍ spotřebičů
-  CAR_FULL_PWR: 0.2,  // připojené auto pod tímto příkonem = bereme jako nabité
-  CAR_MAX_PWR: 3.3,   // nad tímto je auto na svém maximu (auto zvládá max 3,4 kW)
-  LOAD_ORDER: ['pool', 'boiler'], // pořadí po autu (první = vyšší priorita): bazén → bojler
-  LOADS: {
-    // Bazén: čerpadlo + tepelné čerpadlo → nesmí cyklovat. Když sepne, běží min 30 min;
-    // když vypne, je vypnutý min 10 min. Vypne, až když přetok jde do mínusu aspoň 5 min
-    // A bojler je zároveň už vypnutý.
-    pool:   { dev: 'pool',   need: 1.85, minOnS: 1800, minOffS: 600, offDebounceS: 300, offAfterBoiler: true },
-    // Bojler: může cyklovat víc, stačí krátké časy (180 s).
-    boiler: { dev: 'shelly', need: 2.0,  minOnS: 180,  minOffS: 180, offDebounceS: 180, offAfterBoiler: false }
-  }
+  SUN_ECO_AFTER_SUNRISE_S: 3600,  // hodinu po východu slunce → ECO
+  SUN_FAST_BEFORE_SUNSET_S: 3600  // hodinu před západem slunce → FAST
 };
 
 let wbControlRunning = false;
-const ecCond = {}; // klíč podmínky -> { val, since } pro hysterezi/debounce
-const ecLoad = { boiler: { onAt: 0, offAt: 0 }, pool: { onAt: 0, offAt: 0 } };
 
-// Podmínka musí nepřetržitě platit aspoň `sec` sekund (stable() z pseudokódu)
-function ecStable(key, cond, sec, now) {
-  let s = ecCond[key];
-  if (!s || s.val !== cond) { s = { val: cond, since: now }; ecCond[key] = s; }
-  return cond && (now - s.since) >= sec * 1000;
-}
-
-// Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST):
-//  - hodinu po východu slunce → ECO (den, nabíjí z přebytku)
-//  - hodinu před západem slunce → FAST (a přes noc, baterka se přelije do auta)
+// Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
   const w = weatherCache.data;
@@ -2525,70 +2473,20 @@ function ecWallboxTarget() {
 
 async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
-  // Bez čerstvých dat ze střídače nerozhodujeme; respektujeme hlavní vypínač automatiky
-  if (!state.autoEnabled || !state.solax) return;
-  if (Date.now() - new Date(state.solax.fetchedAt).getTime() > 10 * 60 * 1000) return;
+  if (!state.autoEnabled) return; // hlavní vypínač automatiky
   wbControlRunning = true;
-  const now = Date.now();
   try {
-    // 1) REŽIM WALLBOXU: ECO hodinu po východu slunce, FAST hodinu před západem (a v noci)
     const target = ecWallboxTarget();
     if (target && state.wbLastTarget !== target) {
-      try {
-        await wbSetMode(target);
-        state.wbLastTarget = target;
-        state.wallbox = { ...state.wallbox, mode: target };
-        recordWbMode(target);
-        broadcast('wallbox', { wallbox: state.wallbox });
-        addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
-      } catch (err) { addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`); }
-    }
-
-    // 2) PRIORITA AUTA: dokud auto může přibírat, jiným spotřebičům přebytek nedáme
-    const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
-    const carPlugged = st === 1 || st === 2 || st === 3; // připraveno / nabíjí / dokončeno
-    const carPower = (state.infigy && typeof state.infigy.wbPower === 'number')
-      ? state.infigy.wbPower
-      : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
-    const carFull = carPlugged && carPower < EC.CAR_FULL_PWR;
-    const carHungry = carPlugged && !carFull && carPower < EC.CAR_MAX_PWR;
-    const allowOther = !carHungry;
-
-    // 3) BAZÉN A BOJLER jen z přebytku (přetok do sítě), který zbyde po autu
-    let surplus = (state.solax && typeof state.solax.feedinKw === 'number') ? state.solax.feedinKw : 0;
-    const aq = (state.aircon && state.aircon.aquarea || [])[0];
-    const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
-
-    for (const load of EC.LOAD_ORDER) {
-      const cfg = EC.LOADS[load];
-      const dev = state.devices[cfg.dev];
-      if (!dev || dev.isOn === null || dev.isOn === undefined) continue; // stav neznámý → beze změny
-      const lt = ecLoad[load];
-      if (lt.onAt === 0 && dev.isOn) lt.onAt = now; // fix po restartu serveru
-
-      // Bojler: nad 70 °C v nádrži vždy vypnout (ochrana, má přednost)
-      if (load === 'boiler' && tankTemp !== null && tankTemp >= 70) {
-        if (dev.isOn && await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`)) lt.offAt = now;
-        continue;
-      }
-
-      const offLongEnough = !dev.isOn && (now - lt.offAt) >= cfg.minOffS * 1000;
-      const onLongEnough = dev.isOn && (now - lt.onAt) >= cfg.minOnS * 1000;
-
-      if (allowOther && !dev.isOn && ecStable(load + 'On', surplus >= cfg.need, EC.DEBOUNCE_S, now) && offLongEnough) {
-        // ZAPNOUT: je přebytek, auto ho nechce a spotřebič byl dost dlouho vypnutý
-        if (await autoSet(cfg.dev, 'on', `přebytek ${formatKwLog(surplus * 1000)}`)) { lt.onAt = now; surplus -= cfg.need; }
-      } else if (dev.isOn && onLongEnough && ecStable(load + 'Off', surplus < 0, cfg.offDebounceS, now)) {
-        // VYPNOUT: přetok jde do mínusu a spotřebič už běžel dost dlouho.
-        // Bazén navíc vypneme, až když je bojler taky vypnutý (bazén je poslední, co shazujeme).
-        const boilerOff = !(state.devices.shelly && state.devices.shelly.isOn === true);
-        if (!cfg.offAfterBoiler || boilerOff) {
-          if (await autoSet(cfg.dev, 'off', `odběr ze sítě ${formatKwLog(surplus * 1000)}`)) lt.offAt = now;
-        }
-      }
+      await wbSetMode(target);
+      state.wbLastTarget = target;
+      state.wallbox = { ...state.wallbox, mode: target };
+      recordWbMode(target);
+      broadcast('wallbox', { wallbox: state.wallbox });
+      addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
     }
   } catch (err) {
-    console.error('Energetika:', err.message);
+    addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`);
   } finally {
     wbControlRunning = false;
   }
