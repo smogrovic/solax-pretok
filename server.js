@@ -488,8 +488,11 @@ function updateRuntimes() {
       }
     }
   }
-  // Wallbox: aktivní kdykoli výkon > 0 W (nepočítá se do doby běhu relé)
-  const wbW = state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power : 0;
+  // Wallbox: aktivní kdykoli výkon > 0 (nepočítá se do doby běhu relé).
+  // Výkon bereme přednostně z Infigy (živější — Solax často hlásí 0 i při nabíjení).
+  const wbW = (state.infigy && typeof state.infigy.wbPower === 'number')
+    ? state.infigy.wbPower * 1000
+    : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power : 0);
   if (wbW > 0) {
     const segs = state.timeline.wallbox;
     const last = segs[segs.length - 1];
@@ -985,17 +988,22 @@ const POOL_ON_THRESHOLD_W = 1850;
 const POOL_OFF_THRESHOLD_W = -200;
 const POOL_MIN_RUN_MS = 30 * 60 * 1000;
 
-// Auto má přednost: rezervujeme mu jeho max příkon (3,4 kW). Bazén/bojler pak
-// dostanou jen přebytek NAD autem. Když auto nabíjí méně, rezervuje se zbytek do maxima;
-// když je odpojené nebo dobité, rezerva = 0 → běží čistě původní logika.
+// Auto má přednost, ale rezervujeme mu headroom (do 3,4 kW) JEN když se reálně rozjíždí
+// (přidává výkon oproti minule). Když jede ustáleně, klesá nebo stojí, rezerva = 0 —
+// takže bazén/bojler dostanou přebytek NAD tím, co si auto reálně bere, a neblokujeme je
+// zbytečně, když auto víc nechce (např. dobíjí na 1,4 kW a už se nerozjede). Volá se
+// 1× za automatický cyklus (jinak by se wbPrevDraw přepsal mezi bazénem a bojlerem).
 const CAR_MAX_KW = 3.4;
+let wbPrevDraw = 0;
 function carReserveW() {
   const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
-  if (st !== 1 && st !== 2) return 0; // jen připraveno/nabíjí; odpojeno/dokončeno → nerezervujeme
+  if (st !== 1 && st !== 2) { wbPrevDraw = 0; return 0; } // odpojeno/dokončeno → bez rezervy
   const draw = (state.infigy && typeof state.infigy.wbPower === 'number')
     ? state.infigy.wbPower
     : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
-  return Math.round(Math.max(0, CAR_MAX_KW - draw) * 1000);
+  const ramping = draw > wbPrevDraw + 0.3; // auto ještě přidává výkon (rozjíždí se)
+  wbPrevDraw = draw;
+  return ramping ? Math.round(Math.max(0, CAR_MAX_KW - draw) * 1000) : 0;
 }
 
 const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
@@ -1067,7 +1075,7 @@ async function autoSet(key, turn, reason) {
 
 // Bazén (podle samostatného Shelly skriptu): zapíná z přetoku (2× nad 1850 W),
 // vypíná 3× pod −200 W po min. 30 min běhu, s ochranou baterie podle hodiny a SOC.
-async function runPoolAutomation(now, prague, weather, totalW, soc) {
+async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   const isOn = pool.isOn;
@@ -1103,7 +1111,7 @@ async function runPoolAutomation(now, prague, weather, totalW, soc) {
   }
 
   // Zapnutí: 2× po sobě nad prahem (+ rezerva na auto — bazén jen z přebytku nad autem)
-  if (totalW > POOL_ON_THRESHOLD_W + carReserveW()) {
+  if (totalW > POOL_ON_THRESHOLD_W + reserveW) {
     poolAuto.overCount++;
     if (poolAuto.overCount >= 2 && !isOn) {
       await autoSet('pool', 'on', `přetok ${formatKwLog(totalW)}`);
@@ -1132,7 +1140,7 @@ async function runPoolAutomation(now, prague, weather, totalW, soc) {
 
 // Bojler (podle samostatného Shelly skriptu): topí jen ve dne, jen když běží bazén,
 // z dostatečného přetoku podle nabití baterie. Nad 70 °C v nádrži vždy vypne.
-async function runBoilerAutomation(now, prague, weather, totalW, soc) {
+async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) {
   const boiler = state.devices.shelly;
   if (!boiler || boiler.isOn === null || boiler.isOn === undefined) return;
   const isOn = boiler.isOn;
@@ -1170,7 +1178,7 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc) {
   let threshold = 1400;
   if (typeof soc === 'number' && soc < 50) threshold = 2600;
   else if (typeof soc === 'number' && soc < 80) threshold = 2000;
-  threshold += carReserveW();
+  threshold += reserveW;
 
   // Zapnutí (jinak drží stav)
   if (totalW > threshold && !isOn) {
@@ -1260,9 +1268,10 @@ async function runAutomation() {
     // "Přebytek" = přetok do sítě + výkon nabíjející baterii (feed + bat)
     const totalW = Math.round((state.solax.feedinKw + state.solax.batPowerKw) * 1000);
     const soc = state.solax.batterySoc;
+    const reserveW = carReserveW(); // rezerva na auto — spočítá se jednou za cyklus
 
-    await runPoolAutomation(now, prague, weather, totalW, soc);
-    await runBoilerAutomation(now, prague, weather, totalW, soc);
+    await runPoolAutomation(now, prague, weather, totalW, soc, reserveW);
+    await runBoilerAutomation(now, prague, weather, totalW, soc, reserveW);
     await runSolinatorAutomation(now, prague, weather);
   } catch (err) {
     console.error('Automatika:', err.message);

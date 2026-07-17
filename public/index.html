@@ -2301,9 +2301,9 @@ function airconTimelineLanes() {
   acKeys.sort((a, b) => acGuids.indexOf(a.slice(3)) - acGuids.indexOf(b.slice(3)));
   return acKeys.map((k, i) => {
     const dev = acDevices.find(d => 'ac_' + d.guid === k);
-    // V legendě vynecháme slovo "Klimatizace" (v nadpisu grafu zůstává)
+    // V legendě vynecháme slovo "Klima"/"Klimatizace" (v nadpisu grafu zůstává)
     let label = dev ? dev.name : 'Klima';
-    if (dev) label = dev.name.replace(/klimatizace/ig, '').replace(/\s+/g, ' ').trim() || dev.name;
+    if (dev) label = dev.name.replace(/klimatizace|klima/ig, '').replace(/\s+/g, ' ').trim() || dev.name;
     return { key: k, label, color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] };
   });
 }
