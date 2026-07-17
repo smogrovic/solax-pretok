@@ -2214,7 +2214,10 @@ function airconTimelineLanes() {
   acKeys.sort((a, b) => acGuids.indexOf(a.slice(3)) - acGuids.indexOf(b.slice(3)));
   return acKeys.map((k, i) => {
     const dev = acDevices.find(d => 'ac_' + d.guid === k);
-    return { key: k, label: dev ? dev.name : 'Klima', color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] };
+    // V legendě vynecháme slovo "Klimatizace" (v nadpisu grafu zůstává)
+    let label = dev ? dev.name : 'Klima';
+    if (dev) label = dev.name.replace(/klimatizace/ig, '').replace(/\s+/g, ' ').trim() || dev.name;
+    return { key: k, label, color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] };
   });
 }
 
@@ -4061,12 +4064,28 @@ function connectStream() {
     renderAssistantLog(JSON.parse(e.data).log || []);
   });
   es.addEventListener('runtime', e => {
-    runtimeData = JSON.parse(e.data).runtime;
+    // Server po deployi začíná od nuly — nikdy nepřepisujeme nižší hodnotou, bereme vyšší
+    const rt = JSON.parse(e.data).runtime;
+    if (rt && rt.date) {
+      if (!runtimeData || runtimeData.date !== rt.date) {
+        runtimeData = rt;
+      } else {
+        for (const k of Object.keys(rt.ms || {})) {
+          runtimeData.ms[k] = Math.max((runtimeData.ms && runtimeData.ms[k]) || 0, rt.ms[k] || 0);
+        }
+      }
+    }
     renderStats();
     saveRuntimeLocal();
   });
   es.addEventListener('timeline', e => {
-    timelineData = pruneTimelineLocal(JSON.parse(e.data).timeline);
+    // Server posílá plnou (po deployi řídkou) osu periodicky — MERGE, ať nepřijdeme o zálohu
+    const serverTl = pruneTimelineLocal(JSON.parse(e.data).timeline);
+    const merged = {};
+    for (const k of new Set([...Object.keys(timelineData), ...Object.keys(serverTl)])) {
+      merged[k] = mergeTimelineSegs(timelineData[k] || [], serverTl[k] || []);
+    }
+    timelineData = merged;
     renderTimeline();
     saveTimelineLocal();
   });
@@ -4093,14 +4112,14 @@ function connectStream() {
   });
   es.addEventListener('boilerHistory', e => {
     const d = JSON.parse(e.data);
-    if (Array.isArray(d.history)) boilerHistory = mergeBoilerHistories(d.history, []);
+    if (Array.isArray(d.history)) boilerHistory = mergeBoilerHistories(d.history, boilerHistory);
     else if (d.point) boilerHistory = mergeBoilerHistories(boilerHistory, [d.point]);
     renderBoilerChart();
     saveBoilerHistoryLocal();
   });
   es.addEventListener('wallboxHistory', e => {
     const d = JSON.parse(e.data);
-    if (Array.isArray(d.history)) wallboxHistory = mergeWbHistories(d.history, []);
+    if (Array.isArray(d.history)) wallboxHistory = mergeWbHistories(d.history, wallboxHistory);
     else if (d.point) wallboxHistory = mergeWbHistories(wallboxHistory, [d.point]);
     renderWallboxChart();
     saveWallboxHistoryLocal();
@@ -4110,7 +4129,7 @@ function connectStream() {
     renderWbAuto();
   });
   es.addEventListener('wbModeHistory', e => {
-    wbModeHistoryData = mergeWbModeHistories(JSON.parse(e.data).history || [], []);
+    wbModeHistoryData = mergeWbModeHistories(JSON.parse(e.data).history || [], wbModeHistoryData);
     renderWbModeChart();
     saveWbModeHistoryLocal();
   });
