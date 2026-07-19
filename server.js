@@ -2494,11 +2494,22 @@ function ecWallboxTarget() {
   return (now >= ecoStart && now < fastStart) ? 'eco' : 'fast';
 }
 
+let wbPrevStatus = null;
+
 async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
   if (!state.autoEnabled) return; // hlavní vypínač automatiky
   wbControlRunning = true;
   try {
+    // Když se auto právě PŘIPOJILO (odpojeno/dokončeno → připraveno/nabíjí), vynutíme
+    // znovunastavení režimu. V STOP/idle totiž wallbox nemusí dřív nastavený režim držet,
+    // takže by po připojení nebyl "ready" ve správném režimu.
+    const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
+    const carReady = st === 1 || st === 2; // připraveno / nabíjí
+    const wasReady = wbPrevStatus === 1 || wbPrevStatus === 2;
+    if (carReady && !wasReady) state.wbLastTarget = null; // auto se připojilo → přenastav režim
+    wbPrevStatus = st;
+
     const target = ecWallboxTarget();
     if (target && state.wbLastTarget !== target) {
       await wbSetMode(target);
