@@ -960,6 +960,9 @@
     transition:color .2s;
   }
   .wb-mode-opt.active{color:var(--navy);}
+  .wb-manual{margin-top:16px;width:100%;}
+  .wb-manual-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;font-weight:600;}
+  .wb-manual-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
   #wbModeChart{
     width:100%;
     display:block;
@@ -1517,6 +1520,14 @@
           <button class="toggle-switch" id="wbAutoSwitch" aria-label="Přepnout FAST/AUTO"></button>
           <span class="wb-mode-opt" id="wbModeAuto">AUTO</span>
         </div>
+        <div class="wb-manual">
+          <div class="wb-manual-label">Ruční přepnutí režimu</div>
+          <div class="wb-manual-btns" id="wbManualBtns">
+            <button class="wb-mode-btn" data-mode="stop">STOP</button>
+            <button class="wb-mode-btn" data-mode="eco">ECO</button>
+            <button class="wb-mode-btn" data-mode="fast">FAST</button>
+          </div>
+        </div>
         <div class="updated" id="wbHint" style="margin-top:10px;text-align:center"></div>
       </div>
 
@@ -1646,6 +1657,7 @@
             <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
             <li><b>AUTO</b>: hodinu <b>po východu slunce → ECO</b> (nabíjí z přebytku FVE).</li>
             <li><b>AUTO</b>: hodinu <b>před západem a přes noc → FAST</b> (baterka se přelije do auta).</li>
+            <li><b>Ruční přepnutí</b> (STOP/ECO/FAST) platí, dokud ho automatika při další změně (východ/západ) zase nepřepne.</li>
             <li>Ručně ve střídači/wallboxu: ECO = Level1 6A, „Battery charge EVC" = Enable, Min SOC nízko (~10 %).</li>
           </ul>
         </div>
@@ -3282,6 +3294,36 @@ if (wbAutoSwitchEl) {
   wbAutoSwitchEl.addEventListener('click', () => wbSetAuto(!wbAutoData));
 }
 
+// Ruční přepnutí režimu (STOP/ECO/FAST). Platí, dokud ho automatika při další
+// změně (východ/západ slunce) zase nepřepne.
+const wbManualBtnsEl = document.getElementById('wbManualBtns');
+async function wbSetMode(mode, btn) {
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+  try {
+    const res = await fetch('/api/wallbox/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ mode })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Wallbox: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+}
+if (wbManualBtnsEl) {
+  for (const btn of wbManualBtnsEl.querySelectorAll('.wb-mode-btn')) {
+    btn.addEventListener('click', () => wbSetMode(btn.dataset.mode, btn));
+  }
+}
+
 function renderWbAuto() {
   if (wbAutoSwitchEl) wbAutoSwitchEl.classList.toggle('on', !!wbAutoData);
   if (wbModeAutoEl) wbModeAutoEl.classList.toggle('active', !!wbAutoData);
@@ -3314,6 +3356,12 @@ function renderWallbox() {
   if (wbOverviewEl) wbOverviewEl.textContent = kwStr;
   wbStatusValEl.textContent = (typeof w.status === 'number' && WB_STATUS_LABELS_UI[w.status]) || '–';
   wbHintEl.textContent = w.error || '';
+  // Zvýraznění aktuálního režimu na ručních tlačítkách
+  if (wbManualBtnsEl) {
+    for (const btn of wbManualBtnsEl.querySelectorAll('.wb-mode-btn')) {
+      btn.classList.toggle('active', btn.dataset.mode === w.mode);
+    }
+  }
   renderWbAuto();
 }
 
