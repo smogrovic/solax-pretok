@@ -1579,7 +1579,7 @@
         <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojler">–</span></div>
         <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
         <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
-        <div class="stat-row"><span>Wallbox nyní</span><span class="stat-val" id="wbOverview">– kW</span></div>
+        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
       </div>
 
       <div class="card boilers-card" id="prodCard">
@@ -3344,16 +3344,15 @@ function renderWallbox() {
     wbPowerEl.textContent = '–';
     wbStatusValEl.textContent = '–';
     wbHintEl.textContent = 'Wallbox není nastaven (chybí WALLBOX_SN na serveru).';
-    if (wbOverviewEl) wbOverviewEl.textContent = '– kW';
+    if (wbOverviewEl) wbOverviewEl.textContent = '– kWh';
     return;
   }
   const w = wallboxData || {};
   const kw = wbPowerKw();
   const kwStr = kw !== null ? kw.toFixed(1).replace('.', ',') + ' kW' : '– kW';
   wbPowerEl.textContent = kw !== null ? kw.toFixed(1).replace('.', ',') + ' kW' : '–';
-  // Spotřeba wallboxu i na první stránce (dlaždice) a na Přehledu
+  // Spotřeba wallboxu (aktuální výkon) i na první stránce (dlaždice)
   if (wallboxValueEl) wallboxValueEl.textContent = kwStr;
-  if (wbOverviewEl) wbOverviewEl.textContent = kwStr;
   wbStatusValEl.textContent = (typeof w.status === 'number' && WB_STATUS_LABELS_UI[w.status]) || '–';
   wbHintEl.textContent = w.error || '';
   // Zvýraznění aktuálního režimu na ručních tlačítkách
@@ -3419,7 +3418,17 @@ function integrateWbKwh(pts) {
   return kwh;
 }
 
+// "Wallbox celkem" na Přehledu = nabito dnes (od půlnoci) v kWh
+function renderWbToday() {
+  if (!wbOverviewEl) return;
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const pts = wallboxHistory.filter(p => p.t >= midnight.getTime());
+  const kwh = pts.length >= 2 ? integrateWbKwh(pts) : 0;
+  wbOverviewEl.textContent = kwh.toFixed(1).replace('.', ',') + ' kWh';
+}
+
 function renderWallboxChart() {
+  renderWbToday();
   if (!wbChartCanvas) return;
   const ctx = wbChartCanvas.getContext('2d');
   const w = wbChartCanvas.clientWidth || 300;
