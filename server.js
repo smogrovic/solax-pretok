@@ -1533,8 +1533,8 @@ app.post('/api/blinds/timer', async (req, res) => {
   const urls = Array.isArray(deviceURLs)
     ? deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 20)
     : (typeof deviceURL === 'string' && deviceURL ? [deviceURL] : []);
-  if (!urls.length || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) {
-    return res.status(400).json({ error: 'Chybí rolety, time (HH:MM) nebo action (up/down).' });
+  if (!urls.length || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down', 'tilt'].includes(action)) {
+    return res.status(400).json({ error: 'Chybí rolety, time (HH:MM) nebo action (up/down/tilt).' });
   }
   let tilt = null;
   if (orientation !== undefined && orientation !== null) {
@@ -1542,6 +1542,10 @@ app.post('/api/blinds/timer', async (req, res) => {
     if (!Number.isFinite(tilt) || tilt < 0 || tilt > 100) {
       return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
     }
+  }
+  // "tilt" = jen naklopení lamel (nehýbe roletou nahoru/dolů) → naklopení je povinné
+  if (action === 'tilt' && tilt === null) {
+    return res.status(400).json({ error: 'Pro naklopení zadej hodnotu naklopení 0–100.' });
   }
   if (blindTimers.length >= 10) {
     return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
@@ -1559,7 +1563,8 @@ app.post('/api/blinds/timer', async (req, res) => {
   const timer = { id: blindTimerSeq++, deviceURLs: urls, name, time, action, orientation: tilt };
   blindTimers.push(timer);
   blindTimers.sort((a, b) => a.time.localeCompare(b.time));
-  addLog(`Časovač: ${name} ${action === 'up' ? 'vytáhnout' : 'zatáhnout'} v ${time}`);
+  const actWord = action === 'up' ? 'vytáhnout' : (action === 'down' ? 'zatáhnout' : `naklopit na ${tilt} %`);
+  addLog(`Časovač: ${name} ${actWord} v ${time}`);
   broadcast('blindTimers', { timers: blindTimers });
   res.json({ timers: blindTimers });
 });
@@ -1587,9 +1592,11 @@ setInterval(async () => {
   broadcast('blindTimers', { timers: blindTimers });
   for (const t of due) {
     let ok = 0;
+    // "tilt" = jen naklopení lamel → posíláme orientation (nehýbe roletou nahoru/dolů)
+    const cmd = t.action === 'tilt' ? 'orientation' : t.action;
     for (const url of t.deviceURLs || []) {
       try {
-        await blindCommand(url, t.action, t.orientation);
+        await blindCommand(url, cmd, t.orientation);
         ok++;
       } catch (err) {
         addLog(`Časovač ${t.name}: roleta selhala (${err.message.slice(0, 100)})`);
@@ -1597,7 +1604,8 @@ setInterval(async () => {
       await delay(500);
     }
     if (ok > 0) {
-      addLog(`${t.name}: ${t.action === 'up' ? 'vytaženo' : 'zataženo'} (časovač ${t.time})`);
+      const done = t.action === 'up' ? 'vytaženo' : (t.action === 'down' ? 'zataženo' : `naklopeno na ${t.orientation} %`);
+      addLog(`${t.name}: ${done} (časovač ${t.time})`);
     }
   }
 }, 30000);
