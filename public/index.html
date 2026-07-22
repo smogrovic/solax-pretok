@@ -468,6 +468,9 @@
     color:var(--grey-text);
     font-weight:600;
   }
+  .garage-ind{justify-content:center;}
+  .garage-icon{display:flex;align-items:center;justify-content:center;}
+  .garage-state{font-size:9px;color:var(--grey-text);font-weight:700;white-space:nowrap;}
   .blind-meter{
     width:8px;
     height:34px;
@@ -1083,6 +1086,19 @@
         <div class="tempauto-list" id="tempAutoList"></div>
       </div>
 
+      <div class="card lockable">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="autoLight"></div>
+            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="autoOnBtn">ON</button>
+            <button class="power-btn off-btn" id="autoOffBtn">OFF</button>
+          </div>
+        </div>
+      </div>
+
       <button class="refresh-btn" id="refreshBtn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
@@ -1565,17 +1581,10 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="autoLight"></div>
-            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="autoOnBtn">ON</button>
-            <button class="power-btn off-btn" id="autoOffBtn">OFF</button>
-          </div>
-        </div>
+      <div class="card stats-card">
+        <div class="graph-title">Kdy co běželo (8:00–24:00)</div>
+        <canvas id="timelineChart"></canvas>
+        <div class="timeline-legend" id="timelineLegend"></div>
       </div>
 
       <div class="card stats-card">
@@ -1586,6 +1595,20 @@
         <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
         <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
         <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Today">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Today">– kWh</span></div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Včera</div>
+        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
+        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
+        <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojlerYest">–</span></div>
+        <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazenYest">–</span></div>
+        <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinatorYest">–</span></div>
+        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Yest">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Yest">– kWh</span></div>
       </div>
 
       <div class="card boilers-card" id="prodCard">
@@ -1598,12 +1621,6 @@
           <div class="boiler-name">Skutečnost (Solax)</div>
           <div class="boiler-temp" id="prodActual">– kWh</div>
         </div>
-      </div>
-
-      <div class="card stats-card">
-        <div class="graph-title">Kdy co běželo (8:00–24:00)</div>
-        <canvas id="timelineChart"></canvas>
-        <div class="timeline-legend" id="timelineLegend"></div>
       </div>
 
       <div class="card stats-card" id="timelineAcCard">
@@ -2167,6 +2184,16 @@ const statImportTodayEl = document.getElementById('statImportToday');
 const statRunBojlerEl = document.getElementById('statRunBojler');
 const statRunBazenEl = document.getElementById('statRunBazen');
 const statRunSolinatorEl = document.getElementById('statRunSolinator');
+const statB1TodayEl = document.getElementById('statB1Today');
+const statB2TodayEl = document.getElementById('statB2Today');
+const statFeedinYestEl = document.getElementById('statFeedinYest');
+const statImportYestEl = document.getElementById('statImportYest');
+const statRunBojlerYestEl = document.getElementById('statRunBojlerYest');
+const statRunBazenYestEl = document.getElementById('statRunBazenYest');
+const statRunSolinatorYestEl = document.getElementById('statRunSolinatorYest');
+const wbYestEl = document.getElementById('wbYest');
+const statB1YestEl = document.getElementById('statB1Yest');
+const statB2YestEl = document.getElementById('statB2Yest');
 const autoLight = document.getElementById('autoLight');
 const autoStateEl = document.getElementById('autoState');
 const autoOnBtn = document.getElementById('autoOnBtn');
@@ -2194,6 +2221,8 @@ function formatRuntime(ms) {
   return h > 0 ? h + ' h ' + m + ' min' : m + ' min';
 }
 
+function fmtWhKwh(wh) { return typeof wh === 'number' ? (wh / 1000).toFixed(1).replace('.', ',') + ' kWh' : '– kWh'; }
+
 function renderStats() {
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
@@ -2205,6 +2234,27 @@ function renderStats() {
     statRunBazenEl.textContent = formatRuntime(runtimeData.ms.pool);
     statRunSolinatorEl.textContent = formatRuntime(runtimeData.ms.solinator);
   }
+  // Dnešní energie bojlerů (z denní akumulace na serveru)
+  const wh = runtimeData && runtimeData.wh;
+  if (statB1TodayEl) statB1TodayEl.textContent = wh ? fmtWhKwh(wh.b1) : '– kWh';
+  if (statB2TodayEl) statB2TodayEl.textContent = wh ? fmtWhKwh(wh.b2) : '– kWh';
+  renderYesterday();
+}
+
+// Box "Včera" — kompletní údaje z předchozího dne (snapshot na serveru)
+function renderYesterday() {
+  const y = runtimeData && runtimeData.yesterday;
+  const w = (y && y.wh) || {};
+  const m = (y && y.ms) || {};
+  const set = (el, v) => { if (el) el.textContent = y ? v : (el.id && el.id.startsWith('statRun') ? '–' : '– kWh'); };
+  set(statFeedinYestEl, fmtWhKwh(w.feed));
+  set(statImportYestEl, fmtWhKwh(w.import));
+  set(statRunBojlerYestEl, formatRuntime(m.shelly));
+  set(statRunBazenYestEl, formatRuntime(m.pool));
+  set(statRunSolinatorYestEl, formatRuntime(m.solinator));
+  set(wbYestEl, fmtWhKwh(w.wb));
+  set(statB1YestEl, fmtWhKwh(w.b1));
+  set(statB2YestEl, fmtWhKwh(w.b2));
 }
 
 function renderAutomation(enabled) {
@@ -2262,10 +2312,14 @@ function saveRuntimeLocal() {
 }
 
 async function maybeRestoreRuntimeToServer(serverRt, localRt) {
-  if (!localRt || localRt.date !== todayStr() || !localRt.ms) return;
+  if (!localRt || !localRt.ms) return;
+  const sameDay = localRt.date === todayStr();
   const serverMs = (serverRt && serverRt.ms) || {};
-  const hasNewer = Object.keys(localRt.ms).some(k => (localRt.ms[k] || 0) > (serverMs[k] || 0));
-  if (!hasNewer) return;
+  const serverWh = (serverRt && serverRt.wh) || {};
+  const msNewer = sameDay && Object.keys(localRt.ms).some(k => (localRt.ms[k] || 0) > (serverMs[k] || 0));
+  const whNewer = sameDay && localRt.wh && Object.keys(localRt.wh).some(k => (localRt.wh[k] || 0) > (serverWh[k] || 0));
+  const yestNew = localRt.yesterday && !(serverRt && serverRt.yesterday);
+  if (!msNewer && !whNewer && !yestNew) return;
   try {
     await fetch('/api/runtime/restore', {
       method: 'POST',
@@ -2560,9 +2614,19 @@ function makeBlindBtn(cls, text, handler) {
   return btn;
 }
 
+function garageSVG(closed) {
+  const outline = 'M3 11 L12 5 L21 11 V20 H3 Z';
+  const slats = closed
+    ? '<line x1="6.5" y1="14" x2="17.5" y2="14"/><line x1="6.5" y1="17" x2="17.5" y2="17"/>'
+    : '<line x1="6.5" y1="13" x2="17.5" y2="13"/>';
+  return `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--orange)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${outline}"/>${slats}</svg>`;
+}
+
 function renderBlindRow(b) {
   const wrap = document.createElement('div');
   wrap.className = 'blind-item';
+  // Garáž = garážová vrata (nenaklápí lamely) — místo % ukazuje otevřeno/zavřeno
+  const isGarage = b.uiClass === 'GarageDoor' || normalizeName(b.label).includes('garaz') || normalizeName(b.room).includes('garaz');
 
   const row = document.createElement('div');
   row.className = 'blind-row';
@@ -2616,16 +2680,16 @@ function renderBlindRow(b) {
     const upCmd = isPergola ? 'down' : 'up';
     const downCmd = isPergola ? 'up' : 'down';
     // Garáž vyžaduje potvrzení, ať se neotevře/nezavře omylem ukliknutím
-    const isGarage = b.uiClass === 'GarageDoor' || normalizeName(b.label).includes('garaz') || normalizeName(b.room).includes('garaz');
     const guard = (open, fn) => (btn) => {
       if (isGarage && !confirm(open ? 'Opravdu OTEVŘÍT garáž?' : 'Opravdu ZAVŘÍT garáž?')) return;
       return fn(btn);
     };
     btns.appendChild(makeBlindBtn('blind-btn', '▲', guard(true, btn => blindCommand(b.deviceURL, upCmd, tiltValue(), btn))));
-    // Garáž, pergola (a zařízení bez povelu stop) mají místo prostředního tlačítka mezeru
+    // Prostřední pozice: stop (jen io rolety), nebo mezera. Garáž ji vynechá úplně —
+    // tlačítko ▼ tak sedne hned vedle ▲.
     if (b.hasStop && b.uiClass !== 'GarageDoor' && !isPergola) {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
-    } else {
+    } else if (!isGarage) {
       btns.appendChild(spacer());
     }
     btns.appendChild(makeBlindBtn('blind-btn', '▼', guard(false, btn => blindCommand(b.deviceURL, downCmd, tiltValue(), btn))));
@@ -2640,22 +2704,36 @@ function renderBlindRow(b) {
   // kde zařízení polohu hlásí (io rolety).
   const meterCol = document.createElement('div');
   meterCol.className = 'blind-meter-col';
-  const meter = document.createElement('div');
-  meter.className = 'blind-meter';
-  const meterPct = document.createElement('span');
-  meterPct.className = 'blind-meter-pct';
-  if (b.type !== 'switch' && typeof b.closure === 'number') {
-    const c = Math.min(100, Math.max(0, Math.round(b.closure)));
-    const fill = document.createElement('div');
-    fill.className = 'blind-meter-fill';
-    fill.style.height = c + '%';
-    meter.appendChild(fill);
-    meterPct.textContent = c + ' %';
+  if (isGarage) {
+    // Garáž: symbol vrat + text otevřeno/zavřeno (nenaklápí se → žádná %)
+    meterCol.classList.add('garage-ind');
+    const closed = typeof b.closure === 'number' ? b.closure >= 50 : null;
+    const icon = document.createElement('div');
+    icon.className = 'garage-icon';
+    icon.innerHTML = garageSVG(closed !== false);
+    const txt = document.createElement('span');
+    txt.className = 'garage-state';
+    txt.textContent = closed === null ? '–' : (closed ? 'Zavřeno' : 'Otevřeno');
+    meterCol.appendChild(icon);
+    meterCol.appendChild(txt);
   } else {
-    meterCol.style.visibility = 'hidden';
+    const meter = document.createElement('div');
+    meter.className = 'blind-meter';
+    const meterPct = document.createElement('span');
+    meterPct.className = 'blind-meter-pct';
+    if (b.type !== 'switch' && typeof b.closure === 'number') {
+      const c = Math.min(100, Math.max(0, Math.round(b.closure)));
+      const fill = document.createElement('div');
+      fill.className = 'blind-meter-fill';
+      fill.style.height = c + '%';
+      meter.appendChild(fill);
+      meterPct.textContent = c + ' %';
+    } else {
+      meterCol.style.visibility = 'hidden';
+    }
+    meterCol.appendChild(meter);
+    meterCol.appendChild(meterPct);
   }
-  meterCol.appendChild(meter);
-  meterCol.appendChild(meterPct);
   row.appendChild(meterCol);
 
   wrap.appendChild(row);
@@ -4159,11 +4237,20 @@ function applySnapshot(snap) {
     if (!runtimeData || runtimeData.date !== localRt.date) {
       runtimeData = localRt;
     } else {
+      // dnešek: vezmi vyšší hodnoty (ms i wh)
       for (const k of Object.keys(localRt.ms)) {
         if ((localRt.ms[k] || 0) > (runtimeData.ms[k] || 0)) runtimeData.ms[k] = localRt.ms[k];
       }
+      if (localRt.wh) {
+        if (!runtimeData.wh) runtimeData.wh = {};
+        for (const k of Object.keys(localRt.wh)) {
+          if ((localRt.wh[k] || 0) > (runtimeData.wh[k] || 0)) runtimeData.wh[k] = localRt.wh[k];
+        }
+      }
     }
   }
+  // Včerejšek: když ho server po deployi nemá a telefon ano, převezmeme z telefonu
+  if (runtimeData && !runtimeData.yesterday && localRt && localRt.yesterday) runtimeData.yesterday = localRt.yesterday;
   saveRuntimeLocal();
   maybeRestoreRuntimeToServer(serverRt, localRt);
   renderStats();
@@ -4247,7 +4334,14 @@ function connectStream() {
         for (const k of Object.keys(rt.ms || {})) {
           runtimeData.ms[k] = Math.max((runtimeData.ms && runtimeData.ms[k]) || 0, rt.ms[k] || 0);
         }
+        if (rt.wh) {
+          if (!runtimeData.wh) runtimeData.wh = {};
+          for (const k of Object.keys(rt.wh)) {
+            runtimeData.wh[k] = Math.max((runtimeData.wh && runtimeData.wh[k]) || 0, rt.wh[k] || 0);
+          }
+        }
       }
+      if (rt.yesterday) runtimeData.yesterday = rt.yesterday;
     }
     renderStats();
     saveRuntimeLocal();

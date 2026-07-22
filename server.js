@@ -88,7 +88,14 @@ const state = {
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
-  runtime: { date: '', ms: { shelly: 0, pool: 0, solinator: 0 }, lastTs: Date.now() }, // dnešní doba běhu
+  // dnešní doba běhu (ms) + denní energie (Wh) + snapshot včerejška
+  runtime: {
+    date: '',
+    ms: { shelly: 0, pool: 0, solinator: 0 },
+    wh: { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 },
+    yesterday: null, // { ms:{...}, wh:{...} }
+    lastTs: Date.now()
+  },
   timeline: { shelly: [], pool: [], solinator: [], wallbox: [] }, // segmenty { from, to } zapnutí za 48 h
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
@@ -191,7 +198,7 @@ function snapshot() {
     log: state.log,
     autoEnabled: state.autoEnabled,
     weather: state.weather,
-    runtime: { date: state.runtime.date, ms: state.runtime.ms },
+    runtime: runtimePayload(),
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     blindTimers,
@@ -466,14 +473,21 @@ async function pollShelly() {
   }
 }
 
-// Dnešní doba běhu bojleru/bazénu/solinátoru; nuluje se o pražské půlnoci
+function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
+function runtimePayload() {
+  return { date: state.runtime.date, ms: state.runtime.ms, wh: state.runtime.wh, yesterday: state.runtime.yesterday };
+}
+
+// Dnešní doba běhu + denní energie; o pražské půlnoci se dnešek uloží jako včerejšek a vynuluje
 function updateRuntimes() {
   const today = pragueDateString();
   const now = Date.now();
   const dt = Math.min(now - state.runtime.lastTs, 10 * 60 * 1000);
   if (state.runtime.date !== today) {
+    if (state.runtime.date) state.runtime.yesterday = { ms: state.runtime.ms, wh: state.runtime.wh };
     state.runtime.date = today;
     state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
+    state.runtime.wh = emptyWh();
   }
   for (const k of Object.keys(state.runtime.ms)) {
     if (state.devices[k] && state.devices[k].isOn === true) {
@@ -502,9 +516,22 @@ function updateRuntimes() {
       segs.push({ from: now, to: now });
     }
   }
+  // Denní energie (Wh): přetok/odběr ze sítě, wallbox, oba bojlery
+  const dtH = dt / 3600000;
+  const wh = state.runtime.wh;
+  const feedKw = state.solax && typeof state.solax.feedinKw === 'number' ? state.solax.feedinKw : 0;
+  if (feedKw >= 0) wh.feed += feedKw * 1000 * dtH; else wh.import += -feedKw * 1000 * dtH;
+  const wbKw = (state.infigy && typeof state.infigy.wbPower === 'number') ? state.infigy.wbPower
+    : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
+  wh.wb += Math.max(0, wbKw) * 1000 * dtH;
+  const b1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
+  wh.b1 += Math.max(0, b1W) * dtH;
+  const b2Kw = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower : 0;
+  wh.b2 += Math.max(0, b2Kw) * 1000 * dtH;
+
   state.runtime.lastTs = now;
   pruneTimeline();
-  broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
+  broadcast('runtime', { runtime: runtimePayload() });
   broadcast('timeline', { timeline: state.timeline });
 }
 
@@ -755,27 +782,34 @@ app.post('/api/log/restore', (req, res) => {
 // Obnova dnešní doby běhu po restartu/deployi — klient pošle svou kopii,
 // server si vezme vyšší hodnoty (jen pro dnešní pražské datum)
 app.post('/api/runtime/restore', (req, res) => {
-  const { date, ms } = req.body || {};
+  const { date, ms, wh, yesterday } = req.body || {};
   if (typeof date !== 'string' || !ms || typeof ms !== 'object') {
     return res.status(400).json({ error: 'Chybí date/ms.' });
   }
-  if (date !== pragueDateString()) return res.json({ ok: false });
-
-  if (state.runtime.date !== date) {
-    state.runtime.date = date;
-    state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
-  }
   let changed = false;
-  for (const k of Object.keys(state.runtime.ms)) {
-    const v = Number(ms[k]);
-    if (Number.isFinite(v) && v > state.runtime.ms[k] && v <= 24 * 60 * 60 * 1000) {
-      state.runtime.ms[k] = v;
-      changed = true;
+  // Včerejšek: když ho po deployi nemáme a telefon ho má, převezmeme
+  if (yesterday && typeof yesterday === 'object' && !state.runtime.yesterday) {
+    state.runtime.yesterday = yesterday;
+    changed = true;
+  }
+  if (date === pragueDateString()) {
+    if (state.runtime.date !== date) {
+      state.runtime.date = date;
+      state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
+      state.runtime.wh = emptyWh();
+    }
+    for (const k of Object.keys(state.runtime.ms)) {
+      const v = Number(ms[k]);
+      if (Number.isFinite(v) && v > state.runtime.ms[k] && v <= 24 * 60 * 60 * 1000) { state.runtime.ms[k] = v; changed = true; }
+    }
+    if (wh && typeof wh === 'object') {
+      for (const k of Object.keys(state.runtime.wh)) {
+        const v = Number(wh[k]);
+        if (Number.isFinite(v) && v > state.runtime.wh[k] && v <= 500000) { state.runtime.wh[k] = v; changed = true; }
+      }
     }
   }
-  if (changed) {
-    broadcast('runtime', { runtime: { date: state.runtime.date, ms: state.runtime.ms } });
-  }
+  if (changed) broadcast('runtime', { runtime: runtimePayload() });
   res.json({ ok: true });
 });
 
