@@ -882,10 +882,19 @@ app.post('/api/tempauto', (req, res) => {
   res.json({ tempAuto: state.tempAuto });
 });
 
-// Ruční refresh z appky: Solax hned, Shelly cyklus na pozadí (chráněný zámkem)
+// Ruční refresh z appky („Aktualizovat"): vynutí načtení VŠECH zdrojů.
+// Dlouhé pollery (Shelly fronta 1 dotaz/s, Panasonic po zařízeních, Infigy socket)
+// běží na pozadí a do appky se propíšou přes SSE, jak dorazí — tlačítko na ně nečeká.
 app.post('/api/refresh', async (req, res) => {
   pollShelly();
-  await pollSolax();
+  if (panasonicEnabled) pollAircon();   // Panasonic klimatizace + tepelné čerpadlo
+  if (infigyEnabled) pollInfigy();      // Infigy (bojler 2, výroba, baterie, wallbox)
+  blindsCache = { ts: 0, list: [] };    // rolety se přečtou čerstvé při dalším dotazu
+  weatherCache.ts = 0;                  // vynuť čerstvé počasí (jinak drží cache)
+
+  const jobs = [pollSolax(), fetchWeather()];
+  if (wallboxEnabled) jobs.push(pollWallbox());
+  await Promise.allSettled(jobs);
   res.json({ ok: true });
 });
 
@@ -1049,7 +1058,8 @@ let weatherCache = { ts: 0, data: null };
 
 async function fetchWeather() {
   if (!OWM_API_KEY) return null;
-  if (weatherCache.data && Date.now() - weatherCache.ts < 15 * 60 * 1000) {
+  // Cache 5 min — ať i venkovní teplota (a časy slunce) jsou nejvýš 5 min staré
+  if (weatherCache.data && Date.now() - weatherCache.ts < 5 * 60 * 1000) {
     return weatherCache.data;
   }
   try {

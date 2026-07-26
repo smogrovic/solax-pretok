@@ -1678,10 +1678,21 @@
         <div class="logic-sec">
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
-            <li>Automatika běží, jen když je zapnutý <b>hlavní vypínač</b> (stránka Přehled).</li>
+            <li>Automatika běží, jen když je zapnutý <b>hlavní vypínač</b> (stránka Asistent).</li>
             <li>Rozhoduje se jen z <b>čerstvých dat</b> ze střídače (max 10 min stará).</li>
             <li>Bazén, bojler a solinátor: přepočet <b>každých 5 min</b>. Režim wallboxu: <b>každou minutu</b>.</li>
             <li>„Přebytek" = <b>přetok do sítě + výkon nabíjející baterii</b> (feed + bat).</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Načítání dat (nejdéle každých 5 min)</div>
+          <ul class="logic-list">
+            <li><b>Solax</b> (výroba, baterie, přetok) a <b>Shelly</b> (bojler, bazén, solinátor, světla): každé <b>2 min</b>.</li>
+            <li><b>Wallbox</b> (Solax cloud): každou <b>1 min</b>. <b>Teploty bojlerů</b> do grafu: každou <b>1 min</b>.</li>
+            <li><b>Panasonic klimatizace</b> + tepelné čerpadlo: každých <b>5 min</b>.</li>
+            <li><b>Infigy</b> (bojler 2, výroba, baterie, wallbox) a <b>počasí</b>: každých <b>5 min</b>.</li>
+            <li>Tlačítko <b>Aktualizovat</b> (stránka Asistent) vynutí okamžité načtení <b>všech</b> zdrojů. Delší dotazy (Shelly, Panasonic, Infigy) dobíhají na pozadí a naskočí samy, jak dorazí.</li>
           </ul>
         </div>
 
