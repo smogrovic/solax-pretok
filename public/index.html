@@ -294,6 +294,16 @@
     min-height:14px;
   }
   .graph-total + .graph-total{margin-top:1px;}
+  .solinator-chlor{width:100%;margin-top:10px;}
+  .solinator-chlor-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;}
+  .solinator-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .chlor-btn{border:none;border-radius:12px;padding:11px 2px;font-size:12px;font-weight:700;}
+  .chlor-plus{background:rgba(39,174,96,0.14);color:#1e7e46;}
+  .chlor-minus{background:rgba(231,76,60,0.14);color:#b03a2e;}
+  .chlor-btn:disabled{opacity:0.55;}
+  .chlor-btn.active-state{outline:2px solid currentColor;}
+  .solinator-status{font-size:11px;color:var(--orange);font-weight:600;text-align:center;margin-top:8px;min-height:15px;}
+  .solinator-status .cancel{color:var(--grey-text);text-decoration:underline;margin-left:8px;font-weight:600;}
   .logic-card{align-items:stretch;}
   .logic-sec{margin-top:16px;}
   .logic-sec:first-child{margin-top:0;}
@@ -1442,6 +1452,16 @@
             <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
           </div>
           <div class="device-power" id="poolTotalPower"></div>
+          <div class="solinator-chlor">
+            <div class="solinator-chlor-label">Podle chloru v bazénu</div>
+            <div class="solinator-btns">
+              <button class="chlor-btn chlor-plus" data-hours="2">+2 h</button>
+              <button class="chlor-btn chlor-plus" data-hours="4">+4 h</button>
+              <button class="chlor-btn chlor-minus" data-days="1">−1 den</button>
+              <button class="chlor-btn chlor-minus" data-days="2">−2 dny</button>
+            </div>
+            <div class="solinator-status" id="solinatorStatus"></div>
+          </div>
         </div>
       </div>
 
@@ -1710,9 +1730,13 @@
         <div class="logic-sec">
           <div class="logic-h">Solinátor</div>
           <ul class="logic-list">
+            <li>Relé se po <b>60 min</b> samo vypne (nastaveno v Shelly).</li>
+            <li><b>11:00</b> → denní start (bez podmínky).</li>
             <li><b>13:00</b> → zapnout, když je venku <b>&gt; 20 °C</b>.</li>
             <li><b>15:00</b> → zapnout, když je venku <b>&gt; 25 °C</b>.</li>
             <li>Hodinu před západem slunce → vypnout.</li>
+            <li><b>+2 h / +4 h</b> (nízký chlor): appka drží solinátor zapnutý 2/4 h — posílá „on" znovu, jak se relé po hodině vypne.</li>
+            <li><b>−1 den / −2 dny</b> (vysoký chlor): úplně zakáže spouštění solinátoru na 1/2 dny.</li>
           </ul>
         </div>
 
@@ -2291,6 +2315,81 @@ async function setAutomation(enabled) {
 
 autoOnBtn.addEventListener('click', () => setAutomation(true));
 autoOffBtn.addEventListener('click', () => setAutomation(false));
+
+// ---------- Solinátor: boost (+2h/+4h) a vypnutí (−1d/−2d) podle chloru ----------
+let solinatorData = { boostUntil: 0, disabledUntil: 0 };
+const solinatorStatusEl = document.getElementById('solinatorStatus');
+const chlorBtns = Array.from(document.querySelectorAll('.chlor-btn'));
+
+function fmtSolTime(ts) {
+  const d = new Date(ts);
+  const tm = d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString()
+    ? tm
+    : d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric' }) + ' ' + tm;
+}
+
+function renderSolinator() {
+  if (!solinatorStatusEl) return;
+  const now = Date.now();
+  const s = solinatorData || {};
+  let txt = '';
+  if (s.disabledUntil && s.disabledUntil > now) txt = 'Vypnuto do ' + fmtSolTime(s.disabledUntil);
+  else if (s.boostUntil && s.boostUntil > now) txt = 'Boost do ' + fmtSolTime(s.boostUntil);
+  solinatorStatusEl.innerHTML = txt ? txt + ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '';
+  const cancel = document.getElementById('solinatorCancel');
+  if (cancel) cancel.addEventListener('click', () => solinatorAction('/api/solinator/clear'));
+}
+
+async function solinatorAction(url, body) {
+  chlorBtns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    if (data.solinator) { solinatorData = data.solinator; renderSolinator(); saveSolinatorLocal(); }
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Solinátor: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  chlorBtns.forEach(b => { b.disabled = false; });
+}
+
+for (const b of chlorBtns) {
+  b.addEventListener('click', () => {
+    if (b.dataset.hours) solinatorAction('/api/solinator/boost', { hours: Number(b.dataset.hours) });
+    else if (b.dataset.days) solinatorAction('/api/solinator/disable', { days: Number(b.dataset.days) });
+  });
+}
+
+function saveSolinatorLocal() {
+  try { localStorage.setItem('solinatorState', JSON.stringify(solinatorData)); } catch {}
+}
+function loadSolinatorLocal() {
+  try { return JSON.parse(localStorage.getItem('solinatorState') || 'null'); } catch { return null; }
+}
+async function maybeRestoreSolinator(server, local) {
+  if (!local) return;
+  const now = Date.now();
+  const need = (local.boostUntil > now && local.boostUntil > ((server && server.boostUntil) || 0))
+    || (local.disabledUntil > now && local.disabledUntil > ((server && server.disabledUntil) || 0));
+  if (!need) return;
+  try {
+    await fetch('/api/solinator/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(local)
+    });
+  } catch {}
+}
+
+// Odpočet stavu ať se občas obnoví (vyprší boost/vypnutí)
+setInterval(renderSolinator, 60000);
 
 // Lokální kopie dnešní doby běhu — po deployi ji appka vrátí serveru
 function todayStr() {
@@ -4216,6 +4315,18 @@ function applySnapshot(snap) {
   renderAssistantLog(snap.assistantLog || []);
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   renderTempAuto();
+  // Solinátor boost/vypnutí: server + lokální záloha (přežije deploy)
+  const serverSol = snap.solinator || { boostUntil: 0, disabledUntil: 0 };
+  const localSol = loadSolinatorLocal();
+  solinatorData = { boostUntil: serverSol.boostUntil || 0, disabledUntil: serverSol.disabledUntil || 0 };
+  if (localSol) {
+    const nowMs = Date.now();
+    if (localSol.boostUntil > nowMs && localSol.boostUntil > solinatorData.boostUntil) solinatorData.boostUntil = localSol.boostUntil;
+    if (localSol.disabledUntil > nowMs && localSol.disabledUntil > solinatorData.disabledUntil) solinatorData.disabledUntil = localSol.disabledUntil;
+  }
+  renderSolinator();
+  saveSolinatorLocal();
+  maybeRestoreSolinator(serverSol, localSol);
   applyHomeFlags(snap);
   applyInfigyFlags(snap);
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
@@ -4370,6 +4481,11 @@ function connectStream() {
   es.addEventListener('tempAuto', e => {
     tempAutoData = JSON.parse(e.data).tempAuto || tempAutoData;
     renderTempAuto();
+  });
+  es.addEventListener('solinator', e => {
+    solinatorData = JSON.parse(e.data).solinator || solinatorData;
+    renderSolinator();
+    saveSolinatorLocal();
   });
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;

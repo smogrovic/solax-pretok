@@ -106,6 +106,7 @@ const state = {
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
+  solinator: { boostUntil: 0, disabledUntil: 0 }, // +2h/+4h boost (do kdy držet zapnuté) a −1d/−2d (do kdy nespouštět)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
 
@@ -207,6 +208,7 @@ function snapshot() {
     airconEnabled: panasonicEnabled,
     airconTimers,
     tempAuto: state.tempAuto,
+    solinator: state.solinator,
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
@@ -1041,7 +1043,7 @@ function carReserveW() {
 }
 
 const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
-const solinatorAuto = { done13: '', done15: '' };
+const solinatorAuto = { done11: '', done13: '', done15: '' };
 
 let weatherCache = { ts: 0, data: null };
 
@@ -1224,11 +1226,32 @@ async function runSolinatorAutomation(now, prague, weather) {
   const sol = state.devices.solinator;
   const today = pragueDateString();
 
-  // Večerní vypnutí hodinu před západem (ve původním skriptu chybělo, ale večer se vypíná všechno)
+  // −1d/−2d: úplně zakázáno na 1–2 dny (ať klesne chlor) — nespouštíme vůbec
+  if (now < state.solinator.disabledUntil) {
+    if (sol && sol.isOn) await autoSet('solinator', 'off', 'solinátor dočasně vypnut (vysoký chlor)');
+    return;
+  }
+
+  // +2h/+4h boost: relé se po hodině samo vypne, tak posíláme „on" znovu, dokud boost trvá
+  if (now < state.solinator.boostUntil) {
+    if (sol && sol.isOn === false) await autoSet('solinator', 'on', 'boost (nízký chlor)');
+    return; // během boostu neřešíme denní pravidla ani západ
+  }
+
+  // Večerní vypnutí hodinu před západem (večer se vypína všechno)
   const sunsetMs = weather.sys.sunset * 1000;
   if (now >= sunsetMs - 3600000) {
     if (sol && sol.isOn) await autoSet('solinator', 'off', 'západ slunce');
     return;
+  }
+
+  // 11:00 → denní start (dělá appka, bez teplotní podmínky)
+  if (prague.hour === 11 && solinatorAuto.done11 !== today) {
+    if (sol && sol.isOn === true) {
+      solinatorAuto.done11 = today;
+    } else if (sol && sol.isOn === false) {
+      if (await autoSet('solinator', 'on', 'denní start 11:00')) solinatorAuto.done11 = today;
+    }
   }
 
   const temp = weather.main && typeof weather.main.temp === 'number' ? weather.main.temp : null;
@@ -1270,6 +1293,55 @@ async function runSolinatorAutomation(now, prague, weather) {
     }
   }
 }
+
+// Solinátor: podle měření chloru — boost (+2h/+4h) při nízkém, vypnutí (−1d/−2d) při vysokém
+function broadcastSolinator() { broadcast('solinator', { solinator: state.solinator }); }
+
+app.post('/api/solinator/boost', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const hours = Number(req.body && req.body.hours);
+  if (![2, 4].includes(hours)) return res.status(400).json({ error: 'hours musí být 2 nebo 4.' });
+  const base = Math.max(Date.now(), state.solinator.boostUntil || 0);
+  state.solinator.boostUntil = base + hours * 3600000;
+  state.solinator.disabledUntil = 0; // boost ruší případné vypnutí
+  addLog(`Solinátor: boost +${hours} h (nízký chlor)`);
+  broadcastSolinator();
+  res.json({ solinator: state.solinator });
+  try { const sol = state.devices.solinator; if (sol && sol.isOn === false) await autoSet('solinator', 'on', 'boost (nízký chlor)'); } catch {}
+});
+
+app.post('/api/solinator/disable', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const days = Number(req.body && req.body.days);
+  if (![1, 2].includes(days)) return res.status(400).json({ error: 'days musí být 1 nebo 2.' });
+  state.solinator.disabledUntil = Date.now() + days * 24 * 3600000;
+  state.solinator.boostUntil = 0; // vypnutí ruší boost
+  addLog(`Solinátor: vypnut na ${days} ${days === 1 ? 'den' : 'dny'} (vysoký chlor)`);
+  broadcastSolinator();
+  res.json({ solinator: state.solinator });
+  try { const sol = state.devices.solinator; if (sol && sol.isOn) await autoSet('solinator', 'off', 'vypnut (vysoký chlor)'); } catch {}
+});
+
+app.post('/api/solinator/clear', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  state.solinator.boostUntil = 0;
+  state.solinator.disabledUntil = 0;
+  addLog('Solinátor: boost/vypnutí zrušeno');
+  broadcastSolinator();
+  res.json({ solinator: state.solinator });
+});
+
+// Obnova stavu solinátoru po deployi (telefon drží zálohu) — bereme pozdější platné časy
+app.post('/api/solinator/restore', (req, res) => {
+  const now = Date.now();
+  let changed = false;
+  const bu = Number(req.body && req.body.boostUntil);
+  if (Number.isFinite(bu) && bu > now && bu > (state.solinator.boostUntil || 0)) { state.solinator.boostUntil = bu; changed = true; }
+  const du = Number(req.body && req.body.disabledUntil);
+  if (Number.isFinite(du) && du > now && du > (state.solinator.disabledUntil || 0)) { state.solinator.disabledUntil = du; changed = true; }
+  if (changed) broadcastSolinator();
+  res.json({ ok: true });
+});
 
 let automationRunning = false;
 let weatherProblemLogged = false;
