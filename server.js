@@ -105,7 +105,7 @@ const state = {
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
-  tempAuto: { loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
+  tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   solinator: { boostUntil: 0, disabledUntil: 0 }, // +2h/+4h boost (do kdy držet zapnuté) a −1d/−2d (do kdy nespouštět)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
@@ -2233,6 +2233,7 @@ async function pccGetStatus(guid) {
 // na coolTemp °C (tiše); vypne, až klesne pod offTemp °C (hystereze). Po vypnutí
 // automatikou zůstane pokoj aspoň TEMP_AUTO_OFF_LOCKOUT_MS vypnutý (nezapne dřív).
 const TEMP_AUTO_RULES = [
+  { key: 'obyvak', room: 'Obývák', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
   { key: 'loznice', room: 'Ložnice', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
   { key: 'elenka', room: 'Elenka', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
   { key: 'miky', room: 'Miky', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true }

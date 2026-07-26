@@ -1091,12 +1091,6 @@
         <div class="asst-log-title">Co asistent udělal</div>
         <div class="asst-log" id="asstLog"></div>
       </div>
-      <div class="card lockable tempauto-card" id="tempAutoCard">
-        <div class="asst-log-title">Teplotní automatika</div>
-        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne tiché chlazení na 20 °C. Vypne, jakmile klesne pod 20,5 °C — a pak zůstane aspoň 30 min vypnuté.</div>
-        <div class="tempauto-list" id="tempAutoList"></div>
-      </div>
-
       <div class="card lockable" style="margin-top:12px">
         <div class="device-block last">
           <div class="shelly-row">
@@ -1108,6 +1102,12 @@
             <button class="power-btn off-btn" id="autoOffBtn">OFF</button>
           </div>
         </div>
+      </div>
+
+      <div class="card lockable tempauto-card" id="tempAutoCard">
+        <div class="asst-log-title">Teplotní automatika</div>
+        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne tiché chlazení na 20 °C. Vypne, jakmile klesne pod 20,5 °C — a pak zůstane aspoň 30 min vypnuté.</div>
+        <div class="tempauto-list" id="tempAutoList"></div>
       </div>
 
       <button class="refresh-btn" id="refreshBtn">
@@ -1742,7 +1742,7 @@
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Klimatizace — teplotní automatika (Ložnice, Elenka, Miky)</div>
+          <div class="logic-h">Klimatizace — teplotní automatika (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
             <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
             <li>Když teplota v pokoji vystoupí na <b>22 °C</b> → zapne <b>chlazení na 20 °C</b> (tiše).</li>
@@ -3919,12 +3919,13 @@ if (asstSend) {
 // ---------- Teplotní automatika klimatizace ----------
 
 const TEMP_AUTO_ROOMS = [
+  { key: 'obyvak', label: 'Obývák' },
   { key: 'loznice', label: 'Ložnice' },
   { key: 'elenka', label: 'Elenka' },
   { key: 'miky', label: 'Miky' }
 ];
 const tempAutoListEl = document.getElementById('tempAutoList');
-let tempAutoData = { loznice: false, elenka: false, miky: false };
+let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false };
 
 function roomInsideTemp(label) {
   const devs = (airconData && airconData.devices) || [];
