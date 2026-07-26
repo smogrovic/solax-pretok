@@ -1565,7 +1565,7 @@ async function blindCommand(deviceURL, action, value) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      label: `Šmogyho FVE: ${blind.label} ${action}`,
+      label: `SMG home: ${blind.label} ${action}`,
       actions: [{ deviceURL, commands: commandList }]
     })
   });
@@ -2979,7 +2979,7 @@ app.post('/api/assistant', async (req, res) => {
   if (!text) return res.status(400).json({ error: 'Chybí text.' });
 
   const prague = pragueTime();
-  const system = `Jsi hlasový asistent chytré domácnosti "Šmogyho FVE". Uživatel mluví česky. `
+  const system = `Jsi hlasový asistent chytré domácnosti "SMG home". Uživatel mluví česky. `
     + `Aktuální čas je ${String(prague.hour).padStart(2, '0')}:${String(prague.minute).padStart(2, '0')}. `
     + `Podle jeho pokynu zavolej správné nástroje a proveď akci. Můžeš zavolat i více nástrojů najednou (např. "zhasni všechna světla"). `
     + `Zařízení: bojler, bazén (filtrace), solinátor, světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla), `

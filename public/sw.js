@@ -7,7 +7,7 @@ self.addEventListener('push', event => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {}
-  event.waitUntil(self.registration.showNotification(data.title || 'Šmogyho FVE', {
+  event.waitUntil(self.registration.showNotification(data.title || 'SMG home', {
     body: data.body || '',
     icon: '/icon-192.png',
     badge: '/icon-192.png'
