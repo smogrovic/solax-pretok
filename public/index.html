@@ -1697,6 +1697,31 @@
         </div>
 
         <div class="logic-sec">
+          <div class="logic-h">Korekce podle předpovědi výroby</div>
+          <ul class="logic-list">
+            <li>Z Infigy se bere <b>odhad dnešní výroby</b>. Nepočítá se „kolik zbývá vyrobit" (to večer klesá k nule i po skvělém dni), ale <b>kolik zbyde, až se nabije baterie</b>:</li>
+            <li><b>volný přebytek</b> = (odhad výroby − už vyrobeno) − (kolik chybí do plné baterie, kapacita 11,6 kWh)</li>
+            <li>☀️ <b>Silný den</b> (volný přebytek ≥ 15 kWh): bazén SOC práh <b>−15 %</b>, bojler práh <b>−400 W</b> → pustí dřív, ať se přebytek využije.</li>
+            <li>☁️ <b>Slabý den</b> (≤ 5 kWh a SOC &lt; 85 %): bazén SOC práh <b>+10 %</b>, bojler práh <b>+400 W</b> → přednost má nabití baterie.</li>
+            <li>Pojistky: neutahuje se při <b>SOC ≥ 85 %</b> (plnou baterii není proč chránit), SOC práh zůstává v <b>0–95 %</b>, a když data z Infigy chybí, <b>korekce se neuplatní</b>.</li>
+            <li>Auta se to netýká — <b>rezerva na auto se přičítá až nakonec</b>, takže si drží přednost i v silný den.</li>
+            <li>V logu je u zapnutí vidět pásmo i použitý práh, ať je zpětně jasné, proč se tak rozhodlo.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Notifikace do telefonu</div>
+          <ul class="logic-list">
+            <li>🔋 <b>Baterie je plná</b> (≥ 99 %, odjistí se pod 90 %).</li>
+            <li>🚪 <b>Garáž otevřená déle než 10 min.</b></li>
+            <li>🔌 <b>Auto dobito</b> (wallbox přešel na „Dokončeno").</li>
+            <li>🔥 <b>Bojler 1 vyhřátý</b> — nádrž dosáhla 70 °C a topení se vypnulo.</li>
+            <li>⚠️ <b>Výpadek dat</b> — Solax, Infigy nebo klimatizace neodpovídá déle než 30 min (automatika by jela naslepo).</li>
+            <li>Každá hláška přijde <b>jednou</b> a odjistí se, teprve až stav pomine.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
           <div class="logic-h">Priorita auta (platí pro bazén i bojler)</div>
           <ul class="logic-list">
             <li>Auto má přednost — bazén/bojler dostanou jen přebytek <b>nad autem</b>.</li>
@@ -1749,6 +1774,7 @@
             <li>Hodinu před západem slunce → vypnout.</li>
             <li><b>+2 h / +4 h</b> (nízký chlor): appka drží solinátor zapnutý 2/4 h — posílá „on" znovu, jak se relé po hodině vypne.</li>
             <li><b>−1 den / −2 dny</b> (vysoký chlor): úplně zakáže spouštění solinátoru na 1/2 dny.</li>
+            <li>Umí to i <b>asistent</b>: „pusť solinátor na dvě hodiny", „vypni solinátor na den", „ať jede solinátor normálně".</li>
           </ul>
         </div>
 

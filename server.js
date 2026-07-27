@@ -1021,6 +1021,89 @@ function checkBatteryFull(soc) {
   }
 }
 
+// ---------- Hlídače a notifikace ----------
+// Každá hláška se pošle jednou a odjistí se, teprve až stav pomine (jako u plné baterie),
+// takže telefon nespamuje opakovaně tím samým.
+
+const SERVER_START_TS = Date.now();
+const GARAGE_OPEN_ALERT_MS = 10 * 60 * 1000; // garáž otevřená déle → hláška
+const OUTAGE_ALERT_MS = 30 * 60 * 1000;      // zdroj dat neodpovídá déle → hláška
+
+const notif = {
+  garageOpenSince: 0,
+  garageNotified: false,
+  carDoneNotified: false,
+  boilerHotNotified: false,
+  outage: {} // klíč zdroje -> už nahlášeno
+};
+
+// Garáž otevřená moc dlouho. Rolety se čtou jen na vyžádání, tak si je doptáme sami.
+async function checkGarageOpen() {
+  if (!tahomaEnabled || !pushEnabled) return;
+  try {
+    const blinds = await getBlinds();
+    const garage = blinds.find(b => b.uiClass === 'GarageDoor'
+      || cz(b.label).includes('garaz') || cz(b.room).includes('garaz'));
+    if (!garage || typeof garage.closure !== 'number') return;
+    if (garage.closure >= 50) { // zavřeno → odjistit
+      notif.garageOpenSince = 0;
+      notif.garageNotified = false;
+      return;
+    }
+    if (!notif.garageOpenSince) notif.garageOpenSince = Date.now();
+    const openMs = Date.now() - notif.garageOpenSince;
+    if (openMs >= GARAGE_OPEN_ALERT_MS && !notif.garageNotified) {
+      notif.garageNotified = true;
+      const mins = Math.round(openMs / 60000);
+      addLog(`Garáž je otevřená ${mins} min`);
+      sendPushToAll('🚪 Garáž je otevřená', `Garáž je otevřená už ${mins} min.`);
+    }
+  } catch {}
+}
+
+// Auto dobito — stav wallboxu přešel na „Dokončeno"
+function checkCarCharged(status) {
+  if (typeof status !== 'number') return;
+  if (status === 3 && !notif.carDoneNotified) {
+    notif.carDoneNotified = true;
+    addLog('Wallbox: nabíjení auta dokončeno');
+    sendPushToAll('🔌 Auto je dobité', 'Nabíjení auta je dokončeno.');
+  } else if (status === 0 || status === 1) {
+    notif.carDoneNotified = false; // odpojeno/připraveno → odjistit
+  }
+}
+
+// Výpadek zdroje dat — dnes by to skončilo jen v logu, který nikdo nečte
+function checkOutages() {
+  if (!pushEnabled) return;
+  const now = Date.now();
+  // Po startu serveru dáme integracím čas naběhnout, ať nehlásíme planý poplach
+  if (now - SERVER_START_TS < OUTAGE_ALERT_MS) return;
+  const sources = [
+    { key: 'solax', label: 'Solax', on: true, ts: state.solax && state.solax.fetchedAt },
+    { key: 'infigy', label: 'Infigy', on: infigyEnabled, ts: state.infigy && state.infigy.fetchedAt },
+    { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, ts: state.aircon && state.aircon.fetchedAt }
+  ];
+  for (const s of sources) {
+    if (!s.on) continue;
+    const age = s.ts ? now - new Date(s.ts).getTime() : Infinity;
+    if (age > OUTAGE_ALERT_MS) {
+      if (!notif.outage[s.key]) {
+        notif.outage[s.key] = true;
+        addLog(`${s.label}: neodpovídá déle než 30 min`);
+        sendPushToAll('⚠️ Výpadek dat', `${s.label} neodpovídá déle než 30 min — automatika může jet naslepo.`);
+      }
+    } else if (notif.outage[s.key]) {
+      notif.outage[s.key] = false;
+      addLog(`${s.label}: data znovu naskočila`);
+    }
+  }
+}
+
+// Hlídače pouštíme po 5 min (garáž si musí doptat TaHomu, proto ne častěji)
+setTimeout(() => { checkGarageOpen(); checkOutages(); }, 60000);
+setInterval(() => { checkGarageOpen(); checkOutages(); }, 5 * 60 * 1000);
+
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
 const OWM_API_KEY = process.env.OWM_API_KEY;
@@ -1053,6 +1136,34 @@ function carReserveW() {
 
 const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
 const solinatorAuto = { done11: '', done13: '', done15: '' };
+
+// ---------- Korekce prahů podle předpovědi výroby (Infigy SP_FORECAST_PV) ----------
+// Neptáme se „kolik se dnes ještě vyrobí" (to večer klesá k nule i po skvělém dni),
+// ale „kolik zbyde, až se nabije baterie" — to se samo přizpůsobuje denní době:
+//   volny = (odhad výroby − už vyrobeno) − (kolik chybí do plné baterie)
+// Silný den → pustíme bazén/bojler dřív. Slabý den → přednost má nabití baterie.
+const BATTERY_KWH = Number(process.env.BATTERY_KWH) || 11.6;
+const FC_STRONG_KWH = 15;   // volný přebytek nad tímto = silný den
+const FC_WEAK_KWH = 5;      // volný přebytek pod tímto = slabý den
+const FC_SOC_NO_TIGHTEN = 85; // nad tímto SOC už neutahujeme (baterie je skoro plná)
+
+// Vrátí { band, volny } — band: 'strong' | 'weak' | null (normální/bez dat)
+function forecastBand(soc) {
+  const forecast = state.infigy && typeof state.infigy.forecastPv === 'number' ? state.infigy.forecastPv : null;
+  const produced = state.solax && typeof state.solax.yieldToday === 'number' ? state.solax.yieldToday : null;
+  if (forecast === null || produced === null || typeof soc !== 'number') return { band: null, volny: null };
+  const zbyva = forecast - produced;                       // kolik se dnes ještě vyrobí (kWh)
+  const potreba = ((100 - soc) / 100) * BATTERY_KWH;       // kolik chybí do plné baterie (kWh)
+  const volny = Math.round((zbyva - potreba) * 10) / 10;   // co zbyde na bojler a bazén
+  if (volny >= FC_STRONG_KWH) return { band: 'strong', volny };
+  // Utahujeme jen když má baterie ještě co dohánět — u skoro plné není co chránit
+  if (volny <= FC_WEAK_KWH && soc < FC_SOC_NO_TIGHTEN) return { band: 'weak', volny };
+  return { band: null, volny };
+}
+
+function forecastLabel(band) {
+  return band === 'strong' ? 'silný den' : (band === 'weak' ? 'slabý den' : null);
+}
 
 let weatherCache = { ts: 0, data: null };
 
@@ -1149,6 +1260,12 @@ async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   else if (prague.hour >= 13) minSoc = 60;
   else if (prague.hour >= 12) minSoc = 50;
 
+  // Korekce podle předpovědi: silný den → pustíme dřív, slabý → přednost baterii
+  const fc = forecastBand(soc);
+  if (fc.band === 'strong') minSoc -= 15;
+  else if (fc.band === 'weak') minSoc += 10;
+  minSoc = Math.max(0, Math.min(95, minSoc));
+
   if (typeof soc === 'number' && soc < minSoc) {
     if (isOn) await autoSet('pool', 'off', `nízké nabití baterie (${Math.round(soc)} %)`);
     poolAuto.overCount = 0;
@@ -1160,7 +1277,9 @@ async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   if (totalW > POOL_ON_THRESHOLD_W + reserveW) {
     poolAuto.overCount++;
     if (poolAuto.overCount >= 2 && !isOn) {
-      await autoSet('pool', 'on', `přetok ${formatKwLog(totalW)}`);
+      const why = forecastLabel(fc.band);
+      await autoSet('pool', 'on', `přetok ${formatKwLog(totalW)}`
+        + (why ? ` · ${why} (volný přebytek ${fc.volny} kWh, SOC práh ${minSoc} %)` : ''));
       poolAuto.lastOnTime = now;
       poolAuto.overCount = 0;
       poolAuto.underCount = 0;
@@ -1196,8 +1315,13 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
   const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   if (tankTemp !== null && tankTemp >= 70) {
     if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`);
+    if (!notif.boilerHotNotified) { // hláška jednou, odjistí se pod 65 °C
+      notif.boilerHotNotified = true;
+      sendPushToAll('🔥 Bojler 1 je vyhřátý', `Nádrž má ${Math.round(tankTemp)} °C — topení vypnuto.`);
+    }
     return;
   }
+  if (tankTemp !== null && tankTemp < 65) notif.boilerHotNotified = false;
 
   // Hodinu před západem slunce nebo ráno před 10:00 → vypnout natvrdo
   const sunsetMs = weather.sys.sunset * 1000;
@@ -1220,15 +1344,23 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
     return;
   }
 
-  // Dynamický práh přetoku podle nabití baterie (+ rezerva na auto — přebytek nad autem)
+  // Dynamický práh přetoku podle nabití baterie
   let threshold = 1400;
   if (typeof soc === 'number' && soc < 50) threshold = 2600;
   else if (typeof soc === 'number' && soc < 80) threshold = 2000;
+  // Korekce podle předpovědi: silný den → pustíme dřív, slabý → přednost baterii
+  const fc = forecastBand(soc);
+  if (fc.band === 'strong') threshold -= 400;
+  else if (fc.band === 'weak') threshold += 400;
+  threshold = Math.max(500, threshold);
+  // Rezerva na auto se přičítá AŽ NAKONEC — auto si tak drží přednost i v silný den
   threshold += reserveW;
 
   // Zapnutí (jinak drží stav)
   if (totalW > threshold && !isOn) {
-    await autoSet('shelly', 'on', `přetok ${formatKwLog(totalW)}`);
+    const why = forecastLabel(fc.band);
+    await autoSet('shelly', 'on', `přetok ${formatKwLog(totalW)}`
+      + (why ? ` · ${why} (volný přebytek ${fc.volny} kWh, práh ${formatKwLog(threshold)})` : ''));
   }
 }
 
@@ -1307,38 +1439,54 @@ async function runSolinatorAutomation(now, prague, weather) {
 // Solinátor: podle měření chloru — boost (+2h/+4h) při nízkém, vypnutí (−1d/−2d) při vysokém
 function broadcastSolinator() { broadcast('solinator', { solinator: state.solinator }); }
 
-app.post('/api/solinator/boost', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  const hours = Number(req.body && req.body.hours);
-  if (![2, 4].includes(hours)) return res.status(400).json({ error: 'hours musí být 2 nebo 4.' });
+// Sdílená logika (používají ji endpointy i asistent). Stav se nastaví hned (synchronně),
+// povel do relé odletí na pozadí — ať endpoint odpovídá už aktuálním stavem.
+function solinatorBoost(hours) {
   const base = Math.max(Date.now(), state.solinator.boostUntil || 0);
   state.solinator.boostUntil = base + hours * 3600000;
   state.solinator.disabledUntil = 0; // boost ruší případné vypnutí
   addLog(`Solinátor: boost +${hours} h (nízký chlor)`);
   broadcastSolinator();
-  res.json({ solinator: state.solinator });
-  try { const sol = state.devices.solinator; if (sol && sol.isOn === false) await autoSet('solinator', 'on', 'boost (nízký chlor)'); } catch {}
-});
+  const sol = state.devices.solinator;
+  if (sol && sol.isOn === false) autoSet('solinator', 'on', 'boost (nízký chlor)').catch(() => {});
+  return state.solinator;
+}
 
-app.post('/api/solinator/disable', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  const days = Number(req.body && req.body.days);
-  if (![1, 2].includes(days)) return res.status(400).json({ error: 'days musí být 1 nebo 2.' });
+function solinatorDisable(days) {
   state.solinator.disabledUntil = Date.now() + days * 24 * 3600000;
   state.solinator.boostUntil = 0; // vypnutí ruší boost
   addLog(`Solinátor: vypnut na ${days} ${days === 1 ? 'den' : 'dny'} (vysoký chlor)`);
   broadcastSolinator();
-  res.json({ solinator: state.solinator });
-  try { const sol = state.devices.solinator; if (sol && sol.isOn) await autoSet('solinator', 'off', 'vypnut (vysoký chlor)'); } catch {}
-});
+  const sol = state.devices.solinator;
+  if (sol && sol.isOn) autoSet('solinator', 'off', 'vypnut (vysoký chlor)').catch(() => {});
+  return state.solinator;
+}
 
-app.post('/api/solinator/clear', (req, res) => {
-  if (!requireAuth(req, res)) return;
+function solinatorClear() {
   state.solinator.boostUntil = 0;
   state.solinator.disabledUntil = 0;
   addLog('Solinátor: boost/vypnutí zrušeno');
   broadcastSolinator();
-  res.json({ solinator: state.solinator });
+  return state.solinator;
+}
+
+app.post('/api/solinator/boost', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const hours = Number(req.body && req.body.hours);
+  if (![2, 4].includes(hours)) return res.status(400).json({ error: 'hours musí být 2 nebo 4.' });
+  res.json({ solinator: solinatorBoost(hours) });
+});
+
+app.post('/api/solinator/disable', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const days = Number(req.body && req.body.days);
+  if (![1, 2].includes(days)) return res.status(400).json({ error: 'days musí být 1 nebo 2.' });
+  res.json({ solinator: solinatorDisable(days) });
+});
+
+app.post('/api/solinator/clear', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  res.json({ solinator: solinatorClear() });
 });
 
 // Obnova stavu solinátoru po deployi (telefon drží zálohu) — bereme pozdější platné časy
@@ -2519,6 +2667,7 @@ async function pollWallbox() {
   try {
     const result = await wbFetchStatus();
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
+    checkCarCharged(state.wallbox.status); // notifikace „auto dobito"
     // Do grafu režimů NEzaznamenáváme skutečný stav nabíječky (ta se sama dá do STOP,
     // když auto není připojené / je dobito). Zaznamenáváme jen změny NASTAVENÉHO režimu
     // (viz runEnergyControl a /api/wallbox/set), ať čára FAST/ECO/GREEN běží dál i přes STOP.
@@ -2844,6 +2993,39 @@ async function assistantSetWallbox(mode) {
   return `Wallbox: režim ${WB_MODE_LABELS[mode]}.`;
 }
 
+// Přepnutí wallboxu mezi automatikou (ECO/FAST dle slunce) a pevným FAST
+function assistantSetWallboxAuto(auto) {
+  if (!wallboxEnabled) return 'Wallbox není nastaven.';
+  state.wbAuto = !!auto;
+  broadcast('wbAuto', { wbAuto: state.wbAuto });
+  addLog(`Wallbox: přepnuto na ${state.wbAuto ? 'AUTO' : 'FAST'} (asistent)`);
+  state.wbLastTarget = null; // vynuť okamžité nastavení režimu
+  runEnergyControl();
+  return `Wallbox: ${state.wbAuto ? 'automatika (ECO ve dne, FAST v noci)' : 'pevně FAST'}.`;
+}
+
+// Solinátor podle chloru: boost při nízkém, vypnutí na dny při vysokém
+function assistantSetSolinator({ action, hours, days }) {
+  const fmt = ts => new Date(ts).toLocaleString('cs-CZ', {
+    timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+  if (action === 'boost') {
+    const h = [2, 4].includes(Number(hours)) ? Number(hours) : 2;
+    const s = solinatorBoost(h);
+    return `Solinátor pojede ${h} h (do ${fmt(s.boostUntil)}).`;
+  }
+  if (action === 'disable') {
+    const d = [1, 2].includes(Number(days)) ? Number(days) : 1;
+    const s = solinatorDisable(d);
+    return `Solinátor vypnutý na ${d === 1 ? 'jeden den' : 'dva dny'} (do ${fmt(s.disabledUntil)}).`;
+  }
+  if (action === 'clear') {
+    solinatorClear();
+    return 'Solinátor: boost i vypnutí zrušeno, jede podle běžné automatiky.';
+  }
+  return 'U solinátoru neznám tuhle akci (boost / disable / clear).';
+}
+
 function assistantAddAirconTimer({ room, time, action, quiet }) {
   if (!/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
   const dev = findAircon(room);
@@ -2963,6 +3145,28 @@ const ASSISTANT_TOOLS = [
     }
   },
   {
+    name: 'set_wallbox_auto',
+    description: 'Přepne nabíječku auta mezi automatikou a pevným rychlým nabíjením. auto=true → automatika (ECO ve dne z přebytku, FAST v noci), auto=false → pořád FAST.',
+    input_schema: {
+      type: 'object',
+      properties: { auto: { type: 'boolean', description: 'true = automatika, false = pevně FAST.' } },
+      required: ['auto']
+    }
+  },
+  {
+    name: 'set_solinator',
+    description: 'Řídí solinátor bazénu podle naměřeného chloru. action "boost" = při NÍZKÉM chloru nechá solinátor běžet 2 nebo 4 hodiny (relé se samo po hodině vypne, appka ho zapíná znovu). action "disable" = při VYSOKÉM chloru úplně zakáže spouštění na 1 nebo 2 dny, aby chlor klesl. action "clear" = zruší boost i zákaz.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['boost', 'disable', 'clear'] },
+        hours: { type: 'number', enum: [2, 4], description: 'Jen pro boost: 2 nebo 4 hodiny.' },
+        days: { type: 'number', enum: [1, 2], description: 'Jen pro disable: 1 nebo 2 dny.' }
+      },
+      required: ['action']
+    }
+  },
+  {
     name: 'lock_house',
     description: 'Zamkne vchodové dveře domu (Nuki zámek) — např. "zamkni dům", "zamkni dveře".',
     input_schema: { type: 'object', properties: {} }
@@ -2975,6 +3179,8 @@ async function runAssistantTool(name, input) {
     case 'set_aircon': return assistantSetAircon(input);
     case 'control_blinds': return assistantControlBlinds(input);
     case 'set_wallbox': return assistantSetWallbox(input.mode);
+    case 'set_wallbox_auto': return assistantSetWallboxAuto(input.auto);
+    case 'set_solinator': return assistantSetSolinator(input);
     case 'add_aircon_timer': return assistantAddAirconTimer(input);
     case 'add_blind_timer': return assistantAddBlindTimer(input);
     case 'add_relay_timer': return assistantAddRelayTimer(input);
@@ -3000,6 +3206,11 @@ app.post('/api/assistant', async (req, res) => {
     + `PERGOLA: Na terase je pergola (lamelová/markýzová střecha) — ovládáš ji jako žaluzii přes control_blinds, target "pergola". action "up" = otevřít/vytáhnout, "down" = zavřít/zatáhnout. Pergola má i vlastní SVĚTLO: "rozsviť/zhasni pergolu" nebo "světlo u pergoly" → set_relay device "světlo terasa" (NE zahradní světla!). Rozliš: "zatáhni/otevři pergolu" = žaluzie (control_blinds), "rozsviť pergolu" = světlo (set_relay). `
     + `SVĚTLA VENKU: "rozsviť/zhasni zahradu" → set_relay device "zahrada" (obě zahradní světla nahoře i dole). "rozsviť/zhasni komplet venek" (celý venek) → set_relay device "komplet venek" (zahrada nahoře + dole + světlo bazén + pergola). Platí i pro zhasínání. `
     + `Umíš taky zamknout dům/vchodové dveře (lock_house). `
+    + `SOLINÁTOR A CHLOR: Když uživatel řekne, že je v bazénu MÁLO chloru (nebo „pusť solinátor na dvě/čtyři hodiny"), zavolej set_solinator action "boost" s hours 2 nebo 4. `
+    + `Když řekne, že je chloru MOC (nebo „vypni solinátor na den/dva"), zavolej set_solinator action "disable" s days 1 nebo 2. `
+    + `„Zruš boost / ať jede solinátor normálně" → set_solinator action "clear". Když neurčí počet, zvol 2 hodiny resp. 1 den. `
+    + `WALLBOX: „dej wallbox na automatiku" → set_wallbox_auto auto=true; „nabíjej pořád rychle / natvrdo fast" → set_wallbox_auto auto=false. `
+    + `Konkrétní režim (stop/eco/fast/green) nastav přes set_wallbox. `
     + `LOCKDOWN: Když uživatel řekne "lockdown" (nebo "zabezpeč dům", "odcházím a zabezpeč"), proveď najednou: zhasni všechna světla (set_relay device "všechna světla", state "off"), zatáhni všechny žaluzie (control_blinds target "vše", action "down") a zamkni dům (lock_house). `
     + `Jednej podle situace: když uživatel popíše stav (svítí slunce, je horko, je zima, je tma), sám zvol a proveď vhodnou akci. `
     + `Např. "svítí na mě slunce v kuchyni a je mi teplo" → zatáhni žaluzie v Obýváku a zapni chlazení klimatizace Obývák (třeba na 23 °C). `
