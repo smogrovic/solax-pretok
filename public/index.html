@@ -56,8 +56,9 @@
     display:flex;
     flex-direction:column;
     align-items:center;
+    /* Horní safe-area řeší lišta se záložkami nad sliderem, tady stačí odsazení */
     padding:
-      max(12px, env(safe-area-inset-top))
+      12px
       max(16px, env(safe-area-inset-right))
       max(12px, env(safe-area-inset-bottom))
       max(16px, env(safe-area-inset-left));
@@ -286,6 +287,58 @@
     height:144px;
     display:block;
   }
+  #pvChart{
+    width:100%;
+    height:150px;
+    display:block;
+  }
+  .pv-tabs{display:flex;gap:6px;margin-top:8px;width:100%;}
+  .pv-tab{
+    flex:1;
+    border:none;
+    border-radius:10px;
+    padding:8px 4px;
+    font-size:12px;
+    font-weight:700;
+    color:var(--grey-text);
+    background:rgba(44,62,80,0.06);
+  }
+  .pv-tab.active{background:rgba(245,147,61,0.16);color:var(--orange-dark);}
+  .pv-avg{
+    font-size:12.5px;
+    color:var(--grey-text);
+    text-align:center;
+    margin-top:10px;
+    min-height:16px;
+  }
+  .pv-avg b{color:var(--navy);font-size:15px;font-weight:800;}
+
+  /* Lišta se záložkami stránek (nahoře místo nadpisu) */
+  .page-tabs{
+    flex-shrink:0;
+    display:flex;
+    gap:22px;
+    overflow-x:auto;
+    scrollbar-width:none;
+    -webkit-overflow-scrolling:touch;
+    padding:max(8px, env(safe-area-inset-top)) 16px 0;
+    background:var(--bg);
+    border-bottom:1px solid rgba(44,62,80,0.10);
+  }
+  .page-tabs::-webkit-scrollbar{display:none;}
+  .page-tab{
+    flex:0 0 auto;
+    border:none;
+    background:none;
+    padding:0 0 8px;
+    font-size:15px;
+    font-weight:600;
+    white-space:nowrap;
+    color:var(--grey-text);
+    border-bottom:3px solid transparent;
+    border-radius:2px;
+  }
+  .page-tab.active{color:var(--orange);border-bottom-color:var(--orange);}
   .graph-total{
     font-size:11px;
     font-weight:600;
@@ -613,12 +666,12 @@
     margin:-8px 0 0 -8px;border:2px solid rgba(255,255,255,0.4);
     border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;
   }
+  /* Přesně 2 řádky návrhů (2×2) — u flex-wrap by počet řádků kolísal podle šířky */
   .asst-examples{
-    display:flex;
-    flex-wrap:wrap;
+    display:grid;
+    grid-template-columns:1fr 1fr;
     gap:6px;
     margin-top:12px;
-    justify-content:center;
   }
   .asst-chip{
     border:none;
@@ -1037,39 +1090,17 @@
     display:none;
   }
   .error-banner.show{display:block;}
-  .page-dots{
-    flex-shrink:0;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    gap:8px;
-    padding:6px 0 max(10px, env(safe-area-inset-bottom));
-    background:var(--bg);
-  }
-  .dot{
-    width:8px;
-    height:8px;
-    border-radius:50%;
-    background:rgba(44,62,80,0.2);
-    cursor:pointer;
-    transition:background .2s, transform .2s;
-  }
-  .dot.active{
-    background:var(--orange);
-    transform:scale(1.2);
-  }
 </style>
 </head>
 <body>
 
+<div class="page-tabs" id="pageTabs"></div>
+
 <div class="slider-wrap" id="sliderWrap">
 
   <!-- Asistent (první stránka) -->
-  <div class="slide" id="assistantSlide">
+  <div class="slide" id="assistantSlide" data-title="Asistent">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Asistent</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1079,7 +1110,7 @@
         <div class="lock-error"></div>
       </div>
       <div class="card lockable asszistant-card">
-        <div class="asst-hint">Napiš nebo nadiktuj (mikrofon na klávesnici), co mám udělat.</div>
+        <div class="asst-hint">Napiš nebo nadiktuj, co mám udělat.</div>
         <div class="asst-reply" id="asstReply"></div>
         <div class="asst-row">
           <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
@@ -1106,7 +1137,6 @@
 
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
-        <div class="tempauto-hint">Když teplota v pokoji stoupne na 22 °C, zapne tiché chlazení na 20 °C. Vypne, jakmile klesne pod 20,5 °C — a pak zůstane aspoň 30 min vypnuté.</div>
         <div class="tempauto-list" id="tempAutoList"></div>
       </div>
 
@@ -1121,11 +1151,8 @@
   </div>
 
   <!-- Slide 1: Stats -->
-  <div class="slide slide-stats">
+  <div class="slide slide-stats" data-title="FVE">
     <div class="page">
-      <div class="topbar">
-        <div class="title">FVE</div>
-      </div>
       <div class="error-banner" id="errorBanner"></div>
       <div class="card">
         <div class="nodes">
@@ -1284,11 +1311,8 @@
   </div>
 
   <!-- Slide 3: Žaluzie -->
-  <div class="slide">
+  <div class="slide" data-title="Žaluzie">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Žaluzie</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1326,11 +1350,8 @@
   </div>
 
   <!-- Slide 4: Žaluzie 2 -->
-  <div class="slide" id="blindsSlide2">
+  <div class="slide" id="blindsSlide2" data-title="Žaluzie 2">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Žaluzie</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1366,11 +1387,8 @@
   </div>
 
   <!-- Slide 5: Klima -->
-  <div class="slide">
+  <div class="slide" data-title="Klima">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Klima</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1404,11 +1422,8 @@
   </div>
 
   <!-- Slide 6: Ovládání -->
-  <div class="slide">
+  <div class="slide" data-title="Ovládání">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Ovládání</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1534,11 +1549,8 @@
   </div>
 
   <!-- Slide 7: Wallbox -->
-  <div class="slide">
+  <div class="slide" data-title="Wallbox">
     <div class="page top">
-      <div class="topbar">
-        <div class="title">Wallbox</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1589,11 +1601,8 @@
   </div>
 
   <!-- Slide 8: Přehled -->
-  <div class="slide">
+  <div class="slide" data-title="Přehled">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Přehled</div>
-      </div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -1644,6 +1653,17 @@
         </div>
       </div>
 
+      <div class="card stats-card">
+        <div class="graph-title">Odhad vs. skutečnost (10 dní)</div>
+        <div class="pv-tabs" id="pvTabs">
+          <button class="pv-tab active" data-fc="fcAm">Ranní odhad</button>
+          <button class="pv-tab" data-fc="fcPm">Večerní odhad</button>
+        </div>
+        <div class="pv-avg" id="pvAvg"></div>
+        <canvas id="pvChart"></canvas>
+        <div class="timeline-legend" id="pvLegend"></div>
+      </div>
+
       <div class="card stats-card" id="timelineAcCard">
         <div class="graph-title">Klimatizace (24 h)</div>
         <canvas id="timelineChartAc"></canvas>
@@ -1653,11 +1673,8 @@
   </div>
 
   <!-- Slide 9: Log -->
-  <div class="slide">
+  <div class="slide" data-title="Log">
     <div class="page">
-      <div class="topbar">
-        <div class="title">Log</div>
-      </div>
       <div class="card log-card">
         <div class="log-list" id="logList">
           <div class="log-empty">Zatím žádné záznamy</div>
@@ -1669,11 +1686,8 @@
   </div>
 
   <!-- Slide 10: Logika automatiky -->
-  <div class="slide">
+  <div class="slide" data-title="Logika automatiky">
     <div class="page top">
-      <div class="topbar">
-        <div class="title">Logika automatiky</div>
-      </div>
       <div class="card logic-card">
         <div class="logic-sec">
           <div class="logic-h">Obecné</div>
@@ -1706,6 +1720,16 @@
             <li>Pojistky: neutahuje se při <b>SOC ≥ 85 %</b> (plnou baterii není proč chránit), SOC práh zůstává v <b>0–95 %</b>, a když data z Infigy chybí, <b>korekce se neuplatní</b>.</li>
             <li>Auta se to netýká — <b>rezerva na auto se přičítá až nakonec</b>, takže si drží přednost i v silný den.</li>
             <li>V logu je u zapnutí vidět pásmo i použitý práh, ať je zpětně jasné, proč se tak rozhodlo.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Graf „Odhad vs. skutečnost" (Přehled)</div>
+          <ul class="logic-list">
+            <li>Každý den se ukládá <b>ranní odhad</b> (první hodnota z Infigy po 7:00, dál se nemění), <b>večerní odhad</b> (poslední hodnota dne) a <b>skutečná výroba</b>.</li>
+            <li>V grafu jde mezi ranním a večerním odhadem <b>přepnout</b> — ranní ukazuje, jak dobře Infigy předpovídá den dopředu.</li>
+            <li>Čísla pod sloupci = <b>kolik % odhadu se ten den skutečně vyrobilo</b>; nad grafem je průměr za zobrazené dny.</li>
+            <li>Historie se drží <b>14 dní</b>, graf kreslí posledních <b>10</b>. Plní se postupně — jeden bod za den.</li>
           </ul>
         </div>
 
@@ -1793,7 +1817,6 @@
 
 </div>
 
-<div class="page-dots" id="pageDots"></div>
 
 <script>
 const fveEl = document.getElementById('fveValue');
@@ -3880,11 +3903,13 @@ const asstExamples = document.getElementById('asstExamples');
 const asstLog = document.getElementById('asstLog');
 const asstLogCard = document.getElementById('asstLogCard');
 
-const ASST_EXAMPLES = ['Zapni bojler', 'Zhasni všechna světla', 'Zatáhni žaluzie v ložnici', 'Nastav klima v obýváku na 23 a chlazení'];
+// Čtyři krátké návrhy → mřížka 2×2 = přesně dva řádky
+const ASST_EXAMPLES = ['Zapni bojler', 'Zhasni všechna světla', 'Zatáhni žaluzie v ložnici', 'Zamkni dům'];
 
 function renderAssistantLog(entries) {
   if (!asstLog || !asstLogCard) return;
-  const list = (entries || []).slice().sort((a, b) => b.t - a.t);
+  // Jen posledních 5 akcí (server si historii drží celou)
+  const list = (entries || []).slice().sort((a, b) => b.t - a.t).slice(0, 5);
   if (!list.length) { asstLogCard.style.display = 'none'; asstLog.innerHTML = ''; return; }
   asstLogCard.style.display = '';
   asstLog.innerHTML = '';
@@ -4302,6 +4327,172 @@ function renderProduction() {
   if (prodActualEl) prodActualEl.textContent = fmtKwh(lastSolaxData && typeof lastSolaxData.yieldToday === 'number' ? lastSolaxData.yieldToday : null);
 }
 
+// ---------- Graf: odhad vs. skutečnost za 10 dní ----------
+// Sdružené sloupce, obě veličiny v kWh na JEDNÉ ose. Procenta nejsou druhá osa
+// (dvojitá osa je klasický anti-pattern) — jdou do popisků pod dny a do průměru.
+const PV_COLORS = { fc: '#3498db', act: '#f5933d' }; // ověřeno validátorem palety
+const PV_DAYS_SHOWN = 10;
+const pvChartCanvas = document.getElementById('pvChart');
+const pvLegendEl = document.getElementById('pvLegend');
+const pvAvgEl = document.getElementById('pvAvg');
+const pvTabsEl = document.getElementById('pvTabs');
+let pvDaysData = [];
+let pvForecastKey = 'fcAm'; // 'fcAm' = ranní odhad, 'fcPm' = večerní
+
+function savePvDaysLocal() {
+  try { localStorage.setItem('pvDays', JSON.stringify(pvDaysData)); } catch {}
+}
+function loadPvDaysLocal() {
+  try { return JSON.parse(localStorage.getItem('pvDays') || '[]') || []; } catch { return []; }
+}
+
+// Sloučení serveru s lokální zálohou: doplň chybějící, u výroby ber vyšší
+function mergePvDays(a, b) {
+  const map = new Map();
+  for (const r of [...(a || []), ...(b || [])]) {
+    if (!r || typeof r.d !== 'string') continue;
+    const cur = map.get(r.d) || { d: r.d, fcAm: null, fcPm: null, actual: null };
+    if (cur.fcAm === null && typeof r.fcAm === 'number') cur.fcAm = r.fcAm;
+    if (cur.fcPm === null && typeof r.fcPm === 'number') cur.fcPm = r.fcPm;
+    if (typeof r.actual === 'number' && r.actual > (cur.actual || 0)) cur.actual = r.actual;
+    map.set(r.d, cur);
+  }
+  return [...map.values()].sort((x, y) => x.d.localeCompare(y.d)).slice(-14);
+}
+
+async function maybeRestorePvDays(serverDays, localDays) {
+  if (!localDays || !localDays.length) return;
+  const srv = new Map((serverDays || []).map(r => [r.d, r]));
+  const need = localDays.some(r => {
+    const s = srv.get(r.d);
+    if (!s) return true;
+    return (s.fcAm === null && typeof r.fcAm === 'number')
+      || (s.fcPm === null && typeof r.fcPm === 'number')
+      || (typeof r.actual === 'number' && r.actual > (s.actual || 0));
+  });
+  if (!need) return;
+  try {
+    await fetch('/api/pvdays/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pvDays: localDays })
+    });
+  } catch {}
+}
+
+// Sloupec se zaoblenou horní hranou, ukotvený k základně
+function pvBar(ctx, x, yTop, w, yBase, color) {
+  const h = Math.max(0, yBase - yTop);
+  const r = Math.min(4, w / 2, h);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, yBase);
+  ctx.lineTo(x, yTop + r);
+  ctx.quadraticCurveTo(x, yTop, x + r, yTop);
+  ctx.lineTo(x + w - r, yTop);
+  ctx.quadraticCurveTo(x + w, yTop, x + w, yTop + r);
+  ctx.lineTo(x + w, yBase);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function renderPvChart() {
+  if (pvTabsEl) {
+    pvTabsEl.querySelectorAll('.pv-tab').forEach(t =>
+      t.classList.toggle('active', t.dataset.fc === pvForecastKey));
+  }
+  if (!pvChartCanvas) return;
+  const ctx = pvChartCanvas.getContext('2d');
+  const w = pvChartCanvas.clientWidth || 320;
+  const h = pvChartCanvas.clientHeight || 150;
+  const dpr = window.devicePixelRatio || 1;
+  pvChartCanvas.width = w * dpr;
+  pvChartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const grey = 'rgba(44,62,80,0.45)';
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  // Legenda (u dvou sérií povinná)
+  if (pvLegendEl) {
+    pvLegendEl.textContent = '';
+    for (const [color, label] of [[PV_COLORS.fc, 'Odhad (Infigy)'], [PV_COLORS.act, 'Skutečnost (Solax)']]) {
+      const span = document.createElement('span');
+      const dot = document.createElement('i');
+      dot.style.background = color;
+      span.appendChild(dot);
+      span.appendChild(document.createTextNode(label));
+      pvLegendEl.appendChild(span);
+    }
+  }
+
+  // Jen dny, kde máme obě čísla — ať graf nemá díry
+  const days = (pvDaysData || [])
+    .filter(r => typeof r[pvForecastKey] === 'number' && r[pvForecastKey] > 0 && typeof r.actual === 'number')
+    .slice(-PV_DAYS_SHOWN);
+
+  if (!days.length) {
+    ctx.fillStyle = grey;
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    if (pvAvgEl) pvAvgEl.textContent = 'Graf se plní postupně, jeden bod za den.';
+    return;
+  }
+
+  // Průměr: kolik % odhadu se skutečně vyrobilo
+  const pcts = days.map(r => (r.actual / r[pvForecastKey]) * 100);
+  const avg = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+  if (pvAvgEl) {
+    pvAvgEl.innerHTML = `Průměrně vyrobeno <b>${avg} %</b> odhadu`
+      + `<span style="opacity:.75"> · dny v %</span>`;
+  }
+
+  const padL = 28, padR = 6, padT = 8, padB = 30;
+  const baseY = h - padB;
+  const max = Math.max(...days.map(r => Math.max(r[pvForecastKey], r.actual))) * 1.1 || 1;
+  const y = v => baseY - (v / max) * (baseY - padT);
+
+  // Recesivní mřížka + popisky osy y (kWh) — jedna osa pro obě série
+  ctx.textAlign = 'right';
+  for (const frac of [0, 0.5, 1]) {
+    const v = max * frac;
+    ctx.strokeStyle = 'rgba(44,62,80,0.07)';
+    ctx.beginPath(); ctx.moveTo(padL, y(v)); ctx.lineTo(w - padR, y(v)); ctx.stroke();
+    ctx.fillStyle = grey;
+    ctx.fillText(Math.round(v), padL - 4, y(v) + 3);
+  }
+
+  const slotW = (w - padL - padR) / days.length;
+  const barW = Math.min(11, Math.max(5, (slotW - 6) / 2));
+  days.forEach((r, i) => {
+    const cx = padL + slotW * i + slotW / 2;
+    const fcV = r[pvForecastKey];
+    // 2px mezera mezi dvojicí sloupců
+    pvBar(ctx, cx - barW - 1, y(fcV), barW, baseY, PV_COLORS.fc);
+    pvBar(ctx, cx + 1, y(r.actual), barW, baseY, PV_COLORS.act);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = grey;
+    // Datum (např. 29.7) — bez koncové tečky, ať se na 10 dnů popisky nedotýkají
+    const parts = r.d.split('-');
+    ctx.font = '8.5px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillText(`${Number(parts[2])}.${Number(parts[1])}`, cx, baseY + 12);
+    // Procento — bez znaku „%" (ten je v popisku průměru), jinak by se čísla slévala.
+    // V textové barvě, ne v barvě série.
+    ctx.font = '600 9px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = 'rgba(44,62,80,0.8)';
+    ctx.fillText(Math.round(pcts[i]), cx, baseY + 24);
+  });
+}
+
+if (pvTabsEl) {
+  for (const tab of pvTabsEl.querySelectorAll('.pv-tab')) {
+    tab.addEventListener('click', () => { pvForecastKey = tab.dataset.fc; renderPvChart(); });
+  }
+}
+window.addEventListener('resize', renderPvChart);
+
 // ---------- SSE stream — živé aktualizace ze serveru ----------
 
 let es = null;
@@ -4366,6 +4557,13 @@ function applySnapshot(snap) {
   renderSolinator();
   saveSolinatorLocal();
   maybeRestoreSolinator(serverSol, localSol);
+  // Denní odhad vs. skutečnost: server + lokální záloha (přežije deploy)
+  const serverPv = snap.pvDays || [];
+  const localPv = loadPvDaysLocal();
+  pvDaysData = mergePvDays(serverPv, localPv);
+  renderPvChart();
+  savePvDaysLocal();
+  maybeRestorePvDays(serverPv, localPv);
   applyHomeFlags(snap);
   applyInfigyFlags(snap);
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
@@ -4525,6 +4723,12 @@ function connectStream() {
     solinatorData = JSON.parse(e.data).solinator || solinatorData;
     renderSolinator();
     saveSolinatorLocal();
+  });
+  es.addEventListener('pvDays', e => {
+    // MERGE, ne přepis — server po deployi startuje s prázdnou historií
+    pvDaysData = mergePvDays(JSON.parse(e.data).pvDays || [], pvDaysData);
+    renderPvChart();
+    savePvDaysLocal();
   });
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
@@ -4761,30 +4965,39 @@ async function initPush() {
 
 initPush();
 
-// Slider dots — generují se podle počtu stránek (druhá stránka rolet může zmizet)
+// Lišta se záložkami stránek — názvy se berou z data-title na slidech
+// (druhá stránka rolet i Asistent můžou zmizet, proto se lišta staví dynamicky)
 const sliderWrap = document.getElementById('sliderWrap');
-const pageDotsEl = document.getElementById('pageDots');
+const pageTabsEl = document.getElementById('pageTabs');
 
 function updateDots() {
+  if (!pageTabsEl || !sliderWrap.clientWidth) return;
   const idx = Math.round(sliderWrap.scrollLeft / sliderWrap.clientWidth);
-  pageDotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+  const tabs = pageTabsEl.querySelectorAll('.page-tab');
+  tabs.forEach((t, i) => t.classList.toggle('active', i === idx));
+  // Aktivní záložku vždy doroluj do viditelné části lišty
+  const active = tabs[idx];
+  if (active) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
 
 function rebuildDots() {
-  const count = sliderWrap.querySelectorAll('.slide').length;
-  pageDotsEl.textContent = '';
-  for (let i = 0; i < count; i++) {
-    const dot = document.createElement('span');
-    dot.className = 'dot';
-    dot.addEventListener('click', () => {
+  if (!pageTabsEl) return;
+  const slides = sliderWrap.querySelectorAll('.slide');
+  pageTabsEl.textContent = '';
+  slides.forEach((slide, i) => {
+    const tab = document.createElement('button');
+    tab.className = 'page-tab';
+    tab.textContent = slide.dataset.title || `Stránka ${i + 1}`;
+    tab.addEventListener('click', () => {
       sliderWrap.scrollTo({ left: i * sliderWrap.clientWidth, behavior: 'smooth' });
     });
-    pageDotsEl.appendChild(dot);
-  }
+    pageTabsEl.appendChild(tab);
+  });
   updateDots();
 }
 
 sliderWrap.addEventListener('scroll', updateDots, { passive: true });
+window.addEventListener('resize', updateDots);
 rebuildDots();
 </script>
 </body>

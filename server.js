@@ -107,6 +107,7 @@ const state = {
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   solinator: { boostUntil: 0, disabledUntil: 0 }, // +2h/+4h boost (do kdy držet zapnuté) a −1d/−2d (do kdy nespouštět)
+  pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
 };
 
@@ -200,6 +201,7 @@ function snapshot() {
     autoEnabled: state.autoEnabled,
     weather: state.weather,
     runtime: runtimePayload(),
+    pvDays: state.pvDays,
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     blindTimers,
@@ -475,6 +477,30 @@ async function pollShelly() {
   }
 }
 
+// ---------- Denní odhad výroby vs. skutečnost (graf „jak se odhad trefil") ----------
+// Zapisuje se PRŮBĚŽNĚ, ne až o půlnoci — kdyby se server v noci restartoval,
+// dokončený den je už uložený.
+const PV_DAYS_MAX = 14;
+
+function recordPvDay() {
+  const d = pragueDateString();
+  let rec = state.pvDays.find(r => r.d === d);
+  if (!rec) { rec = { d, fcAm: null, fcPm: null, actual: null }; state.pvDays.push(rec); }
+  const fc = state.infigy && typeof state.infigy.forecastPv === 'number' ? state.infigy.forecastPv : null;
+  const act = state.solax && typeof state.solax.yieldToday === 'number' ? state.solax.yieldToday : null;
+  if (fc !== null && fc > 0) {
+    // Ranní odhad: první hodnota po 7:00, dál se nepřepisuje (poctivá předpověď dne dopředu)
+    if (rec.fcAm === null && pragueTime().hour >= 7) rec.fcAm = fc;
+    rec.fcPm = fc; // Večerní odhad: poslední viděná hodnota dne
+  }
+  // Maximum chrání před restartem serveru, po kterém Solax krátce hlásí 0
+  if (act !== null) rec.actual = Math.max(rec.actual || 0, act);
+  if (state.pvDays.length > PV_DAYS_MAX) {
+    state.pvDays.sort((a, b) => a.d.localeCompare(b.d));
+    state.pvDays = state.pvDays.slice(-PV_DAYS_MAX);
+  }
+}
+
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
 function runtimePayload() {
   return { date: state.runtime.date, ms: state.runtime.ms, wh: state.runtime.wh, yesterday: state.runtime.yesterday };
@@ -532,9 +558,11 @@ function updateRuntimes() {
   wh.b2 += Math.max(0, b2Kw) * 1000 * dtH;
 
   state.runtime.lastTs = now;
+  recordPvDay();
   pruneTimeline();
   broadcast('runtime', { runtime: runtimePayload() });
   broadcast('timeline', { timeline: state.timeline });
+  broadcast('pvDays', { pvDays: state.pvDays });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -813,6 +841,31 @@ app.post('/api/runtime/restore', (req, res) => {
   }
   if (changed) broadcast('runtime', { runtime: runtimePayload() });
   res.json({ ok: true });
+});
+
+// Obnova denní historie výroby po deployi — telefon drží zálohu.
+// Doplňujeme jen chybějící (živé hodnoty serveru nepřepisujeme), u výroby bereme vyšší.
+app.post('/api/pvdays/restore', (req, res) => {
+  const days = req.body && Array.isArray(req.body.pvDays) ? req.body.pvDays : null;
+  if (!days) return res.status(400).json({ error: 'Chybí pvDays.' });
+  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 200 ? v : null);
+  let changed = false;
+  for (const inc of days.slice(0, PV_DAYS_MAX)) {
+    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
+    const am = num(inc.fcAm), pm = num(inc.fcPm), ac = num(inc.actual);
+    if (am === null && pm === null && ac === null) continue; // samé nesmysly → nezakládat prázdný den
+    let rec = state.pvDays.find(r => r.d === inc.d);
+    if (!rec) { rec = { d: inc.d, fcAm: null, fcPm: null, actual: null }; state.pvDays.push(rec); changed = true; }
+    if (rec.fcAm === null && am !== null) { rec.fcAm = am; changed = true; }
+    if (rec.fcPm === null && pm !== null) { rec.fcPm = pm; changed = true; }
+    if (ac !== null && ac > (rec.actual || 0)) { rec.actual = ac; changed = true; }
+  }
+  if (changed) {
+    state.pvDays.sort((a, b) => a.d.localeCompare(b.d));
+    state.pvDays = state.pvDays.slice(-PV_DAYS_MAX);
+    broadcast('pvDays', { pvDays: state.pvDays });
+  }
+  res.json({ ok: true, days: state.pvDays.length });
 });
 
 // Obnova časové osy po restartu/deployi — sloučení segmentů z telefonu
