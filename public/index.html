@@ -526,6 +526,9 @@
     align-items:center;
     gap:2px;
     flex-shrink:0;
+    /* Pevná šířka, ať širší popisek garáže („Zavřeno") neodtlačí tlačítka
+       a šipky zůstaly zarovnané se všemi řádky nad i pod */
+    width:46px;
   }
   .blind-meter-pct{
     font-size:9px;
@@ -1328,7 +1331,7 @@
       </div>
 
       <div class="card lockable timer-card blind-timer-card">
-        <div class="graph-title">Časovač rolet</div>
+        <div class="graph-title">Časovač žaluzií</div>
         <select class="timer-select bt-device"></select>
         <div class="timer-form-row">
           <select class="timer-select bt-action">
@@ -1365,7 +1368,7 @@
       </div>
 
       <div class="card lockable timer-card blind-timer-card">
-        <div class="graph-title">Časovač rolet</div>
+        <div class="graph-title">Časovač žaluzií</div>
         <select class="timer-select bt-device"></select>
         <div class="timer-form-row">
           <select class="timer-select bt-action">
@@ -2845,14 +2848,16 @@ function renderBlindRow(b) {
       return fn(btn);
     };
     btns.appendChild(makeBlindBtn('blind-btn', '▲', guard(true, btn => blindCommand(b.deviceURL, upCmd, tiltValue(), btn))));
-    // Prostřední pozice: stop (jen io rolety), nebo mezera. Garáž ji vynechá úplně —
-    // tlačítko ▼ tak sedne hned vedle ▲.
+    // Prostřední pozice: stop (jen io rolety), nebo mezera. Garáž stop nemá a ▼ má mít
+    // hned vedle ▲ — prázdné místo proto dostane až NA KONEC, aby si blok udržel
+    // šířku tří tlačítek a ▲ zůstalo zarovnané se šipkami v řádcích nad ním.
     if (b.hasStop && b.uiClass !== 'GarageDoor' && !isPergola) {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
     } else if (!isGarage) {
       btns.appendChild(spacer());
     }
     btns.appendChild(makeBlindBtn('blind-btn', '▼', guard(false, btn => blindCommand(b.deviceURL, downCmd, tiltValue(), btn))));
+    if (isGarage) btns.appendChild(spacer());
   }
 
   row.appendChild(info);
@@ -2982,7 +2987,7 @@ async function loadBlinds() {
 
 loadBlinds();
 
-// ---------- Časovače rolet (na obou stránkách rolet stejný seznam) ----------
+// ---------- Časovače žaluzií (na obou stránkách stejný seznam) ----------
 
 const blindTimerCards = Array.from(document.querySelectorAll('.blind-timer-card'));
 let blindTimersData = [];
@@ -3117,7 +3122,7 @@ for (const card of blindTimerCards) {
       if (!res.ok) throw new Error(data.error || 'Časovač se nepodařilo přidat.');
       errorEl.classList.remove('show');
     } catch (err) {
-      errorEl.textContent = 'Časovač rolet: ' + err.message;
+      errorEl.textContent = 'Časovač žaluzií: ' + err.message;
       errorEl.classList.add('show');
     }
     addBtn.disabled = false;

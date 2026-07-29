@@ -1838,7 +1838,7 @@ app.post('/api/blinds/command', async (req, res) => {
   }
 });
 
-// ---------- Časovače rolet (jednorázové vytažení/zatažení v daný čas) ----------
+// ---------- Časovače žaluzií (jednorázové vytažení/zatažení v daný čas) ----------
 
 let blindTimers = [];
 let blindTimerSeq = 1;
