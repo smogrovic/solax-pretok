@@ -2848,16 +2848,15 @@ function renderBlindRow(b) {
       return fn(btn);
     };
     btns.appendChild(makeBlindBtn('blind-btn', '▲', guard(true, btn => blindCommand(b.deviceURL, upCmd, tiltValue(), btn))));
-    // Prostřední pozice: stop (jen io rolety), nebo mezera. Garáž stop nemá a ▼ má mít
-    // hned vedle ▲ — prázdné místo proto dostane až NA KONEC, aby si blok udržel
-    // šířku tří tlačítek a ▲ zůstalo zarovnané se šipkami v řádcích nad ním.
+    // Prostřední pozice: stop (jen io rolety), jinak mezera. Garáž ani pergola stop
+    // nemají — ▲ tak zůstane v prvním sloupci a ▼ ve třetím, zarovnané pod ▼ / OFF
+    // v řádcích nad nimi.
     if (b.hasStop && b.uiClass !== 'GarageDoor' && !isPergola) {
       btns.appendChild(makeBlindBtn('blind-btn', '■', btn => blindCommand(b.deviceURL, 'stop', tiltValue(), btn)));
-    } else if (!isGarage) {
+    } else {
       btns.appendChild(spacer());
     }
     btns.appendChild(makeBlindBtn('blind-btn', '▼', guard(false, btn => blindCommand(b.deviceURL, downCmd, tiltValue(), btn))));
-    if (isGarage) btns.appendChild(spacer());
   }
 
   row.appendChild(info);
