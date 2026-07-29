@@ -930,6 +930,9 @@ app.post('/api/tempauto', (req, res) => {
     if (enabled) {
       delete tempAutoOffAt[key]; // ruční zapnutí automatiky ruší 30min blokaci
       if (panasonicEnabled) setTimeout(pollAircon, 500); // hned vyhodnotit
+    } else if (panasonicEnabled && rule) {
+      // Vypnutí přepínače = vypnout i klimatizaci, ne ji nechat běžet v aktuálním stavu
+      tempAutoTurnOff(rule);
     }
   }
   res.json({ tempAuto: state.tempAuto });
@@ -2451,6 +2454,23 @@ const TEMP_AUTO_RULES = [
 ];
 const TEMP_AUTO_OFF_LOCKOUT_MS = 30 * 60 * 1000; // po vypnutí drž vypnuté aspoň 30 min
 const tempAutoOffAt = {}; // key -> čas posledního vypnutí automatikou
+
+// Vypnutí přepínače teplotní automatiky vypne i samotnou klimatizaci —
+// jinak by v pokoji zůstala běžet v tom stavu, v jakém ji automatika nechala.
+async function tempAutoTurnOff(rule) {
+  const dev = findAircon(rule.room);
+  if (!dev || dev.power !== true) return; // nenašli jsme ji, nebo už je vypnutá
+  try {
+    await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+      method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters: { operate: 0 } })
+    }));
+    dev.power = false;
+    addLog(`${dev.name}: vypnuto (teplotní automatika vypnuta)`);
+    broadcast('aircon', { aircon: state.aircon });
+  } catch (err) {
+    addLog(`Teplotní automatika ${rule.room}: vypnutí klimatizace selhalo (${err.message.slice(0, 100)})`);
+  }
+}
 
 async function evaluateTempAuto(devices) {
   for (const rule of TEMP_AUTO_RULES) {

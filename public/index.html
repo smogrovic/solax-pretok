@@ -1812,6 +1812,7 @@
             <li>Když teplota v pokoji vystoupí na <b>22 °C</b> → zapne <b>chlazení na 20 °C</b> (tiše).</li>
             <li><b>Vypne</b>, jakmile teplota klesne pod <b>20,5 °C</b>.</li>
             <li>Po vypnutí automatikou zůstane vypnuto aspoň <b>30 min</b>.</li>
+            <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
           </ul>
         </div>
       </div>
@@ -2800,7 +2801,8 @@ function renderBlindRow(b) {
   label.className = 'blind-label';
   label.textContent = b.label;
   info.appendChild(label);
-  const pos = blindPositionText(b);
+  // U garáže stav nepíšeme — vpravo ho už ukazuje ikona vrat s popiskem
+  const pos = isGarage ? '' : blindPositionText(b);
   if (pos) {
     const posEl = document.createElement('span');
     posEl.className = 'blind-pos';
