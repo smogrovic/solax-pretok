@@ -106,6 +106,7 @@ const state = {
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
+  tempAutoOn: 22,    // společná spínací teplota pro všechny pokoje (18–23 °C, jezdec v appce)
   solinator: { boostUntil: 0, disabledUntil: 0 }, // +2h/+4h boost (do kdy držet zapnuté) a −1d/−2d (do kdy nespouštět)
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: []   // { t, text } — co asistent provedl, za 24 h
@@ -210,6 +211,7 @@ function snapshot() {
     airconEnabled: panasonicEnabled,
     airconTimers,
     tempAuto: state.tempAuto,
+    tempAutoOn: state.tempAutoOn,
     solinator: state.solinator,
     wallbox: state.wallbox,
     wallboxEnabled,
@@ -936,6 +938,34 @@ app.post('/api/tempauto', (req, res) => {
     }
   }
   res.json({ tempAuto: state.tempAuto });
+});
+
+// Společná spínací teplota pro všechny pokoje (jezdec v appce)
+app.post('/api/tempauto/threshold', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const temp = Number(req.body && req.body.temp);
+  if (!Number.isInteger(temp) || temp < TEMP_AUTO_ON_MIN || temp > TEMP_AUTO_ON_MAX) {
+    return res.status(400).json({ error: `Teplota musí být celé číslo ${TEMP_AUTO_ON_MIN}–${TEMP_AUTO_ON_MAX} °C.` });
+  }
+  if (state.tempAutoOn !== temp) {
+    state.tempAutoOn = temp;
+    const l = tempAutoLevels();
+    addLog(`Teplotní automatika: spínat při ${l.onTemp} °C (vypínat při ${l.offTemp} °C)`);
+    broadcast('tempAutoOn', { tempAutoOn: state.tempAutoOn });
+    if (panasonicEnabled) setTimeout(pollAircon, 500); // hned přehodnotit podle nové meze
+  }
+  res.json({ tempAutoOn: state.tempAutoOn });
+});
+
+// Obnova nastavené meze po deployi (telefon drží zálohu) — jen hodnota, ne přepínače
+app.post('/api/tempauto/restore', (req, res) => {
+  const temp = Number(req.body && req.body.tempAutoOn);
+  if (Number.isInteger(temp) && temp >= TEMP_AUTO_ON_MIN && temp <= TEMP_AUTO_ON_MAX
+      && state.tempAutoOn !== temp) {
+    state.tempAutoOn = temp;
+    broadcast('tempAutoOn', { tempAutoOn: state.tempAutoOn });
+  }
+  res.json({ tempAutoOn: state.tempAutoOn });
 });
 
 // Ruční refresh z appky („Aktualizovat"): vynutí načtení VŠECH zdrojů.
@@ -2447,11 +2477,22 @@ async function pccGetStatus(guid) {
 // na coolTemp °C (tiše); vypne, až klesne pod offTemp °C (hystereze). Po vypnutí
 // automatikou zůstane pokoj aspoň TEMP_AUTO_OFF_LOCKOUT_MS vypnutý (nezapne dřív).
 const TEMP_AUTO_RULES = [
-  { key: 'obyvak', room: 'Obývák', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
-  { key: 'loznice', room: 'Ložnice', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
-  { key: 'elenka', room: 'Elenka', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true },
-  { key: 'miky', room: 'Miky', onTemp: 22, offTemp: 20.5, coolTemp: 20, quiet: true }
+  { key: 'obyvak', room: 'Obývák', quiet: true },
+  { key: 'loznice', room: 'Ložnice', quiet: true },
+  { key: 'elenka', room: 'Elenka', quiet: true },
+  { key: 'miky', room: 'Miky', quiet: true }
 ];
+
+// Spínací teplota je jedna společná pro všechny pokoje (jezdec v appce, 18–23 °C).
+// Odvozené hodnoty drží stejné rozestupy jako původní napevno psané pravidlo (22/20,5/20):
+//   vypnout  = zapnout − 1,5 °C
+//   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
+const TEMP_AUTO_ON_MIN = 18;
+const TEMP_AUTO_ON_MAX = 23;
+function tempAutoLevels() {
+  const onTemp = state.tempAutoOn;
+  return { onTemp, offTemp: onTemp - 1.5, coolTemp: onTemp - 2 };
+}
 const TEMP_AUTO_OFF_LOCKOUT_MS = 30 * 60 * 1000; // po vypnutí drž vypnuté aspoň 30 min
 const tempAutoOffAt = {}; // key -> čas posledního vypnutí automatikou
 
@@ -2473,6 +2514,7 @@ async function tempAutoTurnOff(rule) {
 }
 
 async function evaluateTempAuto(devices) {
+  const { onTemp, offTemp, coolTemp } = tempAutoLevels();
   for (const rule of TEMP_AUTO_RULES) {
     if (!state.tempAuto[rule.key]) continue;
     const rn = cz(rule.room);
@@ -2480,10 +2522,10 @@ async function evaluateTempAuto(devices) {
     if (!dev || typeof dev.insideTemp !== 'number') continue;
     let parameters = null, msg = null;
     const lockedUntil = (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_OFF_LOCKOUT_MS;
-    if (dev.insideTemp >= rule.onTemp && dev.power !== true && Date.now() >= lockedUntil) {
-      parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: rule.coolTemp, ecoMode: rule.quiet ? 2 : 0 };
-      msg = `${dev.name}: zapnuto chlazení ${rule.coolTemp} °C (v pokoji ${dev.insideTemp} °C)`;
-    } else if (dev.insideTemp <= rule.offTemp && dev.power === true) {
+    if (dev.insideTemp >= onTemp && dev.power !== true && Date.now() >= lockedUntil) {
+      parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: coolTemp, ecoMode: rule.quiet ? 2 : 0 };
+      msg = `${dev.name}: zapnuto chlazení ${coolTemp} °C (v pokoji ${dev.insideTemp} °C, mez ${onTemp} °C)`;
+    } else if (dev.insideTemp <= offTemp && dev.power === true) {
       parameters = { operate: 0 };
       msg = `${dev.name}: vypnuto (v pokoji ${dev.insideTemp} °C)`;
     }

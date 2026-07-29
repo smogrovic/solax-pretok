@@ -720,6 +720,31 @@
     flex-direction:column;
     gap:10px;
   }
+  /* Společná spínací teplota pro všechny pokoje */
+  .tempauto-thr{
+    margin-top:14px;
+    padding-top:12px;
+    border-top:1px solid rgba(44,62,80,0.08);
+  }
+  .tempauto-thr-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:6px;
+  }
+  .tempauto-thr-label{font-size:12.5px;color:var(--grey-text);font-weight:600;}
+  .tempauto-thr-val{font-size:15px;color:var(--navy);font-weight:800;}
+  .tempauto-thr input[type=range]{
+    width:100%;
+    accent-color:var(--orange);
+    margin:0;
+  }
+  .tempauto-thr-hint{
+    font-size:11px;
+    color:var(--grey-text);
+    margin-top:6px;
+    text-align:center;
+  }
   .tempauto-row{
     display:flex;
     align-items:center;
@@ -1141,6 +1166,14 @@
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
         <div class="tempauto-list" id="tempAutoList"></div>
+        <div class="tempauto-thr">
+          <div class="tempauto-thr-row">
+            <span class="tempauto-thr-label">Zapnout při</span>
+            <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
+          </div>
+          <input type="range" min="18" max="23" step="1" value="22" id="tempAutoOnSlider">
+          <div class="tempauto-thr-hint" id="tempAutoOffHint"></div>
+        </div>
       </div>
 
       <button class="refresh-btn" id="refreshBtn">
@@ -1809,8 +1842,10 @@
           <div class="logic-h">Klimatizace — teplotní automatika (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
             <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
-            <li>Když teplota v pokoji vystoupí na <b>22 °C</b> → zapne <b>chlazení na 20 °C</b> (tiše).</li>
-            <li><b>Vypne</b>, jakmile teplota klesne pod <b>20,5 °C</b>.</li>
+            <li><b>Spínací teplota se nastavuje jezdcem</b> pod přepínači (<b>18–23 °C</b> po 1 °C) a platí <b>pro všechny pokoje</b> zároveň.</li>
+            <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení (tiše) na <b>mez − 2 °C</b>.</li>
+            <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1,5 °C</b>.</li>
+            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 20,5 °C.</li>
             <li>Po vypnutí automatikou zůstane vypnuto aspoň <b>30 min</b>.</li>
             <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
           </ul>
@@ -3995,6 +4030,59 @@ const TEMP_AUTO_ROOMS = [
 const tempAutoListEl = document.getElementById('tempAutoList');
 let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false };
 
+// Společná spínací teplota (18–23 °C). Vypínací mez je vždy o 1,5 °C níž.
+const tempAutoSliderEl = document.getElementById('tempAutoOnSlider');
+const tempAutoOnValEl = document.getElementById('tempAutoOnVal');
+const tempAutoOffHintEl = document.getElementById('tempAutoOffHint');
+let tempAutoOnData = 22;
+
+function fmtC(v) { return String(v).replace('.', ',') + ' °C'; }
+
+function renderTempAutoThreshold() {
+  if (tempAutoSliderEl && document.activeElement !== tempAutoSliderEl) {
+    tempAutoSliderEl.value = String(tempAutoOnData);
+  }
+  const shown = tempAutoSliderEl ? Number(tempAutoSliderEl.value) : tempAutoOnData;
+  if (tempAutoOnValEl) tempAutoOnValEl.textContent = fmtC(shown);
+  if (tempAutoOffHintEl) {
+    tempAutoOffHintEl.textContent = `Vypne pod ${fmtC(shown - 1.5)} · chladí na ${fmtC(shown - 2)}`;
+  }
+}
+
+function saveTempAutoOnLocal() {
+  try { localStorage.setItem('tempAutoOn', String(tempAutoOnData)); } catch {}
+}
+function loadTempAutoOnLocal() {
+  const v = Number(localStorage.getItem('tempAutoOn'));
+  return Number.isInteger(v) && v >= 18 && v <= 23 ? v : null;
+}
+
+async function sendTempAutoThreshold(temp) {
+  try {
+    const res = await fetch('/api/tempauto/threshold', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ temp })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se nastavit.');
+    tempAutoOnData = data.tempAutoOn;
+    saveTempAutoOnLocal();
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Teplotní automatika: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  renderTempAutoThreshold();
+}
+
+if (tempAutoSliderEl) {
+  // Během tažení jen přepisujeme popisky, povel jde až po puštění
+  tempAutoSliderEl.addEventListener('input', renderTempAutoThreshold);
+  tempAutoSliderEl.addEventListener('change', () => sendTempAutoThreshold(Number(tempAutoSliderEl.value)));
+}
+
 function roomInsideTemp(label) {
   const devs = (airconData && airconData.devices) || [];
   const n = label.toLowerCase();
@@ -4551,6 +4639,19 @@ function applySnapshot(snap) {
   renderAssistantLog(snap.assistantLog || []);
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   renderTempAuto();
+  // Spínací teplota: server + záloha v telefonu (přežije deploy)
+  if (typeof snap.tempAutoOn === 'number') tempAutoOnData = snap.tempAutoOn;
+  const localThr = loadTempAutoOnLocal();
+  if (localThr !== null && localThr !== tempAutoOnData) {
+    // Server po deployi startuje s výchozími 22 °C — vrátíme mu naposledy nastavenou mez
+    tempAutoOnData = localThr;
+    fetch('/api/tempauto/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempAutoOn: localThr })
+    }).catch(() => {});
+  }
+  renderTempAutoThreshold();
+  saveTempAutoOnLocal();
   // Solinátor boost/vypnutí: server + lokální záloha (přežije deploy)
   const serverSol = snap.solinator || { boostUntil: 0, disabledUntil: 0 };
   const localSol = loadSolinatorLocal();
@@ -4724,6 +4825,10 @@ function connectStream() {
   es.addEventListener('tempAuto', e => {
     tempAutoData = JSON.parse(e.data).tempAuto || tempAutoData;
     renderTempAuto();
+  });
+  es.addEventListener('tempAutoOn', e => {
+    const v = JSON.parse(e.data).tempAutoOn;
+    if (typeof v === 'number') { tempAutoOnData = v; renderTempAutoThreshold(); saveTempAutoOnLocal(); }
   });
   es.addEventListener('solinator', e => {
     solinatorData = JSON.parse(e.data).solinator || solinatorData;
