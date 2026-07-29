@@ -4038,15 +4038,21 @@ let tempAutoOnData = 22;
 
 function fmtC(v) { return String(v).replace('.', ',') + ' °C'; }
 
-function renderTempAutoThreshold() {
-  if (tempAutoSliderEl && document.activeElement !== tempAutoSliderEl) {
-    tempAutoSliderEl.value = String(tempAutoOnData);
-  }
+// Popisky se jen přepisují podle polohy jezdce — do .value se tady NIKDY nesahá,
+// jinak by se hodnota při tažení vracela zpět (iOS u range inputu nenastaví focus).
+function updateTempAutoLabels() {
   const shown = tempAutoSliderEl ? Number(tempAutoSliderEl.value) : tempAutoOnData;
   if (tempAutoOnValEl) tempAutoOnValEl.textContent = fmtC(shown);
   if (tempAutoOffHintEl) {
     tempAutoOffHintEl.textContent = `Vypne pod ${fmtC(shown - 1.5)} · chladí na ${fmtC(shown - 2)}`;
   }
+}
+
+// Nastavení jezdce podle serveru — jen když s ním uživatel zrovna nehýbe
+let tempAutoDragging = false;
+function renderTempAutoThreshold() {
+  if (tempAutoSliderEl && !tempAutoDragging) tempAutoSliderEl.value = String(tempAutoOnData);
+  updateTempAutoLabels();
 }
 
 function saveTempAutoOnLocal() {
@@ -4079,8 +4085,14 @@ async function sendTempAutoThreshold(temp) {
 
 if (tempAutoSliderEl) {
   // Během tažení jen přepisujeme popisky, povel jde až po puštění
-  tempAutoSliderEl.addEventListener('input', renderTempAutoThreshold);
-  tempAutoSliderEl.addEventListener('change', () => sendTempAutoThreshold(Number(tempAutoSliderEl.value)));
+  tempAutoSliderEl.addEventListener('input', () => { tempAutoDragging = true; updateTempAutoLabels(); });
+  tempAutoSliderEl.addEventListener('change', () => {
+    tempAutoDragging = false;
+    sendTempAutoThreshold(Number(tempAutoSliderEl.value));
+  });
+  // Kdyby 'change' nedorazil (přerušené gesto), zámek uvolníme i po puštění prstu
+  tempAutoSliderEl.addEventListener('pointerup', () => { tempAutoDragging = false; });
+  tempAutoSliderEl.addEventListener('touchend', () => { tempAutoDragging = false; });
 }
 
 function roomInsideTemp(label) {
