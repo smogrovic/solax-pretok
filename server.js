@@ -1324,6 +1324,14 @@ function pragueDateString() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
 }
 
+// Čas časovače HH:MM — kontroluje i rozsah. Samotný formát nestačí: „25:99" by prošlo,
+// ale takový časovač by se nikdy netrefil do reálného času a tiše by nikdy nespustil.
+function validTimerTime(t) {
+  if (typeof t !== 'string' || !/^\d{2}:\d{2}$/.test(t)) return false;
+  const [h, m] = t.split(':').map(Number);
+  return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+}
+
 function formatKwLog(w) {
   return (w / 1000).toFixed(1).replace('.', ',') + ' kW';
 }
@@ -1965,7 +1973,7 @@ app.post('/api/blinds/timer', async (req, res) => {
   const urls = Array.isArray(deviceURLs)
     ? deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 20)
     : (typeof deviceURL === 'string' && deviceURL ? [deviceURL] : []);
-  if (!urls.length || !/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down', 'tilt'].includes(action)) {
+  if (!urls.length || !validTimerTime(time) || !['up', 'down', 'tilt'].includes(action)) {
     return res.status(400).json({ error: 'Chybí rolety, time (HH:MM) nebo action (up/down/tilt).' });
   }
   let tilt = null;
@@ -2060,7 +2068,7 @@ async function actuateRelay(key, stateOn, reason) {
 app.post('/api/relay/timer', (req, res) => {
   if (!requireAuth(req, res)) return;
   const { key, time, action } = req.body || {};
-  if (!DEVICES[key] || !/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) {
+  if (!DEVICES[key] || !validTimerTime(time) || !['on', 'off'].includes(action)) {
     return res.status(400).json({ error: 'Chybí zařízení, time (HH:MM) nebo action (on/off).' });
   }
   if (relayTimers.length >= 10) {
@@ -2753,14 +2761,17 @@ let airconTimerSeq = 1;
 app.post('/api/aircon/timer', (req, res) => {
   if (!requireAuth(req, res)) return;
   const { guid, time, action, quiet } = req.body || {};
-  if (typeof guid !== 'string' || !/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) {
+  if (typeof guid !== 'string' || !validTimerTime(time) || !['on', 'off'].includes(action)) {
     return res.status(400).json({ error: 'Chybí guid, time (HH:MM) nebo action (on/off).' });
   }
   if (airconTimers.length >= 10) {
     return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
   }
+  // guid "all" = hromadný časovač; ukládá se jako JEDEN záznam (ne N samostatných),
+  // ať se nevyčerpá limit 10 časovačů a seznam zůstane přehledný
   const dev = state.aircon.devices.find(d => d.guid === guid);
-  const timer = { id: airconTimerSeq++, guid, name: (dev && dev.name) || 'Klima', time, action, quiet: action === 'on' && !!quiet };
+  const name = guid === 'all' ? 'Všechny klimatizace' : ((dev && dev.name) || 'Klima');
+  const timer = { id: airconTimerSeq++, guid, name, time, action, quiet: action === 'on' && !!quiet };
   airconTimers.push(timer);
   airconTimers.sort((a, b) => a.time.localeCompare(b.time));
   addLog(`Časovač: ${timer.name} ${action === 'on' ? 'zapnout' : 'vypnout'} v ${time}`);
@@ -2791,23 +2802,34 @@ setInterval(async () => {
   airconTimers = airconTimers.filter(t => t.time !== current);
   broadcast('airconTimers', { timers: airconTimers });
   for (const t of due) {
-    try {
-      const params = { operate: t.action === 'on' ? 1 : 0 };
-      // Při zapnutí s tichým režimem rovnou nastavíme ecoMode = tichý (2)
-      if (t.action === 'on' && t.quiet) params.ecoMode = 2;
-      await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-        method: 'POST',
-        body: JSON.stringify({ deviceGuid: t.guid, parameters: params })
-      }));
-      const dev = state.aircon.devices.find(d => d.guid === t.guid);
-      if (dev) {
-        dev.power = t.action === 'on';
-        if (t.action === 'on' && t.quiet) dev.eco = 2;
-        broadcast('aircon', { aircon: state.aircon });
+    const params = { operate: t.action === 'on' ? 1 : 0 };
+    // Při zapnutí s tichým režimem rovnou nastavíme ecoMode = tichý (2)
+    if (t.action === 'on' && t.quiet) params.ecoMode = 2;
+    // „all" = obejít všechny jednotky; pccQueued je serializuje, takže na Panasonic
+    // nepřijde nával naráz
+    const targets = t.guid === 'all'
+      ? (state.aircon.devices || []).map(d => d.guid)
+      : [t.guid];
+    let ok = 0;
+    for (const guid of targets) {
+      try {
+        await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+          method: 'POST',
+          body: JSON.stringify({ deviceGuid: guid, parameters: params })
+        }));
+        const dev = state.aircon.devices.find(d => d.guid === guid);
+        if (dev) {
+          dev.power = t.action === 'on';
+          if (t.action === 'on' && t.quiet) dev.eco = 2;
+        }
+        ok++;
+      } catch (err) {
+        addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
       }
+    }
+    if (ok > 0) {
+      broadcast('aircon', { aircon: state.aircon });
       addLog(`${t.name}: ${t.action === 'on' ? 'zapnuto' : 'vypnuto'}${t.action === 'on' && t.quiet ? ' (tichý)' : ''} (časovač ${t.time})`);
-    } catch (err) {
-      addLog(`Časovač ${t.name}: selhal (${err.message.slice(0, 100)})`);
     }
   }
 }, 30000);
@@ -3088,7 +3110,7 @@ async function assistantSetRelay(name, stateOn) {
 function assistantAddRelayTimer({ device, time, action }) {
   const key = findRelayKey(device || '');
   if (!key) return `Zařízení „${device}" neznám.`;
-  if (!/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  if (!validTimerTime(time) || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
   if (relayTimers.length >= 10) return 'Je nastaveno maximum časovačů (10).';
   const timer = { id: relayTimerSeq++, key, name: DEVICE_LABELS[key], time, action };
   relayTimers.push(timer);
@@ -3228,7 +3250,7 @@ function assistantSetSolinator({ action, hours, days }) {
 }
 
 function assistantAddAirconTimer({ room, time, action, quiet }) {
-  if (!/^\d{2}:\d{2}$/.test(time || '') || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  if (!validTimerTime(time) || !['on', 'off'].includes(action)) return 'Neplatný čas nebo akce časovače.';
   const dev = findAircon(room);
   const timer = { id: airconTimerSeq++, guid: dev ? dev.guid : room, name: dev ? dev.name : room, time, action, quiet: action === 'on' && !!quiet };
   airconTimers.push(timer);
@@ -3239,7 +3261,7 @@ function assistantAddAirconTimer({ room, time, action, quiet }) {
 }
 
 async function assistantAddBlindTimer({ target, time, action, orientation }) {
-  if (!/^\d{2}:\d{2}$/.test(time || '') || !['up', 'down'].includes(action)) return 'Neplatný čas nebo akce časovače.';
+  if (!validTimerTime(time) || !['up', 'down'].includes(action)) return 'Neplatný čas nebo akce časovače.';
   const blinds = await getBlinds();
   const covers = blinds.filter(b => b.type === 'cover');
   const matched = matchBlinds(covers, target);

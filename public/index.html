@@ -1843,6 +1843,16 @@
         </div>
 
         <div class="logic-sec">
+          <div class="logic-h">Časovače — hromadná volba</div>
+          <ul class="logic-list">
+            <li><b>Žaluzie</b>: volba <b>„Všechny žaluzie"</b> ovládne rolety <b>z té stránky</b>, na které časovač zakládáš (Žaluzie / Žaluzie 2).</li>
+            <li><b>Pergola ani garáž se časovačem neovládají</b> — nejsou v seznamu a nespadají ani pod hromadnou volbu.</li>
+            <li><b>Klimatizace</b>: volba <b>„Všechny klimatizace"</b> je jeden časovač, který v daný čas obejde všechny jednotky.</li>
+            <li>Časovač relé (stránka Ovládání) hromadnou volbu <b>záměrně nemá</b> — mísí spotřebiče se světly a hromadné zapnutí by znamenalo velký odběr naráz.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
           <div class="logic-h">Klimatizace — teplotní automatika (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
             <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
@@ -3063,10 +3073,11 @@ function blindTimerOptions(page) {
       }
     }
   }
-  // Na první stránce nabídneme i "Vše" — všechny rolety v domě najednou
-  if (page === 1) {
-    const all = blinds.filter(b => b.type === 'cover').map(b => b.deviceURL);
-    if (all.length) options.push({ value: all.join('|'), label: 'Vše' });
+  // Hromadná volba: rolety z TÉTO stránky. Skládá se z položek, které v seznamu
+  // opravdu jsou, takže se automaticky drží filtr stránky i vyloučení pergoly
+  // a garáže (dřív šla volba "Vše" mimo tenhle filtr a zavírala i garážová vrata).
+  if (options.length > 1) {
+    options.push({ value: options.map(o => o.value).join('|'), label: 'Všechny žaluzie' });
   }
   return options;
 }
@@ -3349,10 +3360,18 @@ let airconTimersData = [];
 function renderTimerDeviceOptions() {
   const selected = timerDeviceEl.value;
   timerDeviceEl.textContent = '';
-  for (const d of airconData.devices || []) {
+  const devs = airconData.devices || [];
+  for (const d of devs) {
     const opt = document.createElement('option');
     opt.value = d.guid;
     opt.textContent = d.name;
+    timerDeviceEl.appendChild(opt);
+  }
+  // Hromadná volba — server ji uloží jako jeden časovač a při spuštění obejde všechny
+  if (devs.length > 1) {
+    const opt = document.createElement('option');
+    opt.value = 'all';
+    opt.textContent = 'Všechny klimatizace';
     timerDeviceEl.appendChild(opt);
   }
   if (selected) timerDeviceEl.value = selected;
