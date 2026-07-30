@@ -1648,7 +1648,7 @@
         <div class="lock-error"></div>
       </div>
       <div class="card stats-card">
-        <div class="graph-title">Kdy co běželo (8:00–24:00)</div>
+        <div class="graph-title">Kdy co běželo (0:00–24:00)</div>
         <canvas id="timelineChart"></canvas>
         <div class="timeline-legend" id="timelineLegend"></div>
       </div>
@@ -2658,9 +2658,10 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
 
   const x = frac => padL + frac * (w - padL - padR);
 
-  // Svislá mřížka + popisky hodin po 4 h
-  ctx.textAlign = 'center';
-  for (let hh = startHour; hh <= startHour + spanHours; hh += 4) {
+  // Svislá mřížka + popisky hodin. U 24h osy krok 6 h — po 4 h se popisky dotýkaly.
+  const lastHh = startHour + spanHours;
+  const tickStep = spanHours > 16 ? 6 : 4;
+  for (let hh = startHour; hh <= lastHh; hh += tickStep) {
     const fx = x((hh - startHour) / spanHours);
     ctx.strokeStyle = 'rgba(44,62,80,0.08)';
     ctx.lineWidth = 1;
@@ -2669,8 +2670,11 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
     ctx.lineTo(fx, h - padB);
     ctx.stroke();
     ctx.fillStyle = 'rgba(44,62,80,0.4)';
+    // Krajní popisky zarovnáme dovnitř, ať se u okraje neodseknou (dřív „24:0")
+    ctx.textAlign = hh === startHour ? 'left' : (hh === lastHh ? 'right' : 'center');
     ctx.fillText(hh + ':00', fx, h - 4);
   }
+  ctx.textAlign = 'center';
 
   days.forEach((day, d) => {
     const blockTop = padT + d * (dayBlockH + dayGap) + 8;
@@ -2707,7 +2711,7 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
 
 function renderTimeline() {
   // Pevná zařízení: okno 8:00–24:00
-  drawTimeline(timelineCanvas, timelineLegendEl, baseTimelineLanes(), 8, 16);
+  drawTimeline(timelineCanvas, timelineLegendEl, baseTimelineLanes(), 0, 24);
   // Klimatizace: samostatný graf, celých 24 h (0:00–24:00)
   const acLanes = airconTimelineLanes();
   if (timelineAcCard) timelineAcCard.style.display = acLanes.length ? '' : 'none';
