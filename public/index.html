@@ -1736,13 +1736,14 @@
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Načítání dat (nejdéle každých 5 min)</div>
+          <div class="logic-h">Načítání dat</div>
           <ul class="logic-list">
-            <li><b>Solax</b> (výroba, baterie, přetok) a <b>Shelly</b> (bojler, bazén, solinátor, světla): každé <b>2 min</b>.</li>
-            <li><b>Wallbox</b> (Solax cloud): každou <b>1 min</b>. <b>Teploty bojlerů</b> do grafu: každou <b>1 min</b>.</li>
-            <li><b>Panasonic klimatizace</b> + tepelné čerpadlo: každých <b>5 min</b>.</li>
-            <li><b>Infigy</b> (bojler 2, výroba, baterie, wallbox) a <b>počasí</b>: každých <b>5 min</b>.</li>
+            <li><b>Diagram toku energie bere všechno ze Solaxu</b> (výroba, baterie, dům, přetok) — jeden zdroj v jednom okamžiku, takže součty vždy sedí. Dřív se míchal s Infigy a hodnoty byly z různých časů.</li>
+            <li>Každé <b>2 min</b>: Solax, Shelly (bazén, relé), wallbox.</li>
+            <li>Každých <b>5 min</b>: bojlery (Panasonic pro bojler 1, Infigy pro bojler 2) <b>včetně zápisu do grafu</b>, teploty klimatizací, počasí, přepočet automatiky.</li>
+            <li>Dotazy jsou <b>rozprostřené v čase</b> (každý poller má vlastní offset), takže se nepotkají naráz. Dotazy na Shelly navíc čeká jedna fronta s odstupem <b>1 s</b>.</li>
             <li>Tlačítko <b>Aktualizovat</b> (stránka Asistent) vynutí okamžité načtení <b>všech</b> zdrojů. Delší dotazy (Shelly, Panasonic, Infigy) dobíhají na pozadí a naskočí samy, jak dorazí.</li>
+            <li>Grafy za 24 h jsou <b>vyhlazené</b> klouzavým průměrem — jde jen o kreslení, <b>součty kWh se počítají z původních dat</b>.</li>
           </ul>
         </div>
 
@@ -1907,17 +1908,14 @@ function renderSolax(data) {
 }
 
 // Dlaždice Výroba FVE / Baterie (SOC) / Tok baterie — přednostně z Infigy (živější), jinak Solax
+// Celý diagram toku energie bere data z JEDNOHO zdroje — ze Solaxu. Když se míchal
+// se Infigy, každá dlaždice byla z jiného okamžiku a součty na první pohled nesedly.
 function renderEnergyTiles() {
-  const inf = infigyData || {};
   const s = lastSolaxData || {};
-  const fve = typeof inf.pvPower === 'number' ? inf.pvPower : (typeof s.fveKw === 'number' ? s.fveKw : null);
-  fveEl.textContent = formatKw(fve);
-  const soc = typeof inf.soc === 'number' ? inf.soc : (typeof s.batterySoc === 'number' ? s.batterySoc : null);
-  batteryEl.textContent = formatPct(soc);
-  // Tok baterie: sjednotíme na "kladné = nabíjení". Infigy má záporné = nabíjení, Solax kladné = nabíjení.
-  let chargeKw = null;
-  if (typeof inf.batteryPower === 'number') chargeKw = -inf.batteryPower;
-  else if (typeof s.batPowerKw === 'number') chargeKw = s.batPowerKw;
+  fveEl.textContent = formatKw(typeof s.fveKw === 'number' ? s.fveKw : null);
+  batteryEl.textContent = formatPct(typeof s.batterySoc === 'number' ? s.batterySoc : null);
+  // Tok baterie: kladné = nabíjení (Solax to tak už má)
+  const chargeKw = typeof s.batPowerKw === 'number' ? s.batPowerKw : null;
   batPowerEl.textContent = formatBatPower(chargeKw);
   if (typeof chargeKw === 'number' && Math.abs(chargeKw) >= 0.05) {
     batPowerLabel.textContent = chargeKw > 0 ? 'Nabíjení' : 'Vybíjení';
@@ -2198,24 +2196,10 @@ function renderChart() {
     ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
   }
 
-  // Výplň pod křivkou
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].kw));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.kw));
-  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
-  ctx.lineTo(x(pts[0].t), y(0));
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(245,147,61,0.18)';
-  ctx.fill();
-
-  // Křivka
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].kw));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.kw));
-  ctx.strokeStyle = '#f5933d';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
+  // Vyhlazená plocha + křivka (součty kWh se počítají z původních dat výše)
+  drawSmoothArea(ctx, pts, p => p.kw, x, y, {
+    half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
+  });
 
   renderStats(); // denní přehled počítá ze stejné historie
 }
@@ -3782,24 +3766,10 @@ function renderWallboxChart() {
     ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
   }
 
-  // Výplň pod křivkou
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].w / 1000));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.w / 1000));
-  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
-  ctx.lineTo(x(pts[0].t), y(0));
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(245,147,61,0.18)';
-  ctx.fill();
-
-  // Křivka
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].w / 1000));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.w / 1000));
-  ctx.strokeStyle = '#f5933d';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
+  // Vyhlazená plocha + křivka
+  drawSmoothArea(ctx, pts, p => p.w / 1000, x, y, {
+    half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
+  });
 }
 
 window.addEventListener('resize', renderWallboxChart);
@@ -4261,24 +4231,10 @@ function renderBatteryChart() {
     ctx.fillText(d.getHours() + ':00', x(t), h - 5);
   }
 
-  // Výplň pod křivkou
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].soc));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.soc));
-  ctx.lineTo(x(pts[pts.length - 1].t), y(0));
-  ctx.lineTo(x(pts[0].t), y(0));
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(39,174,96,0.16)';
-  ctx.fill();
-
-  // Křivka
-  ctx.beginPath();
-  ctx.moveTo(x(pts[0].t), y(pts[0].soc));
-  for (const p of pts) ctx.lineTo(x(p.t), y(p.soc));
-  ctx.strokeStyle = '#27ae60';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
+  // Vyhlazená plocha + křivka
+  drawSmoothArea(ctx, pts, p => p.soc, x, y, {
+    half: 5, baseV: 0, stroke: '#27ae60', fill: 'rgba(39,174,96,0.16)'
+  });
 }
 
 window.addEventListener('resize', renderBatteryChart);
@@ -4389,7 +4345,7 @@ function renderBoilerChart() {
   for (const key of ['b1', 'b2']) {
     let line = pts.filter(p => typeof p[key] === 'number').map(p => ({ t: p.t, v: p[key] }));
     if (line.length < 2) continue;
-    line = smoothSeries(line, 4);
+    line = smoothSeries(line, 2); // vzorkuje se po 5 min → ±2 body = ±10 min
     ctx.strokeStyle = BOILER_COLORS[key];
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
@@ -4411,6 +4367,29 @@ function smoothSeries(line, half) {
 }
 
 // Plynulá křivka přes body (kvadratické bezier přes středy segmentů)
+// Vyhlazená plocha + křivka — používají ji všechny 24h grafy, ať vypadají stejně.
+// Vyhlazuje se jen KRESLENÍ; součty kWh se vždy počítají z původních dat.
+function drawSmoothArea(ctx, pts, getV, x, y, opts) {
+  const half = opts.half || 3;
+  const line = smoothSeries(pts.map(p => ({ t: p.t, v: getV(p) })), half);
+  const sp = line.map(p => ({ x: x(p.t), y: y(p.v) }));
+  if (!sp.length) return;
+  if (opts.fill) {
+    drawSmoothPath(ctx, sp);
+    ctx.lineTo(sp[sp.length - 1].x, y(opts.baseV || 0));
+    ctx.lineTo(sp[0].x, y(opts.baseV || 0));
+    ctx.closePath();
+    ctx.fillStyle = opts.fill;
+    ctx.fill();
+  }
+  drawSmoothPath(ctx, sp);
+  ctx.strokeStyle = opts.stroke;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
 function drawSmoothPath(ctx, p) {
   ctx.beginPath();
   if (!p.length) return;

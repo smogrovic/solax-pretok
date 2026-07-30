@@ -1630,8 +1630,8 @@ async function runAutomation() {
   }
 }
 
-setTimeout(runAutomation, 30000); // první běh až poté, co poller stihne načíst stavy
-setInterval(runAutomation, AUTOMATION_INTERVAL_MS);
+// První běh až poté, co Shelly poller (start ve 20 s, ~9 dotazů po 1 s) načte stavy
+scheduleEvery(runAutomation, AUTOMATION_INTERVAL_MS, 110000); // offset 110 s
 
 // ---------- TaHoma (Somfy rolety přes Overkiz cloud) ----------
 
@@ -2605,8 +2605,9 @@ async function pollAircon() {
 }
 
 if (panasonicEnabled) {
-  setTimeout(pollAircon, 15000);
-  setInterval(pollAircon, 5 * 60 * 1000);
+  // Panasonic (klimatizace + nádrž TČ = bojler 1) zůstává na 5 min — Comfort Cloud
+  // je na četnost dotazů citlivý a bojlery mají mít 5 min tak jako tak
+  scheduleEvery(pollAircon, 5 * 60 * 1000, 80000); // offset 80 s
 }
 
 app.post('/api/aircon/set', async (req, res) => {
@@ -2806,8 +2807,8 @@ async function pollWallbox() {
 }
 
 if (wallboxEnabled) {
-  setTimeout(pollWallbox, 20000);
-  setInterval(pollWallbox, 60 * 1000); // 1 dotaz/min — bezpečně pod limitem 10/min
+  // Wallbox sjednocen na 2 min jako ostatní dlaždice diagramu (limit je 10 dotazů/min)
+  scheduleEvery(pollWallbox, POLL_INTERVAL_MS, 40000); // offset 40 s
 }
 
 // Přepnutí režimu: pileCmd (POST, rwType 2 = zápis, cmdType 1 = režim nabíjení)
@@ -2929,8 +2930,8 @@ app.post('/api/wallbox/auto', async (req, res) => {
 });
 
 if (wallboxEnabled) {
-  setTimeout(runEnergyControl, 30000);
-  setInterval(runEnergyControl, 60 * 1000);
+  // Nedělá dotazy na data, jen občas přepne režim wallboxu — 2 min stačí
+  scheduleEvery(runEnergyControl, POLL_INTERVAL_MS, 50000); // offset 50 s
 }
 
 // ---------- AI asistent (Claude API, ovládání v přirozené řeči) ----------
@@ -3482,8 +3483,9 @@ async function pollInfigy() {
 }
 
 if (infigyEnabled) {
-  setTimeout(pollInfigy, 12000);
-  setInterval(pollInfigy, 5 * 60 * 1000);
+  // Infigy zůstává na 5 min — každý dotaz je login + portál + socket (trvá i 25 s)
+  // a po přesunu diagramu na Solax z něj bereme jen bojler 2 (ten má mít 5 min)
+  scheduleEvery(pollInfigy, 5 * 60 * 1000, 60000); // offset 60 s
 }
 
 // ---------- Historie teplot bojlerů (graf na stránce FVE) ----------
@@ -3500,9 +3502,9 @@ function recordBoilerTemps() {
   broadcast('boilerHistory', { point });
 }
 
-// Vzorkujeme často (1×/min), ať graf rychle nabíhá a přežije i časté deploye
-setTimeout(recordBoilerTemps, 10000);
-setInterval(recordBoilerTemps, 60 * 1000);
+// Vzorkujeme po 5 min — stejně jako se obnovují teploty samotné (Panasonic + Infigy),
+// častější zápis by jen kopíroval tu samou hodnotu. Nedělá žádné dotazy, čte jen stav.
+scheduleEvery(recordBoilerTemps, 5 * 60 * 1000, 100000); // offset 100 s
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.
@@ -3558,10 +3560,17 @@ if (SELF_URL) {
   }, 10 * 60 * 1000);
 }
 
-pollSolax();
-pollShelly();
-setInterval(pollSolax, POLL_INTERVAL_MS);
-setInterval(pollShelly, POLL_INTERVAL_MS);
+// ---------- Rozvrh dotazů ----------
+// Kdyby všechny pollery měly setInterval spuštěný v čase 0, pálily by dotazy
+// naráz každé dvě minuty. Každý proto startuje s vlastním offsetem, který si
+// pak drží natrvalo — dotazy tak zůstanou rozprostřené a nepotkají se.
+function scheduleEvery(fn, intervalMs, offsetMs) {
+  setTimeout(() => { fn(); setInterval(fn, intervalMs); }, offsetMs);
+}
+
+pollSolax();                                             //   0 s — hned po startu
+scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
+scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
 
 app.listen(PORT, () => {
   console.log(`Server běží na portu ${PORT}`);
