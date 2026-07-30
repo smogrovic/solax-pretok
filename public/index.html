@@ -4233,7 +4233,9 @@ function renderBatteryChart() {
 
   // Vyhlazená plocha + křivka
   drawSmoothArea(ctx, pts, p => p.soc, x, y, {
-    half: 5, baseV: 0, stroke: '#27ae60', fill: 'rgba(39,174,96,0.16)'
+    // SOC sám nekmitá — klouzavý průměr by jen zaoblil reálné zlomy (např. ostrý
+    // večerní pokles), takže tady vyhlazujeme jen tvarem křivky
+    half: 0, baseV: 0, stroke: '#27ae60', fill: 'rgba(39,174,96,0.16)'
   });
 }
 
@@ -4341,17 +4343,20 @@ function renderBoilerChart() {
     ctx.fillText(d.getHours() + ':00', x(t), h - 5);
   }
 
-  // Vyhlazené křivky pro oba bojlery (klouzavý průměr + bezier)
+  // Vyhlazené křivky pro oba bojlery. Chybějící úseky se nepřemosťují přímkou —
+  // vzorkuje se po 5 min, takže díra nad 25 min znamená, že data prostě chybí.
   for (const key of ['b1', 'b2']) {
-    let line = pts.filter(p => typeof p[key] === 'number').map(p => ({ t: p.t, v: p[key] }));
-    if (line.length < 2) continue;
-    line = smoothSeries(line, 2); // vzorkuje se po 5 min → ±2 body = ±10 min
-    ctx.strokeStyle = BOILER_COLORS[key];
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    drawSmoothPath(ctx, line.map(p => ({ x: x(p.t), y: y(p.v) })));
-    ctx.stroke();
+    const raw = pts.filter(p => typeof p[key] === 'number').map(p => ({ t: p.t, v: p[key] }));
+    for (const seg of splitGaps(raw, 25 * 60 * 1000)) {
+      if (seg.length < 2) continue;
+      const line = smoothSeries(seg, 2); // po 5 min → ±2 body = ±10 min
+      ctx.strokeStyle = BOILER_COLORS[key];
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      drawSmoothPath(ctx, line.map(p => ({ x: x(p.t), y: y(p.v) })));
+      ctx.stroke();
+    }
   }
 }
 
@@ -4366,30 +4371,51 @@ function smoothSeries(line, half) {
   return out;
 }
 
-// Plynulá křivka přes body (kvadratické bezier přes středy segmentů)
-// Vyhlazená plocha + křivka — používají ji všechny 24h grafy, ať vypadají stejně.
-// Vyhlazuje se jen KRESLENÍ; součty kWh se vždy počítají z původních dat.
-function drawSmoothArea(ctx, pts, getV, x, y, opts) {
-  const half = opts.half || 3;
-  const line = smoothSeries(pts.map(p => ({ t: p.t, v: getV(p) })), half);
-  const sp = line.map(p => ({ x: x(p.t), y: y(p.v) }));
-  if (!sp.length) return;
-  if (opts.fill) {
-    drawSmoothPath(ctx, sp);
-    ctx.lineTo(sp[sp.length - 1].x, y(opts.baseV || 0));
-    ctx.lineTo(sp[0].x, y(opts.baseV || 0));
-    ctx.closePath();
-    ctx.fillStyle = opts.fill;
-    ctx.fill();
+// Rozdělí řadu tam, kde v datech chybí body. Bez toho by se přes chybějící úsek
+// (deploy serveru, zavřená appka) natáhla přímka a vypadalo by to jako plynulý
+// průběh — graf by si tím vymýšlel data, která nemá.
+const CHART_GAP_MS = 15 * 60 * 1000;
+function splitGaps(line, maxGapMs) {
+  const segs = [];
+  let cur = [];
+  for (const p of line) {
+    if (cur.length && p.t - cur[cur.length - 1].t > (maxGapMs || CHART_GAP_MS)) {
+      segs.push(cur); cur = [];
+    }
+    cur.push(p);
   }
-  drawSmoothPath(ctx, sp);
-  ctx.strokeStyle = opts.stroke;
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.stroke();
+  if (cur.length) segs.push(cur);
+  return segs;
 }
 
+// Vyhlazená plocha + křivka — používají ji všechny 24h grafy, ať vypadají stejně.
+// Vyhlazuje se jen KRESLENÍ; součty kWh se vždy počítají z původních dat.
+// half: 0 = bez klouzavého průměru (hodí se pro hodnoty, co samy nekmitají, např. SOC)
+function drawSmoothArea(ctx, pts, getV, x, y, opts) {
+  const half = typeof opts.half === 'number' ? opts.half : 3;
+  const raw = pts.map(p => ({ t: p.t, v: getV(p) }));
+  for (const seg of splitGaps(raw, opts.maxGapMs)) {
+    if (seg.length < 2) continue;
+    const line = half > 0 ? smoothSeries(seg, half) : seg;
+    const sp = line.map(p => ({ x: x(p.t), y: y(p.v) }));
+    if (opts.fill) {
+      drawSmoothPath(ctx, sp);
+      ctx.lineTo(sp[sp.length - 1].x, y(opts.baseV || 0));
+      ctx.lineTo(sp[0].x, y(opts.baseV || 0));
+      ctx.closePath();
+      ctx.fillStyle = opts.fill;
+      ctx.fill();
+    }
+    drawSmoothPath(ctx, sp);
+    ctx.strokeStyle = opts.stroke;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+}
+
+// Plynulá křivka přes body (kvadratické bezier přes středy segmentů)
 function drawSmoothPath(ctx, p) {
   ctx.beginPath();
   if (!p.length) return;
