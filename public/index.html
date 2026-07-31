@@ -1826,18 +1826,17 @@
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Solinátor</div>
+          <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
-            <li>Relé se po <b>60 min</b> samo vypne (nastaveno v Shelly).</li>
-            <li><b>12:00</b> → denní start (bez podmínky).</li>
-            <li><b>13:00</b> → zapnout, když je venku <b>&gt; 20 °C</b>.</li>
-            <li><b>15:00</b> → zapnout, když je venku <b>&gt; 25 °C</b>.</li>
-            <li>Hodinu před západem slunce → vypnout.</li>
-            <li><b>+2 h / +4 h</b> (nízký chlor): appka drží solinátor zapnutý 2/4 h — posílá „on" znovu, jak se relé po hodině vypne.</li>
-            <li>Boost <b>respektuje večerní vypnutí</b>. Co se do dnešního večera nevejde, se <b>přenese na další den</b> a odbaví se <b>od 10:00</b>, tedy v okně před denním startem, kdy by solinátor jinak stál.</li>
-            <li>Příklad: zmáčknu <b>+2 h</b> a do večerního vypnutí zbývá 45 min → dnes 45 min, další den ještě <b>1:15</b>. Přenos je vidět ve stavu pod tlačítky.</li>
-            <li>Přenesený čas smaže tlačítko <b>−1 den / −2 dny</b> i <b>zrušit</b>. Dluh se nesčítá nad <b>8 h</b>.</li>
-            <li><b>−1 den / −2 dny</b> (vysoký chlor): úplně zakáže spouštění solinátoru na 1/2 dny.</li>
+            <li>Appka nesleduje konkrétní časy, ale <b>kolik hodin má solinátor za den celkem odběhnout</b>, a podle toho ho sama zapíná i vypíná.</li>
+            <li><b>Cíl na den</b> = <b>1 h</b> základ + <b>1 h</b> když je venku přes <b>20 °C</b> + další <b>1 h</b> když přes <b>25 °C</b> → nejvýš <b>3 h</b>.</li>
+            <li>Přirážka za teplotu <b>jen roste</b> — večerní ochlazení už jednou přiznané hodiny nesebere.</li>
+            <li>Běží <b>od 12:00 do hodiny před západem</b> slunce, dokud není rozpočet naplněn. Pak se sám vypne.</li>
+            <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
+            <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b>.</li>
+            <li><b>−1 den / −2 dny</b> (vysoký chlor): ty dny se neběží vůbec a <b>nevzniká žádný dluh</b>. Tlačítko <b>zrušit</b> smaže boost.</li>
+            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“.</li>
+            <li>Časovač v relé (60 min) zůstává jako <b>pojistka</b> — kdyby appka spadla, solinátor se sám vypne. Rozpočet měří <b>skutečně odběhnutý čas</b>, takže si případnou mezeru sám dožene.</li>
             <li>Umí to i <b>asistent</b>: „pusť solinátor na dvě hodiny", „vypni solinátor na den", „ať jede solinátor normálně".</li>
           </ul>
         </div>
@@ -2360,6 +2359,7 @@ function renderStats() {
   if (statB1TodayEl) statB1TodayEl.textContent = wh ? fmtWhKwh(wh.b1) : '– kWh';
   if (statB2TodayEl) statB2TodayEl.textContent = wh ? fmtWhKwh(wh.b2) : '– kWh';
   renderYesterday();
+  renderSolinator(); // rozpočet solinátoru se počítá z téže doby běhu
 }
 
 // Box "Včera" — kompletní údaje z předchozího dne (snapshot na serveru)
@@ -2414,7 +2414,7 @@ autoOnBtn.addEventListener('click', () => setAutomation(true));
 autoOffBtn.addEventListener('click', () => setAutomation(false));
 
 // ---------- Solinátor: boost (+2h/+4h) a vypnutí (−1d/−2d) podle chloru ----------
-let solinatorData = { boostUntil: 0, disabledUntil: 0, carryMs: 0 };
+let solinatorData = { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 };
 const solinatorStatusEl = document.getElementById('solinatorStatus');
 const chlorBtns = Array.from(document.querySelectorAll('.chlor-btn'));
 
@@ -2432,17 +2432,23 @@ function fmtSolDur(ms) {
   return h > 0 ? `${h}:${String(m % 60).padStart(2, '0')}` : `${m} min`;
 }
 
+// Solinátor jede na denní rozpočet — ukazujeme odběhnuto / cíl
 function renderSolinator() {
   if (!solinatorStatusEl) return;
   const now = Date.now();
   const s = solinatorData || {};
-  const parts = [];
-  if (s.disabledUntil && s.disabledUntil > now) parts.push('Vypnuto do ' + fmtSolTime(s.disabledUntil));
-  else if (s.boostUntil && s.boostUntil > now) parts.push('Boost do ' + fmtSolTime(s.boostUntil));
-  // Zbytek, který se nevešel do dnešního večera, se odbaví další den od 10:00
-  if (s.carryMs > 0) parts.push(`další den ještě ${fmtSolDur(s.carryMs)}`);
-  const txt = parts.join(' · ');
-  solinatorStatusEl.innerHTML = txt ? txt + ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '';
+  let txt;
+  if (s.disabledUntil && s.disabledUntil > now) {
+    txt = 'Vypnuto do ' + fmtSolTime(s.disabledUntil);
+  } else {
+    const target = 3600000 + (s.bonusMs || 0) + (s.boostMs || 0);
+    const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
+    txt = `Dnes ${fmtSolDur(ran)} / ${fmtSolDur(target)}`;
+    if (ran >= target) txt += ' · hotovo';
+    else if (s.boostMs > 0) txt += ` · vč. boostu ${fmtSolDur(s.boostMs)}`;
+  }
+  const canCancel = (s.disabledUntil && s.disabledUntil > now) || s.boostMs > 0;
+  solinatorStatusEl.innerHTML = txt + (canCancel ? ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '');
   const cancel = document.getElementById('solinatorCancel');
   if (cancel) cancel.addEventListener('click', () => solinatorAction('/api/solinator/clear'));
 }
@@ -2483,9 +2489,10 @@ function loadSolinatorLocal() {
 async function maybeRestoreSolinator(server, local) {
   if (!local) return;
   const now = Date.now();
-  const need = (local.boostUntil > now && local.boostUntil > ((server && server.boostUntil) || 0))
-    || (local.disabledUntil > now && local.disabledUntil > ((server && server.disabledUntil) || 0))
-    || (local.carryMs > 0 && local.carryMs > ((server && server.carryMs) || 0));
+  const sameDay = local.date === todayStr();
+  const need = (local.disabledUntil > now && local.disabledUntil > ((server && server.disabledUntil) || 0))
+    || (sameDay && local.boostMs > 0 && local.boostMs > ((server && server.boostMs) || 0))
+    || (sameDay && local.bonusMs > 0 && local.bonusMs > ((server && server.bonusMs) || 0));
   if (!need) return;
   try {
     await fetch('/api/solinator/restore', {
@@ -4705,19 +4712,26 @@ function applySnapshot(snap) {
   }
   renderTempAutoThreshold();
   saveTempAutoOnLocal();
-  // Solinátor boost/vypnutí: server + lokální záloha (přežije deploy)
-  const serverSol = snap.solinator || { boostUntil: 0, disabledUntil: 0 };
+  // Solinátor (rozpočet + zákaz): server + lokální záloha (přežije deploy)
+  const serverSol = snap.solinator || {};
   const localSol = loadSolinatorLocal();
   solinatorData = {
-    boostUntil: serverSol.boostUntil || 0,
-    disabledUntil: serverSol.disabledUntil || 0,
-    carryMs: serverSol.carryMs || 0
+    date: serverSol.date || '',
+    bonusMs: serverSol.bonusMs || 0,
+    boostMs: serverSol.boostMs || 0,
+    disabledUntil: serverSol.disabledUntil || 0
   };
   if (localSol) {
     const nowMs = Date.now();
-    if (localSol.boostUntil > nowMs && localSol.boostUntil > solinatorData.boostUntil) solinatorData.boostUntil = localSol.boostUntil;
-    if (localSol.disabledUntil > nowMs && localSol.disabledUntil > solinatorData.disabledUntil) solinatorData.disabledUntil = localSol.disabledUntil;
-    if (localSol.carryMs > 0 && localSol.carryMs > solinatorData.carryMs) solinatorData.carryMs = localSol.carryMs;
+    if (localSol.disabledUntil > nowMs && localSol.disabledUntil > solinatorData.disabledUntil) {
+      solinatorData.disabledUntil = localSol.disabledUntil;
+    }
+    // Rozpočet přebíráme jen pro tentýž den, jinak by se dnešek naplnil včerejškem
+    if (localSol.date === todayStr()) {
+      if (!solinatorData.date) solinatorData.date = localSol.date;
+      if (localSol.bonusMs > solinatorData.bonusMs) solinatorData.bonusMs = localSol.bonusMs;
+      if (localSol.boostMs > solinatorData.boostMs) solinatorData.boostMs = localSol.boostMs;
+    }
   }
   renderSolinator();
   saveSolinatorLocal();
