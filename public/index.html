@@ -552,8 +552,7 @@
     border-radius:4px;
     transition:height .3s ease;
   }
-  #timelineChart,
-  #timelineChartAc{
+  #timelineChart{
     width:100%;
     height:150px;
     display:block;
@@ -1700,11 +1699,6 @@
         <div class="timeline-legend" id="pvLegend"></div>
       </div>
 
-      <div class="card stats-card" id="timelineAcCard">
-        <div class="graph-title">Klimatizace (24 h)</div>
-        <canvas id="timelineChartAc"></canvas>
-        <div class="timeline-legend" id="timelineLegendAc"></div>
-      </div>
     </div>
   </div>
 
@@ -2546,9 +2540,6 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
 
 const timelineCanvas = document.getElementById('timelineChart');
 const timelineLegendEl = document.getElementById('timelineLegend');
-const timelineAcCanvas = document.getElementById('timelineChartAc');
-const timelineAcLegendEl = document.getElementById('timelineLegendAc');
-const timelineAcCard = document.getElementById('timelineAcCard');
 const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox'];
 const TIMELINE_BASE = {
   shelly: { label: 'Bojler', color: '#e5534b' },
@@ -2664,9 +2655,10 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  // Legenda
+  // Legenda (oddělovač skupin do ní nepatří — nemá barvu ani název)
   legendEl.textContent = '';
   for (const lane of lanes) {
+    if (lane.separator) continue;
     const span = document.createElement('span');
     const dot = document.createElement('i');
     dot.style.background = lane.color;
@@ -2714,6 +2706,17 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
 
     lanes.forEach((lane, i) => {
       const y = blockTop + i * (laneH + laneGap) + laneH / 2;
+      // Oddělovač skupin (spotřebiče / klimatizace) — jen tenká čára, žádná data
+      if (lane.separator) {
+        ctx.strokeStyle = 'rgba(44,62,80,0.18)';
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'butt';
+        ctx.beginPath();
+        ctx.moveTo(x(0), y);
+        ctx.lineTo(x(1), y);
+        ctx.stroke();
+        return;
+      }
       // Slabá linka celé dráhy
       ctx.strokeStyle = 'rgba(44,62,80,0.06)';
       ctx.lineWidth = laneH;
@@ -2740,12 +2743,12 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
 }
 
 function renderTimeline() {
-  // Pevná zařízení: okno 8:00–24:00
-  drawTimeline(timelineCanvas, timelineLegendEl, baseTimelineLanes(), 0, 24);
-  // Klimatizace: samostatný graf, celých 24 h (0:00–24:00)
+  // Jeden graf pro všechno (0:00–24:00). Klimatizace jsou pod spotřebiči,
+  // oddělené vodorovnou čarou — obě skupiny mají stejnou časovou osu.
+  const lanes = baseTimelineLanes();
   const acLanes = airconTimelineLanes();
-  if (timelineAcCard) timelineAcCard.style.display = acLanes.length ? '' : 'none';
-  if (acLanes.length) drawTimeline(timelineAcCanvas, timelineAcLegendEl, acLanes, 0, 24);
+  if (acLanes.length) lanes.push({ separator: true }, ...acLanes);
+  drawTimeline(timelineCanvas, timelineLegendEl, lanes, 0, 24);
 }
 
 window.addEventListener('resize', renderTimeline);
