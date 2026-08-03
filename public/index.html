@@ -1723,7 +1723,9 @@
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
             <li>Automatika běží, jen když je zapnutý <b>hlavní vypínač</b> (stránka Asistent).</li>
-            <li>Rozhoduje se jen z <b>čerstvých dat</b> ze střídače (max 10 min stará).</li>
+            <li>O <b>přebytku</b> (bazén, bojler) se rozhoduje jen z <b>čerstvých dat</b> ze střídače (max 10 min stará).</li>
+            <li><b>Solinátor na střídači nezávisí</b> — jede podle času a venkovní teploty, takže funguje i v noci, kdy střídač spí a data ze Solaxu zestárnou.</li>
+            <li>Vypnutí <b>po západu slunce</b> (bazén i solinátor) proběhne <b>i bez dat ze střídače</b> — nic nesmí zůstat běžet přes noc.</li>
             <li>Bazén, bojler a solinátor: přepočet <b>každých 5 min</b>. Režim wallboxu: <b>každou minutu</b>.</li>
             <li>„Přebytek" = <b>přetok do sítě + výkon nabíjející baterii</b> (feed + bat).</li>
           </ul>
@@ -1804,7 +1806,8 @@
             <li>Ochrana baterie podle hodiny — SOC musí být aspoň: 12h <b>50 %</b>, 13h <b>60 %</b>, 14h <b>70 %</b>, 15h <b>80 %</b>, 16h <b>85 %</b>, 17h+ <b>90 %</b>.</li>
             <li><b>Zapnout:</b> přebytek 2× po sobě nad <b>1850 W</b> (+ rezerva na auto).</li>
             <li><b>Vypnout:</b> 3× po sobě pod <b>−200 W</b> a po min. <b>30 min</b> běhu.</li>
-            <li>Hodinu před západem slunce → vypnout.</li>
+            <li>Hodinu před západem slunce → vypnout. Tohle vypnutí je <b>pojistkou navíc</b>: pošle se, i když nejsou data ze střídače (v noci spí), aby bazén nemohl zůstat běžet do rána.</li>
+            <li>Když <b>vypadne počasí</b> (a s ním čas západu), platí náhradní mez <b>20:00</b>.</li>
           </ul>
         </div>
 
@@ -1826,6 +1829,7 @@
             <li><b>Cíl na den</b> = <b>1 h</b> základ + <b>1 h</b> když je venku přes <b>20 °C</b> + další <b>1 h</b> když přes <b>25 °C</b> → nejvýš <b>3 h</b>.</li>
             <li>Přirážka za teplotu <b>jen roste</b> — večerní ochlazení už jednou přiznané hodiny nesebere.</li>
             <li>Běží <b>od 12:00 do hodiny před západem</b> slunce, dokud není rozpočet naplněn. Pak se sám vypne.</li>
+            <li><b>Mimo tohle okno je vždy vypnutý</b> — appka ho aktivně vypíná, i po půlnoci a i když vypadnou data ze střídače nebo počasí (náhradní mez <b>20:00</b>). Ruční zapnutí mimo okno tedy do 5 minut zase vypne; na „chci teď navíc" jsou tlačítka +2 h / +4 h.</li>
             <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
             <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b>.</li>
             <li><b>−1 den / −2 dny</b> (vysoký chlor): ty dny se neběží vůbec a <b>nevzniká žádný dluh</b>. Tlačítko <b>zrušit</b> smaže boost.</li>

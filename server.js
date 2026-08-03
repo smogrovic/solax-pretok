@@ -1228,6 +1228,7 @@ const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
 // si appka počítá, kolik hodin má solinátor za den celkem odběhnout, a podle toho
 // ho sama zapíná i vypíná. Boost i přenos do dalšího dne jsou pak jen číslo navíc.
 const SOLINATOR_START_HOUR = 12;              // dřív nezapínáme
+const HARD_OFF_HOUR = 20;                     // záložní mez, když není počasí (jinak západ − 1 h)
 const SOLINATOR_BASE_MS = 1 * 3600000;        // základ každý den
 const SOLINATOR_BONUS_WARM_MS = 1 * 3600000;  // + nad 20 °C
 const SOLINATOR_BONUS_HOT_MS = 2 * 3600000;   // + nad 25 °C (celkem, ne navíc k teplému)
@@ -1372,8 +1373,7 @@ async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   const isOn = pool.isOn;
 
   // Hodinu před západem slunce se vypíná natvrdo
-  const sunsetMs = weather.sys.sunset * 1000;
-  if (now >= sunsetMs - 3600000) {
+  if (afterSunsetCutoff(now, prague, weather)) {
     if (isOn) await autoSet('pool', 'off', 'západ slunce');
     poolAuto.overCount = 0;
     poolAuto.underCount = 0;
@@ -1498,6 +1498,31 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
   }
 }
 
+// Konec dne pro spotřebiče, které mají jet jen za světla: hodina před západem.
+// Bez počasí (výpadek OWM) padáme na pevnou hodinu — ať nikdy nezůstane bez meze.
+function afterSunsetCutoff(now, prague, weather) {
+  if (weather && weather.sys && typeof weather.sys.sunset === 'number') {
+    return now >= weather.sys.sunset * 1000 - 3600000;
+  }
+  return prague.hour >= HARD_OFF_HOUR;
+}
+
+function outsideSolinatorWindow(now, prague, weather) {
+  return prague.hour < SOLINATOR_START_HOUR || afterSunsetCutoff(now, prague, weather);
+}
+
+// Pojistka pro bazén: po západu musí být vypnutý i tehdy, když střídač nehlásí data
+// a hlavní automatika se kvůli tomu vůbec neprovede (v noci spí → bazén by jel do rána).
+// Normální rozhodování bazénu zůstává v runPoolAutomation.
+async function enforcePoolOffWindow(now, prague, weather) {
+  const pool = state.devices.pool;
+  if (!pool || pool.isOn !== true) return;
+  if (!afterSunsetCutoff(now, prague, weather)) return;
+  await autoSet('pool', 'off', 'západ slunce');
+  poolAuto.overCount = 0;
+  poolAuto.underCount = 0;
+}
+
 async function runSolinatorAutomation(now, prague, weather) {
   const sol = state.devices.solinator;
   const isOn = sol && sol.isOn;              // null = stav neznámý (Shelly nedostupné)
@@ -1512,16 +1537,18 @@ async function runSolinatorAutomation(now, prague, weather) {
     return;
   }
 
-  // Hodinu před západem končíme. Co se nestihlo, přenese se při přelomu dne.
-  const cutoff = weather.sys.sunset * 1000 - 3600000;
-  if (now >= cutoff) {
-    if (isOn === true) await autoSet('solinator', 'off', 'západ slunce');
+  // Povolené okno: od 12:00 do hodiny před západem. Mimo něj solinátor NIKDY nejede —
+  // vypínáme natvrdo, ne jen "return". Jinak by cokoliv, co jede o půlnoci, jelo dál
+  // až do poledne: večerní mez se totiž po půlnoci zase rozpojí (západ už je zítřejší)
+  // a odběhnutý čas se o půlnoci nuluje, takže ani rozpočet by to nezastavil.
+  if (outsideSolinatorWindow(now, prague, weather)) {
+    if (isOn === true) await autoSet('solinator', 'off', 'mimo denní okno');
     return;
   }
 
   // Teplotní přirážka — jen roste. Kdyby se počítala z aktuální teploty, večer
   // by cíl klesl pod už odběhnutý čas a solinátor by se vypnul předčasně.
-  const temp = weather.main && typeof weather.main.temp === 'number' ? weather.main.temp : null;
+  const temp = weather && weather.main && typeof weather.main.temp === 'number' ? weather.main.temp : null;
   if (temp !== null) {
     const bonus = temp > 25 ? SOLINATOR_BONUS_HOT_MS : (temp > 20 ? SOLINATOR_BONUS_WARM_MS : 0);
     if (bonus > state.solinator.bonusMs) {
@@ -1540,9 +1567,7 @@ async function runSolinatorAutomation(now, prague, weather) {
     return;
   }
 
-  // Zbývá odběhnout. Před 12:00 sami nezapínáme (ruční zapnutí ale nepřerušujeme —
-  // jeho čas se do rozpočtu započítá stejně).
-  if (prague.hour < SOLINATOR_START_HOUR) return;
+  // Zbývá odběhnout
   if (isOn === false) {
     await autoSet('solinator', 'on', `zbývá ${fmtDur(target - ran)} z ${fmtDur(target)}`);
   }
@@ -1638,27 +1663,36 @@ async function runAutomation() {
   if (automationRunning) return;
   automationRunning = true;
   try {
-    // Bez čerstvých dat ze střídače (max 10 min starých) nerozhodujeme
-    if (!state.solax) return;
-    if (Date.now() - new Date(state.solax.fetchedAt).getTime() > 10 * 60 * 1000) return;
-
     const weather = await fetchWeather();
     if (!weather) {
       if (!weatherProblemLogged) {
         weatherProblemLogged = true;
+        // Bazén a bojler bez času západu nerozhodujeme; solinátor jede dál na náhradní mez 20:00
         addLog(OWM_API_KEY
-          ? 'Automatika: počasí se nepodařilo načíst'
-          : 'Automatika vypnuta — na serveru chybí OWM_API_KEY');
+          ? 'Automatika: počasí se nepodařilo načíst — bazén a bojler stojí, solinátor jede do 20:00'
+          : 'Automatika bez počasí — na serveru chybí OWM_API_KEY');
       }
-      return;
+    } else {
+      weatherProblemLogged = false;
     }
-    weatherProblemLogged = false;
 
     // Hlavní vypínač: počasí se stahuje dál (kvůli zobrazení), ale zařízení nesaháme
     if (!state.autoEnabled) return;
 
     const now = Date.now();
     const prague = pragueTime();
+
+    // Nejdřív to, co se řídí jen časem — solinátor střídač vůbec nepotřebuje a vypnutí
+    // po západu se nesmí ztratit, když střídač v noci spí a jeho data zestárnou.
+    await runSolinatorAutomation(now, prague, weather);
+    await enforcePoolOffWindow(now, prague, weather);
+
+    // Zbytek se rozhoduje podle přebytku → bez čerstvých dat ze střídače (a bez
+    // počasí kvůli západu) nerozhodujeme
+    if (!weather) return;
+    if (!state.solax) return;
+    if (Date.now() - new Date(state.solax.fetchedAt).getTime() > 10 * 60 * 1000) return;
+
     // "Přebytek" = přetok do sítě + výkon nabíjející baterii (feed + bat)
     const totalW = Math.round((state.solax.feedinKw + state.solax.batPowerKw) * 1000);
     const soc = state.solax.batterySoc;
@@ -1666,7 +1700,6 @@ async function runAutomation() {
 
     await runPoolAutomation(now, prague, weather, totalW, soc, reserveW);
     await runBoilerAutomation(now, prague, weather, totalW, soc, reserveW);
-    await runSolinatorAutomation(now, prague, weather);
   } catch (err) {
     console.error('Automatika:', err.message);
   } finally {
