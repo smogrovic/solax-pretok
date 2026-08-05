@@ -607,6 +607,18 @@
     min-width:56px;
     text-align:center;
   }
+  /* Teplota jde nastavit i klepnutím — na iPhonu se otevře systémové kolečko.
+     Jemné pozadí (jako u .mode-select) říká, že to není jen popisek. */
+  .temp-select{
+    border:none;
+    border-radius:10px;
+    padding:6px 4px;
+    background:rgba(44,62,80,0.08);
+    font-family:inherit;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  .temp-select:disabled{opacity:0.5;}
   .mode-btn{
     border:none;
     border-radius:12px;
@@ -3204,6 +3216,21 @@ function formatTempC(v) {
   return typeof v === 'number' ? String(Math.round(v * 10) / 10).replace('.', ',') + ' °C' : '–';
 }
 
+// Rozsah cílové teploty klimatizace (stejný, na který ořezávala tlačítka ±)
+const AIRCON_TEMP_MIN = 16, AIRCON_TEMP_MAX = 30, AIRCON_TEMP_STEP = 0.5;
+
+// Vybere teplotu v seznamu. Kdyby jednotka hlásila hodnotu mimo půlstupňovou mřížku,
+// select by ji nenašel a tiše ukázal první položku — proto ji radši doplníme na
+// správné místo, ať appka nelže o skutečném stavu.
+function setTempSelect(sel, t) {
+  sel.value = String(t);
+  if (sel.value === String(t)) return;
+  const opt = new Option(formatTempC(t), String(t));
+  const after = [...sel.options].find(o => Number(o.value) > t);
+  sel.add(opt, after || null);
+  sel.value = String(t);
+}
+
 async function airconSet(guid, payload, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -3226,7 +3253,25 @@ async function airconSet(guid, payload, btn) {
   if (btn) btn.disabled = false;
 }
 
+// Nová data chodí každých 5 min a renderAircon staví seznam celý znovu. Kdyby dorazila
+// s otevřeným rolovacím seznamem (teplota, režim), prvek by se pod rukama zrušil a výběr
+// ztratil. Překreslení proto počká, až uživatel volbu dokončí.
+let airconRenderPending = false;
+airconListEl.addEventListener('focusout', () => {
+  // setTimeout: při focusout ještě activeElement ukazuje na starý prvek
+  setTimeout(() => {
+    if (!airconRenderPending) return;
+    airconRenderPending = false;
+    renderAircon();
+  }, 0);
+});
+
 function renderAircon() {
+  if (document.activeElement && document.activeElement.tagName === 'SELECT'
+      && airconListEl.contains(document.activeElement)) {
+    airconRenderPending = true;
+    return;
+  }
   airconListEl.textContent = '';
   if (airconEnabled === false) {
     blindsMessage(airconListEl, 'Panasonic není nastaven (chybí přihlášení na serveru).');
@@ -3301,22 +3346,37 @@ function renderAircon() {
     const minus = document.createElement('button');
     minus.className = 'temp-btn';
     minus.textContent = '−';
-    const tempVal = document.createElement('span');
-    tempVal.className = 'temp-val';
-    tempVal.textContent = formatTempC(d.targetTemp);
+    // Teplota jako rolovací seznam — klepnutí otevře na iPhonu systémové kolečko,
+    // ať se z 16 na 26 °C nemusí klikat dvacetkrát. Tlačítka ± zůstávají.
+    const tempVal = document.createElement('select');
+    tempVal.className = 'temp-val temp-select';
+    if (typeof d.targetTemp === 'number') {
+      for (let t = AIRCON_TEMP_MIN; t <= AIRCON_TEMP_MAX; t += AIRCON_TEMP_STEP) {
+        tempVal.appendChild(new Option(formatTempC(t), String(t)));
+      }
+      setTempSelect(tempVal, d.targetTemp);
+    } else {
+      // Stav jednotky neznáme — nemá smysl jí teplotu nastavovat (dnes to tlačítka
+      // taky odmítala, jen to nebylo vidět)
+      tempVal.appendChild(new Option(formatTempC(null), ''));
+      tempVal.disabled = true;
+    }
     const plus = document.createElement('button');
     plus.className = 'temp-btn';
     plus.textContent = '+';
-    const stepTemp = (dir, btn) => {
-      if (typeof d.targetTemp !== 'number') return;
-      const t = Math.min(30, Math.max(16, d.targetTemp + dir * 0.5));
+    const setTemp = (t, btn) => {
       if (t === d.targetTemp) return;
       d.targetTemp = t;
-      tempVal.textContent = formatTempC(t);
+      setTempSelect(tempVal, t);
       airconSet(d.guid, { temperature: t }, btn);
+    };
+    const stepTemp = (dir, btn) => {
+      if (typeof d.targetTemp !== 'number') return;
+      setTemp(Math.min(AIRCON_TEMP_MAX, Math.max(AIRCON_TEMP_MIN, d.targetTemp + dir * AIRCON_TEMP_STEP)), btn);
     };
     minus.addEventListener('click', () => stepTemp(-1, minus));
     plus.addEventListener('click', () => stepTemp(1, plus));
+    tempVal.addEventListener('change', () => setTemp(Number(tempVal.value), null));
     stepper.appendChild(minus);
     stepper.appendChild(tempVal);
     stepper.appendChild(plus);
