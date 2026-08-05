@@ -607,9 +607,9 @@
     min-width:56px;
     text-align:center;
   }
-  /* Teplota jde nastavit i klepnutím — na iPhonu se otevře systémové kolečko.
+  /* Teplota jde nastavit i klepnutím — otevře kolotoč jako na iPhonu.
      Jemné pozadí (jako u .mode-select) říká, že to není jen popisek. */
-  .temp-select{
+  .temp-pick{
     border:none;
     border-radius:10px;
     padding:6px 4px;
@@ -618,7 +618,95 @@
     -webkit-appearance:none;
     appearance:none;
   }
-  .temp-select:disabled{opacity:0.5;}
+  .temp-pick:disabled{opacity:0.5;}
+  .temp-pick:active:not(:disabled){transform:scale(0.96);}
+
+  /* Vysouvací kolotoč: vlevo stupně, vpravo půlstupně */
+  .sheet-back{
+    position:fixed;
+    inset:0;
+    background:rgba(20,30,40,0.35);
+    display:flex;
+    align-items:flex-end;
+    justify-content:center;
+    z-index:60;
+  }
+  .sheet{
+    width:100%;
+    max-width:520px;
+    background:var(--card,#fff);
+    border-radius:20px 20px 0 0;
+    padding:14px 14px calc(14px + env(safe-area-inset-bottom));
+    box-shadow:0 -8px 30px rgba(20,30,40,0.18);
+  }
+  .sheet-title{
+    text-align:center;
+    font-size:13px;
+    font-weight:700;
+    color:var(--navy);
+    margin-bottom:2px;
+  }
+  .sheet-val{
+    text-align:center;
+    font-size:22px;
+    font-weight:800;
+    color:var(--orange,#f0932b);
+    margin-bottom:6px;
+  }
+  .wheel-wrap{
+    position:relative;
+    display:flex;
+    justify-content:center;
+  }
+  /* Zvýrazněný střed — jen podklad, klepnutí propouští na kolotoče */
+  .wheel-band{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(50% - 22px);
+    height:44px;
+    border-radius:12px;
+    background:rgba(44,62,80,0.07);
+    pointer-events:none;
+  }
+  .wheel{
+    position:relative;
+    height:220px;
+    min-width:74px;
+    overflow-y:scroll;
+    scroll-snap-type:y mandatory;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    text-align:center;
+  }
+  .wheel::-webkit-scrollbar{display:none;}
+  .wheel-item{
+    height:44px;
+    line-height:44px;
+    scroll-snap-align:center;
+    font-size:24px;
+    font-weight:600;
+    color:rgba(44,62,80,0.35);
+    transition:color 0.12s, font-weight 0.12s;
+  }
+  .wheel-item.sel{color:var(--navy);font-weight:800;}
+  .wheel-pad{height:88px;}
+  /* Sloupce se přisadí k sobě, ať dohromady čtou jako jedno číslo „22,5" */
+  .wheel-deg{text-align:right;padding-right:2px;}
+  .wheel-frac{text-align:left;padding-left:2px;min-width:58px;}
+  .sheet-done{
+    width:100%;
+    margin-top:12px;
+    border:none;
+    border-radius:14px;
+    padding:12px;
+    background:var(--orange,#f0932b);
+    color:#fff;
+    font-size:15px;
+    font-weight:800;
+    font-family:inherit;
+  }
   .mode-btn{
     border:none;
     border-radius:12px;
@@ -3218,17 +3306,105 @@ function formatTempC(v) {
 
 // Rozsah cílové teploty klimatizace (stejný, na který ořezávala tlačítka ±)
 const AIRCON_TEMP_MIN = 16, AIRCON_TEMP_MAX = 30, AIRCON_TEMP_STEP = 0.5;
+const WHEEL_ITEM_H = 44;   // musí sedět s .wheel-item v CSS
 
-// Vybere teplotu v seznamu. Kdyby jednotka hlásila hodnotu mimo půlstupňovou mřížku,
-// select by ji nenašel a tiše ukázal první položku — proto ji radši doplníme na
-// správné místo, ať appka nelže o skutečném stavu.
-function setTempSelect(sel, t) {
-  sel.value = String(t);
-  if (sel.value === String(t)) return;
-  const opt = new Option(formatTempC(t), String(t));
-  const after = [...sel.options].find(o => Number(o.value) > t);
-  sel.add(opt, after || null);
-  sel.value = String(t);
+function clampTemp(t) {
+  return Math.min(AIRCON_TEMP_MAX, Math.max(AIRCON_TEMP_MIN, Math.round(t / AIRCON_TEMP_STEP) * AIRCON_TEMP_STEP));
+}
+
+// Jeden sloupec kolotoče. Rolování řeší CSS (scroll-snap), my jen čteme, kde se
+// zastavil, a zvýrazňujeme prostřední položku.
+function buildWheel(labels, index, onChange, extraClass) {
+  const el = document.createElement('div');
+  el.className = 'wheel ' + extraClass;
+  el.appendChild(Object.assign(document.createElement('div'), { className: 'wheel-pad' }));
+  labels.forEach(text => {
+    const item = document.createElement('div');
+    item.className = 'wheel-item';
+    item.textContent = text;
+    el.appendChild(item);
+  });
+  el.appendChild(Object.assign(document.createElement('div'), { className: 'wheel-pad' }));
+
+  const items = () => [...el.querySelectorAll('.wheel-item')];
+  const mark = i => items().forEach((it, n) => it.classList.toggle('sel', n === i));
+  el.selected = index;
+  mark(index);
+
+  let settle = null;
+  el.addEventListener('scroll', () => {
+    const i = Math.max(0, Math.min(labels.length - 1, Math.round(el.scrollTop / WHEEL_ITEM_H)));
+    if (i !== el.selected) { el.selected = i; mark(i); onChange(); }
+    // Klepnutí mimo střed nechá snap doskákat — po doznění srovnáme přesně
+    clearTimeout(settle);
+    settle = setTimeout(() => { el.scrollTop = el.selected * WHEEL_ITEM_H; }, 140);
+  });
+  // Dá se i klepnout přímo na položku
+  el.addEventListener('click', e => {
+    const it = e.target.closest('.wheel-item');
+    if (it) el.scrollTo({ top: items().indexOf(it) * WHEEL_ITEM_H, behavior: 'smooth' });
+  });
+  // scrollTop jde nastavit až po vložení do dokumentu (jinak má prvek nulovou výšku)
+  el.scrollToIndex = i => { el.scrollTop = i * WHEEL_ITEM_H; };
+  return el;
+}
+
+// Vysouvací kolotoč pro cílovou teplotu: vlevo celé stupně, vpravo půlstupeň.
+// Potvrdí se tlačítkem Hotovo, klepnutí mimo výběr zahodí.
+let tempWheelOpen = false;
+function openTempWheel(name, current, onPick) {
+  const start = clampTemp(current);
+  const degs = [];
+  for (let t = AIRCON_TEMP_MIN; t <= AIRCON_TEMP_MAX; t++) degs.push(String(t));
+  const fracs = [',0', ',5'];
+
+  const back = document.createElement('div');
+  back.className = 'sheet-back';
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  const title = document.createElement('div');
+  title.className = 'sheet-title';
+  title.textContent = name;
+  const val = document.createElement('div');
+  val.className = 'sheet-val';
+  const wrap = document.createElement('div');
+  wrap.className = 'wheel-wrap';
+  const band = document.createElement('div');
+  band.className = 'wheel-band';
+
+  const pick = () => AIRCON_TEMP_MIN + wDeg.selected + (wFrac.selected ? 0.5 : 0);
+  const refresh = () => { val.textContent = formatTempC(pick()); };
+  const wDeg = buildWheel(degs, Math.floor(start) - AIRCON_TEMP_MIN, () => refresh(), 'wheel-deg');
+  const wFrac = buildWheel(fracs, start % 1 === 0.5 ? 1 : 0, () => refresh(), 'wheel-frac');
+  refresh();
+
+  wrap.appendChild(band);
+  wrap.appendChild(wDeg);
+  wrap.appendChild(wFrac);
+  const done = document.createElement('button');
+  done.className = 'sheet-done';
+  done.textContent = 'Hotovo';
+
+  sheet.appendChild(title);
+  sheet.appendChild(val);
+  sheet.appendChild(wrap);
+  sheet.appendChild(done);
+  back.appendChild(sheet);
+  document.body.appendChild(back);
+  tempWheelOpen = true;
+  // Až v dokumentu má prvek výšku, teprve teď jde nastavit pozice
+  wDeg.scrollToIndex(wDeg.selected);
+  wFrac.scrollToIndex(wFrac.selected);
+
+  const close = () => {
+    if (!tempWheelOpen) return;
+    tempWheelOpen = false;
+    back.remove();
+    if (airconRenderPending) { airconRenderPending = false; renderAircon(); }
+  };
+  back.addEventListener('click', e => { if (e.target === back) close(); });
+  done.addEventListener('click', () => { const t = pick(); close(); onPick(t); });
+  return back;
 }
 
 async function airconSet(guid, payload, btn) {
@@ -3254,8 +3430,8 @@ async function airconSet(guid, payload, btn) {
 }
 
 // Nová data chodí každých 5 min a renderAircon staví seznam celý znovu. Kdyby dorazila
-// s otevřeným rolovacím seznamem (teplota, režim), prvek by se pod rukama zrušil a výběr
-// ztratil. Překreslení proto počká, až uživatel volbu dokončí.
+// s otevřeným výběrem (kolotoč teploty, seznam režimu), rozdělaná volba by se ztratila.
+// Překreslení proto počká, až uživatel volbu dokončí.
 let airconRenderPending = false;
 airconListEl.addEventListener('focusout', () => {
   // setTimeout: při focusout ještě activeElement ukazuje na starý prvek
@@ -3267,8 +3443,9 @@ airconListEl.addEventListener('focusout', () => {
 });
 
 function renderAircon() {
-  if (document.activeElement && document.activeElement.tagName === 'SELECT'
-      && airconListEl.contains(document.activeElement)) {
+  const busySelect = document.activeElement && document.activeElement.tagName === 'SELECT'
+    && airconListEl.contains(document.activeElement);
+  if (busySelect || tempWheelOpen) {
     airconRenderPending = true;
     return;
   }
@@ -3346,37 +3523,33 @@ function renderAircon() {
     const minus = document.createElement('button');
     minus.className = 'temp-btn';
     minus.textContent = '−';
-    // Teplota jako rolovací seznam — klepnutí otevře na iPhonu systémové kolečko,
+    // Klepnutí na teplotu otevře kolotoč (vlevo stupně, vpravo půlstupně),
     // ať se z 16 na 26 °C nemusí klikat dvacetkrát. Tlačítka ± zůstávají.
-    const tempVal = document.createElement('select');
-    tempVal.className = 'temp-val temp-select';
-    if (typeof d.targetTemp === 'number') {
-      for (let t = AIRCON_TEMP_MIN; t <= AIRCON_TEMP_MAX; t += AIRCON_TEMP_STEP) {
-        tempVal.appendChild(new Option(formatTempC(t), String(t)));
-      }
-      setTempSelect(tempVal, d.targetTemp);
-    } else {
-      // Stav jednotky neznáme — nemá smysl jí teplotu nastavovat (dnes to tlačítka
-      // taky odmítala, jen to nebylo vidět)
-      tempVal.appendChild(new Option(formatTempC(null), ''));
-      tempVal.disabled = true;
-    }
+    const tempVal = document.createElement('button');
+    tempVal.className = 'temp-val temp-pick';
+    tempVal.textContent = formatTempC(d.targetTemp);
+    // Stav jednotky neznáme — nemá smysl jí teplotu nastavovat (tlačítka to
+    // odmítala i dřív, jen to nebylo vidět)
+    tempVal.disabled = typeof d.targetTemp !== 'number';
     const plus = document.createElement('button');
     plus.className = 'temp-btn';
     plus.textContent = '+';
     const setTemp = (t, btn) => {
       if (t === d.targetTemp) return;
       d.targetTemp = t;
-      setTempSelect(tempVal, t);
+      tempVal.textContent = formatTempC(t);
       airconSet(d.guid, { temperature: t }, btn);
     };
     const stepTemp = (dir, btn) => {
       if (typeof d.targetTemp !== 'number') return;
-      setTemp(Math.min(AIRCON_TEMP_MAX, Math.max(AIRCON_TEMP_MIN, d.targetTemp + dir * AIRCON_TEMP_STEP)), btn);
+      setTemp(clampTemp(d.targetTemp + dir * AIRCON_TEMP_STEP), btn);
     };
     minus.addEventListener('click', () => stepTemp(-1, minus));
     plus.addEventListener('click', () => stepTemp(1, plus));
-    tempVal.addEventListener('change', () => setTemp(Number(tempVal.value), null));
+    tempVal.addEventListener('click', () => {
+      if (typeof d.targetTemp !== 'number') return;
+      openTempWheel(d.name, d.targetTemp, t => setTemp(t, null));
+    });
     stepper.appendChild(minus);
     stepper.appendChild(tempVal);
     stepper.appendChild(plus);
