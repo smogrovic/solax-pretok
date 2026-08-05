@@ -1232,7 +1232,11 @@ const HARD_OFF_HOUR = 20;                     // záložní mez, když není po�
 const SOLINATOR_BASE_MS = 1 * 3600000;        // základ každý den
 const SOLINATOR_BONUS_WARM_MS = 1 * 3600000;  // + nad 20 °C
 const SOLINATOR_BONUS_HOT_MS = 2 * 3600000;   // + nad 25 °C (celkem, ne navíc k teplému)
-const SOLINATOR_MAX_MS = 8 * 3600000;         // strop boostu i přenosu
+const SOLINATOR_MAX_MS = 8 * 3600000;         // strop ručního boostu (+2 h / +4 h)
+// Strop přenosu dluhu na další den. Musí být tak nízko, aby se denní cíl (1 + 2 + dluh)
+// vešel do okna 12:00 → západ − 1 h (v létě ~7,5 h). Jinak zůstane nesplněný zbytek i po
+// dokonalém dni, přenese se, a dluh se donekonečna obnovuje sám.
+const SOLINATOR_CARRY_MAX_MS = 3 * 3600000;
 
 function fmtDur(ms) {
   const m = Math.round(ms / 60000);
@@ -1257,8 +1261,13 @@ function solinatorRollDay(today) {
   if (state.solinator.date) {
     const unmet = Math.max(0, solinatorTargetMs() - solinatorRanMs());
     const disabled = Date.now() < state.solinator.disabledUntil;
-    state.solinator.boostMs = disabled ? 0 : Math.min(SOLINATOR_MAX_MS, unmet);
-    if (!disabled && unmet > 0) addLog(`Solinátor: ${fmtDur(unmet)} se přenáší na dnešek`);
+    const carry = disabled ? 0 : Math.min(SOLINATOR_CARRY_MAX_MS, unmet);
+    state.solinator.boostMs = carry;
+    // Psát skutečně přenesenou hodnotu, ne tu před ořezem
+    if (carry > 0) {
+      addLog(`Solinátor: ${fmtDur(carry)} se přenáší na dnešek`
+        + (unmet > carry ? ` (${fmtDur(unmet - carry)} propadá)` : ''));
+    }
   }
   state.solinator.date = today;
   state.solinator.bonusMs = 0;
@@ -1344,6 +1353,29 @@ function formatKwLog(w) {
   return (w / 1000).toFixed(1).replace('.', ',') + ' kW';
 }
 
+// Automatika posílá „on" jen když vidí vypnuto a „off" jen když vidí zapnuto, takže dva
+// stejné povely po sobě vždycky znamenají, že relé neposlechlo. Log se tím dřív zaplavil
+// desítkami stejných řádků — teď se zapíše první povel a pak už jen jedno upozornění,
+// že zařízení nereaguje. Posílat povel se nepřestane.
+const autoRepeat = new Map();   // key -> { turn, n, warned }
+const AUTO_REPEAT_WARN = 6;     // ~30 min při pětiminutovém cyklu
+
+function logAutoSet(key, turn, reason) {
+  const label = DEVICE_LABELS[key];
+  const word = turn === 'on' ? 'zapnuto' : 'vypnuto';
+  const prev = autoRepeat.get(key);
+  if (!prev || prev.turn !== turn) {
+    autoRepeat.set(key, { turn, n: 1, warned: false });
+    addLog(`${label}: ${word} (${reason})`);
+    return;
+  }
+  prev.n++;
+  if (prev.n >= AUTO_REPEAT_WARN && !prev.warned) {
+    prev.warned = true;
+    addLog(`${label}: nereaguje na povel „${word}" (${prev.n}× za sebou)`);
+  }
+}
+
 async function autoSet(key, turn, reason) {
   const dev = DEVICES[key];
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -1351,7 +1383,7 @@ async function autoSet(key, turn, reason) {
       await setShellyState(dev.serverUri, dev.deviceId, turn);
       state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       broadcast('device', { key, status: state.devices[key] });
-      addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} (${reason})`);
+      logAutoSet(key, turn, reason);
       return true;
     } catch (err) {
       if (attempt === 0) {

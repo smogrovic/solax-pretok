@@ -1931,7 +1931,7 @@
             <li>Běží <b>od 12:00 do hodiny před západem</b> slunce, dokud není rozpočet naplněn. Pak se sám vypne.</li>
             <li><b>Mimo tohle okno je vždy vypnutý</b> — appka ho aktivně vypíná, i po půlnoci a i když vypadnou data ze střídače nebo počasí (náhradní mez <b>20:00</b>). Ruční zapnutí mimo okno tedy do 5 minut zase vypne; na „chci teď navíc" jsou tlačítka +2 h / +4 h.</li>
             <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
-            <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b>.</li>
+            <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b> — ale <b>nejvýš 3 h</b>, zbytek propadá. Kdyby se přenášelo víc, cíl by přerostl denní okno, nešel by nikdy splnit a dluh by se donekonečna obnovoval sám.</li>
             <li><b>−1 den / −2 dny</b> (vysoký chlor): ty dny se neběží vůbec a <b>nevzniká žádný dluh</b>. Tlačítko <b>zrušit</b> smaže boost.</li>
             <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“.</li>
             <li>Časovač v relé (60 min) zůstává jako <b>pojistka</b> — kdyby appka spadla, solinátor se sám vypne. Rozpočet měří <b>skutečně odběhnutý čas</b>, takže si případnou mezeru sám dožene.</li>
