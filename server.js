@@ -2593,6 +2593,35 @@ const TEMP_AUTO_RULES = [
 ];
 
 // Spínací teplota je jedna společná pro všechny pokoje (jezdec v appce, 18–23 °C).
+// Poslední stav zapnutí, který o klimatizaci víme — buď z pollu, nebo protože jsme ho sami
+// nastavili. Slouží k rozpoznání změny, kterou udělal někdo jiný (dálkový ovladač, appka
+// Panasonic): poller ji pak zapíše do logu.
+const airconLastPower = new Map(); // guid -> true/false
+
+// Jediná cesta, kudy jdou povely do klimatizace. Díky tomu si vlastní akci zapamatujeme
+// a poller ji nehlásí jako zásah zvenčí.
+async function pccControl(guid, parameters) {
+  await pccQueued(() => pccApiFetch('/deviceStatus/control', {
+    method: 'POST',
+    body: JSON.stringify({ deviceGuid: guid, parameters })
+  }));
+  if (parameters.operate !== undefined) airconLastPower.set(guid, parameters.operate === 1);
+}
+
+// Zapíše do logu změnu zapnutí, kterou appka neudělala — dálkový ovladač, appka Panasonic,
+// nebo náš povel neprošel. Vlastní akce se sem nedostanou, ty si pamatuje pccControl.
+function noteAirconExternalChanges(devices) {
+  for (const d of devices) {
+    if (typeof d.power !== 'boolean') continue;   // stav neznámý → nehádat
+    const prev = airconLastPower.get(d.guid);
+    // Poprvé po startu jen zapamatovat, ať se nehlásí „změna" proti prázdnu
+    if (prev !== undefined && prev !== d.power) {
+      addLog(`${d.name}: ${d.power ? 'zapnuto' : 'vypnuto'} (mimo appku)`);
+    }
+    airconLastPower.set(d.guid, d.power);
+  }
+}
+
 // Odvozené hodnoty drží stejné rozestupy jako původní napevno psané pravidlo (22/20,5/20):
 //   vypnout  = zapnout − 1,5 °C
 //   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
@@ -2611,9 +2640,7 @@ async function tempAutoTurnOff(rule) {
   const dev = findAircon(rule.room);
   if (!dev || dev.power !== true) return; // nenašli jsme ji, nebo už je vypnutá
   try {
-    await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-      method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters: { operate: 0 } })
-    }));
+    await pccControl(dev.guid, { operate: 0 });
     dev.power = false;
     addLog(`${dev.name}: vypnuto (teplotní automatika vypnuta)`);
     broadcast('aircon', { aircon: state.aircon });
@@ -2640,9 +2667,7 @@ async function evaluateTempAuto(devices) {
     }
     if (!parameters) continue;
     try {
-      await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-        method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
-      }));
+      await pccControl(dev.guid, parameters);
       dev.power = parameters.operate === 1;
       if (parameters.operate === 0) tempAutoOffAt[rule.key] = Date.now(); // start 30min blokace
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
@@ -2676,6 +2701,8 @@ async function pollAircon() {
       }
       await delay(500);
     }
+
+    noteAirconExternalChanges(out);
 
     // Časová osa: segmenty běhu klimatizací (dynamické klíče ac_<guid>)
     const nowTs = Date.now();
@@ -2751,10 +2778,7 @@ app.post('/api/aircon/set', async (req, res) => {
   if (!Object.keys(parameters).length) return res.status(400).json({ error: 'Žádný parametr ke změně.' });
 
   try {
-    await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-      method: 'POST',
-      body: JSON.stringify({ deviceGuid: guid, parameters })
-    }));
+    await pccControl(guid, parameters);
 
     // Optimistická aktualizace, ověření proběhne příštím pollem
     const dev = state.aircon.devices.find(d => d.guid === guid);
@@ -2832,10 +2856,7 @@ setInterval(async () => {
     let ok = 0;
     for (const guid of targets) {
       try {
-        await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-          method: 'POST',
-          body: JSON.stringify({ deviceGuid: guid, parameters: params })
-        }));
+        await pccControl(guid, params);
         const dev = state.aircon.devices.find(d => d.guid === guid);
         if (dev) {
           dev.power = t.action === 'on';
@@ -3167,9 +3188,7 @@ async function assistantSetAircon({ room, power, mode, temperature, quiet }) {
     parameters.ecoMode = 2;
   }
   if (!Object.keys(parameters).length) return `U ${dev.name} nebylo co nastavit.`;
-  await pccQueued(() => pccApiFetch('/deviceStatus/control', {
-    method: 'POST', body: JSON.stringify({ deviceGuid: dev.guid, parameters })
-  }));
+  await pccControl(dev.guid, parameters);
   if (parameters.operate !== undefined) dev.power = parameters.operate === 1;
   if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
   if (parameters.operationMode !== undefined) dev.mode = mode;
