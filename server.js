@@ -1195,8 +1195,10 @@ setInterval(() => { checkGarageOpen(); checkOutages(); }, 5 * 60 * 1000);
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
 const OWM_API_KEY = process.env.OWM_API_KEY;
-const WEATHER_LAT = 49.765;
-const WEATHER_LON = 14.688;
+// Na západu slunce visí vypínání bazénu i solinátoru, takže po přenosu appky jinam
+// se souřadnice musí dát změnit. Výchozí hodnoty = původní místo.
+const WEATHER_LAT = Number(process.env.WEATHER_LAT) || 49.765;
+const WEATHER_LON = Number(process.env.WEATHER_LON) || 14.688;
 const AUTOMATION_INTERVAL_MS = 5 * 60 * 1000;
 
 // Bazén: spíná při velkém přebytku (přetok do sítě + nabíjení baterie)
