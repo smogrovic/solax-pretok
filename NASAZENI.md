@@ -67,6 +67,9 @@ Přehled všech je v souboru `.env.example` a v tabulce na konci tohohle návodu
    - solinátor → `SOLINATOR_DEVICE_ID`
 3. Kdyby některé relé bylo na jiném serveru, dá se přebít přes `POOL_SERVER_URI` /
    `SOLINATOR_SERVER_URI`.
+4. Máš-li **Shelly H&T** (teploměr) v obýváku, jeho Device ID patří do
+   `SHELLY_TEMP_OBYVAK_ID` — řídí se podle něj teplotní automatika klimatizace.
+   **Vyplň ho**, jinak se čte čidlo původního majitele.
 
 ### Panasonic — klimatizace a tepelné čerpadlo
 Stačí e-mail a heslo od účtu **Panasonic Comfort Cloud** (stejné jako v mobilní appce):
@@ -180,6 +183,7 @@ Kompletní popis toho, co a kdy se spíná, je přímo v appce na stránce **Log
 | `POOL_DEVICE_ID` | pro bazén | bazén chybí |
 | `SOLINATOR_DEVICE_ID` | pro solinátor | solinátor chybí |
 | `POOL_SERVER_URI`, `SOLINATOR_SERVER_URI` | ne | použije se `SHELLY_SERVER_URI` |
+| `SHELLY_TEMP_OBYVAK_ID` | **ano, když máš H&T** | čte se **cizí čidlo** původního majitele; teplotní automatika obýváku pak jede podle něj |
 | `PANASONIC_EMAIL`, `PANASONIC_PASSWORD` | pro klimatizace | stránka Klima hlásí nenastaveno, teplotní automatika neběží |
 | `TAHOMA_EMAIL`, `TAHOMA_PASSWORD` | pro žaluzie | stránky Žaluzie zůstanou prázdné |
 | `WALLBOX_SN` | pro wallbox | stránka Wallbox nefunguje |

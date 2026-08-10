@@ -861,6 +861,22 @@
     margin-left:6px;
     font-weight:400;
   }
+  /* Hodnota z čidla (tučně) je ta rozhodující; z klimatizace je vedle jen na porovnání */
+  b.tempauto-temp{color:var(--navy);font-weight:800;}
+  .tempauto-temp-alt{opacity:0.65;}
+
+  /* DOČASNÉ: karta s daty čidel na porovnání */
+  .sensor-now{font-size:12px;color:var(--navy);line-height:1.6;padding-bottom:6px;}
+  .sensor-now b{font-weight:800;}
+  .sensor-log{
+    max-height:220px;
+    overflow-y:auto;
+    font-size:11px;
+    color:var(--grey-text);
+    font-variant-numeric:tabular-nums;
+  }
+  .sensor-log div{display:flex;justify-content:space-between;padding:2px 0;}
+  .sensor-log span:first-child{opacity:0.7;}
   .toggle-switch{
     position:relative;
     width:46px;
@@ -1553,6 +1569,14 @@
         <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="timerList"></div>
       </div>
+
+      <!-- DOČASNÉ: porovnání Shelly čidla s čidlem v klimatizaci. Až bude jasné,
+           kterému věřit, smaže se celá tahle karta i state.sensorLog na serveru. -->
+      <div class="card stats-card" id="sensorCard" hidden>
+        <div class="graph-title">Data čidel (dočasné, na porovnání)</div>
+        <div id="sensorNow"></div>
+        <div class="sensor-log" id="sensorLog"></div>
+      </div>
     </div>
   </div>
 
@@ -1953,6 +1977,9 @@
           <div class="logic-h">Klimatizace — teplotní automatika (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
             <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
+            <li><b>Obývák se řídí podle Shelly čidla</b> v místnosti (měří v obytné zóně). Ostatní pokoje podle čidla v klimatizaci, které je u stropu a ukazuje víc.</li>
+            <li>Když čidlo <b>6 hodin nic nenahlásí</b> (vybitá baterka, spadlé Wi-Fi), automatika se vrátí k teplotě z klimatizace a zapíše to do logu. Klidná teplota se za výpadek nepovažuje — čidlo hlásí jen při změně.</li>
+            <li>Při <b>slabé baterce</b> čidla přijde push.</li>
             <li><b>Spínací teplota se nastavuje jezdcem</b> pod přepínači (<b>18–23 °C</b> po 1 °C) a platí <b>pro všechny pokoje</b> zároveň.</li>
             <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení (tiše) na <b>mez − 2 °C</b>.</li>
             <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1,5 °C</b>.</li>
@@ -3296,6 +3323,81 @@ for (const card of blindTimerCards) {
 
 const airconListEl = document.getElementById('airconList');
 let airconData = { devices: [], error: null };
+// Shelly H&T čidla: pokoj -> { tempC, humidity, battery, online, reportedAt }
+let sensorsData = {};
+
+// Čidlo patřící ke klimatizaci daného jména (klíč pokoje je v TEMP_AUTO_ROOMS)
+function sensorForDevice(name) {
+  const n = (name || '').toLowerCase();
+  const room = TEMP_AUTO_ROOMS.find(r => n.includes(r.label.toLowerCase()));
+  return room ? sensorsData[room.key] : null;
+}
+function roomSensorTemp(label) {
+  const room = TEMP_AUTO_ROOMS.find(r => r.label.toLowerCase() === label.toLowerCase());
+  const s = room ? sensorsData[room.key] : null;
+  return s && typeof s.tempC === 'number' ? s.tempC : null;
+}
+
+// ---------- DOČASNÉ: porovnání čidla s klimatizací (celý blok půjde smazat) ----------
+const sensorCardEl = document.getElementById('sensorCard');
+const sensorNowEl = document.getElementById('sensorNow');
+const sensorLogEl = document.getElementById('sensorLog');
+let sensorLogData = [];
+
+function fmtAge(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'teď';
+  if (m < 60) return `před ${m} min`;
+  const h = Math.floor(m / 60);
+  return `před ${h} h ${String(m % 60).padStart(2, '0')} min`;
+}
+function fmtC1(v) {
+  return typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '–';
+}
+
+function renderSensorCard() {
+  if (!sensorCardEl) return;
+  const rooms = Object.keys(sensorsData);
+  if (!rooms.length) { sensorCardEl.hidden = true; return; }
+  sensorCardEl.hidden = false;
+
+  sensorNowEl.textContent = '';
+  for (const key of rooms) {
+    const s = sensorsData[key];
+    const room = TEMP_AUTO_ROOMS.find(r => r.key === key);
+    const pcc = room ? roomInsideTemp(room.label) : null;
+    const line = document.createElement('div');
+    line.className = 'sensor-now';
+    const b = document.createElement('b');
+    b.textContent = `${room ? room.label : key}: ${fmtC1(s.tempC)} °C`;
+    line.appendChild(b);
+    const rest = [];
+    if (typeof s.humidity === 'number') rest.push(Math.round(s.humidity) + ' %');
+    if (typeof s.battery === 'number') rest.push('baterie ' + Math.round(s.battery) + ' %');
+    rest.push(s.reportedAt ? fmtAge(Date.now() - s.reportedAt) : 'čas hlášení neznámý');
+    if (pcc !== null) {
+      rest.push(`klima ${fmtC1(pcc)} °C`);
+      rest.push(`rozdíl ${(s.tempC - pcc >= 0 ? '+' : '') + fmtC1(s.tempC - pcc)} °C`);
+    }
+    line.appendChild(document.createTextNode(' · ' + rest.join(' · ')));
+    sensorNowEl.appendChild(line);
+  }
+
+  sensorLogEl.textContent = '';
+  for (const x of sensorLogData.slice().reverse()) {
+    const row = document.createElement('div');
+    const t = new Date(x.t);
+    const left = document.createElement('span');
+    left.textContent = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    const right = document.createElement('span');
+    const diff = typeof x.pccC === 'number' ? x.sensorC - x.pccC : null;
+    right.textContent = `čidlo ${fmtC1(x.sensorC)} · klima ${fmtC1(x.pccC)}`
+      + (diff !== null ? ` · ${(diff >= 0 ? '+' : '') + fmtC1(diff)}` : '');
+    row.appendChild(left);
+    row.appendChild(right);
+    sensorLogEl.appendChild(row);
+  }
+}
 let airconEnabled = null;
 
 const AIRCON_MODE_LABELS = { auto: 'Auto', dry: 'Vysoušení', cool: 'Chlazení', heat: 'Topení', fan: 'Ventilátor' };
@@ -3486,12 +3588,24 @@ function renderAircon() {
     if (d.power === null || d.power === undefined) {
       pos.textContent = 'stav neznámý';
     } else {
-      const parts = [];
-      if (typeof d.insideTemp === 'number') parts.push('uvnitř ' + formatTempC(d.insideTemp));
-      if (d.power && d.mode) parts.push(AIRCON_MODE_LABELS[d.mode] || d.mode);
-      if (d.power && d.eco === 2) parts.push('tichý');
-      if (d.power && d.eco === 1) parts.push('výkonný');
-      pos.textContent = parts.join(' · ');
+      // Teplota z Shelly čidla je tučně hned vedle té z klimatizace, ať jdou porovnat
+      const sens = sensorForDevice(d.name);
+      const nodes = [];
+      const txt = t => nodes.push(document.createTextNode(t));
+      if (typeof d.insideTemp === 'number') txt('uvnitř ' + formatTempC(d.insideTemp));
+      if (sens && typeof sens.tempC === 'number') {
+        const b = document.createElement('b');
+        b.textContent = 'čidlo ' + formatTempC(sens.tempC);
+        nodes.push(b);
+        if (typeof sens.humidity === 'number') txt(Math.round(sens.humidity) + ' %');
+      }
+      if (d.power && d.mode) txt(AIRCON_MODE_LABELS[d.mode] || d.mode);
+      if (d.power && d.eco === 2) txt('tichý');
+      if (d.power && d.eco === 1) txt('výkonný');
+      nodes.forEach((n, i) => {
+        if (i) pos.appendChild(document.createTextNode(' · '));
+        pos.appendChild(n);
+      });
     }
     info.appendChild(pos);
 
@@ -4365,10 +4479,18 @@ function renderTempAuto() {
     const name = document.createElement('div');
     name.className = 'tempauto-name';
     name.textContent = room.label;
+    // Tučně to, podle čeho se automatika rozhoduje (čidlo), za tím hodnota z klimatizace
+    const sensT = roomSensorTemp(room.label);
     const t = roomInsideTemp(room.label);
+    if (sensT !== null) {
+      const temp = document.createElement('b');
+      temp.className = 'tempauto-temp';
+      temp.textContent = sensT.toFixed(1).replace('.', ',') + ' °C';
+      name.appendChild(temp);
+    }
     if (t !== null) {
       const temp = document.createElement('span');
-      temp.className = 'tempauto-temp';
+      temp.className = 'tempauto-temp' + (sensT !== null ? ' tempauto-temp-alt' : '');
       temp.textContent = t.toFixed(1).replace('.', ',') + ' °C';
       name.appendChild(temp);
     }
@@ -4915,6 +5037,9 @@ function applySnapshot(snap) {
   renderAutomation(snap.autoEnabled !== false);
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
+  sensorsData = snap.sensors || {};
+  sensorLogData = snap.sensorLog || [];
+  renderSensorCard();
   renderAircon();
   airconTimersData = snap.airconTimers || [];
   renderTimers();
@@ -5130,6 +5255,18 @@ function connectStream() {
     renderAircon();
     renderTimeline(); // názvy klimatizací v legendě osy
     renderTempAuto(); // aktuální teploty v pokojích
+    renderSensorCard();
+  });
+  es.addEventListener('sensor', e => {
+    const d = JSON.parse(e.data);
+    if (d.room) sensorsData[d.room] = d.sensor;
+    renderAircon();
+    renderTempAuto();
+    renderSensorCard();
+  });
+  es.addEventListener('sensorLog', e => {
+    sensorLogData = JSON.parse(e.data).sensorLog || [];
+    renderSensorCard();
   });
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];

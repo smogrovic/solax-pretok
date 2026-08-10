@@ -31,6 +31,17 @@ const LIGHT_ZAHRADA_NAHORE_ID = '34b7daca6dc8';
 const LIGHT_BAZEN_ID          = '34b7daca4150';
 const LIGHT_NOCNI_ID          = 'dcda0cea454c';
 
+// Teplotní čidla (Shelly H&T) — jen ke čtení, proto stranou od DEVICES: nemají ON/OFF
+// endpointy ani stav relé. Klíč pokoje je stejný jako v TEMP_AUTO_RULES.
+const TEMP_SENSORS = {
+  obyvak: { deviceId: process.env.SHELLY_TEMP_OBYVAK_ID || '08927250b96c', serverUri: SHELLY_SERVER_URI }
+};
+// Kdy přestat věřit poslední hodnotě. Čidlo hlásí při změně, takže „stará" hodnota při
+// klidné teplotě je správná — 6 h je velkoryse nad periodickým hlášením a chytá až
+// vybitou baterku nebo spadlé Wi-Fi.
+const SENSOR_STALE_MS = 6 * 60 * 60 * 1000;
+const SENSOR_LOW_BATTERY = 15;
+
 // Všechna relé, která obchází centrální poller; klíče odpovídají zařízením ve frontendu
 const DEVICES = {
   shelly:      { apiPath: '/api/shelly',              serverUri: SHELLY_SERVER_URI,    deviceId: SHELLY_DEVICE_ID },
@@ -111,7 +122,9 @@ const state = {
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
   solinator: { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
-  assistantLog: []   // { t, text } — co asistent provedl, za 24 h
+  assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
+  sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
+  sensorLog: []      // DOČASNÉ: { t, sensorC, pccC } na porovnání čidla s klimatizací
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -227,7 +240,9 @@ function snapshot() {
     assistantLog: state.assistantLog,
     nukiEnabled,
     pushEnabled,
-    lockEnabled
+    lockEnabled,
+    sensors: state.sensors,
+    sensorLog: state.sensorLog
   };
 }
 
@@ -401,7 +416,22 @@ async function fetchShellyStatus(serverUri, deviceId) {
     if (typeof status['switch:0'].apower === 'number') powerW = status['switch:0'].apower;
   }
 
-  const result = { online: !!online, isOn, powerW };
+  // Teplota/vlhkost/baterie — hlásí je H&T čidlo. POZOR: `temperature:0` posílá i relé,
+  // ale to je jeho VNITŘNÍ teplota. Jako teplotu v pokoji to smí vzít jen volající,
+  // který ví, že jde o čidlo z TEMP_SENSORS (viz pollSensor).
+  const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const tempC = num(status?.['temperature:0']?.tC) ?? num(status?.tmp?.value);
+  const humidity = num(status?.['humidity:0']?.rh) ?? num(status?.hum?.value);
+  const battery = num(status?.['devicepower:0']?.battery?.percent) ?? num(status?.bat?.value);
+  // Cloud přikládá čas poslední aktualizace ve tvaru "2026-08-10 19:30:29" (UTC)
+  const updatedRaw = status?._updated;
+  const updatedTs = typeof updatedRaw === 'string' ? Date.parse(updatedRaw.replace(' ', 'T') + 'Z') : NaN;
+
+  const result = {
+    online: !!online, isOn, powerW,
+    tempC, humidity, battery,
+    updatedAt: Number.isFinite(updatedTs) ? updatedTs : null
+  };
   shellyCache.set(cacheKey, { value: result, ts: Date.now() });
   return result;
 }
@@ -456,6 +486,50 @@ async function pollDevice(key) {
   broadcast('device', { key, status: state.devices[key] });
 }
 
+// Teplotní čidlo. Na rozdíl od relé se neukládá stav zapnutí — jen naměřené hodnoty.
+async function pollSensor(room) {
+  const cfg = TEMP_SENSORS[room];
+  const prev = state.sensors[room] || {};
+  try {
+    const s = await fetchShellyStatus(cfg.serverUri, cfg.deviceId);
+    // Kdy čidlo naposledy hlásilo. Cloud dává `_updated`; když ne, bereme poslední chvíli,
+    // kdy bylo online — bateriové čidlo cloud během spánku hlásí jako offline, takže
+    // pouhé `online:false` ještě neznamená, že je hodnota k zahození.
+    const reportedAt = s.updatedAt || (s.online ? Date.now() : (prev.reportedAt || null));
+    state.sensors[room] = {
+      tempC: s.tempC, humidity: s.humidity, battery: s.battery,
+      online: s.online, reportedAt, fetchedAt: Date.now()
+    };
+    checkSensorBattery(room, s.battery);
+  } catch {
+    // Výpadek dotazu není výpadek čidla — poslední známou hodnotu si necháme,
+    // o její platnosti rozhodne stáří (SENSOR_STALE_MS).
+    state.sensors[room] = { ...prev, online: false, fetchedAt: Date.now() };
+  }
+  broadcast('sensor', { room, sensor: state.sensors[room] });
+}
+
+// Teplota z čidla, pokud se jí dá věřit. null = použij náhradní zdroj (klimatizaci).
+function sensorTempC(room) {
+  const s = state.sensors[room];
+  if (!s || typeof s.tempC !== 'number') return null;
+  if (!s.reportedAt || Date.now() - s.reportedAt > SENSOR_STALE_MS) return null;
+  return s.tempC;
+}
+
+const sensorBatteryWarned = {};
+function checkSensorBattery(room, battery) {
+  if (typeof battery !== 'number') return;
+  if (battery <= SENSOR_LOW_BATTERY && !sensorBatteryWarned[room]) {
+    sensorBatteryWarned[room] = true;
+    const label = (TEMP_AUTO_RULES.find(r => r.key === room) || {}).room || room;
+    addLog(`Čidlo ${label}: slabá baterie (${Math.round(battery)} %)`);
+    sendPushToAll('Slabá baterie čidla', `Teplotní čidlo ${label} hlásí ${Math.round(battery)} %.`);
+  } else if (battery > SENSOR_LOW_BATTERY + 10) {
+    sensorBatteryWarned[room] = false;   // po výměně/nabití se upozornění zase natáhne
+  }
+}
+
 let shellyPollRunning = false;
 
 async function pollShelly() {
@@ -465,6 +539,9 @@ async function pollShelly() {
     // Rozestupy mezi dotazy hlídá globální fronta shellyQueued
     for (const key of Object.keys(DEVICES)) {
       await pollDevice(key);
+    }
+    for (const room of Object.keys(TEMP_SENSORS)) {
+      await pollSensor(room);
     }
 
     const powers = [];
@@ -2651,21 +2728,68 @@ async function tempAutoTurnOff(rule) {
   }
 }
 
+// Podle čeho se v pokoji rozhoduje: přednost má Shelly čidlo (měří v obytné zóně),
+// náhradou je čidlo v klimatizaci (u stropu, ukazuje víc). Přepnutí zdroje se zapisuje
+// jen při změně — jinak by to při každém cyklu přidalo řádek do logu.
+const tempSourceLogged = {};
+function roomTemp(roomKey, dev) {
+  const fromSensor = TEMP_SENSORS[roomKey] ? sensorTempC(roomKey) : null;
+  const fromPcc = dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null;
+  const source = fromSensor !== null ? 'čidlo' : 'klimatizace';
+  if (TEMP_SENSORS[roomKey] && tempSourceLogged[roomKey] !== source) {
+    if (tempSourceLogged[roomKey] !== undefined) {
+      const label = (TEMP_AUTO_RULES.find(r => r.key === roomKey) || {}).room || roomKey;
+      addLog(fromSensor !== null
+        ? `Teplotní automatika ${label}: zpět na Shelly čidlo`
+        : `Teplotní automatika ${label}: čidlo nehlásí, přechází se na teplotu z klimatizace`);
+    }
+    tempSourceLogged[roomKey] = source;
+  }
+  return { temp: fromSensor !== null ? fromSensor : fromPcc, source };
+}
+
+// DOČASNÉ (na porovnání čidla s klimatizací, pak se to celé smaže):
+// při každém načtení klimatizací uloží dvojici hodnot. Schválně to nejde do hlavního
+// logu — 288 řádků denně by ho pohřbilo.
+const SENSOR_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function recordSensorSample(devices) {
+  const now = Date.now();
+  for (const room of Object.keys(TEMP_SENSORS)) {
+    const s = state.sensors[room];
+    if (!s || typeof s.tempC !== 'number') continue;
+    const rule = TEMP_AUTO_RULES.find(r => r.key === room);
+    const rn = rule ? cz(rule.room) : cz(room);
+    const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
+    state.sensorLog.push({
+      t: now,
+      room,
+      sensorC: s.tempC,
+      humidity: typeof s.humidity === 'number' ? s.humidity : null,
+      pccC: dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null
+    });
+  }
+  state.sensorLog = state.sensorLog.filter(x => now - x.t <= SENSOR_LOG_MAX_AGE_MS);
+  broadcast('sensorLog', { sensorLog: state.sensorLog });
+}
+
 async function evaluateTempAuto(devices) {
   const { onTemp, offTemp, coolTemp } = tempAutoLevels();
   for (const rule of TEMP_AUTO_RULES) {
     if (!state.tempAuto[rule.key]) continue;
     const rn = cz(rule.room);
     const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
-    if (!dev || typeof dev.insideTemp !== 'number') continue;
+    if (!dev) continue;
+    const { temp, source } = roomTemp(rule.key, dev);
+    if (typeof temp !== 'number') continue;
+    const src = TEMP_SENSORS[rule.key] ? ` (${source})` : '';
     let parameters = null, msg = null;
     const lockedUntil = (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_OFF_LOCKOUT_MS;
-    if (dev.insideTemp >= onTemp && dev.power !== true && Date.now() >= lockedUntil) {
+    if (temp >= onTemp && dev.power !== true && Date.now() >= lockedUntil) {
       parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: coolTemp, ecoMode: rule.quiet ? 2 : 0 };
-      msg = `${dev.name}: zapnuto chlazení ${coolTemp} °C (v pokoji ${dev.insideTemp} °C, mez ${onTemp} °C)`;
-    } else if (dev.insideTemp <= offTemp && dev.power === true) {
+      msg = `${dev.name}: zapnuto chlazení ${coolTemp} °C (v pokoji ${temp} °C${src}, mez ${onTemp} °C)`;
+    } else if (temp <= offTemp && dev.power === true) {
       parameters = { operate: 0 };
-      msg = `${dev.name}: vypnuto (v pokoji ${dev.insideTemp} °C)`;
+      msg = `${dev.name}: vypnuto (v pokoji ${temp} °C${src})`;
     }
     if (!parameters) continue;
     try {
@@ -2705,6 +2829,7 @@ async function pollAircon() {
     }
 
     noteAirconExternalChanges(out);
+    recordSensorSample(out);
 
     // Časová osa: segmenty běhu klimatizací (dynamické klíče ac_<guid>)
     const nowTs = Date.now();
