@@ -2800,7 +2800,8 @@ function recordAirconTemps(devices) {
   broadcast('airconHistory', { history: state.airconHistory });
 }
 
-// Ruční zásah do klimatizace (tlačítka v appce, ovladač, asistent) shodí přepínač
+// Zásah do klimatizace od člověka (tlačítka v appce, dálkový ovladač, časovač,
+// asistent) shodí přepínač
 // teplotní automatiky toho pokoje — ať automatika nepřepíše, co si člověk právě nastavil.
 //
 // POZOR: na rozdíl od ručního vypnutí přepínače tady klimatizací NEHÝBEME. Vypnutí
@@ -3033,6 +3034,10 @@ setInterval(async () => {
         if (dev) {
           dev.power = t.action === 'on';
           if (t.action === 'on' && t.quiet) dev.eco = 2;
+          // Časovač je taky pokyn od člověka — jinak by automatika po nočním vypnutí
+          // klimatizaci hned zase nahodila. Jméno bereme z jednotky, ne z časovače:
+          // hromadný časovač se jmenuje „Všechny klimatizace" a na pokoj by nesedl.
+          tempAutoDisableByHand(dev.name, `časovač ${t.time}`);
         }
         ok++;
       } catch (err) {
