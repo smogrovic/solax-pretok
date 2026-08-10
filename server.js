@@ -117,14 +117,15 @@ const state = {
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
-  tempAutoOn: 22,    // společná spínací teplota pro všechny pokoje (18–23 °C, jezdec v appce)
+  tempAutoOn: 22,    // společná spínací teplota pro všechny pokoje (18–25 °C, jezdec v appce)
   // Solinátor jede na denní rozpočet hodin: cíl = základ + bonus za teplotu + boost.
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
   solinator: { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
-  sensorLog: []      // DOČASNÉ: { t, sensorC, pccC } na porovnání čidla s klimatizací
+  // teploty v pokojích za 24 h pro graf: temps = podle guid klimatizace, sens = Shelly čidla
+  airconHistory: []  // { t, temps: { guid: °C }, sens: { pokoj: °C } }
 };
 
 const TIMELINE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -242,7 +243,7 @@ function snapshot() {
     pushEnabled,
     lockEnabled,
     sensors: state.sensors,
-    sensorLog: state.sensorLog
+    airconHistory: state.airconHistory
   };
 }
 
@@ -807,6 +808,36 @@ app.post('/api/wallbox-history/restore', (req, res) => {
 });
 
 // Obnova historie teplot bojlerů po restartu/deployi (klient drží zálohu v localStorage)
+// Historie teplot v pokojích ze zálohy v telefonu — po deployi server startuje s prázdnou
+app.post('/api/aircon-history/restore', (req, res) => {
+  const points = req.body && Array.isArray(req.body.points) ? req.body.points : null;
+  if (!points) return res.status(400).json({ error: 'Chybí points.' });
+
+  const now = Date.now();
+  const cutoff = now - AIRCON_HISTORY_MAX_AGE_MS;
+  // Teploty v pokoji: cokoli mimo tenhle rozsah je zjevně nesmysl, ne data
+  const okMap = m => m && typeof m === 'object' && !Array.isArray(m)
+    && Object.values(m).every(v => typeof v === 'number' && v > -30 && v < 60);
+  const clean = points
+    .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now
+      && okMap(p.temps || {}) && okMap(p.sens || {})
+      && (Object.keys(p.temps || {}).length || Object.keys(p.sens || {}).length))
+    .map(p => ({ t: p.t, temps: p.temps || {}, sens: p.sens || {} }))
+    .slice(0, 2000);
+  if (!clean.length) return res.json({ added: 0 });
+
+  const before = state.airconHistory.length;
+  const all = state.airconHistory.concat(clean).sort((a, b) => a.t - b.t);
+  const merged = [];
+  for (const p of all) {
+    if (!merged.length || p.t - merged[merged.length - 1].t > 30000) merged.push(p);
+  }
+  state.airconHistory = merged.filter(p => p.t >= cutoff);
+  const added = state.airconHistory.length - before;
+  if (added > 0) broadcast('airconHistory', { history: state.airconHistory });
+  res.json({ added });
+});
+
 app.post('/api/boiler-history/restore', (req, res) => {
   const points = req.body && Array.isArray(req.body.points) ? req.body.points : null;
   if (!points) return res.status(400).json({ error: 'Chybí points.' });
@@ -2671,7 +2702,7 @@ const TEMP_AUTO_RULES = [
   { key: 'miky', room: 'Miky', quiet: true }
 ];
 
-// Spínací teplota je jedna společná pro všechny pokoje (jezdec v appce, 18–23 °C).
+// Spínací teplota je jedna společná pro všechny pokoje (jezdec v appce, 18–25 °C).
 // Poslední stav zapnutí, který o klimatizaci víme — buď z pollu, nebo protože jsme ho sami
 // nastavili. Slouží k rozpoznání změny, kterou udělal někdo jiný (dálkový ovladač, appka
 // Panasonic): poller ji pak zapíše do logu.
@@ -2696,6 +2727,7 @@ function noteAirconExternalChanges(devices) {
     // Poprvé po startu jen zapamatovat, ať se nehlásí „změna" proti prázdnu
     if (prev !== undefined && prev !== d.power) {
       addLog(`${d.name}: ${d.power ? 'zapnuto' : 'vypnuto'} (mimo appku)`);
+      tempAutoDisableByHand(d.name, 'zásah mimo appku');
     }
     airconLastPower.set(d.guid, d.power);
   }
@@ -2705,7 +2737,7 @@ function noteAirconExternalChanges(devices) {
 //   vypnout  = zapnout − 1,5 °C
 //   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
 const TEMP_AUTO_ON_MIN = 18;
-const TEMP_AUTO_ON_MAX = 23;
+const TEMP_AUTO_ON_MAX = 25;
 function tempAutoLevels() {
   const onTemp = state.tempAutoOn;
   return { onTemp, offTemp: onTemp - 1.5, coolTemp: onTemp - 2 };
@@ -2748,28 +2780,40 @@ function roomTemp(roomKey, dev) {
   return { temp: fromSensor !== null ? fromSensor : fromPcc, source };
 }
 
-// DOČASNÉ (na porovnání čidla s klimatizací, pak se to celé smaže):
-// při každém načtení klimatizací uloží dvojici hodnot. Schválně to nejde do hlavního
-// logu — 288 řádků denně by ho pohřbilo.
-const SENSOR_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-function recordSensorSample(devices) {
+// Teploty v pokojích pro graf na stránce Klima. Bere jen to, co poll právě přinesl —
+// žádné dotazy navíc. Vzorek po 5 min stačí, tak často se teploty stejně obnovují.
+const AIRCON_HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function recordAirconTemps(devices) {
   const now = Date.now();
+  const temps = {};
+  for (const d of devices || []) {
+    if (typeof d.insideTemp === 'number') temps[d.guid] = d.insideTemp;
+  }
+  const sens = {};
   for (const room of Object.keys(TEMP_SENSORS)) {
     const s = state.sensors[room];
-    if (!s || typeof s.tempC !== 'number') continue;
-    const rule = TEMP_AUTO_RULES.find(r => r.key === room);
-    const rn = rule ? cz(rule.room) : cz(room);
-    const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
-    state.sensorLog.push({
-      t: now,
-      room,
-      sensorC: s.tempC,
-      humidity: typeof s.humidity === 'number' ? s.humidity : null,
-      pccC: dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null
-    });
+    if (s && typeof s.tempC === 'number') sens[room] = s.tempC;
   }
-  state.sensorLog = state.sensorLog.filter(x => now - x.t <= SENSOR_LOG_MAX_AGE_MS);
-  broadcast('sensorLog', { sensorLog: state.sensorLog });
+  if (!Object.keys(temps).length && !Object.keys(sens).length) return;
+  state.airconHistory.push({ t: now, temps, sens });
+  state.airconHistory = state.airconHistory.filter(x => now - x.t <= AIRCON_HISTORY_MAX_AGE_MS);
+  broadcast('airconHistory', { history: state.airconHistory });
+}
+
+// Ruční zásah do klimatizace (tlačítka v appce, ovladač, asistent) shodí přepínač
+// teplotní automatiky toho pokoje — ať automatika nepřepíše, co si člověk právě nastavil.
+//
+// POZOR: na rozdíl od ručního vypnutí přepínače tady klimatizací NEHÝBEME. Vypnutí
+// přepínače jinak klimatizaci zhasne (viz /api/tempauto) — což by tady bylo obráceně:
+// zapneš ji ručně a appka by ti ji hned zase vypnula.
+function tempAutoDisableByHand(deviceName, why) {
+  const n = cz(deviceName || '');
+  if (!n) return;
+  const rule = TEMP_AUTO_RULES.find(r => n.includes(cz(r.room)) || cz(r.room).includes(n));
+  if (!rule || !state.tempAuto[rule.key]) return;
+  state.tempAuto[rule.key] = false;
+  addLog(`Teplotní automatika ${rule.room}: vypnuta (${why})`);
+  broadcast('tempAuto', { tempAuto: state.tempAuto });
 }
 
 async function evaluateTempAuto(devices) {
@@ -2829,7 +2873,7 @@ async function pollAircon() {
     }
 
     noteAirconExternalChanges(out);
-    recordSensorSample(out);
+    recordAirconTemps(out);
 
     // Časová osa: segmenty běhu klimatizací (dynamické klíče ac_<guid>)
     const nowTs = Date.now();
@@ -2916,6 +2960,7 @@ app.post('/api/aircon/set', async (req, res) => {
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
       broadcast('aircon', { aircon: state.aircon });
       if (actions.length) addLog(`${dev.name}: ${actions.join(', ')}`);
+      tempAutoDisableByHand(dev.name, 'ruční ovládání');
     }
     res.json({ success: true });
   } catch (err) {
@@ -3321,6 +3366,7 @@ async function assistantSetAircon({ room, power, mode, temperature, quiet }) {
   if (parameters.operationMode !== undefined) dev.mode = mode;
   if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
   broadcast('aircon', { aircon: state.aircon });
+  tempAutoDisableByHand(dev.name, 'pokyn asistentovi');
   if (parameters.operate !== undefined || parameters.operationMode !== undefined) {
     addLog(`${dev.name}: ${done.filter(x => !x.includes('°C')).join(', ') || 'nastaveno'} (asistent)`);
   }

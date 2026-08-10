@@ -287,6 +287,11 @@
     height:144px;
     display:block;
   }
+  #airconChart{
+    width:100%;
+    height:160px;
+    display:block;
+  }
   #pvChart{
     width:100%;
     height:150px;
@@ -1286,7 +1291,7 @@
             <span class="tempauto-thr-label">Zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
           </div>
-          <input type="range" min="18" max="23" step="1" value="22" id="tempAutoOnSlider">
+          <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSlider">
           <div class="tempauto-thr-hint" id="tempAutoOffHint"></div>
         </div>
       </div>
@@ -1568,6 +1573,12 @@
         </div>
         <button class="timer-add-btn" id="timerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="timerList"></div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Teplota v pokojích (24 h)</div>
+        <canvas id="airconChart"></canvas>
+        <div class="timeline-legend" id="airconChartLegend"></div>
       </div>
 
       <!-- DOČASNÉ: porovnání Shelly čidla s čidlem v klimatizaci. Až bude jasné,
@@ -1980,12 +1991,15 @@
             <li><b>Obývák se řídí podle Shelly čidla</b> v místnosti (měří v obytné zóně). Ostatní pokoje podle čidla v klimatizaci, které je u stropu a ukazuje víc.</li>
             <li>Když čidlo <b>6 hodin nic nenahlásí</b> (vybitá baterka, spadlé Wi-Fi), automatika se vrátí k teplotě z klimatizace a zapíše to do logu. Klidná teplota se za výpadek nepovažuje — čidlo hlásí jen při změně.</li>
             <li>Při <b>slabé baterce</b> čidla přijde push.</li>
-            <li><b>Spínací teplota se nastavuje jezdcem</b> pod přepínači (<b>18–23 °C</b> po 1 °C) a platí <b>pro všechny pokoje</b> zároveň.</li>
+            <li><b>Spínací teplota se nastavuje jezdcem</b> pod přepínači (<b>18–25 °C</b> po 1 °C) a platí <b>pro všechny pokoje</b> zároveň.</li>
             <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení (tiše) na <b>mez − 2 °C</b>.</li>
             <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1,5 °C</b>.</li>
             <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 20,5 °C.</li>
             <li>Po vypnutí automatikou zůstane vypnuto aspoň <b>30 min</b>.</li>
             <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
+            <li><b>Jakýkoliv ruční zásah do klimatizace přepínač shodí do vypnuto</b> — tlačítka na stránce Klima, dálkový ovladač i pokyn asistentovi. Automatika ti pak nepřepíše, co sis nastavil. <b>Klimatizací se přitom nehýbe</b>, zůstane tak, jak jsi ji nechal.</li>
+            <li><b>Časovače přepínač neshazují</b> — jsou předem naprogramované, ne zásah do právě běžícího stavu (jinak by noční „vypnout ve 04:00" shodilo automatiku každý den).</li>
+            <li>Dole na stránce Klima je <b>graf teplot za 24 h</b>. U obýváku jsou obě hodnoty přes sebe: čidlo <b>čárkovaně</b>, klimatizace plnou čarou.</li>
             <li>Do <b>logu</b> se zapíše i zapnutí nebo vypnutí, které appka neudělala — <b>dálkovým ovladačem</b> nebo appkou Panasonic. Pozná se podle poznámky <b>„mimo appku"</b> a objeví se do 5 minut (podle toho, jak často se stavy načítají).</li>
           </ul>
         </div>
@@ -2679,7 +2693,10 @@ const TIMELINE_BASE = {
   solinator: { label: 'Solinátor', color: '#3fb950' },
   wallbox: { label: 'Wallbox', color: '#f5933d' }
 };
-const TIMELINE_AC_COLORS = ['#9b59d0', '#e8a13a', '#18a999', '#e05fa0', '#7f8c8d'];
+// Ověřeno validátorem na barvosleposti přes všechny dvojice. Původní růžová a tyrkysová
+// byly pro deuteranopii prakticky totožné (ΔE 1,4) — ve čtyřech křivkách přes sebe
+// v grafu teplot to bylo nečitelné. Pořadí je pevné, barvy se necyklují.
+const TIMELINE_AC_COLORS = ['#7d5fd6', '#e8a13a', '#18a999', '#c94f4f', '#4a7c2f'];
 let timelineData = { shelly: [], pool: [], solinator: [], wallbox: [] };
 
 function pruneTimelineLocal(tl) {
@@ -3338,11 +3355,169 @@ function roomSensorTemp(label) {
   return s && typeof s.tempC === 'number' ? s.tempC : null;
 }
 
+// ---------- Graf teplot v pokojích za 24 h ----------
+const airconChartCanvas = document.getElementById('airconChart');
+const airconChartLegendEl = document.getElementById('airconChartLegend');
+let airconHistory = [];
+
+function pruneAirconHistory(arr) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return (arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff);
+}
+// Záloha v telefonu — historie na serveru je jen v paměti a deploy ji vynuluje
+function saveAirconHistoryLocal() {
+  try { localStorage.setItem('airconHistory', JSON.stringify(pruneAirconHistory(airconHistory))); } catch {}
+}
+function loadAirconHistoryLocal() {
+  try { return pruneAirconHistory(JSON.parse(localStorage.getItem('airconHistory') || '[]')); } catch { return []; }
+}
+async function maybeRestoreAirconHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(p => p.t < serverOldest - 60000);
+  if (older.length < 2) return;
+  try {
+    await fetch('/api/aircon-history/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: older })
+    });
+  } catch {}
+}
+
+// Řady do grafu: jedna na klimatizaci + navíc Shelly čidlo tam, kde je.
+// Čidlo má stejnou barvu jako pokoj, ale čárkovaně — je to tentýž pokoj, jen jiný zdroj.
+function airconChartSeries(pts) {
+  const devs = (airconData && airconData.devices) || [];
+  const out = [];
+  devs.forEach((d, i) => {
+    const color = TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length];
+    const short = (d.name || '').replace(/klimatizace|klima/ig, '').replace(/\s+/g, ' ').trim() || d.name;
+    const room = TEMP_AUTO_ROOMS.find(r => (d.name || '').toLowerCase().includes(r.label.toLowerCase()));
+    const hasSensor = room && pts.some(p => p.sens && typeof p.sens[room.key] === 'number');
+    out.push({
+      label: hasSensor ? short + ' (klima)' : short,
+      color, dashed: false,
+      data: pts.filter(p => p.temps && typeof p.temps[d.guid] === 'number').map(p => ({ t: p.t, v: p.temps[d.guid] }))
+    });
+    if (hasSensor) {
+      out.push({
+        label: short + ' (čidlo)',
+        color, dashed: true,
+        data: pts.filter(p => typeof p.sens[room.key] === 'number').map(p => ({ t: p.t, v: p.sens[room.key] }))
+      });
+    }
+  });
+  return out.filter(s => s.data.length);
+}
+
+function renderAirconChart() {
+  if (!airconChartCanvas) return;
+  const ctx = airconChartCanvas.getContext('2d');
+  const w = airconChartCanvas.clientWidth || 300;
+  const h = airconChartCanvas.clientHeight || 160;
+  const dpr = window.devicePixelRatio || 1;
+  airconChartCanvas.width = w * dpr;
+  airconChartCanvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now();
+  const start = now - 24 * 60 * 60 * 1000;
+  const pts = pruneAirconHistory(airconHistory);
+  const series = airconChartSeries(pts);
+  const grey = 'rgba(44,62,80,0.4)';
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  if (airconChartLegendEl) {
+    airconChartLegendEl.textContent = '';
+    for (const s of series) {
+      const span = document.createElement('span');
+      const dot = document.createElement('i');
+      dot.style.background = s.color;
+      // Čárkovaná řada má i v legendě „prázdný" puntík, ať se pozná bez barvy
+      if (s.dashed) { dot.style.background = 'transparent'; dot.style.border = '2px solid ' + s.color; }
+      span.appendChild(dot);
+      span.appendChild(document.createTextNode(s.label));
+      airconChartLegendEl.appendChild(span);
+    }
+  }
+
+  if (!series.some(s => s.data.length >= 2)) {
+    ctx.fillStyle = grey;
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
+    return;
+  }
+
+  // Osa Y podle dat, ale nejméně 4 °C rozpětí — jinak by klidný den vypadal jako šum
+  const all = series.flatMap(s => s.data.map(p => p.v));
+  let min = Math.floor(Math.min(...all) - 0.5);
+  let max = Math.ceil(Math.max(...all) + 0.5);
+  if (max - min < 4) { const mid = (min + max) / 2; min = Math.floor(mid - 2); max = Math.ceil(mid + 2); }
+
+  const padL = 30, padR = 40, padT = 10, padB = 18; // vpravo místo na popisky hodnot
+  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
+  const y = v => padT + (1 - (Math.max(min, Math.min(max, v)) - min) / (max - min)) * (h - padT - padB);
+
+  // Vodicí linky — krok tak, aby jich bylo ~4
+  const step = Math.max(1, Math.ceil((max - min) / 4));
+  ctx.lineWidth = 1;
+  ctx.textAlign = 'right';
+  for (let v = min; v <= max; v += step) {
+    ctx.strokeStyle = 'rgba(44,62,80,0.06)';
+    ctx.beginPath(); ctx.moveTo(padL, y(v)); ctx.lineTo(w - padR, y(v)); ctx.stroke();
+    ctx.fillStyle = grey;
+    ctx.fillText(v + '°', padL - 4, y(v) + 3);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = grey;
+  for (let i = 0; i <= 4; i++) {
+    const t = start + i * 6 * 60 * 60 * 1000;
+    ctx.fillText(new Date(t).getHours() + ':00', x(t), h - 5);
+  }
+
+  for (const s of series) {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.setLineDash(s.dashed ? [5, 4] : []);
+    for (const seg of splitGaps(s.data, 25 * 60 * 1000)) {
+      if (seg.length < 2) continue;
+      drawSmoothPath(ctx, smoothSeries(seg, 2).map(p => ({ x: x(p.t), y: y(p.v) })));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  // Poslední hodnota u konce křivky — nahrazuje bublinu při najetí a zároveň dává
+  // identitu i tam, kde je barva proti bílé slabší
+  ctx.textAlign = 'left';
+  // Nejdřív seřadit odshora dolů a teprve pak rozestrkat — kdyby se posouvalo v pořadí
+  // řad, skončil by popisek klidně pod křivkou s nižší hodnotou a mátl by
+  const labels = series
+    .map(s => ({ s, last: s.data[s.data.length - 1] }))
+    .filter(o => o.last && now - o.last.t <= 60 * 60 * 1000)
+    .sort((a, b) => b.last.v - a.last.v);
+  let prevY = -Infinity;
+  for (const o of labels) {
+    const ly = Math.max(y(o.last.v), prevY + 11);
+    prevY = ly;
+    // Text v barvě písma, ne v barvě řady — oranžová a tyrkysová jsou proti bílé
+    // slabě čitelné. Identitu nese blízkost ke konci křivky a legenda.
+    ctx.fillStyle = 'rgba(44,62,80,0.75)';
+    ctx.fillText(o.last.v.toFixed(1).replace('.', ',') + '°', w - padR + 4, ly + 3);
+  }
+}
+
+window.addEventListener('resize', renderAirconChart);
+
 // ---------- DOČASNÉ: porovnání čidla s klimatizací (celý blok půjde smazat) ----------
 const sensorCardEl = document.getElementById('sensorCard');
 const sensorNowEl = document.getElementById('sensorNow');
 const sensorLogEl = document.getElementById('sensorLog');
-let sensorLogData = [];
 
 function fmtAge(ms) {
   const m = Math.round(ms / 60000);
@@ -3383,19 +3558,28 @@ function renderSensorCard() {
     sensorNowEl.appendChild(line);
   }
 
+  // Vzorky bere ze společné historie teplot (graf výš), ať nejsou dva sklady
+  const devs = (airconData && airconData.devices) || [];
   sensorLogEl.textContent = '';
-  for (const x of sensorLogData.slice().reverse()) {
-    const row = document.createElement('div');
-    const t = new Date(x.t);
-    const left = document.createElement('span');
-    left.textContent = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
-    const right = document.createElement('span');
-    const diff = typeof x.pccC === 'number' ? x.sensorC - x.pccC : null;
-    right.textContent = `čidlo ${fmtC1(x.sensorC)} · klima ${fmtC1(x.pccC)}`
-      + (diff !== null ? ` · ${(diff >= 0 ? '+' : '') + fmtC1(diff)}` : '');
-    row.appendChild(left);
-    row.appendChild(right);
-    sensorLogEl.appendChild(row);
+  for (const p of pruneAirconHistory(airconHistory).slice().reverse()) {
+    for (const key of Object.keys(p.sens || {})) {
+      const sensorC = p.sens[key];
+      if (typeof sensorC !== 'number') continue;
+      const room = TEMP_AUTO_ROOMS.find(r => r.key === key);
+      const dev = room ? devs.find(d => (d.name || '').toLowerCase().includes(room.label.toLowerCase())) : null;
+      const pccC = dev && p.temps && typeof p.temps[dev.guid] === 'number' ? p.temps[dev.guid] : null;
+      const row = document.createElement('div');
+      const t = new Date(p.t);
+      const left = document.createElement('span');
+      left.textContent = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+      const right = document.createElement('span');
+      const diff = pccC !== null ? sensorC - pccC : null;
+      right.textContent = `čidlo ${fmtC1(sensorC)} · klima ${fmtC1(pccC)}`
+        + (diff !== null ? ` · ${(diff >= 0 ? '+' : '') + fmtC1(diff)}` : '');
+      row.appendChild(left);
+      row.appendChild(right);
+      sensorLogEl.appendChild(row);
+    }
   }
 }
 let airconEnabled = null;
@@ -4398,7 +4582,7 @@ const TEMP_AUTO_ROOMS = [
 const tempAutoListEl = document.getElementById('tempAutoList');
 let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false };
 
-// Společná spínací teplota (18–23 °C). Vypínací mez je vždy o 1,5 °C níž.
+// Společná spínací teplota (18–25 °C). Vypínací mez je vždy o 1,5 °C níž.
 const tempAutoSliderEl = document.getElementById('tempAutoOnSlider');
 const tempAutoOnValEl = document.getElementById('tempAutoOnVal');
 const tempAutoOffHintEl = document.getElementById('tempAutoOffHint');
@@ -4428,7 +4612,7 @@ function saveTempAutoOnLocal() {
 }
 function loadTempAutoOnLocal() {
   const v = Number(localStorage.getItem('tempAutoOn'));
-  return Number.isInteger(v) && v >= 18 && v <= 23 ? v : null;
+  return Number.isInteger(v) && v >= 18 && v <= 25 ? v : null;
 }
 
 async function sendTempAutoThreshold(temp) {
@@ -4665,7 +4849,9 @@ function saveBoilerHistoryLocal() {
 function loadBoilerHistoryLocal() {
   try { return pruneBoiler(JSON.parse(localStorage.getItem('boilerHistory') || '[]')); } catch { return []; }
 }
-function mergeBoilerHistories(a, b) {
+// Sloučí dvě časové řady { t, … } a zahodí body bližší než 30 s (server i záloha
+// vzorkují nezávisle). Používá se pro teploty bojlerů i pro teploty v pokojích.
+function mergeByTime(a, b) {
   const all = pruneBoiler((a || []).concat(b || [])).sort((x, y) => x.t - y.t);
   const out = [];
   for (const p of all) {
@@ -5038,7 +5224,14 @@ function applySnapshot(snap) {
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
   sensorsData = snap.sensors || {};
-  sensorLogData = snap.sensorLog || [];
+  {
+    const serverHist = pruneAirconHistory(snap.airconHistory);
+    const localHist = loadAirconHistoryLocal();
+    airconHistory = mergeByTime(serverHist, localHist);
+    saveAirconHistoryLocal();
+    maybeRestoreAirconHistoryToServer(serverHist, localHist);
+  }
+  renderAirconChart();
   renderSensorCard();
   renderAircon();
   airconTimersData = snap.airconTimers || [];
@@ -5114,7 +5307,7 @@ function applySnapshot(snap) {
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
   const serverBoiler = snap.boilerHistory || [];
   const localBoiler = loadBoilerHistoryLocal();
-  boilerHistory = mergeBoilerHistories(serverBoiler, localBoiler);
+  boilerHistory = mergeByTime(serverBoiler, localBoiler);
   renderBoilerChart();
   saveBoilerHistoryLocal();
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
@@ -5256,6 +5449,7 @@ function connectStream() {
     renderTimeline(); // názvy klimatizací v legendě osy
     renderTempAuto(); // aktuální teploty v pokojích
     renderSensorCard();
+    renderAirconChart(); // názvy a barvy řad se berou ze seznamu jednotek
   });
   es.addEventListener('sensor', e => {
     const d = JSON.parse(e.data);
@@ -5264,8 +5458,11 @@ function connectStream() {
     renderTempAuto();
     renderSensorCard();
   });
-  es.addEventListener('sensorLog', e => {
-    sensorLogData = JSON.parse(e.data).sensorLog || [];
+  es.addEventListener('airconHistory', e => {
+    const d = JSON.parse(e.data);
+    if (Array.isArray(d.history)) airconHistory = mergeByTime(d.history, airconHistory);
+    saveAirconHistoryLocal();
+    renderAirconChart();
     renderSensorCard();
   });
   es.addEventListener('airconTimers', e => {
@@ -5300,8 +5497,8 @@ function connectStream() {
   });
   es.addEventListener('boilerHistory', e => {
     const d = JSON.parse(e.data);
-    if (Array.isArray(d.history)) boilerHistory = mergeBoilerHistories(d.history, boilerHistory);
-    else if (d.point) boilerHistory = mergeBoilerHistories(boilerHistory, [d.point]);
+    if (Array.isArray(d.history)) boilerHistory = mergeByTime(d.history, boilerHistory);
+    else if (d.point) boilerHistory = mergeByTime(boilerHistory, [d.point]);
     renderBoilerChart();
     saveBoilerHistoryLocal();
   });
