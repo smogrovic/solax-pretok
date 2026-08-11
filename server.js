@@ -36,10 +36,9 @@ const LIGHT_NOCNI_ID          = 'dcda0cea454c';
 const TEMP_SENSORS = {
   obyvak: { deviceId: process.env.SHELLY_TEMP_OBYVAK_ID || '08927250b96c', serverUri: SHELLY_SERVER_URI }
 };
-// Kdy přestat věřit poslední hodnotě. Čidlo hlásí při změně, takže „stará" hodnota při
-// klidné teplotě je správná — 6 h je velkoryse nad periodickým hlášením a chytá až
-// vybitou baterku nebo spadlé Wi-Fi.
-const SENSOR_STALE_MS = 6 * 60 * 60 * 1000;
+// Jak dlouhé ticho čidla stojí za zmínku v logu. NEurčuje platnost dat — podle čidla se
+// jede dál i po delším tichu, protože ticho znamená stabilní teplotu.
+const SENSOR_SILENCE_LOG_MS = 6 * 60 * 60 * 1000;
 const SENSOR_LOW_BATTERY = 15;
 
 // Všechna relé, která obchází centrální poller; klíče odpovídají zařízením ve frontendu
@@ -507,19 +506,21 @@ async function pollSensor(room) {
     };
     checkSensorBattery(room, s.battery);
   } catch {
-    // Výpadek dotazu není výpadek čidla — poslední známou hodnotu si necháme,
-    // o její platnosti rozhodne stáří (SENSOR_STALE_MS).
+    // Výpadek dotazu není výpadek čidla — poslední známou hodnotu si necháme
+    // a jede se dál podle ní (viz sensorTempC).
     state.sensors[room] = { ...prev, online: false, fetchedAt: Date.now() };
   }
   broadcast('sensor', { room, sensor: state.sensors[room] });
 }
 
-// Teplota z čidla, pokud se jí dá věřit. null = použij náhradní zdroj (klimatizaci).
+// Poslední známá teplota z čidla — BEZ ohledu na stáří. Čidlo hlásí jen při změně
+// teploty, takže při stabilní teplotě mlčí a „stará" hodnota je ta správná. Kdyby se po
+// pár hodinách ticha sáhlo po čidle v klimatizaci (u stropu, ukazuje o ~2 °C víc),
+// klimatizace by naskočila bez důvodu. Nepřidávej sem kontrolu stáří.
+// null = čidlo nehlásilo ještě nikdy (čerstvý start serveru).
 function sensorTempC(room) {
   const s = state.sensors[room];
-  if (!s || typeof s.tempC !== 'number') return null;
-  if (!s.reportedAt || Date.now() - s.reportedAt > SENSOR_STALE_MS) return null;
-  return s.tempC;
+  return s && typeof s.tempC === 'number' ? s.tempC : null;
 }
 
 const sensorBatteryWarned = {};
@@ -2795,21 +2796,31 @@ async function tempAutoTurnOff(rule) {
 // Podle čeho se v pokoji rozhoduje: přednost má Shelly čidlo (měří v obytné zóně),
 // náhradou je čidlo v klimatizaci (u stropu, ukazuje víc). Přepnutí zdroje se zapisuje
 // jen při změně — jinak by to při každém cyklu přidalo řádek do logu.
-const tempSourceLogged = {};
+// Ticho čidla není chyba (hlásí jen při změně), ale dlouhé ticho může znamenat i vybitou
+// baterku — zapíše se proto jednou při změně stavu, ne každý cyklus.
+const sensorStateLogged = {};
+function noteSensorState(roomKey) {
+  const s = state.sensors[roomKey];
+  const st = !s || typeof s.tempC !== 'number' ? 'bez dat'
+    : (s.reportedAt && Date.now() - s.reportedAt > SENSOR_SILENCE_LOG_MS ? 'ticho' : 'ok');
+  if (sensorStateLogged[roomKey] === st) return;
+  const first = sensorStateLogged[roomKey] === undefined;
+  sensorStateLogged[roomKey] = st;
+  if (first && st === 'ok') return;   // běžný start, není co hlásit
+  const label = (TEMP_AUTO_RULES.find(r => r.key === roomKey) || {}).room || roomKey;
+  if (st === 'ticho') addLog(`Čidlo ${label}: nehlásí přes 6 h — jede se dál podle poslední hodnoty`);
+  else if (st === 'bez dat') addLog(`Čidlo ${label}: zatím nehlásí, automatika pokoj přeskakuje`);
+  else addLog(`Čidlo ${label}: zase hlásí`);
+}
+
+// Pokoj s čidlem se řídí VÝHRADNĚ podle něj — žádný náhradní zdroj. Pokoje bez čidla
+// jedou podle čidla v klimatizaci.
 function roomTemp(roomKey, dev) {
-  const fromSensor = TEMP_SENSORS[roomKey] ? sensorTempC(roomKey) : null;
-  const fromPcc = dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null;
-  const source = fromSensor !== null ? 'čidlo' : 'klimatizace';
-  if (TEMP_SENSORS[roomKey] && tempSourceLogged[roomKey] !== source) {
-    if (tempSourceLogged[roomKey] !== undefined) {
-      const label = (TEMP_AUTO_RULES.find(r => r.key === roomKey) || {}).room || roomKey;
-      addLog(fromSensor !== null
-        ? `Teplotní automatika ${label}: zpět na Shelly čidlo`
-        : `Teplotní automatika ${label}: čidlo nehlásí, přechází se na teplotu z klimatizace`);
-    }
-    tempSourceLogged[roomKey] = source;
+  if (TEMP_SENSORS[roomKey]) {
+    noteSensorState(roomKey);
+    return { temp: sensorTempC(roomKey), source: 'čidlo' };
   }
-  return { temp: fromSensor !== null ? fromSensor : fromPcc, source };
+  return { temp: dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null, source: 'klimatizace' };
 }
 
 // Teploty v pokojích pro graf na stránce Klima. Bere jen to, co poll právě přinesl —
