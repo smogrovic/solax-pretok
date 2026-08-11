@@ -117,7 +117,10 @@ const state = {
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
   boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
-  tempAutoOn: 22,    // společná spínací teplota pro všechny pokoje (18–25 °C, jezdec v appce)
+  tempAutoOn: 22,    // společná spínací teplota (18–25 °C, jezdec v appce) — Ložnice, Elenka, Miky
+  // Pokoje s vlastní mezí. Obývák se řídí podle Shelly čidla v obytné zóně, které ukazuje
+  // níž než čidla v klimatizacích, takže jedna společná hodnota by u něj znamenala něco jiného.
+  tempAutoOnRooms: { obyvak: 22 },
   // Solinátor jede na denní rozpočet hodin: cíl = základ + bonus za teplotu + boost.
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
   solinator: { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 },
@@ -228,6 +231,7 @@ function snapshot() {
     airconTimers,
     tempAuto: state.tempAuto,
     tempAutoOn: state.tempAutoOn,
+    tempAutoOnRooms: state.tempAutoOnRooms,
     solinator: state.solinator,
     wallbox: state.wallbox,
     wallboxEnabled,
@@ -1050,32 +1054,55 @@ app.post('/api/tempauto', (req, res) => {
   res.json({ tempAuto: state.tempAuto });
 });
 
-// Společná spínací teplota pro všechny pokoje (jezdec v appce)
+function thresholdPayload() {
+  return { tempAutoOn: state.tempAutoOn, tempAutoOnRooms: state.tempAutoOnRooms };
+}
+const validThreshold = t => Number.isInteger(t) && t >= TEMP_AUTO_ON_MIN && t <= TEMP_AUTO_ON_MAX;
+
+// Spínací teplota. Bez `key` jde o společnou mez (Ložnice, Elenka, Miky),
+// s `key` o mez pokoje, který má vlastní jezdec (obývák).
 app.post('/api/tempauto/threshold', (req, res) => {
   if (!requireAuth(req, res)) return;
   const temp = Number(req.body && req.body.temp);
-  if (!Number.isInteger(temp) || temp < TEMP_AUTO_ON_MIN || temp > TEMP_AUTO_ON_MAX) {
+  const key = req.body && req.body.key;
+  if (!validThreshold(temp)) {
     return res.status(400).json({ error: `Teplota musí být celé číslo ${TEMP_AUTO_ON_MIN}–${TEMP_AUTO_ON_MAX} °C.` });
   }
-  if (state.tempAutoOn !== temp) {
-    state.tempAutoOn = temp;
-    const l = tempAutoLevels();
-    addLog(`Teplotní automatika: spínat při ${l.onTemp} °C (vypínat při ${l.offTemp} °C)`);
-    broadcast('tempAutoOn', { tempAutoOn: state.tempAutoOn });
+  if (key !== undefined && !Object.prototype.hasOwnProperty.call(state.tempAutoOnRooms, key)) {
+    return res.status(400).json({ error: 'Tenhle pokoj nemá vlastní mez.' });
+  }
+  const current = key !== undefined ? state.tempAutoOnRooms[key] : state.tempAutoOn;
+  if (current !== temp) {
+    if (key !== undefined) state.tempAutoOnRooms[key] = temp;
+    else state.tempAutoOn = temp;
+    const l = tempAutoLevels(key);
+    const rule = key !== undefined ? TEMP_AUTO_RULES.find(r => r.key === key) : null;
+    addLog(`Teplotní automatika${rule ? ' ' + rule.room : ''}: spínat při ${l.onTemp} °C (vypínat při ${l.offTemp} °C)`);
+    broadcast('tempAutoOn', thresholdPayload());
     if (panasonicEnabled) setTimeout(pollAircon, 500); // hned přehodnotit podle nové meze
   }
-  res.json({ tempAutoOn: state.tempAutoOn });
+  res.json(thresholdPayload());
 });
 
-// Obnova nastavené meze po deployi (telefon drží zálohu) — jen hodnota, ne přepínače
+// Obnova nastavených mezí po deployi (telefon drží zálohu) — jen hodnoty, ne přepínače
 app.post('/api/tempauto/restore', (req, res) => {
-  const temp = Number(req.body && req.body.tempAutoOn);
-  if (Number.isInteger(temp) && temp >= TEMP_AUTO_ON_MIN && temp <= TEMP_AUTO_ON_MAX
-      && state.tempAutoOn !== temp) {
-    state.tempAutoOn = temp;
-    broadcast('tempAutoOn', { tempAutoOn: state.tempAutoOn });
+  const b = req.body || {};
+  let changed = false;
+  const temp = Number(b.tempAutoOn);
+  if (validThreshold(temp) && state.tempAutoOn !== temp) {
+    state.tempAutoOn = temp; changed = true;
   }
-  res.json({ tempAutoOn: state.tempAutoOn });
+  const rooms = b.tempAutoOnRooms;
+  if (rooms && typeof rooms === 'object') {
+    for (const key of Object.keys(state.tempAutoOnRooms)) {
+      const v = Number(rooms[key]);
+      if (validThreshold(v) && state.tempAutoOnRooms[key] !== v) {
+        state.tempAutoOnRooms[key] = v; changed = true;
+      }
+    }
+  }
+  if (changed) broadcast('tempAutoOn', thresholdPayload());
+  res.json(thresholdPayload());
 });
 
 // Ruční refresh z appky („Aktualizovat"): vynutí načtení VŠECH zdrojů.
@@ -2696,7 +2723,8 @@ async function pccGetStatus(guid) {
 // na coolTemp °C (tiše); vypne, až klesne pod offTemp °C (hystereze). Po vypnutí
 // automatikou zůstane pokoj aspoň TEMP_AUTO_OFF_LOCKOUT_MS vypnutý (nezapne dřív).
 const TEMP_AUTO_RULES = [
-  { key: 'obyvak', room: 'Obývák', quiet: true },
+  // Obývák je denní místnost — nemá smysl ho brzdit tichým režimem, ať chladí naplno
+  { key: 'obyvak', room: 'Obývák', quiet: false },
   { key: 'loznice', room: 'Ložnice', quiet: true },
   { key: 'elenka', room: 'Elenka', quiet: true },
   { key: 'miky', room: 'Miky', quiet: true }
@@ -2738,8 +2766,9 @@ function noteAirconExternalChanges(devices) {
 //   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
 const TEMP_AUTO_ON_MIN = 18;
 const TEMP_AUTO_ON_MAX = 25;
-function tempAutoLevels() {
-  const onTemp = state.tempAutoOn;
+function tempAutoLevels(roomKey) {
+  const own = roomKey !== undefined ? state.tempAutoOnRooms[roomKey] : undefined;
+  const onTemp = own !== undefined ? own : state.tempAutoOn;
   return { onTemp, offTemp: onTemp - 1.5, coolTemp: onTemp - 2 };
 }
 const TEMP_AUTO_OFF_LOCKOUT_MS = 30 * 60 * 1000; // po vypnutí drž vypnuté aspoň 30 min
@@ -2818,9 +2847,10 @@ function tempAutoDisableByHand(deviceName, why) {
 }
 
 async function evaluateTempAuto(devices) {
-  const { onTemp, offTemp, coolTemp } = tempAutoLevels();
   for (const rule of TEMP_AUTO_RULES) {
     if (!state.tempAuto[rule.key]) continue;
+    // Mez se bere per pokoj — obývák má vlastní, zbytek společnou
+    const { onTemp, offTemp, coolTemp } = tempAutoLevels(rule.key);
     const rn = cz(rule.room);
     const dev = (devices || []).find(d => cz(d.name).includes(rn) || rn.includes(cz(d.name)));
     if (!dev) continue;
