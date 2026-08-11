@@ -1044,7 +1044,7 @@ app.post('/api/tempauto', (req, res) => {
     addLog(`Teplotní automatika ${rule ? rule.room : key}: ${enabled ? 'zapnuta' : 'vypnuta'}`);
     broadcast('tempAuto', { tempAuto: state.tempAuto });
     if (enabled) {
-      delete tempAutoOffAt[key]; // ruční zapnutí automatiky ruší 30min blokaci
+      delete tempAutoOffAt[key]; // ruční zapnutí automatiky ruší blokaci minimálního klidu
       if (panasonicEnabled) setTimeout(pollAircon, 500); // hned vyhodnotit
     } else if (panasonicEnabled && rule) {
       // Vypnutí přepínače = vypnout i klimatizaci, ne ji nechat běžet v aktuálním stavu
@@ -2720,8 +2720,8 @@ async function pccGetStatus(guid) {
 }
 
 // Teplotní automatika: když teplota v pokoji stoupne na onTemp, zapne chlazení
-// na coolTemp °C (tiše); vypne, až klesne pod offTemp °C (hystereze). Po vypnutí
-// automatikou zůstane pokoj aspoň TEMP_AUTO_OFF_LOCKOUT_MS vypnutý (nezapne dřív).
+// na coolTemp °C; vypne, až klesne pod offTemp °C (hystereze). Mezi přepnutími platí
+// minimální doba chodu i klidu (TEMP_AUTO_MIN_ON_MS / TEMP_AUTO_MIN_OFF_MS).
 const TEMP_AUTO_RULES = [
   // Obývák je denní místnost — nemá smysl ho brzdit tichým režimem, ať chladí naplno
   { key: 'obyvak', room: 'Obývák', quiet: false },
@@ -2762,17 +2762,20 @@ function noteAirconExternalChanges(devices) {
 }
 
 // Odvozené hodnoty drží stejné rozestupy jako původní napevno psané pravidlo (22/20,5/20):
-//   vypnout  = zapnout − 1,5 °C
+//   vypnout  = zapnout − 1 °C
 //   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
 const TEMP_AUTO_ON_MIN = 18;
 const TEMP_AUTO_ON_MAX = 25;
 function tempAutoLevels(roomKey) {
   const own = roomKey !== undefined ? state.tempAutoOnRooms[roomKey] : undefined;
   const onTemp = own !== undefined ? own : state.tempAutoOn;
-  return { onTemp, offTemp: onTemp - 1.5, coolTemp: onTemp - 2 };
+  return { onTemp, offTemp: onTemp - 1, coolTemp: onTemp - 2 };
 }
-const TEMP_AUTO_OFF_LOCKOUT_MS = 30 * 60 * 1000; // po vypnutí drž vypnuté aspoň 30 min
+// Minimální doby chodu i klidu — ať kompresor necyklu je po pár minutách
+const TEMP_AUTO_MIN_OFF_MS = 20 * 60 * 1000; // po vypnutí drž vypnuté aspoň 20 min
+const TEMP_AUTO_MIN_ON_MS = 20 * 60 * 1000;  // po zapnutí nech běžet aspoň 20 min
 const tempAutoOffAt = {}; // key -> čas posledního vypnutí automatikou
+const tempAutoOnAt = {};  // key -> čas posledního zapnutí automatikou
 
 // Vypnutí přepínače teplotní automatiky vypne i samotnou klimatizaci —
 // jinak by v pokoji zůstala běžet v tom stavu, v jakém ji automatika nechala.
@@ -2857,12 +2860,18 @@ async function evaluateTempAuto(devices) {
     const { temp, source } = roomTemp(rule.key, dev);
     if (typeof temp !== 'number') continue;
     const src = TEMP_SENSORS[rule.key] ? ` (${source})` : '';
+    // Po restartu nevíme, jak dlouho už jednotka běží. Bereme to, jako by se právě zapnula —
+    // nechat ji chvíli běžet navíc je menší zlo než ji po pár minutách zase shodit.
+    if (dev.power === true && !tempAutoOnAt[rule.key]) tempAutoOnAt[rule.key] = Date.now();
+
     let parameters = null, msg = null;
-    const lockedUntil = (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_OFF_LOCKOUT_MS;
-    if (temp >= onTemp && dev.power !== true && Date.now() >= lockedUntil) {
+    const now = Date.now();
+    const canTurnOn = now >= (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_MIN_OFF_MS;
+    const canTurnOff = now >= (tempAutoOnAt[rule.key] || 0) + TEMP_AUTO_MIN_ON_MS;
+    if (temp >= onTemp && dev.power !== true && canTurnOn) {
       parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: coolTemp, ecoMode: rule.quiet ? 2 : 0 };
       msg = `${dev.name}: zapnuto chlazení ${coolTemp} °C (v pokoji ${temp} °C${src}, mez ${onTemp} °C)`;
-    } else if (temp <= offTemp && dev.power === true) {
+    } else if (temp <= offTemp && dev.power === true && canTurnOff) {
       parameters = { operate: 0 };
       msg = `${dev.name}: vypnuto (v pokoji ${temp} °C${src})`;
     }
@@ -2870,7 +2879,9 @@ async function evaluateTempAuto(devices) {
     try {
       await pccControl(dev.guid, parameters);
       dev.power = parameters.operate === 1;
-      if (parameters.operate === 0) tempAutoOffAt[rule.key] = Date.now(); // start 30min blokace
+      // Start minimální doby klidu, resp. chodu
+      if (parameters.operate === 0) { tempAutoOffAt[rule.key] = Date.now(); delete tempAutoOnAt[rule.key]; }
+      else tempAutoOnAt[rule.key] = Date.now();
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
       if (parameters.operationMode !== undefined) dev.mode = 'cool';
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;

@@ -1588,7 +1588,7 @@
       </div>
 
       <div class="card stats-card">
-        <div class="graph-title">Teplota v pokojích (24 h)</div>
+        <div class="graph-title">Teplota v pokojích (12 h)</div>
         <canvas id="airconChart"></canvas>
         <div class="timeline-legend" id="airconChartLegend"></div>
       </div>
@@ -2005,9 +2005,9 @@
             <li>Při <b>slabé baterce</b> čidla přijde push.</li>
             <li><b>Spínací teplota se nastavuje jezdcem</b> (<b>18–25 °C</b> po 1 °C). <b>Obývák má vlastní jezdec</b> hned pod sebou — řídí se podle čidla v obytné zóně, které ukazuje níž. Ložnice, Elenka a Miky mají <b>společný jezdec</b> dole.</li>
             <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení na <b>mez − 2 °C</b>. V ložnici, u Elenky a Miky <b>tiše</b>, v <b>obýváku normálně</b> (denní místnost, nemá smysl ho brzdit).</li>
-            <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1,5 °C</b>.</li>
-            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 20,5 °C.</li>
-            <li>Po vypnutí automatikou zůstane vypnuto aspoň <b>30 min</b>.</li>
+            <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1 °C</b>.</li>
+            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 21 °C.</li>
+            <li>Ať kompresor necykluje: po zapnutí automatika nechá běžet aspoň <b>20 min</b>, po vypnutí nechá vypnuto aspoň <b>20 min</b>.</li>
             <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
             <li><b>Jakýkoliv zásah do klimatizace přepínač shodí do vypnuto</b> — tlačítka na stránce Klima, dálkový ovladač, <b>časovač</b> i pokyn asistentovi. Automatika ti pak nepřepíše, co sis nastavil: po vypnutí časovačem ve 4:00 se klima sama znovu nespustí. <b>Klimatizací se přitom nehýbe</b>, zůstane tak, jak jsi ji nechal.</li>
             <li>Znamená to, že po zásahu si musíš <b>přepínač zase sám zapnout</b>, až má automatika zase převzít řízení.</li>
@@ -3368,6 +3368,8 @@ function roomSensorTemp(label) {
 }
 
 // ---------- Graf teplot v pokojích za 24 h ----------
+// Graf ukazuje posledních 12 h, i když se historie drží 24 h (dole karta s daty čidel)
+const AIRCON_CHART_HOURS = 12;
 const airconChartCanvas = document.getElementById('airconChart');
 const airconChartLegendEl = document.getElementById('airconChartLegend');
 let airconHistory = [];
@@ -3434,7 +3436,7 @@ function renderAirconChart() {
   ctx.clearRect(0, 0, w, h);
 
   const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
+  const start = now - AIRCON_CHART_HOURS * 60 * 60 * 1000;
   const pts = pruneAirconHistory(airconHistory);
   const series = airconChartSeries(pts);
   const grey = 'rgba(44,62,80,0.4)';
@@ -3486,7 +3488,7 @@ function renderAirconChart() {
   ctx.textAlign = 'center';
   ctx.fillStyle = grey;
   for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
+    const t = start + i * (AIRCON_CHART_HOURS / 4) * 60 * 60 * 1000;
     ctx.fillText(new Date(t).getHours() + ':00', x(t), h - 5);
   }
 
@@ -4596,7 +4598,7 @@ const tempAutoListEl = document.getElementById('tempAutoList');
 const tempAutoListOwnEl = document.getElementById('tempAutoListOwn');
 let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false };
 
-// Spínací teplota (18–25 °C), vypínací mez je vždy o 1,5 °C níž.
+// Spínací teplota (18–25 °C), vypínací mez je vždy o 1 °C níž.
 // Obývák má vlastní jezdec, zbytek pokojů společný.
 let tempAutoOnData = 22;                 // společná mez
 let tempAutoOnRoomsData = { obyvak: 22 }; // pokoje s vlastní mezí
@@ -4638,7 +4640,7 @@ function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
   function updateLabels() {
     const shown = slider ? Number(slider.value) : current();
     if (valEl) valEl.textContent = fmtC(shown);
-    if (hintEl) hintEl.textContent = `Vypne pod ${fmtC(shown - 1.5)} · chladí na ${fmtC(shown - 2)}`;
+    if (hintEl) hintEl.textContent = `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(shown - 2)}`;
   }
   function render() {
     if (slider && !dragging) slider.value = String(current());
