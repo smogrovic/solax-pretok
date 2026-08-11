@@ -1376,7 +1376,7 @@ const SOLINATOR_MAX_MS = 8 * 3600000;         // strop ručního boostu (+2 h / 
 // Strop přenosu dluhu na další den. Musí být tak nízko, aby se denní cíl (1 + 2 + dluh)
 // vešel do okna 12:00 → západ − 1 h (v létě ~7,5 h). Jinak zůstane nesplněný zbytek i po
 // dokonalém dni, přenese se, a dluh se donekonečna obnovuje sám.
-const SOLINATOR_CARRY_MAX_MS = 3 * 3600000;
+const SOLINATOR_CARRY_MAX_MS = 2 * 3600000;
 
 function fmtDur(ms) {
   const m = Math.round(ms / 60000);
