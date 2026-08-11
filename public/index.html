@@ -819,13 +819,24 @@
     line-height:1.4;
     margin-bottom:12px;
   }
+  /* width:100% je nutné — .card má align-items:center, takže bez toho je seznam široký
+     jen podle obsahu a řádek s dvěma teplotami (obývák) odsune svůj přepínač doprava */
   .tempauto-list{
+    width:100%;
     display:flex;
     flex-direction:column;
     gap:10px;
   }
-  /* Společná spínací teplota pro všechny pokoje */
+  /* Semafor + přepínač jako jedna skupina vpravo, ať přepínače drží linku */
+  .tempauto-ctl{
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  /* Spínací teplota */
   .tempauto-thr{
+    width:100%;
     margin-top:14px;
     margin-bottom:14px;   /* ať se popisek pod jezdcem neslepí s dalším pokojem */
     padding-top:12px;
@@ -859,6 +870,8 @@
     gap:10px;
   }
   .tempauto-name{
+    flex:1;
+    min-width:0;
     font-size:14px;
     font-weight:600;
     color:var(--navy);
@@ -4685,10 +4698,14 @@ function renderTempAutoThreshold() {
   for (const s of thresholdSliders) s.render();
 }
 
-function roomInsideTemp(label) {
+// Klimatizace patřící k pokoji (názvy jednotek jsou typu „Klima Obývák")
+function roomAircon(label) {
   const devs = (airconData && airconData.devices) || [];
   const n = label.toLowerCase();
-  const dev = devs.find(d => (d.name || '').toLowerCase().includes(n));
+  return devs.find(d => (d.name || '').toLowerCase().includes(n)) || null;
+}
+function roomInsideTemp(label) {
+  const dev = roomAircon(label);
   return dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null;
 }
 
@@ -4741,8 +4758,21 @@ function renderTempAuto() {
       sw.disabled = false;
       renderTempAuto();
     });
+    // Semafor ukazuje KLIMATIZACI (běží / neběží), přepínač vedle něj AUTOMATIKU —
+    // dvě různé věci: automatika může být zapnutá a klima zrovna vypnutá.
+    const dev = roomAircon(room.label);
+    const light = document.createElement('div');
+    const power = dev ? dev.power : undefined;
+    light.className = 'traffic-light' + (power === true ? ' on' : (power === false ? ' off' : ''));
+    light.title = power === true ? 'Klimatizace běží' : (power === false ? 'Klimatizace neběží' : 'Stav neznámý');
+
+    const ctl = document.createElement('div');
+    ctl.className = 'tempauto-ctl';
+    ctl.appendChild(light);
+    ctl.appendChild(sw);
+
     row.appendChild(name);
-    row.appendChild(sw);
+    row.appendChild(ctl);
     // Pokoje s vlastní mezí jdou nad svůj jezdec, ostatní nad ten společný
     (room.own ? tempAutoListOwnEl : tempAutoListEl).appendChild(row);
   }
