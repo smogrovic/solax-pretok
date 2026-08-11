@@ -479,6 +479,14 @@
     font-weight:700;
     color:var(--navy);
   }
+  /* Rozpis času solinátoru */
+  .sol-calc-note{font-size:11px;opacity:0.7;}
+  .sol-calc-foot{
+    font-size:11px;
+    color:var(--grey-text);
+    line-height:1.5;
+    padding-top:8px;
+  }
   .blinds-card{align-items:stretch;}
   .blinds-list{display:flex;flex-direction:column;}
   .blind-row{
@@ -1739,6 +1747,11 @@
         <button class="timer-add-btn" id="relayTimerAddBtn">Přidat časovač</button>
         <div class="timer-list" id="relayTimerList"></div>
       </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
+        <div id="solinatorCalc"></div>
+      </div>
     </div>
   </div>
 
@@ -1992,7 +2005,7 @@
             <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
             <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b> — ale <b>nejvýš 3 h</b>, zbytek propadá. Kdyby se přenášelo víc, cíl by přerostl denní okno, nešel by nikdy splnit a dluh by se donekonečna obnovoval sám.</li>
             <li><b>−1 den / −2 dny</b> (vysoký chlor): ty dny se neběží vůbec a <b>nevzniká žádný dluh</b>. Tlačítko <b>zrušit</b> smaže boost.</li>
-            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“.</li>
+            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“. <b>Dole na stránce Ovládání</b> je celý rozpis — základ, přirážka za teplotu, boost a přenos zvlášť, ať je vidět, z čeho se dnešní cíl skládá.</li>
             <li>Časovač v relé (60 min) zůstává jako <b>pojistka</b> — kdyby appka spadla, solinátor se sám vypne. Rozpočet měří <b>skutečně odběhnutý čas</b>, takže si případnou mezeru sám dožene.</li>
             <li>Umí to i <b>asistent</b>: „pusť solinátor na dvě hodiny", „vypni solinátor na den", „ať jede solinátor normálně".</li>
           </ul>
@@ -2485,7 +2498,9 @@ const autoOnBtn = document.getElementById('autoOnBtn');
 const autoOffBtn = document.getElementById('autoOffBtn');
 let runtimeData = null;
 
+let weatherData = null;
 function renderWeather(w) {
+  weatherData = w || null;   // rozpis solinátoru potřebuje čas západu
   if (!w) {
     weatherInfoEl.textContent = '';
     return;
@@ -2579,7 +2594,7 @@ autoOnBtn.addEventListener('click', () => setAutomation(true));
 autoOffBtn.addEventListener('click', () => setAutomation(false));
 
 // ---------- Solinátor: boost (+2h/+4h) a vypnutí (−1d/−2d) podle chloru ----------
-let solinatorData = { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 };
+let solinatorData = { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 };
 const solinatorStatusEl = document.getElementById('solinatorStatus');
 const chlorBtns = Array.from(document.querySelectorAll('.chlor-btn'));
 
@@ -2616,6 +2631,75 @@ function renderSolinator() {
   solinatorStatusEl.innerHTML = txt + (canCancel ? ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '');
   const cancel = document.getElementById('solinatorCancel');
   if (cancel) cancel.addEventListener('click', () => solinatorAction('/api/solinator/clear'));
+  renderSolinatorCalc();
+}
+
+// Rozpis, jak vyšel dnešní cíl — aby bylo vidět, z čeho se to číslo skládá
+const solinatorCalcEl = document.getElementById('solinatorCalc');
+function renderSolinatorCalc() {
+  if (!solinatorCalcEl) return;
+  solinatorCalcEl.textContent = '';
+  const s = solinatorData || {};
+  const row = (label, value, note, strong) => {
+    const r = document.createElement('div');
+    r.className = 'stat-row';
+    const l = document.createElement('span');
+    l.textContent = label;
+    if (note) {
+      const n = document.createElement('span');
+      n.className = 'sol-calc-note';
+      n.textContent = ' ' + note;
+      l.appendChild(n);
+    }
+    const v = document.createElement('span');
+    v.className = 'stat-val';
+    if (strong) v.style.fontSize = '14px';
+    v.textContent = value;
+    r.appendChild(l);
+    r.appendChild(v);
+    solinatorCalcEl.appendChild(r);
+  };
+
+  if (s.disabledUntil && s.disabledUntil > Date.now()) {
+    row('Dnes se neběží', 'vypnuto do ' + fmtSolTime(s.disabledUntil));
+    const p = document.createElement('div');
+    p.className = 'sol-calc-foot';
+    p.textContent = 'Po dobu vypnutí se nic nepřenáší na další den — „nechloruj" nemá vyrábět dluh.';
+    solinatorCalcEl.appendChild(p);
+    return;
+  }
+
+  // V rozpisu vždy h:mm, ať jde sloupec čísel číst pod sebou (fmtSolDur by dal „0 min")
+  const hm = ms => {
+    const m = Math.round(ms / 60000);
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  };
+  const bonus = s.bonusMs || 0;
+  const boost = s.boostMs || 0;
+  // carryMs je část boostMs; ruční zbytek dopočítáme (ořez kdyby se hodnoty rozešly)
+  const carry = Math.min(s.carryMs || 0, boost);
+  const manual = Math.max(0, boost - carry);
+  const target = 3600000 + bonus + boost;
+  const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
+
+  row('Základ', hm(3600000), 'každý den');
+  row('Přirážka za teplotu', '+' + hm(bonus),
+    bonus >= 2 * 3600000 ? 'venku bylo přes 25 °C' : (bonus > 0 ? 'venku bylo přes 20 °C' : 'zatím pod 20 °C'));
+  row('Boost tlačítky', '+' + hm(manual), manual > 0 ? '+2 h / +4 h' : 'nemačkáno');
+  row('Přeneseno ze včerejška', '+' + hm(carry), carry > 0 ? 'nedoběhnutý zbytek' : 'nic nezbylo');
+  row('Cíl na dnešek', hm(target), '', true);
+  row('Odběhnuto', hm(ran));
+  row('Zbývá', ran >= target ? 'hotovo' : hm(target - ran));
+
+  const foot = document.createElement('div');
+  foot.className = 'sol-calc-foot';
+  const end = weatherData && typeof weatherData.sunsetMs === 'number'
+    ? new Date(weatherData.sunsetMs - 3600000).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
+    : null;
+  foot.textContent = end
+    ? `Běží mezi 12:00 a ${end} (hodina před západem slunce). Co se nestihne, přejde na další den — nejvýš 3 h.`
+    : 'Běží mezi 12:00 a hodinou před západem slunce. Co se nestihne, přejde na další den — nejvýš 3 h.';
+  solinatorCalcEl.appendChild(foot);
 }
 
 async function solinatorAction(url, body) {
@@ -5374,6 +5458,7 @@ function applySnapshot(snap) {
       if (!solinatorData.date) solinatorData.date = localSol.date;
       if (localSol.bonusMs > solinatorData.bonusMs) solinatorData.bonusMs = localSol.bonusMs;
       if (localSol.boostMs > solinatorData.boostMs) solinatorData.boostMs = localSol.boostMs;
+      if ((localSol.carryMs || 0) > (solinatorData.carryMs || 0)) solinatorData.carryMs = localSol.carryMs;
     }
   }
   renderSolinator();

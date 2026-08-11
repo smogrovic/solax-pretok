@@ -122,7 +122,9 @@ const state = {
   tempAutoOnRooms: { obyvak: 22 },
   // Solinátor jede na denní rozpočet hodin: cíl = základ + bonus za teplotu + boost.
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
-  solinator: { date: '', bonusMs: 0, boostMs: 0, disabledUntil: 0 },
+  // carryMs je JEN informativní: kolik z boostMs pochází z přenosu předchozího dne.
+  // Do výpočtu cíle nevstupuje (ten je základ + bonusMs + boostMs), slouží k rozpisu v appce.
+  solinator: { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
@@ -1401,6 +1403,7 @@ function solinatorRollDay(today) {
     const disabled = Date.now() < state.solinator.disabledUntil;
     const carry = disabled ? 0 : Math.min(SOLINATOR_CARRY_MAX_MS, unmet);
     state.solinator.boostMs = carry;
+    state.solinator.carryMs = carry;   // kolik z boostMs je přenos (jen pro rozpis)
     // Psát skutečně přenesenou hodnotu, ne tu před ořezem
     if (carry > 0) {
       addLog(`Solinátor: ${fmtDur(carry)} se přenáší na dnešek`
@@ -1767,6 +1770,7 @@ function solinatorDisable(days) {
   // Zákaz ruší i boost — jinak by si appka protiřečila („vypni na dva dny"
   // a zároveň „ještě dlužíme hodiny navíc")
   state.solinator.boostMs = 0;
+  state.solinator.carryMs = 0;
   addLog(`Solinátor: vypnut na ${days} ${days === 1 ? 'den' : 'dny'} (vysoký chlor)`);
   broadcastSolinator();
   const sol = state.devices.solinator;
@@ -1777,6 +1781,7 @@ function solinatorDisable(days) {
 function solinatorClear() {
   solinatorRollDay(pragueDateString());
   state.solinator.boostMs = 0;
+  state.solinator.carryMs = 0;
   state.solinator.disabledUntil = 0;
   addLog('Solinátor: boost i vypnutí zrušeno');
   broadcastSolinator();
@@ -1815,7 +1820,7 @@ app.post('/api/solinator/restore', (req, res) => {
   // Rozpočet dává smysl jen pro tentýž den — jinak by se dnešek naplnil včerejškem
   if (b.date === pragueDateString()) {
     if (!state.solinator.date) state.solinator.date = b.date;
-    for (const k of ['bonusMs', 'boostMs']) {
+    for (const k of ['bonusMs', 'boostMs', 'carryMs']) {
       const v = Number(b[k]);
       if (Number.isFinite(v) && v > 0 && v <= SOLINATOR_MAX_MS && v > state.solinator[k]) {
         state.solinator[k] = v; changed = true;
