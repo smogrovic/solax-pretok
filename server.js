@@ -1992,7 +1992,11 @@ async function getBlinds() {
         on: cmds.has('on') ? 'on' : null,
         off: cmds.has('off') ? 'off' : null,
         orientation: cmds.has('setOrientation') ? 'setOrientation' : null,
-        closureOrientation: cmds.has('setClosureAndOrientation') ? 'setClosureAndOrientation' : null
+        closureOrientation: cmds.has('setClosureAndOrientation') ? 'setClosureAndOrientation' : null,
+        // Jízda do konkrétní polohy (0 % = vytaženo, 100 % = zataženo)
+        closure: cmds.has('setClosure') ? 'setClosure'
+          : (cmds.has('setPosition') ? 'setPosition'
+          : (cmds.has('setDeployment') ? 'setDeployment' : null))
       };
       // cover = jezdí nahoru/dolů; switch = spíná (světlo na terase apod.)
       // Světla jsou vždy spínač, i když umí up/down (stmívání) — v appce mají ON/OFF
@@ -2036,35 +2040,83 @@ app.get('/api/blinds/all', async (req, res) => {
   }
 });
 
-async function blindCommand(deviceURL, action, value) {
+async function tahomaExec(label, deviceURL, commands) {
+  const out = await tahomaFetch('/exec/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, actions: [{ deviceURL, commands }] })
+  });
+  return out && out.execId ? out.execId : null;
+}
+
+// Počká, až běh dojede (zmizí z /exec/current). Když se dotaz nepovede nebo to trvá
+// moc dlouho, radši se pokračuje dál — poslat druhý povel se zpožděním je pořád lepší
+// než ho zahodit.
+const EXEC_WAIT_MAX_MS = 90 * 1000;
+async function waitForExec(execId) {
+  if (!execId) { await delay(5000); return; }
+  const until = Date.now() + EXEC_WAIT_MAX_MS;
+  while (Date.now() < until) {
+    await delay(2000);
+    try {
+      const running = await tahomaFetch('/exec/current');
+      if (!Array.isArray(running) || !running.some(e => e && e.id === execId)) return;
+    } catch {
+      return; // nevíme → nečekáme donekonečna
+    }
+  }
+}
+
+// action: up / down / stop / on / off / orientation / closure
+// value:  u 'orientation' a 'closure' cílová hodnota, u pohybů cílové naklopení
+// tilt:   naklopení k akci 'closure' (u ostatních akcí ho nese už `value`)
+async function blindCommand(deviceURL, action, value, tilt) {
   const blinds = await getBlinds();
   const blind = blinds.find(b => b.deviceURL === deviceURL);
   if (!blind) throw Object.assign(new Error('Neznámá roleta.'), { status: 400 });
   const cmd = blind.commands[action];
   if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
 
-  let commandList = [{ name: cmd, parameters: action === 'orientation' ? [Math.round(value)] : [] }];
+  const label = `SMG home: ${blind.label} ${action}`;
+  const num = v => Math.round(Math.min(100, Math.max(0, v)));
+
+  if (action === 'closure') {
+    // Zatažení na konkrétní %. Když je zadané i naklopení, musí se to udělat tak, aby
+    // se ty dva povely nevyrušily — buď jedním atomickým povelem, nebo až po dojetí.
+    const hasTilt = Number.isFinite(tilt) && blind.commands.orientation;
+    if (hasTilt && blind.commands.closureOrientation) {
+      await tahomaExec(label, deviceURL, [
+        { name: blind.commands.closureOrientation, parameters: [num(value), num(tilt)] }
+      ]);
+    } else {
+      const execId = await tahomaExec(label, deviceURL, [{ name: cmd, parameters: [num(value)] }]);
+      if (hasTilt) {
+        // Zřetězit hned by pohyb přerušilo — počkáme, až žaluzie dojede
+        await waitForExec(execId);
+        await tahomaExec(label + ' tilt', deviceURL, [
+          { name: blind.commands.orientation, parameters: [num(tilt)] }
+        ]);
+      }
+    }
+    blindsCache = { ts: 0, list: [] };
+    return blind;
+  }
+
+  let commandList = [{ name: cmd, parameters: action === 'orientation' ? [num(value)] : [] }];
   if ((action === 'up' || action === 'down') && Number.isFinite(value) && blind.commands.closureOrientation) {
     // Žaluzie: jeden atomický povel „jeď do krajní polohy s tímto naklopením" —
     // jede kontinuálně (zřetězené up+setOrientation by pohyb hned přerušilo)
     const closure = action === 'down' ? 100 : 0;
-    commandList = [{ name: blind.commands.closureOrientation, parameters: [closure, Math.round(value)] }];
+    commandList = [{ name: blind.commands.closureOrientation, parameters: [closure, num(value)] }];
   } else if (action === 'stop' && blind.commands.orientation && Number.isFinite(value)) {
     // Po zastavení v mezipoloze se žaluzie ještě naklopí na hodnotu z posuvníku
     commandList = [
       { name: cmd, parameters: [] },
-      { name: blind.commands.orientation, parameters: [Math.round(value)] }
+      { name: blind.commands.orientation, parameters: [num(value)] }
     ];
   }
 
-  await tahomaFetch('/exec/apply', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      label: `SMG home: ${blind.label} ${action}`,
-      actions: [{ deviceURL, commands: commandList }]
-    })
-  });
+  await tahomaExec(label, deviceURL, commandList);
   // Zneplatníme cache, ať se po dojetí načte čerstvá poloha (jinak by /api/blinds
   // vracelo starý closure z 60s cache a ukazatel by se neaktualizoval)
   blindsCache = { ts: 0, list: [] };
@@ -2087,7 +2139,8 @@ app.get('/api/blinds', async (req, res) => {
         orientation: b.orientation,
         onState: b.onState,
         hasStop: !!b.commands.stop,
-        hasOrientation: !!b.commands.orientation
+        hasOrientation: !!b.commands.orientation,
+        hasClosure: !!b.commands.closure
       }))
     });
   } catch (err) {
@@ -2097,26 +2150,37 @@ app.get('/api/blinds', async (req, res) => {
 
 const BLIND_ACTION_LABELS = {
   up: 'nahoru', down: 'dolů', stop: 'stop', my: 'moje pozice',
-  on: 'zapnuto', off: 'vypnuto', orientation: 'naklopení'
+  on: 'zapnuto', off: 'vypnuto', orientation: 'naklopení', closure: 'zatažení'
 };
 
 app.post('/api/blinds/command', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { deviceURL, action, value } = req.body || {};
+  const { deviceURL, action, value, tilt } = req.body || {};
   if (typeof deviceURL !== 'string' || !BLIND_ACTION_LABELS[action]) {
     return res.status(400).json({ error: 'Chybí deviceURL nebo neznámá action.' });
   }
-  const movesWithTilt = ['up', 'down', 'stop'];
-  let v = null;
-  if (action === 'orientation' || (movesWithTilt.includes(action) && value !== undefined && value !== null)) {
-    v = Number(value);
-    if (!Number.isFinite(v) || v < 0 || v > 100) {
-      return res.status(400).json({ error: 'Naklopení musí být 0–100.' });
+  const pct = (v, what) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      throw Object.assign(new Error(`${what} musí být 0–100.`), { status: 400 });
     }
+    return n;
+  };
+  const movesWithTilt = ['up', 'down', 'stop'];
+  let v = null, t = null;
+  try {
+    if (action === 'closure') {
+      v = pct(value, 'Zatažení');
+      if (tilt !== undefined && tilt !== null) t = pct(tilt, 'Naklopení');
+    } else if (action === 'orientation' || (movesWithTilt.includes(action) && value !== undefined && value !== null)) {
+      v = pct(value, 'Naklopení');
+    }
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
   try {
     // Ovládání rolet/žaluzií se do logu nezapisuje
-    await blindCommand(deviceURL, action, v);
+    await blindCommand(deviceURL, action, v, t);
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });

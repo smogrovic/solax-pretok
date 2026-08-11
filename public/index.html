@@ -1216,6 +1216,16 @@
     gap:8px;
     padding-bottom:6px;
   }
+  /* display:flex výš by jinak přebilo atribut hidden a posuvník by byl pořád vidět */
+  .blind-tilt[hidden]{display:none;}
+  /* Ukazatel polohy jde poklepat — vysune posuvník zatažení */
+  .blind-meter-col.clickable{cursor:pointer;}
+  .blind-meter-col.clickable .blind-meter-pct{
+    color:var(--orange);
+    text-decoration:underline;
+    text-underline-offset:2px;
+  }
+  .blind-meter-col.clickable:active{transform:scale(0.96);}
   .blind-tilt-label{
     font-size:11px;
     color:var(--grey-text);
@@ -3035,13 +3045,13 @@ function roomPageIndex(room) {
   return { page: 2, order: 99 };
 }
 
-async function blindCommand(deviceURL, action, value, btn) {
+async function blindCommand(deviceURL, action, value, btn, tilt) {
   if (btn) btn.disabled = true;
   try {
     const res = await fetch('/api/blinds/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ deviceURL, action, value })
+      body: JSON.stringify({ deviceURL, action, value, tilt })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -3217,6 +3227,48 @@ function renderBlindRow(b) {
   row.appendChild(meterCol);
 
   wrap.appendChild(row);
+
+  // Zatažení na konkrétní %: skryté, vyjede po klepnutí na ukazatel polohy.
+  // Povel nese i naklopení z posuvníku níž — server pak obojí udělá jedním povelem
+  // (nebo po sobě), ať se ty dva pohyby navzájem nevyruší.
+  // Podmínka na closure: když roleta polohu nehlásí, je ukazatel skrytý a nebylo by
+  // kam klepnout — nabízet posuvník, ke kterému se nedá dostat, nemá smysl
+  if (b.hasClosure && b.type === 'cover' && !isGarage && typeof b.closure === 'number') {
+    const box = document.createElement('div');
+    box.className = 'blind-tilt';
+    box.hidden = true;
+    const lbl = document.createElement('span');
+    lbl.className = 'blind-tilt-label';
+    lbl.textContent = 'Zatažení';
+    const val = document.createElement('span');
+    val.className = 'blind-tilt-val';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.value = typeof b.closure === 'number' ? Math.round(b.closure) : 50;
+    val.textContent = slider.value + ' %';
+    slider.addEventListener('input', () => { val.textContent = slider.value + ' %'; });
+    slider.addEventListener('change', () => blindCommand(
+      b.deviceURL, 'closure', Number(slider.value), null,
+      tiltSlider ? Number(tiltSlider.value) : null
+    ));
+    box.appendChild(lbl);
+    box.appendChild(val);
+    box.appendChild(slider);
+    wrap.appendChild(box);
+
+    // Klepnutí jen odkrývá posuvník — samo o sobě žaluzií nehne
+    meterCol.classList.add('clickable');
+    meterCol.title = 'Nastavit zatažení na %';
+    meterCol.addEventListener('click', () => {
+      box.hidden = !box.hidden;
+      if (!box.hidden && typeof b.closure === 'number') {
+        slider.value = String(Math.round(b.closure));
+        val.textContent = slider.value + ' %';
+      }
+    });
+  }
 
   // Naklopení lamel: posuvník 0–100 %, povel se pošle po puštění prstu
   if (tiltSlider) {
