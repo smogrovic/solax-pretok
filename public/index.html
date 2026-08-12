@@ -1216,16 +1216,73 @@
     gap:8px;
     padding-bottom:6px;
   }
-  /* display:flex výš by jinak přebilo atribut hidden a posuvník by byl pořád vidět */
-  .blind-tilt[hidden]{display:none;}
-  /* Ukazatel polohy jde poklepat — vysune posuvník zatažení */
-  .blind-meter-col.clickable{cursor:pointer;}
-  .blind-meter-col.clickable .blind-meter-pct{
+  /* Ukazatel polohy: podržet a táhnout svisle = nastavit zatažení na % */
+  .blind-meter-col.holdable{
+    cursor:grab;
+    user-select:none;
+    -webkit-user-select:none;
+    /* Bez tohohle iOS při podržení nabídne lupu a výběr textu místo tažení */
+    -webkit-touch-callout:none;
+  }
+  .blind-meter-col.holdable .blind-meter-pct{
     color:var(--orange);
     text-decoration:underline;
     text-underline-offset:2px;
   }
-  .blind-meter-col.clickable:active{transform:scale(0.96);}
+  .blind-meter-col.holdable.dragging{cursor:grabbing;}
+  .blind-drag{
+    /* Fixed, ať jezdec nepodléhá ořezu karty; během tažení se stránkou stejně nehýbe */
+    position:fixed;
+    z-index:60;
+    width:10px;
+    height:180px;
+    /* Jezdec je jen na koukání a tažení — klepnutí skrz něj nikam nepatří */
+    pointer-events:none;
+  }
+  .blind-drag-track{
+    position:relative;
+    width:10px;
+    height:180px;
+    border-radius:5px;
+    background:rgba(44,62,80,0.12);
+    box-shadow:0 2px 10px rgba(44,62,80,0.18);
+    overflow:hidden;
+  }
+  .blind-drag-fill{
+    position:absolute;
+    top:0;
+    left:0;
+    width:100%;
+    background:var(--orange);
+    border-radius:5px;
+  }
+  .blind-drag-knob{
+    position:absolute;
+    left:50%;
+    width:18px;
+    height:18px;
+    margin-left:-9px;
+    margin-top:-9px;
+    border-radius:50%;
+    background:#fff;
+    border:2px solid var(--orange);
+    box-shadow:0 1px 4px rgba(44,62,80,0.35);
+  }
+  .blind-drag-val{
+    /* Prst zakrývá dráhu, číslo proto patří vedle ní — a jede s puntíkem, ať je
+       tam, kam se člověk dívá */
+    position:absolute;
+    right:18px;
+    transform:translateY(-50%);
+    font-size:15px;
+    font-weight:700;
+    color:var(--navy);
+    background:#fff;
+    border-radius:10px;
+    padding:3px 8px;
+    box-shadow:0 2px 8px rgba(44,62,80,0.22);
+    white-space:nowrap;
+  }
   .blind-tilt-label{
     font-size:11px;
     color:var(--grey-text);
@@ -3110,6 +3167,142 @@ function garageSVG(closed) {
   return `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--orange)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${outline}"/>${slats}</svg>`;
 }
 
+// ---------- Zatažení tažením: podržet ukazatel polohy a jet prstem svisle ----------
+const HOLD_MS = 400;         // jak dlouho držet, než se jezdec objeví
+const HOLD_MOVE_TOL = 8;     // do téhle vzdálenosti to je pořád držení, dál už rolování
+const DRAG_TRACK_PX = 180;   // dráha = celý rozsah 0–100 %, puntík tak jede přesně s prstem
+
+// Překreslit seznam uprostřed gesta by řádek pod prstem zahodilo — počká to na puštění
+let blindDragActive = false;
+let blindRenderPending = false;
+
+function attachClosureDrag(meterCol, b, tiltValue) {
+  let holdTimer = null, pointerId = null;
+  let startY = 0, startX = 0, startVal = 0, value = 0;
+  let els = null;
+
+  const blockScroll = e => e.preventDefault();
+  const onKey = e => { if (e.key === 'Escape') close(false); };
+  const clamp = v => Math.min(100, Math.max(0, v));
+
+  function cancelHold() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+
+  function open() {
+    holdTimer = null;
+    startVal = typeof b.closure === 'number' ? clamp(Math.round(b.closure)) : 50;
+    value = startVal;
+
+    const box = document.createElement('div');
+    box.className = 'blind-drag';
+    const val = document.createElement('span');
+    val.className = 'blind-drag-val';
+    const track = document.createElement('div');
+    track.className = 'blind-drag-track';
+    const fill = document.createElement('div');
+    fill.className = 'blind-drag-fill';
+    const knob = document.createElement('div');
+    knob.className = 'blind-drag-knob';
+    track.appendChild(fill);
+    track.appendChild(knob);
+    box.appendChild(val);
+    box.appendChild(track);
+    document.body.appendChild(box);
+
+    // Dráha sedí na ukazateli polohy; u kraje obrazovky se posune, ať je celá vidět
+    // a nelezla přes lištu se záložkami nahoře
+    const m = meterCol.getBoundingClientRect();
+    const tabs = document.getElementById('pageTabs');
+    const minTop = (tabs ? tabs.getBoundingClientRect().bottom : 0) + 8;
+    const top = Math.min(
+      Math.max(m.top + m.height / 2 - DRAG_TRACK_PX / 2, minTop),
+      Math.max(minTop, window.innerHeight - DRAG_TRACK_PX - 8)
+    );
+    box.style.top = top + 'px';
+    box.style.right = Math.max(4, window.innerWidth - (m.left + m.width / 2) - 5) + 'px';
+
+    els = { box, val, fill, knob };
+    paint();
+
+    blindDragActive = true;
+    meterCol.classList.add('dragging');
+    // Ať gesto neuteče, když prst nebo myš sjede mimo malý ukazatel
+    try { meterCol.setPointerCapture(pointerId); } catch {}
+    if (navigator.vibrate) navigator.vibrate(15);
+    // Prst se zatím nehnul, takže rolování nezačalo a preventDefault ho udrží stát
+    document.addEventListener('touchmove', blockScroll, { passive: false });
+    document.addEventListener('keydown', onKey);
+  }
+
+  function paint() {
+    if (!els) return;
+    const y = value / 100 * DRAG_TRACK_PX;
+    els.val.textContent = value + ' %';
+    els.fill.style.height = value + '%';
+    els.knob.style.top = y + 'px';
+    els.val.style.top = y + 'px';
+  }
+
+  function move(y) {
+    // Dolů = víc zataženo, stejně jako se ukazatel plní odshora a jako jede žaluzie
+    value = clamp(Math.round(startVal + (y - startY) / DRAG_TRACK_PX * 100));
+    paint();
+  }
+
+  function close(send) {
+    if (!els) return;
+    els.box.remove();
+    els = null;
+    blindDragActive = false;
+    meterCol.classList.remove('dragging');
+    try { meterCol.releasePointerCapture(pointerId); } catch {}
+    document.removeEventListener('touchmove', blockScroll);
+    document.removeEventListener('keydown', onKey);
+    // Podržet a pustit bez pohybu je jen omyl — s roletou se nehýbe
+    if (send && value !== startVal) {
+      blindCommand(b.deviceURL, 'closure', value, null, tiltValue());
+    }
+    if (blindRenderPending) {
+      blindRenderPending = false;
+      renderBlinds();
+    }
+  }
+
+  meterCol.addEventListener('pointerdown', e => {
+    if (e.button) return;                 // jen levé tlačítko / dotyk
+    if (els || holdTimer) return;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    holdTimer = setTimeout(open, HOLD_MS);
+  });
+  meterCol.addEventListener('pointermove', e => {
+    if (e.pointerId !== pointerId) return;
+    if (holdTimer) {
+      // Ještě se drží: znatelný pohyb znamená rolování stránky, ne nastavování
+      if (Math.abs(e.clientY - startY) > HOLD_MOVE_TOL || Math.abs(e.clientX - startX) > HOLD_MOVE_TOL) cancelHold();
+      return;
+    }
+    if (els) move(e.clientY);
+  });
+  meterCol.addEventListener('pointerup', e => {
+    if (e.pointerId !== pointerId) return;
+    if (holdTimer) return cancelHold();   // krátké klepnutí nedělá nic
+    close(true);
+  });
+  meterCol.addEventListener('pointercancel', e => {
+    if (e.pointerId !== pointerId) return;
+    if (holdTimer) cancelHold(); else close(false);
+  });
+  // Dlouhý stisk jinak vyvolá nabídku prohlížeče místo tažení
+  meterCol.addEventListener('contextmenu', e => e.preventDefault());
+
+  meterCol.classList.add('holdable');
+  meterCol.title = 'Podržet a táhnout = nastavit zatažení';
+}
+
 function renderBlindRow(b) {
   const wrap = document.createElement('div');
   wrap.className = 'blind-item';
@@ -3228,46 +3421,13 @@ function renderBlindRow(b) {
 
   wrap.appendChild(row);
 
-  // Zatažení na konkrétní %: skryté, vyjede po klepnutí na ukazatel polohy.
-  // Povel nese i naklopení z posuvníku níž — server pak obojí udělá jedním povelem
-  // (nebo po sobě), ať se ty dva pohyby navzájem nevyruší.
+  // Zatažení na konkrétní %: podržet ukazatel polohy a táhnout svisle, po puštění
+  // se pošle povel. Nese i naklopení z posuvníku níž — server pak obojí udělá jedním
+  // povelem (nebo po sobě), ať se ty dva pohyby navzájem nevyruší.
   // Podmínka na closure: když roleta polohu nehlásí, je ukazatel skrytý a nebylo by
-  // kam klepnout — nabízet posuvník, ke kterému se nedá dostat, nemá smysl
+  // co držet
   if (b.hasClosure && b.type === 'cover' && !isGarage && typeof b.closure === 'number') {
-    const box = document.createElement('div');
-    box.className = 'blind-tilt';
-    box.hidden = true;
-    const lbl = document.createElement('span');
-    lbl.className = 'blind-tilt-label';
-    lbl.textContent = 'Zatažení';
-    const val = document.createElement('span');
-    val.className = 'blind-tilt-val';
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0';
-    slider.max = '100';
-    slider.value = typeof b.closure === 'number' ? Math.round(b.closure) : 50;
-    val.textContent = slider.value + ' %';
-    slider.addEventListener('input', () => { val.textContent = slider.value + ' %'; });
-    slider.addEventListener('change', () => blindCommand(
-      b.deviceURL, 'closure', Number(slider.value), null,
-      tiltSlider ? Number(tiltSlider.value) : null
-    ));
-    box.appendChild(lbl);
-    box.appendChild(val);
-    box.appendChild(slider);
-    wrap.appendChild(box);
-
-    // Klepnutí jen odkrývá posuvník — samo o sobě žaluzií nehne
-    meterCol.classList.add('clickable');
-    meterCol.title = 'Nastavit zatažení na %';
-    meterCol.addEventListener('click', () => {
-      box.hidden = !box.hidden;
-      if (!box.hidden && typeof b.closure === 'number') {
-        slider.value = String(Math.round(b.closure));
-        val.textContent = slider.value + ' %';
-      }
-    });
+    attachClosureDrag(meterCol, b, () => (tiltSlider ? Number(tiltSlider.value) : null));
   }
 
   // Naklopení lamel: posuvník 0–100 %, povel se pošle po puštění prstu
@@ -3300,6 +3460,8 @@ function hideBlindsSlide2() {
 }
 
 function renderBlinds() {
+  // Uprostřed tažení by se řádek pod prstem postavil znovu a gesto by se přetrhlo
+  if (blindDragActive) { blindRenderPending = true; return; }
   blindsList1El.textContent = '';
   if (blindsList2El) blindsList2El.textContent = '';
   if (!blinds.length) {
