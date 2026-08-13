@@ -5806,6 +5806,8 @@ function applySnapshot(snap) {
   saveRuntimeLocal();
   maybeRestoreRuntimeToServer(serverRt, localRt);
   renderStats();
+  // Stav solinátoru se kreslil dřív, ještě se serverovou (po deployi nulovou) dobou běhu
+  renderSolinator();
   // Časová osa: spojíme serverová data s lokální zálohou a chybějící vrátíme serveru
   const serverTl = pruneTimelineLocal(snap.timeline);
   const localTl = loadTimelineLocal();
@@ -5896,6 +5898,8 @@ function connectStream() {
       if (rt.yesterday) runtimeData.yesterday = rt.yesterday;
     }
     renderStats();
+    // Solinátor ukazuje odběhnuto/cíl — ať se to nerozchází s dobou běhu
+    renderSolinator();
     saveRuntimeLocal();
   });
   es.addEventListener('timeline', e => {

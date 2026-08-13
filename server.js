@@ -959,7 +959,12 @@ app.post('/api/runtime/restore', (req, res) => {
       }
     }
   }
-  if (changed) broadcast('runtime', { runtime: runtimePayload() });
+  if (changed) {
+    broadcast('runtime', { runtime: runtimePayload() });
+    // Odhad na zítřek stojí na odběhnutém čase — po deployi je na serveru nula a bez
+    // tohohle by se do dalšího dne tvářil jako dluh čas, který se dnes dávno odběhl
+    broadcastSolinator();
+  }
   res.json({ ok: true });
 });
 
