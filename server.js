@@ -234,6 +234,7 @@ function snapshot() {
     tempAutoOn: state.tempAutoOn,
     tempAutoOnRooms: state.tempAutoOnRooms,
     solinator: state.solinator,
+    solinatorPlan: solinatorPlan(),
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
@@ -1411,19 +1412,22 @@ function solinatorRanMs() {
 // chlorovat i zítra. Přenese se ale jen ručně namačkaná část, ne to, co samo přišlo
 // ze včerejška; jinak by jedno −1 h tiše ubíralo napořád.
 // Při aktivním zákazu se nepřenáší nic — „nechloruj" nemá vyrábět dluh.
+// Samotné pravidlo přenosu. Používá ho přelom dne i odhad na zítřek — jen s jiným
+// „nedoběhnutým zbytkem" (skutečným vs. očekávaným), ať se ta dvě místa nerozejdou.
+function solinatorCarryFor(unmet, disabled) {
+  if (disabled) return 0;
+  const boost = state.solinator.boostMs;
+  const manual = boost - solinatorCarryPart(boost, state.solinator.carryMs);
+  return manual < 0
+    ? Math.max(-SOLINATOR_CARRY_MAX_MS, manual)
+    : Math.min(SOLINATOR_CARRY_MAX_MS, Math.max(0, unmet));
+}
+
 function solinatorRollDay(today) {
   if (state.solinator.date === today) return;
   if (state.solinator.date) {
-    const boost = state.solinator.boostMs;
-    const manual = boost - solinatorCarryPart(boost, state.solinator.carryMs);
     const unmet = Math.max(0, solinatorTargetMs() - solinatorRanMs());
-    const disabled = Date.now() < state.solinator.disabledUntil;
-    let carry = 0;
-    if (!disabled) {
-      carry = manual < 0
-        ? Math.max(-SOLINATOR_CARRY_MAX_MS, manual)
-        : Math.min(SOLINATOR_CARRY_MAX_MS, unmet);
-    }
+    const carry = solinatorCarryFor(unmet, Date.now() < state.solinator.disabledUntil);
     state.solinator.boostMs = carry;
     state.solinator.carryMs = carry;   // kolik z boostMs je přenos (jen pro rozpis)
     // Psát skutečně přenesenou hodnotu, ne tu před ořezem
@@ -1436,6 +1440,38 @@ function solinatorRollDay(today) {
   }
   state.solinator.date = today;
   state.solinator.bonusMs = 0;
+}
+
+// Odhad, kolik solinátor pojede zítra — ať je po stisku boostu hned vidět, co to
+// s dalším dnem udělá. Přenos se počítá stejným pravidlem jako o půlnoci, jen
+// s odhadem, kolik se do konce dnešního okna ještě stihne odběhnout.
+// (Přechody letního času posunou hranice o hodinu; na odhad to nevadí.)
+function solinatorPlan() {
+  const now = Date.now();
+  const prague = pragueTime();
+  const minutesIn = prague.hour * 3600000 + prague.minute * 60000;
+  const hoursMs = h => h * 3600000;
+
+  // Konec dnešního okna: hodina před západem, bez počasí záložní HARD_OFF_HOUR
+  const sunset = state.weather && typeof state.weather.sunsetMs === 'number' ? state.weather.sunsetMs : null;
+  const cutoff = sunset !== null ? sunset - hoursMs(1) : now - minutesIn + hoursMs(HARD_OFF_HOUR);
+  const start = Math.max(now, now - minutesIn + hoursMs(SOLINATOR_START_HOUR));
+  const windowLeft = Math.max(0, cutoff - start);
+
+  const target = solinatorTargetMs();
+  const ran = solinatorRanMs();
+  const expectedRan = ran + Math.min(Math.max(0, target - ran), windowLeft);
+  const carryMs = solinatorCarryFor(target - expectedRan, now < state.solinator.disabledUntil);
+
+  const maxTempC = forecastTomorrowTemp();
+  const bonusMs = maxTempC === null ? null
+    : (maxTempC > 25 ? SOLINATOR_BONUS_HOT_MS : (maxTempC > 20 ? SOLINATOR_BONUS_WARM_MS : 0));
+
+  // Zákaz platný ještě zítra v poledne = zítra se neběží vůbec
+  const disabled = state.solinator.disabledUntil > now - minutesIn + hoursMs(24 + SOLINATOR_START_HOUR);
+  const targetMs = disabled ? 0 : Math.max(0, SOLINATOR_BASE_MS + (bonusMs || 0) + carryMs);
+
+  return { date: pragueDateString(now + hoursMs(24)), targetMs, bonusMs, carryMs, maxTempC, disabled };
 }
 
 // ---------- Korekce prahů podle předpovědi výroby (Infigy SP_FORECAST_PV) ----------
@@ -1493,17 +1529,56 @@ async function fetchWeather() {
   }
 }
 
-// Server na Renderu běží v UTC — všechny časové podmínky počítáme v Europe/Prague
-function pragueTime() {
+// Předpověď na zítřek — kvůli odhadu, kolik solinátor pojede. Zajímá nás nejvyšší
+// teplota v okně, kdy vůbec jezdí (12:00 → 20:00), protože přirážka za teplo se počítá
+// jen tam. Dotaz nejvýš jednou za hodinu, výpadek nevadí — odhad se ukáže bez přirážky.
+let forecastCache = { ts: 0, forDate: '', maxTempC: null };
+const FORECAST_TTL_MS = 60 * 60 * 1000;
+
+function forecastTomorrowTemp() {
+  const tomorrow = pragueDateString(Date.now() + 24 * 3600000);
+  return forecastCache.forDate === tomorrow ? forecastCache.maxTempC : null;
+}
+
+async function refreshForecast() {
+  if (!OWM_API_KEY) return;
+  const tomorrow = pragueDateString(Date.now() + 24 * 3600000);
+  if (forecastCache.forDate === tomorrow && Date.now() - forecastCache.ts < FORECAST_TTL_MS) return;
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${WEATHER_LAT}&lon=${WEATHER_LON}&appid=${OWM_API_KEY}&units=metric`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.list)) return;
+    let max = null;
+    for (const slot of data.list) {
+      const t = slot && slot.main && slot.main.temp;
+      if (typeof t !== 'number' || typeof slot.dt !== 'number') continue;
+      const ms = slot.dt * 1000;
+      if (pragueDateString(ms) !== tomorrow) continue;
+      const hour = pragueTime(ms).hour;
+      if (hour < SOLINATOR_START_HOUR || hour > HARD_OFF_HOUR) continue;
+      if (max === null || t > max) max = t;
+    }
+    forecastCache = { ts: Date.now(), forDate: tomorrow, maxTempC: max };
+  } catch {
+    // necháme starou hodnotu; když žádná není, odhad prostě bude bez přirážky
+  }
+}
+
+// Server na Renderu běží v UTC — všechny časové podmínky počítáme v Europe/Prague.
+// Bez argumentu platí pro teď, s časem v ms pro ten okamžik (předpověď po slotech).
+function pragueTime(at) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Prague', hour: '2-digit', minute: '2-digit', hour12: false
-  }).formatToParts(new Date());
+  }).formatToParts(at === undefined ? new Date() : new Date(at));
   const get = type => Number(parts.find(p => p.type === type).value);
   return { hour: get('hour') % 24, minute: get('minute') };
 }
 
-function pragueDateString() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
+function pragueDateString(at) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' })
+    .format(at === undefined ? new Date() : new Date(at));
 }
 
 // Čas časovače HH:MM — kontroluje i rozsah. Samotný formát nestačí: „25:99" by prošlo,
@@ -1727,6 +1802,10 @@ async function runSolinatorAutomation(now, prague, weather) {
 
   // Přelom dne: nedoběhnutý zbytek se přenese do dnešního boostu
   solinatorRollDay(today);
+  // Předpověď na zítřek (dotaz nejvýš jednou za hodinu) — kvůli odhadu v appce.
+  // Je tu nahoře schválně: plán se má obnovovat i ve dnech/hodinách, kdy se neběží.
+  await refreshForecast();
+  broadcastSolinator();
 
   // −1d/−2d: úplně zakázáno (ať klesne chlor) — rozpočet se ten den vůbec neřeší
   if (now < state.solinator.disabledUntil) {
@@ -1775,7 +1854,10 @@ async function runSolinatorAutomation(now, prague, weather) {
 }
 
 // Solinátor: podle měření chloru — boost (+2h/+4h) při nízkém, vypnutí (−1d/−2d) při vysokém
-function broadcastSolinator() { broadcast('solinator', { solinator: state.solinator }); }
+// Plán na zítřek se posílá spolu se stavem, ať se řádek přepíše hned po stisku tlačítka
+function broadcastSolinator() {
+  broadcast('solinator', { solinator: state.solinator, solinatorPlan: solinatorPlan() });
+}
 
 // Sdílená logika (používají ji endpointy i asistent). Stav se nastaví hned (synchronně),
 // povel do relé odletí na pozadí — ať endpoint odpovídá už aktuálním stavem.
@@ -1841,19 +1923,19 @@ app.post('/api/solinator/boost', (req, res) => {
   if (!Number.isInteger(hours) || hours === 0 || Math.abs(hours) > 8) {
     return res.status(400).json({ error: 'hours musí být celé číslo −8 až 8 (bez nuly).' });
   }
-  res.json({ solinator: solinatorBoost(hours) });
+  res.json({ solinator: solinatorBoost(hours), solinatorPlan: solinatorPlan() });
 });
 
 app.post('/api/solinator/disable', (req, res) => {
   if (!requireAuth(req, res)) return;
   const days = Number(req.body && req.body.days);
   if (![1, 2].includes(days)) return res.status(400).json({ error: 'days musí být 1 nebo 2.' });
-  res.json({ solinator: solinatorDisable(days) });
+  res.json({ solinator: solinatorDisable(days), solinatorPlan: solinatorPlan() });
 });
 
 app.post('/api/solinator/clear', (req, res) => {
   if (!requireAuth(req, res)) return;
-  res.json({ solinator: solinatorClear() });
+  res.json({ solinator: solinatorClear(), solinatorPlan: solinatorPlan() });
 });
 
 // Obnova stavu solinátoru po deployi (telefon drží zálohu). Přebíráme jen hodnoty
@@ -1880,7 +1962,7 @@ app.post('/api/solinator/restore', (req, res) => {
     }
   }
   if (changed) broadcastSolinator();
-  res.json({ ok: true, solinator: state.solinator });
+  res.json({ ok: true, solinator: state.solinator, solinatorPlan: solinatorPlan() });
 });
 
 let automationRunning = false;

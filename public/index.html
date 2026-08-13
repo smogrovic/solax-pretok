@@ -363,6 +363,8 @@
   .chlor-btn.active-state{outline:2px solid currentColor;}
   .solinator-status{font-size:11px;color:var(--orange);font-weight:600;text-align:center;margin-top:8px;min-height:15px;}
   .solinator-status .cancel{color:var(--grey-text);text-decoration:underline;margin-left:8px;font-weight:600;}
+  /* Odhad na zítřek — drobnější a šedý, ať dnešek zůstane hlavní */
+  .solinator-plan{font-size:11px;color:var(--grey-text);text-align:center;margin-top:3px;min-height:15px;}
   .logic-card{align-items:stretch;}
   .logic-sec{margin-top:16px;}
   .logic-sec:first-child{margin-top:0;}
@@ -481,6 +483,16 @@
   }
   /* Rozpis času solinátoru */
   .sol-calc-note{font-size:11px;opacity:0.7;}
+  .sol-calc-head{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    color:var(--grey-text);
+    margin-top:10px;
+    padding-top:8px;
+    border-top:1px solid rgba(44,62,80,0.08);
+  }
   .sol-calc-foot{
     font-size:11px;
     color:var(--grey-text);
@@ -1752,6 +1764,7 @@
               <button class="chlor-btn chlor-minus" data-days="1">−1 den</button>
             </div>
             <div class="solinator-status" id="solinatorStatus"></div>
+            <div class="solinator-plan" id="solinatorPlan"></div>
           </div>
         </div>
       </div>
@@ -2666,9 +2679,12 @@ async function setAutomation(enabled) {
 autoOnBtn.addEventListener('click', () => setAutomation(true));
 autoOffBtn.addEventListener('click', () => setAutomation(false));
 
-// ---------- Solinátor: boost (+2h/+4h) a vypnutí (−1d/−2d) podle chloru ----------
+// ---------- Solinátor: boost (±1 h) a vypnutí (−1 den) podle chloru ----------
 let solinatorData = { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 };
+// Odhad na zítřek počítá server (přenos z dneška + teplo z předpovědi)
+let solinatorPlanData = null;
 const solinatorStatusEl = document.getElementById('solinatorStatus');
+const solinatorPlanEl = document.getElementById('solinatorPlan');
 const chlorBtns = Array.from(document.querySelectorAll('.chlor-btn'));
 
 function fmtSolTime(ts) {
@@ -2706,7 +2722,22 @@ function renderSolinator() {
   solinatorStatusEl.innerHTML = txt + (canCancel ? ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '');
   const cancel = document.getElementById('solinatorCancel');
   if (cancel) cancel.addEventListener('click', () => solinatorAction('/api/solinator/clear'));
+  renderSolinatorPlan();
   renderSolinatorCalc();
+}
+
+// Druhý řádek: co z dnešního mačkání vyjde na zítřek
+function renderSolinatorPlan() {
+  if (!solinatorPlanEl) return;
+  const p = solinatorPlanData;
+  if (!p) { solinatorPlanEl.textContent = ''; return; }
+  if (p.disabled) { solinatorPlanEl.textContent = 'Zítra: vypnuto (vysoký chlor)'; return; }
+  const parts = [];
+  if (p.carryMs) parts.push(`přenos ${p.carryMs < 0 ? '−' : ''}${fmtSolDur(Math.abs(p.carryMs))}`);
+  parts.push(p.bonusMs === null || p.bonusMs === undefined
+    ? 'bez předpovědi'
+    : `teplo +${fmtSolDur(p.bonusMs)}`);
+  solinatorPlanEl.textContent = `Zítra ~${fmtSolDur(p.targetMs)} · ${parts.join(' + ')}`;
 }
 
 // Rozpis, jak vyšel dnešní cíl — aby bylo vidět, z čeho se to číslo skládá
@@ -2735,20 +2766,44 @@ function renderSolinatorCalc() {
     solinatorCalcEl.appendChild(r);
   };
 
+  // V rozpisu vždy h:mm, ať jde sloupec čísel číst pod sebou (fmtSolDur by dal „0 min")
+  const hm = ms => {
+    const m = Math.round(ms / 60000);
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  };
+  const sign = ms => (ms < 0 ? '−' : '+') + hm(Math.abs(ms));
+
+  // Stejný rozpis, ale na zítřek — teplo z předpovědi a přenos, který z dneška vyjde
+  const planRows = () => {
+    const p = solinatorPlanData;
+    if (!p) return;
+    const head = document.createElement('div');
+    head.className = 'sol-calc-head';
+    head.textContent = 'Odhad na zítřek';
+    solinatorCalcEl.appendChild(head);
+    if (p.disabled) {
+      row('Zítra se neběží', 'vypnuto');
+      return;
+    }
+    const noFc = p.bonusMs === null || p.bonusMs === undefined;
+    row('Základ', hm(3600000), 'každý den');
+    row('Přirážka za teplotu', noFc ? '?' : '+' + hm(p.bonusMs),
+      noFc ? 'předpověď zatím není' : `z předpovědi ${Math.round(p.maxTempC)} °C`);
+    row('Přenos z dneška', sign(p.carryMs || 0),
+      p.carryMs > 0 ? 'co se dnes nestihne' : (p.carryMs < 0 ? 'dnes namačkáno ubrat' : 'dnešek se stihne'));
+    row('Cíl na zítřek', hm(p.targetMs), '', true);
+  };
+
   if (s.disabledUntil && s.disabledUntil > Date.now()) {
     row('Dnes se neběží', 'vypnuto do ' + fmtSolTime(s.disabledUntil));
     const p = document.createElement('div');
     p.className = 'sol-calc-foot';
     p.textContent = 'Po dobu vypnutí se nic nepřenáší na další den — „nechloruj" nemá vyrábět dluh.';
     solinatorCalcEl.appendChild(p);
+    planRows();
     return;
   }
 
-  // V rozpisu vždy h:mm, ať jde sloupec čísel číst pod sebou (fmtSolDur by dal „0 min")
-  const hm = ms => {
-    const m = Math.round(ms / 60000);
-    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
-  };
   const bonus = s.bonusMs || 0;
   const boost = s.boostMs || 0;
   // carryMs je část boostMs; ruční zbytek dopočítáme. Ořez drží obě čísla v jednom
@@ -2757,7 +2812,6 @@ function renderSolinatorCalc() {
   const carry = boost >= 0 ? Math.min(Math.max(cm, 0), boost) : Math.max(Math.min(cm, 0), boost);
   const manual = boost - carry;
   const target = Math.max(0, 3600000 + bonus + boost);
-  const sign = ms => (ms < 0 ? '−' : '+') + hm(Math.abs(ms));
   const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
 
   row('Základ', hm(3600000), 'každý den');
@@ -2769,6 +2823,7 @@ function renderSolinatorCalc() {
   row('Cíl na dnešek', hm(target), '', true);
   row('Odběhnuto', hm(ran));
   row('Zbývá', ran >= target ? 'hotovo' : hm(target - ran));
+  planRows();
 
   const foot = document.createElement('div');
   foot.className = 'sol-calc-foot';
@@ -2793,6 +2848,7 @@ async function solinatorAction(url, body) {
     const data = await res.json();
     if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    if (data.solinatorPlan) solinatorPlanData = data.solinatorPlan;
     if (data.solinator) { solinatorData = data.solinator; renderSolinator(); saveSolinatorLocal(); }
     errorEl.classList.remove('show');
   } catch (err) {
@@ -5683,6 +5739,7 @@ function applySnapshot(snap) {
     date: serverSol.date || '',
     bonusMs: serverSol.bonusMs || 0,
     boostMs: serverSol.boostMs || 0,
+    carryMs: serverSol.carryMs || 0,
     disabledUntil: serverSol.disabledUntil || 0
   };
   if (localSol) {
@@ -5694,10 +5751,13 @@ function applySnapshot(snap) {
     if (localSol.date === todayStr()) {
       if (!solinatorData.date) solinatorData.date = localSol.date;
       if (localSol.bonusMs > solinatorData.bonusMs) solinatorData.bonusMs = localSol.bonusMs;
-      if (localSol.boostMs > solinatorData.boostMs) solinatorData.boostMs = localSol.boostMs;
-      if ((localSol.carryMs || 0) > (solinatorData.carryMs || 0)) solinatorData.carryMs = localSol.carryMs;
+      // Boost a přenos můžou být i záporné (namačkané ubrání) — rozhoduje velikost
+      for (const k of ['boostMs', 'carryMs']) {
+        if (Math.abs(localSol[k] || 0) > Math.abs(solinatorData[k] || 0)) solinatorData[k] = localSol[k];
+      }
     }
   }
+  solinatorPlanData = snap.solinatorPlan || null;
   renderSolinator();
   saveSolinatorLocal();
   maybeRestoreSolinator(serverSol, localSol);
@@ -5887,7 +5947,9 @@ function connectStream() {
     saveTempAutoOnLocal();
   });
   es.addEventListener('solinator', e => {
-    solinatorData = JSON.parse(e.data).solinator || solinatorData;
+    const d = JSON.parse(e.data);
+    solinatorData = d.solinator || solinatorData;
+    if (d.solinatorPlan) solinatorPlanData = d.solinatorPlan;
     renderSolinator();
     saveSolinatorLocal();
   });
