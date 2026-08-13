@@ -5784,7 +5784,10 @@ function applySnapshot(snap) {
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
-  runtimeData = serverRt;
+  // KOPIE, ne odkaz: slučování níž zapisuje do runtimeData, a kdyby to byl tentýž objekt
+  // jako serverRt, mělo by porovnání v maybeRestoreRuntimeToServer už přepsané hodnoty
+  // a serveru bychom po deployi nikdy nic nevrátili
+  runtimeData = serverRt ? JSON.parse(JSON.stringify(serverRt)) : null;
   if (localRt && localRt.date === todayStr() && localRt.ms) {
     if (!runtimeData || runtimeData.date !== localRt.date) {
       runtimeData = localRt;
