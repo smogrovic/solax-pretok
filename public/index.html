@@ -355,7 +355,7 @@
   .graph-total + .graph-total{margin-top:1px;}
   .solinator-chlor{width:100%;margin-top:10px;}
   .solinator-chlor-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;}
-  .solinator-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .solinator-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
   .chlor-btn{border:none;border-radius:12px;padding:11px 2px;font-size:12px;font-weight:700;}
   .chlor-plus{background:rgba(39,174,96,0.14);color:#1e7e46;}
   .chlor-minus{background:rgba(231,76,60,0.14);color:#b03a2e;}
@@ -1747,10 +1747,9 @@
           <div class="solinator-chlor">
             <div class="solinator-chlor-label">Podle chloru v bazénu</div>
             <div class="solinator-btns">
-              <button class="chlor-btn chlor-plus" data-hours="2">+2 h</button>
-              <button class="chlor-btn chlor-plus" data-hours="4">+4 h</button>
+              <button class="chlor-btn chlor-plus" data-hours="1">+1 h</button>
+              <button class="chlor-btn chlor-minus" data-hours="-1">−1 h</button>
               <button class="chlor-btn chlor-minus" data-days="1">−1 den</button>
-              <button class="chlor-btn chlor-minus" data-days="2">−2 dny</button>
             </div>
             <div class="solinator-status" id="solinatorStatus"></div>
           </div>
@@ -2695,13 +2694,15 @@ function renderSolinator() {
   if (s.disabledUntil && s.disabledUntil > now) {
     txt = 'Vypnuto do ' + fmtSolTime(s.disabledUntil);
   } else {
-    const target = 3600000 + (s.bonusMs || 0) + (s.boostMs || 0);
+    const boost = s.boostMs || 0;
+    const target = Math.max(0, 3600000 + (s.bonusMs || 0) + boost);
     const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
     txt = `Dnes ${fmtSolDur(ran)} / ${fmtSolDur(target)}`;
     if (ran >= target) txt += ' · hotovo';
-    else if (s.boostMs > 0) txt += ` · vč. boostu ${fmtSolDur(s.boostMs)}`;
+    else if (boost > 0) txt += ` · vč. boostu ${fmtSolDur(boost)}`;
+    if (boost < 0) txt += ` · zkráceno o ${fmtSolDur(-boost)}`;
   }
-  const canCancel = (s.disabledUntil && s.disabledUntil > now) || s.boostMs > 0;
+  const canCancel = (s.disabledUntil && s.disabledUntil > now) || !!s.boostMs;
   solinatorStatusEl.innerHTML = txt + (canCancel ? ' <span class="cancel" id="solinatorCancel">zrušit</span>' : '');
   const cancel = document.getElementById('solinatorCancel');
   if (cancel) cancel.addEventListener('click', () => solinatorAction('/api/solinator/clear'));
@@ -2750,17 +2751,21 @@ function renderSolinatorCalc() {
   };
   const bonus = s.bonusMs || 0;
   const boost = s.boostMs || 0;
-  // carryMs je část boostMs; ruční zbytek dopočítáme (ořez kdyby se hodnoty rozešly)
-  const carry = Math.min(s.carryMs || 0, boost);
-  const manual = Math.max(0, boost - carry);
-  const target = 3600000 + bonus + boost;
+  // carryMs je část boostMs; ruční zbytek dopočítáme. Ořez drží obě čísla v jednom
+  // směru (boost i přenos můžou být záporné), ať rozpis sedne i po opačném stisku.
+  const cm = s.carryMs || 0;
+  const carry = boost >= 0 ? Math.min(Math.max(cm, 0), boost) : Math.max(Math.min(cm, 0), boost);
+  const manual = boost - carry;
+  const target = Math.max(0, 3600000 + bonus + boost);
+  const sign = ms => (ms < 0 ? '−' : '+') + hm(Math.abs(ms));
   const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
 
   row('Základ', hm(3600000), 'každý den');
   row('Přirážka za teplotu', '+' + hm(bonus),
     bonus >= 2 * 3600000 ? 'venku bylo přes 25 °C' : (bonus > 0 ? 'venku bylo přes 20 °C' : 'zatím pod 20 °C'));
-  row('Boost tlačítky', '+' + hm(manual), manual > 0 ? '+2 h / +4 h' : 'nemačkáno');
-  row('Přeneseno ze včerejška', '+' + hm(carry), carry > 0 ? 'nedoběhnutý zbytek' : 'nic nezbylo');
+  row('Boost tlačítky', sign(manual), manual ? 'mačkáno po hodině' : 'nemačkáno');
+  row('Přeneseno ze včerejška', sign(carry),
+    carry > 0 ? 'nedoběhnutý zbytek' : (carry < 0 ? 'včera namačkáno ubrat' : 'nic nezbylo'));
   row('Cíl na dnešek', hm(target), '', true);
   row('Odběhnuto', hm(ran));
   row('Zbývá', ran >= target ? 'hotovo' : hm(target - ran));
@@ -2770,9 +2775,10 @@ function renderSolinatorCalc() {
   const end = weatherData && typeof weatherData.sunsetMs === 'number'
     ? new Date(weatherData.sunsetMs - 3600000).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
     : null;
-  foot.textContent = end
-    ? `Běží mezi 12:00 a ${end} (hodina před západem slunce). Co se nestihne, přejde na další den — nejvýš 2 h.`
-    : 'Běží mezi 12:00 a hodinou před západem slunce. Co se nestihne, přejde na další den — nejvýš 2 h.';
+  foot.textContent = (end
+    ? `Běží mezi 12:00 a ${end} (hodina před západem slunce). `
+    : 'Běží mezi 12:00 a hodinou před západem slunce. ')
+    + 'Co se nestihne, přejde na další den — a stejně tak namačkané ubrání. Nejvýš 3 h.';
   solinatorCalcEl.appendChild(foot);
 }
 
@@ -2814,7 +2820,8 @@ async function maybeRestoreSolinator(server, local) {
   const now = Date.now();
   const sameDay = local.date === todayStr();
   const need = (local.disabledUntil > now && local.disabledUntil > ((server && server.disabledUntil) || 0))
-    || (sameDay && local.boostMs > 0 && local.boostMs > ((server && server.boostMs) || 0))
+    // Boost může být i záporný (namačkané ubrání) — rozhoduje velikost, ne znaménko
+    || (sameDay && !!local.boostMs && Math.abs(local.boostMs) > Math.abs((server && server.boostMs) || 0))
     || (sameDay && local.bonusMs > 0 && local.bonusMs > ((server && server.bonusMs) || 0));
   if (!need) return;
   try {
