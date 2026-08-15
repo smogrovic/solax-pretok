@@ -1401,7 +1401,7 @@
             <span class="tempauto-thr-label">Obývák — zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnValObyvak">22 °C</span>
           </div>
-          <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSliderObyvak">
+          <input type="range" min="22" max="26" step="1" value="22" id="tempAutoOnSliderObyvak">
           <div class="tempauto-thr-hint" id="tempAutoOffHintObyvak"></div>
         </div>
         <div class="tempauto-list" id="tempAutoList"></div>
@@ -2115,10 +2115,11 @@
             <li>Obývák se řídí <b>výhradně čidlem</b> — stáří hodnoty se neřeší. Čidlo hlásí jen při <b>změně</b> teploty, takže ticho znamená, že je teplota stabilní, ne že je čidlo mimo. Na teplotu z klimatizace se nepřepíná nikdy.</li>
             <li>Když čidlo mlčí <b>přes 6 h</b>, zapíše se to jednou do logu (jede se dál podle poslední hodnoty). Kdyby nehlásilo <b>vůbec nic</b> — třeba hned po nasazení nové verze — automatika obývák chvíli přeskočí, než dorazí první hodnota.</li>
             <li>Při <b>slabé baterce</b> čidla přijde push.</li>
-            <li><b>Spínací teplota se nastavuje jezdcem</b> (<b>18–25 °C</b> po 1 °C). <b>Obývák má vlastní jezdec</b> hned pod sebou — řídí se podle čidla v obytné zóně, které ukazuje níž. Ložnice, Elenka a Miky mají <b>společný jezdec</b> dole.</li>
+            <li><b>Spínací teplota se nastavuje jezdcem</b> po 1 °C. <b>Obývák má vlastní jezdec</b> hned pod sebou (<b>22–26 °C</b>) — řídí se podle čidla v obytné zóně, které ukazuje níž. Ložnice, Elenka a Miky mají <b>společný jezdec</b> dole (<b>18–25 °C</b>).</li>
             <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení na <b>mez − 2 °C</b>. V ložnici, u Elenky a Miky <b>tiše</b>, v <b>obýváku normálně</b> (denní místnost, nemá smysl ho brzdit).</li>
+            <li>V obýváku se navíc <b>nikdy nechladí na víc než 22 °C</b> — i při vysoké mezi se má pořádně dochladit. Takže 22 → 20, 23 → 21, 24 → 22 a 25 i 26 → pořád 22 °C.</li>
             <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1 °C</b>.</li>
-            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 21 °C.</li>
+            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 21 °C. Při mezi <b>26 °C</b> v obýváku: zapne na 26, chladí na 22, vypne pod 25 °C.</li>
             <li>Ať kompresor necykluje: po zapnutí automatika nechá běžet aspoň <b>20 min</b>, po vypnutí nechá vypnuto aspoň <b>20 min</b>.</li>
             <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
             <li><b>Jakýkoliv zásah do klimatizace přepínač shodí do vypnuto</b> — tlačítka na stránce Klima, dálkový ovladač, <b>časovač</b> i pokyn asistentovi. Automatika ti pak nepřepíše, co sis nastavil: po vypnutí časovačem ve 4:00 se klima sama znovu nespustí. <b>Klimatizací se přitom nehýbe</b>, zůstane tak, jak jsi ji nechal.</li>
@@ -4993,10 +4994,20 @@ const tempAutoListEl = document.getElementById('tempAutoList');
 const tempAutoListOwnEl = document.getElementById('tempAutoListOwn');
 let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false };
 
-// Spínací teplota (18–25 °C), vypínací mez je vždy o 1 °C níž.
-// Obývák má vlastní jezdec, zbytek pokojů společný.
+// Spínací teplota, vypínací mez je vždy o 1 °C níž. Obývák má vlastní jezdec s vlastním
+// rozsahem, zbytek pokojů společný. Meze i strop chlazení posílá server.
 let tempAutoOnData = 22;                 // společná mez
 let tempAutoOnRoomsData = { obyvak: 22 }; // pokoje s vlastní mezí
+let tempAutoLimitsData = { shared: { min: 18, max: 25, coolMax: null }, rooms: { obyvak: { min: 22, max: 26, coolMax: 22 } } };
+function tempAutoLimitsFor(roomKey) {
+  return (roomKey && tempAutoLimitsData.rooms && tempAutoLimitsData.rooms[roomKey])
+    || tempAutoLimitsData.shared;
+}
+// Stejné pravidlo jako na serveru: dva stupně pod mez, ale ne výš než strop pokoje
+function tempAutoCoolFor(roomKey, onTemp) {
+  const { coolMax } = tempAutoLimitsFor(roomKey);
+  return typeof coolMax === 'number' ? Math.min(coolMax, onTemp - 2) : onTemp - 2;
+}
 
 function fmtC(v) { return String(v).replace('.', ',') + ' °C'; }
 
@@ -5006,7 +5017,10 @@ function saveTempAutoOnLocal() {
     localStorage.setItem('tempAutoOnRooms', JSON.stringify(tempAutoOnRoomsData));
   } catch {}
 }
-const validThr = v => Number.isInteger(v) && v >= 18 && v <= 25;
+const validThr = (v, roomKey) => {
+  const { min, max } = tempAutoLimitsFor(roomKey);
+  return Number.isInteger(v) && v >= min && v <= max;
+};
 function loadTempAutoOnLocal() {
   const v = Number(localStorage.getItem('tempAutoOn'));
   return validThr(v) ? v : null;
@@ -5016,7 +5030,7 @@ function loadTempAutoOnRoomsLocal() {
     const o = JSON.parse(localStorage.getItem('tempAutoOnRooms') || 'null');
     if (!o || typeof o !== 'object') return null;
     const out = {};
-    for (const k of Object.keys(o)) if (validThr(Number(o[k]))) out[k] = Number(o[k]);
+    for (const k of Object.keys(o)) if (validThr(Number(o[k]), k)) out[k] = Number(o[k]);
     return Object.keys(out).length ? out : null;
   } catch { return null; }
 }
@@ -5035,10 +5049,16 @@ function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
   function updateLabels() {
     const shown = slider ? Number(slider.value) : current();
     if (valEl) valEl.textContent = fmtC(shown);
-    if (hintEl) hintEl.textContent = `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(shown - 2)}`;
+    if (hintEl) hintEl.textContent = `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(tempAutoCoolFor(roomKey, shown))}`;
   }
   function render() {
-    if (slider && !dragging) slider.value = String(current());
+    if (slider && !dragging) {
+      // Rozsah drží server, ať appka nenabídne hodnotu, kterou by pak odmítl
+      const { min, max } = tempAutoLimitsFor(roomKey);
+      slider.min = String(min);
+      slider.max = String(max);
+      slider.value = String(current());
+    }
     updateLabels();
   }
   async function send(temp) {
@@ -5053,6 +5073,7 @@ function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
       if (!res.ok) throw new Error(data.error || 'Nepodařilo se nastavit.');
       tempAutoOnData = data.tempAutoOn;
       tempAutoOnRoomsData = data.tempAutoOnRooms || tempAutoOnRoomsData;
+      if (data.tempAutoLimits) tempAutoLimitsData = data.tempAutoLimits;
       saveTempAutoOnLocal();
       errorEl.classList.remove('show');
     } catch (err) {
@@ -5713,6 +5734,7 @@ function applySnapshot(snap) {
   // Spínací teploty: server + záloha v telefonu (přežije deploy)
   if (typeof snap.tempAutoOn === 'number') tempAutoOnData = snap.tempAutoOn;
   if (snap.tempAutoOnRooms) tempAutoOnRoomsData = { ...tempAutoOnRoomsData, ...snap.tempAutoOnRooms };
+  if (snap.tempAutoLimits) tempAutoLimitsData = snap.tempAutoLimits;
   {
     const localThr = loadTempAutoOnLocal();
     const localRooms = loadTempAutoOnRoomsLocal() || {};
@@ -5955,6 +5977,7 @@ function connectStream() {
     const d = JSON.parse(e.data);
     if (typeof d.tempAutoOn === 'number') tempAutoOnData = d.tempAutoOn;
     if (d.tempAutoOnRooms) tempAutoOnRoomsData = { ...tempAutoOnRoomsData, ...d.tempAutoOnRooms };
+    if (d.tempAutoLimits) tempAutoLimitsData = d.tempAutoLimits;
     renderTempAutoThreshold();
     saveTempAutoOnLocal();
   });

@@ -231,8 +231,7 @@ function snapshot() {
     airconEnabled: panasonicEnabled,
     airconTimers,
     tempAuto: state.tempAuto,
-    tempAutoOn: state.tempAutoOn,
-    tempAutoOnRooms: state.tempAutoOnRooms,
+    ...thresholdPayload(),
     solinator: state.solinator,
     solinatorPlan: solinatorPlan(),
     wallbox: state.wallbox,
@@ -1064,9 +1063,22 @@ app.post('/api/tempauto', (req, res) => {
 });
 
 function thresholdPayload() {
-  return { tempAutoOn: state.tempAutoOn, tempAutoOnRooms: state.tempAutoOnRooms };
+  return {
+    tempAutoOn: state.tempAutoOn,
+    tempAutoOnRooms: state.tempAutoOnRooms,
+    // Meze jezdců posílá server, ať je appka nemá napsané zvlášť a nenabídne hodnotu,
+    // kterou by pak endpoint odmítl
+    tempAutoLimits: {
+      shared: tempAutoLimits(),
+      rooms: Object.fromEntries(Object.keys(state.tempAutoOnRooms).map(k => [k, tempAutoLimits(k)]))
+    }
+  };
 }
-const validThreshold = t => Number.isInteger(t) && t >= TEMP_AUTO_ON_MIN && t <= TEMP_AUTO_ON_MAX;
+// Rozsah je per pokoj — obývák má vlastní (22–26 °C), zbytek společný (18–25 °C)
+const validThreshold = (t, roomKey) => {
+  const { min, max } = tempAutoLimits(roomKey);
+  return Number.isInteger(t) && t >= min && t <= max;
+};
 
 // Spínací teplota. Bez `key` jde o společnou mez (Ložnice, Elenka, Miky),
 // s `key` o mez pokoje, který má vlastní jezdec (obývák).
@@ -1074,11 +1086,12 @@ app.post('/api/tempauto/threshold', (req, res) => {
   if (!requireAuth(req, res)) return;
   const temp = Number(req.body && req.body.temp);
   const key = req.body && req.body.key;
-  if (!validThreshold(temp)) {
-    return res.status(400).json({ error: `Teplota musí být celé číslo ${TEMP_AUTO_ON_MIN}–${TEMP_AUTO_ON_MAX} °C.` });
-  }
   if (key !== undefined && !Object.prototype.hasOwnProperty.call(state.tempAutoOnRooms, key)) {
     return res.status(400).json({ error: 'Tenhle pokoj nemá vlastní mez.' });
+  }
+  if (!validThreshold(temp, key)) {
+    const { min, max } = tempAutoLimits(key);
+    return res.status(400).json({ error: `Teplota musí být celé číslo ${min}–${max} °C.` });
   }
   const current = key !== undefined ? state.tempAutoOnRooms[key] : state.tempAutoOn;
   if (current !== temp) {
@@ -1105,7 +1118,7 @@ app.post('/api/tempauto/restore', (req, res) => {
   if (rooms && typeof rooms === 'object') {
     for (const key of Object.keys(state.tempAutoOnRooms)) {
       const v = Number(rooms[key]);
-      if (validThreshold(v) && state.tempAutoOnRooms[key] !== v) {
+      if (validThreshold(v, key) && state.tempAutoOnRooms[key] !== v) {
         state.tempAutoOnRooms[key] = v; changed = true;
       }
     }
@@ -2994,10 +3007,19 @@ function noteAirconExternalChanges(devices) {
 //   chladit na = zapnout − 2 °C  (o kus pod vypínací mezí, ať klima opravdu dochladí)
 const TEMP_AUTO_ON_MIN = 18;
 const TEMP_AUTO_ON_MAX = 25;
+// Obývák má vlastní rozsah jezdce a strop chlazení: i při vysoké mezi se má dochladit
+// pořádně, ne jen o dva stupně (26 → 22, ne 26 → 24)
+const TEMP_AUTO_ROOM_LIMITS = { obyvak: { min: 22, max: 26, coolMax: 22 } };
+function tempAutoLimits(roomKey) {
+  return TEMP_AUTO_ROOM_LIMITS[roomKey]
+    || { min: TEMP_AUTO_ON_MIN, max: TEMP_AUTO_ON_MAX, coolMax: null };
+}
 function tempAutoLevels(roomKey) {
   const own = roomKey !== undefined ? state.tempAutoOnRooms[roomKey] : undefined;
   const onTemp = own !== undefined ? own : state.tempAutoOn;
-  return { onTemp, offTemp: onTemp - 1, coolTemp: onTemp - 2 };
+  const { coolMax } = tempAutoLimits(roomKey);
+  const coolTemp = coolMax === null ? onTemp - 2 : Math.min(coolMax, onTemp - 2);
+  return { onTemp, offTemp: onTemp - 1, coolTemp };
 }
 // Minimální doby chodu i klidu — ať kompresor necyklu je po pár minutách
 const TEMP_AUTO_MIN_OFF_MS = 20 * 60 * 1000; // po vypnutí drž vypnuté aspoň 20 min
