@@ -324,10 +324,10 @@
   /* Lišta je schválně rozdělená: posuvná část NESMÍ sahat na horní hranu displeje,
      jinak na ni nové iOS nasadí svůj „scroll edge" efekt a záložky jsou rozmazané.
      Odsazení pod výřez a pozadí drží statický obal.
-     --tabs-drop posouvá záložky pod celý rozmazaný pruh (sahá ~40 px pod výřez);
-     kdyby to na novějším iOS nestačilo, zvedne se jen tohle jedno číslo. */
+     --tabs-drop posouvá záložky pod rozmazaný pruh, který sahá kus pod výřez;
+     kdyby se rozmazání vrátilo, zvedne se jen tohle jedno číslo. */
   .page-tabs-bar{
-    --tabs-drop:40px;
+    --tabs-drop:20px;
     flex-shrink:0;
     padding-top:calc(max(8px, env(safe-area-inset-top)) + var(--tabs-drop));
     background:var(--bg);
