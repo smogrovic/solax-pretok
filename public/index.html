@@ -323,10 +323,13 @@
   /* Lišta se záložkami stránek (nahoře místo nadpisu) */
   /* Lišta je schválně rozdělená: posuvná část NESMÍ sahat na horní hranu displeje,
      jinak na ni nové iOS nasadí svůj „scroll edge" efekt a záložky jsou rozmazané.
-     Odsazení pod výřez a pozadí drží statický obal. */
+     Odsazení pod výřez a pozadí drží statický obal.
+     --tabs-drop posouvá záložky pod celý rozmazaný pruh (sahá ~40 px pod výřez);
+     kdyby to na novějším iOS nestačilo, zvedne se jen tohle jedno číslo. */
   .page-tabs-bar{
+    --tabs-drop:40px;
     flex-shrink:0;
-    padding-top:max(8px, env(safe-area-inset-top));
+    padding-top:calc(max(8px, env(safe-area-inset-top)) + var(--tabs-drop));
     background:var(--bg);
     border-bottom:1px solid rgba(44,62,80,0.10);
   }
