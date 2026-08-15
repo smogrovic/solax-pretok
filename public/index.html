@@ -2815,8 +2815,13 @@ function renderSolinatorCalc() {
   const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
 
   row('Základ', hm(3600000), 'každý den');
+  // Přirážku určuje nejvyšší dnešní teplota z předpovědi; bez ní se jede podle naměřené
+  const dnesMax = solinatorPlanData && typeof solinatorPlanData.todayMaxTempC === 'number'
+    ? solinatorPlanData.todayMaxTempC : null;
   row('Přirážka za teplotu', '+' + hm(bonus),
-    bonus >= 2 * 3600000 ? 'venku bylo přes 25 °C' : (bonus > 0 ? 'venku bylo přes 20 °C' : 'zatím pod 20 °C'));
+    dnesMax !== null
+      ? `z předpovědi ${Math.round(dnesMax)} °C`
+      : (bonus >= 2 * 3600000 ? 'venku bylo přes 25 °C' : (bonus > 0 ? 'venku bylo přes 20 °C' : 'zatím pod 20 °C')));
   row('Boost tlačítky', sign(manual), manual ? 'mačkáno po hodině' : 'nemačkáno');
   row('Přeneseno ze včerejška', sign(carry),
     carry > 0 ? 'nedoběhnutý zbytek' : (carry < 0 ? 'včera namačkáno ubrat' : 'nic nezbylo'));
