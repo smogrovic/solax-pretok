@@ -1227,6 +1227,25 @@
     transition:color .2s;
   }
   .wb-mode-opt.active{color:var(--navy);}
+  .wb-morning{
+    width:100%;
+    margin-top:14px;
+    padding-top:12px;
+    border-top:1px solid rgba(44,62,80,0.08);
+  }
+  .wb-morning-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .wb-morning-label{font-size:13px;font-weight:600;color:var(--navy);}
+  .wb-morning-hint{
+    font-size:11px;
+    color:var(--grey-text);
+    line-height:1.45;
+    margin-top:6px;
+  }
   .wb-manual{margin-top:16px;width:100%;}
   .wb-manual-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;font-weight:600;}
   .wb-manual-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
@@ -1910,6 +1929,13 @@
           <button class="toggle-switch" id="wbAutoSwitch" aria-label="Přepnout FAST/AUTO"></button>
           <span class="wb-mode-opt" id="wbModeAuto">AUTO</span>
         </div>
+        <div class="wb-morning" id="wbMorningBox">
+          <div class="wb-morning-row">
+            <span class="wb-morning-label">Ráno auto potřebuju</span>
+            <button class="toggle-switch" id="wbMorningSwitch" aria-label="Ráno auto potřebuju"></button>
+          </div>
+          <div class="wb-morning-hint" id="wbMorningHint"></div>
+        </div>
         <div class="wb-manual">
           <div class="wb-manual-label">Ruční přepnutí režimu</div>
           <div class="wb-manual-btns" id="wbManualBtns">
@@ -2089,13 +2115,15 @@
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Wallbox (přepínač FAST / AUTO)</div>
+          <div class="logic-h">Wallbox (FAST / AUTO a ranní jízda)</div>
           <ul class="logic-list">
             <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
             <li><b>AUTO</b>: hodinu <b>po východu slunce → ECO</b> (nabíjí z přebytku FVE).</li>
             <li><b>AUTO</b>: hodinu <b>před západem a přes noc → FAST</b> (baterka se přelije do auta).</li>
+            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když ho <b>vypneš</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic a ráno se rozjede sám, jakmile začne výroba.</li>
+            <li>Platí vždy jen na <b>nejbližší noc</b> — ráno (když se otevře denní okno) se sám vrátí na „potřebuju", aby jednou ráno nestálo auto vybité.</li>
             <li><b>Ruční přepnutí</b> (STOP/ECO/FAST) platí, dokud ho automatika při další změně (východ/západ) zase nepřepne.</li>
-            <li>Ručně ve střídači/wallboxu: ECO = Level1 6A, „Battery charge EVC" = Enable, Min SOC nízko (~10 %).</li>
+            <li>Ručně ve střídači/wallboxu: ECO = Level1 6A, „Battery charge EVC" = Enable, Min SOC nízko (~10 %). Nejnižší proud (6 A) platí i pro GREEN — určuje, při jakém přebytku se ráno nabíjení rozjede.</li>
           </ul>
         </div>
 
@@ -2940,6 +2968,8 @@ async function maybeRestoreSolinator(server, local) {
 
 // Odpočet stavu ať se občas obnoví (vyprší boost/vypnutí)
 setInterval(renderSolinator, 60000);
+// Přepínač „ráno auto potřebuju" vyprší sám v čase — ať se to na obrazovce projeví
+setInterval(renderWbMorning, 60000);
 
 // Lokální kopie dnešní doby běhu — po deployi ji appka vrátí serveru
 function todayStr() {
@@ -4568,9 +4598,15 @@ const wbAutoSwitchEl = document.getElementById('wbAutoSwitch');
 const wbModeFastEl = document.getElementById('wbModeFast');
 const wbModeAutoEl = document.getElementById('wbModeAuto');
 const wbOverviewEl = document.getElementById('wbOverview');
+const wbMorningBoxEl = document.getElementById('wbMorningBox');
+const wbMorningSwitchEl = document.getElementById('wbMorningSwitch');
+const wbMorningHintEl = document.getElementById('wbMorningHint');
 let wallboxData = null;
 let wallboxEnabledFlag = null;
 let wbAutoData = true;
+// Razítko, do kdy platí „ráno auto nepotřebuju" (0 = potřebuju). Po jeho vypršení
+// se přepínač sám vrátí — appka to pozná z času, server nic posílat nemusí.
+let wbNoMorningData = 0;
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -4602,6 +4638,61 @@ async function wbSetAuto(auto) {
 
 if (wbAutoSwitchEl) {
   wbAutoSwitchEl.addEventListener('click', () => wbSetAuto(!wbAutoData));
+}
+
+const wbMorningNeed = () => !(wbNoMorningData > Date.now());
+
+// „Ráno auto potřebuju" — vypnuto znamená, že se v noci jede GREEN (jen z přebytku)
+async function wbSetMorning(need) {
+  if (wbMorningSwitchEl) wbMorningSwitchEl.disabled = true;
+  try {
+    const res = await fetch('/api/wallbox/morning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ need })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    if (typeof data.wbNoMorning === 'number') wbNoMorningData = data.wbNoMorning;
+    saveWbMorningLocal();
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Wallbox: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (wbMorningSwitchEl) wbMorningSwitchEl.disabled = false;
+  renderWbAuto();
+}
+
+if (wbMorningSwitchEl) {
+  wbMorningSwitchEl.addEventListener('click', () => wbSetMorning(!wbMorningNeed()));
+}
+
+function saveWbMorningLocal() {
+  try { localStorage.setItem('wbNoMorning', String(wbNoMorningData || 0)); } catch {}
+}
+function loadWbMorningLocal() {
+  const v = Number(localStorage.getItem('wbNoMorning'));
+  return Number.isFinite(v) ? v : 0;
+}
+// Server po deployi (a Render umí službu uspat) startuje s nulou — vrátíme mu večerní
+// nastavení, ať se auto přes noc zbytečně nedobije naplno
+async function maybeRestoreWbMorning(serverVal) {
+  const local = loadWbMorningLocal();
+  if (!(local > Date.now()) || local <= (serverVal || 0)) return;
+  wbNoMorningData = local;
+  try {
+    await fetch('/api/wallbox/morning/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wbNoMorning: local })
+    });
+  } catch {}
+  renderWbAuto();
 }
 
 // Ruční přepnutí režimu (STOP/ECO/FAST). Platí, dokud ho automatika při další
@@ -4638,6 +4729,22 @@ function renderWbAuto() {
   if (wbAutoSwitchEl) wbAutoSwitchEl.classList.toggle('on', !!wbAutoData);
   if (wbModeAutoEl) wbModeAutoEl.classList.toggle('active', !!wbAutoData);
   if (wbModeFastEl) wbModeFastEl.classList.toggle('active', !wbAutoData);
+  renderWbMorning();
+}
+
+function renderWbMorning() {
+  if (!wbMorningSwitchEl) return;
+  const need = wbMorningNeed();
+  wbMorningSwitchEl.classList.toggle('on', need);
+  if (!wbMorningHintEl) return;
+  if (!wbAutoData) {
+    // Na pevném FAST se automatika neuplatní, tak ať přepínač nemate
+    wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.';
+    return;
+  }
+  wbMorningHintEl.textContent = need
+    ? 'V noci se dobije naplno (FAST).'
+    : `Nabíjí se jen z přebytku (GREEN) — do rána se ze sítě ani z baterky nebere. Samo se vrátí v ${fmtSolTime(wbNoMorningData)}.`;
 }
 
 // Výkon wallboxu: přednostně z Infigy (živější), jinak ze Solaxu; vrací kW
@@ -5756,7 +5863,10 @@ function applySnapshot(snap) {
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
   wbAutoData = snap.wbAuto !== false;
+  wbNoMorningData = Number(snap.wbNoMorning) || 0;
   renderWallbox();
+  maybeRestoreWbMorning(wbNoMorningData);
+  saveWbMorningLocal();
   // Historie režimů wallboxu: server + lokální záloha (přežije deploy)
   const serverWbMode = snap.wbModeHistory || [];
   const localWbMode = loadWbModeHistoryLocal();
@@ -6060,7 +6170,10 @@ function connectStream() {
     saveWallboxHistoryLocal();
   });
   es.addEventListener('wbAuto', e => {
-    wbAutoData = JSON.parse(e.data).wbAuto !== false;
+    const d = JSON.parse(e.data);
+    wbAutoData = d.wbAuto !== false;
+    if (typeof d.wbNoMorning === 'number') wbNoMorningData = d.wbNoMorning;
+    saveWbMorningLocal();
     renderWbAuto();
   });
   es.addEventListener('wbModeHistory', e => {

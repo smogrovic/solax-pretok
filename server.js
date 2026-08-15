@@ -111,6 +111,7 @@ const state = {
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
+  wbNoMorning: 0,     // do kdy platí „ráno auto nepotřebuju" (0 = potřebuju, jede se noční FAST)
   wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (za 48 h)
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
@@ -238,6 +239,7 @@ function snapshot() {
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
     wbAuto: state.wbAuto,
+    wbNoMorning: state.wbNoMorning || 0,
     wbModeHistory: state.wbModeHistory,
     infigy: state.infigy,
     infigyEnabled,
@@ -1408,6 +1410,13 @@ function solinatorCarryPart(boostMs, carryMs) {
     : Math.max(Math.min(carryMs, 0), boostMs);
 }
 
+// Čas (a datum, když nejde o dnešek) v pražském čase — do logu a hlášek
+function fmtPragueTime(ts) {
+  return new Date(ts).toLocaleString('cs-CZ', {
+    timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+}
+
 function fmtDur(ms) {
   const m = Math.round(ms / 60000);
   const h = Math.floor(m / 60);
@@ -1941,9 +1950,7 @@ function solinatorDisable(days) {
   state.solinator.boostMs = 0;
   state.solinator.carryMs = 0;
   // Po namačkání víc dnů je „na 1 den" matoucí — píšeme, dokdy to nakonec platí
-  addLog(`Solinátor: vypnut do ${new Date(state.solinator.disabledUntil).toLocaleString('cs-CZ', {
-    timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit'
-  })} (vysoký chlor)`);
+  addLog(`Solinátor: vypnut do ${fmtPragueTime(state.solinator.disabledUntil)} (vysoký chlor)`);
   broadcastSolinator();
   const sol = state.devices.solinator;
   if (sol && sol.isOn) autoSet('solinator', 'off', 'vypnut (vysoký chlor)').catch(() => {});
@@ -3489,11 +3496,15 @@ app.post('/api/wallbox/set', async (req, res) => {
 // ---------- Řízení režimu wallboxu (ECO ve dne / FAST v noci podle slunce) ----------
 // AUTO: hodinu po východu slunce → ECO (nabíjí z přebytku FVE), hodinu před západem
 // slunce a přes noc → FAST (baterka se přelije do auta). Přepínač FAST = pevně FAST.
+// Když je přepnuté „ráno auto nepotřebuju", jede se místo nočního FAST GREEN —
+// nabíjí se výhradně z přebytku, takže v noci nevezme nic a ráno se rozjede samo.
 // Bazén a bojler se řídí samostatně (runPoolAutomation / runBoilerAutomation).
 //
 // MIMO KÓD (ručně v appce střídače/wallboxu):
-//  - Wallbox: ECO úroveň = Level1 6A
-//  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme)
+//  - Wallbox: ECO úroveň = Level1 6A  (nejnižší proud platí i pro GREEN — určuje, při
+//    jakém přebytku se ráno nabíjení vůbec rozjede; víc než 6 A = rozjede se později)
+//  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme; týká se
+//    jen FAST, GREEN z baterky nebere)
 //  - Střídač: Min SOC nízko (např. 10 %)     (aby se baterka večer skoro vyprázdnila)
 const EC = {
   SUN_ECO_AFTER_SUNRISE_S: 3600,  // hodinu po východu slunce → ECO
@@ -3502,15 +3513,44 @@ const EC = {
 
 let wbControlRunning = false;
 
+// Začátek denního (ECO) okna pro daný den ze slunečních dat
+function wbEcoStartMs(w) {
+  return w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
+}
+
+// „Ráno auto nepotřebuju" platí vždy jen do nejbližšího rána — pak vyprší samo,
+// není potřeba nic resetovat.
+function wbNoMorningActive() {
+  return Date.now() < (state.wbNoMorning || 0);
+}
+
+// Nejbližší ráno, kdy se přepínač zase přestane vztahovat: začátek ECO okna. Když už
+// dnešní minul, tak zítřejší (východ se den ode dne posune o pár minut, na tohle stačí).
+// Bez dat o počasí záložně nejbližší 8:00 pražského času.
+function wbNextMorningMs() {
+  const now = Date.now();
+  const w = weatherCache.data;
+  if (w && w.sys && w.sys.sunrise !== undefined) {
+    const eco = wbEcoStartMs(w);
+    return eco > now ? eco : eco + 24 * 3600000;
+  }
+  const prague = pragueTime();
+  const minutesIn = prague.hour * 3600000 + prague.minute * 60000;
+  const eight = now - minutesIn + 8 * 3600000;
+  return eight > now ? eight : eight + 24 * 3600000;
+}
+
 // Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return null; // bez dat neměníme
   const now = Date.now();
-  const ecoStart = w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
+  const ecoStart = wbEcoStartMs(w);
   const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
-  return (now >= ecoStart && now < fastStart) ? 'eco' : 'fast';
+  if (now >= ecoStart && now < fastStart) return 'eco';
+  // Večer a v noci: buď se dobíjí naplno, nebo se čeká na slunce
+  return wbNoMorningActive() ? 'green' : 'fast';
 }
 
 let wbPrevStatus = null;
@@ -3545,17 +3585,52 @@ async function runEnergyControl() {
   }
 }
 
+// Do appky chodí oba přepínače pohromadě — patří k sobě
+function wbSwitchPayload() {
+  return { wbAuto: state.wbAuto, wbNoMorning: state.wbNoMorning || 0 };
+}
+
 app.post('/api/wallbox/auto', async (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován.' });
   const { auto } = req.body || {};
   if (typeof auto !== 'boolean') return res.status(400).json({ error: 'auto musí být true/false.' });
   state.wbAuto = auto;
-  broadcast('wbAuto', { wbAuto: state.wbAuto });
+  broadcast('wbAuto', wbSwitchPayload());
   addLog(`Wallbox: přepnuto na ${auto ? 'AUTO' : 'FAST'}`);
-  res.json({ wbAuto: state.wbAuto });
+  res.json(wbSwitchPayload());
   state.wbLastTarget = null; // ruční přepnutí = vynuť okamžité nastavení
   runEnergyControl();
+});
+
+// „Ráno auto potřebuju" (need=true, výchozí) vs. „nepotřebuju" → místo nočního FAST
+// se jede GREEN a nabíjí se až z ranního slunce. Platí vždy jen do nejbližšího rána.
+app.post('/api/wallbox/morning', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován.' });
+  const { need } = req.body || {};
+  if (typeof need !== 'boolean') return res.status(400).json({ error: 'need musí být true/false.' });
+  state.wbNoMorning = need ? 0 : wbNextMorningMs();
+  broadcast('wbAuto', wbSwitchPayload());
+  addLog(need
+    ? 'Wallbox: ráno auto potřebuju → v noci se dobije naplno'
+    : `Wallbox: ráno auto nepotřebuju → do ${fmtPragueTime(state.wbNoMorning)} jen z přebytku`);
+  res.json(wbSwitchPayload());
+  state.wbLastTarget = null; // vynuť okamžité přepnutí režimu
+  runEnergyControl();
+});
+
+// Obnova po deployi/uspání služby — telefon drží zálohu. Bereme jen razítko v budoucnu
+// a dál od teď, ať se večerní „nepotřebuju" neztratí a naopak se nic neprodlužuje samo.
+app.post('/api/wallbox/morning/restore', (req, res) => {
+  const v = Number(req.body && req.body.wbNoMorning);
+  if (Number.isFinite(v) && v > Date.now() && v > (state.wbNoMorning || 0)) {
+    state.wbNoMorning = v;
+    broadcast('wbAuto', wbSwitchPayload());
+    state.wbLastTarget = null;
+    runEnergyControl();
+  }
+  res.json(wbSwitchPayload());
 });
 
 if (wallboxEnabled) {
@@ -3741,7 +3816,7 @@ async function assistantSetWallbox(mode) {
 function assistantSetWallboxAuto(auto) {
   if (!wallboxEnabled) return 'Wallbox není nastaven.';
   state.wbAuto = !!auto;
-  broadcast('wbAuto', { wbAuto: state.wbAuto });
+  broadcast('wbAuto', wbSwitchPayload());
   addLog(`Wallbox: přepnuto na ${state.wbAuto ? 'AUTO' : 'FAST'} (asistent)`);
   state.wbLastTarget = null; // vynuť okamžité nastavení režimu
   runEnergyControl();
@@ -3750,9 +3825,7 @@ function assistantSetWallboxAuto(auto) {
 
 // Solinátor podle chloru: boost při nízkém, vypnutí na dny při vysokém
 function assistantSetSolinator({ action, hours, days }) {
-  const fmt = ts => new Date(ts).toLocaleString('cs-CZ', {
-    timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  const fmt = fmtPragueTime;
   if (action === 'boost') {
     const n = Math.round(Number(hours));
     const h = Number.isFinite(n) && n !== 0 ? Math.max(-8, Math.min(8, n)) : 2;
