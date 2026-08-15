@@ -2120,10 +2120,12 @@
             <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
             <li><b>AUTO</b>: hodinu <b>po východu slunce → ECO</b> (nabíjí z přebytku FVE).</li>
             <li><b>AUTO</b>: hodinu <b>před západem a přes noc → FAST</b> (baterka se přelije do auta).</li>
-            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když ho <b>vypneš</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic a ráno se rozjede sám, jakmile začne výroba.</li>
-            <li>Platí vždy jen na <b>nejbližší noc</b> — ráno (když se otevře denní okno) se sám vrátí na „potřebuju", aby jednou ráno nestálo auto vybité.</li>
+            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když je <b>vypnutý</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic a ráno se rozjede sám, jakmile začne výroba.</li>
+            <li>Výchozí stav se řídí <b>dnem v týdnu toho rána</b>: <b>pracovní den → potřebuju</b> (v noci FAST), <b>víkend → nepotřebuju</b> (čeká se na slunce). Rozhoduje ráno, ne dnešek — v pátek večer tedy platí sobota.</li>
+            <li><b>Ruční přepnutí</b> platí jen na <b>nejbližší ráno</b>, pak zase rozhoduje den v týdnu. Když ho zmáčkneš po půlnoci, týká se rána téhož dne.</li>
+            <li>Odklad končí <b>otevřením denního okna, nejpozději v 8:00</b> — v zimě se okno otevírá pozdě a do té doby by se nenabíjelo vůbec.</li>
             <li><b>Ruční přepnutí</b> (STOP/ECO/FAST) platí, dokud ho automatika při další změně (východ/západ) zase nepřepne.</li>
-            <li>Ručně ve střídači/wallboxu: ECO = Level1 6A, „Battery charge EVC" = Enable, Min SOC nízko (~10 %). Nejnižší proud (6 A) platí i pro GREEN — určuje, při jakém přebytku se ráno nabíjení rozjede.</li>
+            <li>Ručně ve střídači/wallboxu: <b>ECO i GREEN na 6 A</b>, „Battery charge EVC" = Enable, Min SOC nízko (~10 %). Těch 6 A je nejnižší možný proud — určuje, při jakém přebytku se nabíjení vůbec rozjede.</li>
           </ul>
         </div>
 
@@ -4604,9 +4606,9 @@ const wbMorningHintEl = document.getElementById('wbMorningHint');
 let wallboxData = null;
 let wallboxEnabledFlag = null;
 let wbAutoData = true;
-// Razítko, do kdy platí „ráno auto nepotřebuju" (0 = potřebuju). Po jeho vypršení
-// se přepínač sám vrátí — appka to pozná z času, server nic posílat nemusí.
-let wbNoMorningData = 0;
+// Ranní rozhodnutí posílá server rovnou vyhodnocené: need = jestli auto ráno potřebuju,
+// until = do kdy to platí, manual = jestli je to ruční přepnutí (jinak podle dne v týdnu)
+let wbMorningData = { need: true, until: 0, manual: false };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -4640,8 +4642,6 @@ if (wbAutoSwitchEl) {
   wbAutoSwitchEl.addEventListener('click', () => wbSetAuto(!wbAutoData));
 }
 
-const wbMorningNeed = () => !(wbNoMorningData > Date.now());
-
 // „Ráno auto potřebuju" — vypnuto znamená, že se v noci jede GREEN (jen z přebytku)
 async function wbSetMorning(need) {
   if (wbMorningSwitchEl) wbMorningSwitchEl.disabled = true;
@@ -4657,8 +4657,7 @@ async function wbSetMorning(need) {
       throw new Error(data.error || 'Ovládání je zamčené.');
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
-    if (typeof data.wbNoMorning === 'number') wbNoMorningData = data.wbNoMorning;
-    saveWbMorningLocal();
+    applyWbSwitches(data);
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Wallbox: ' + err.message;
@@ -4669,30 +4668,56 @@ async function wbSetMorning(need) {
 }
 
 if (wbMorningSwitchEl) {
-  wbMorningSwitchEl.addEventListener('click', () => wbSetMorning(!wbMorningNeed()));
+  wbMorningSwitchEl.addEventListener('click', () => wbSetMorning(!wbMorningData.need));
 }
 
+// Přepínače wallboxu ze serveru (odpověď endpointu, SSE i snapshot)
+function applyWbSwitches(d) {
+  if (!d) return;
+  if (typeof d.wbAuto === 'boolean') wbAutoData = d.wbAuto;
+  if (typeof d.wbMorningNeed === 'boolean') {
+    wbMorningData = {
+      need: d.wbMorningNeed,
+      until: Number(d.wbMorningUntil) || 0,
+      manual: !!d.wbMorningManual
+    };
+    saveWbMorningLocal();
+  }
+}
+
+// Zálohuje se jen RUČNÍ přepnutí — výchozí stav podle dne v týdnu si server spočítá sám
 function saveWbMorningLocal() {
-  try { localStorage.setItem('wbNoMorning', String(wbNoMorningData || 0)); } catch {}
+  try {
+    if (wbMorningData.manual && wbMorningData.until > Date.now()) {
+      localStorage.setItem('wbMorning', JSON.stringify({ need: wbMorningData.need, until: wbMorningData.until }));
+    } else {
+      localStorage.removeItem('wbMorning');
+    }
+  } catch {}
 }
 function loadWbMorningLocal() {
-  const v = Number(localStorage.getItem('wbNoMorning'));
-  return Number.isFinite(v) ? v : 0;
-}
-// Server po deployi (a Render umí službu uspat) startuje s nulou — vrátíme mu večerní
-// nastavení, ať se auto přes noc zbytečně nedobije naplno
-async function maybeRestoreWbMorning(serverVal) {
-  const local = loadWbMorningLocal();
-  if (!(local > Date.now()) || local <= (serverVal || 0)) return;
-  wbNoMorningData = local;
   try {
-    await fetch('/api/wallbox/morning/restore', {
+    const o = JSON.parse(localStorage.getItem('wbMorning') || 'null');
+    return o && typeof o.need === 'boolean' && Number(o.until) > Date.now()
+      ? { need: o.need, until: Number(o.until) } : null;
+  } catch { return null; }
+}
+// Server po deployi (a Render umí službu uspat) startuje bez ručního přepnutí —
+// vrátíme mu večerní rozhodnutí, ať se auto přes noc nedobije proti tvé vůli
+async function maybeRestoreWbMorning(serverManual) {
+  const local = loadWbMorningLocal();
+  if (!local || serverManual) return;
+  wbMorningData = { ...local, manual: true };
+  renderWbAuto();
+  try {
+    const res = await fetch('/api/wallbox/morning/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wbNoMorning: local })
+      body: JSON.stringify(local)
     });
+    applyWbSwitches(await res.json());
+    renderWbAuto();
   } catch {}
-  renderWbAuto();
 }
 
 // Ruční přepnutí režimu (STOP/ECO/FAST). Platí, dokud ho automatika při další
@@ -4734,7 +4759,7 @@ function renderWbAuto() {
 
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
-  const need = wbMorningNeed();
+  const { need, until, manual } = wbMorningData;
   wbMorningSwitchEl.classList.toggle('on', need);
   if (!wbMorningHintEl) return;
   if (!wbAutoData) {
@@ -4742,9 +4767,13 @@ function renderWbMorning() {
     wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.';
     return;
   }
-  wbMorningHintEl.textContent = need
+  const co = need
     ? 'V noci se dobije naplno (FAST).'
-    : `Nabíjí se jen z přebytku (GREEN) — do rána se ze sítě ani z baterky nebere. Samo se vrátí v ${fmtSolTime(wbNoMorningData)}.`;
+    : 'Nabíjí se jen z přebytku (GREEN) — do rána se ze sítě ani z baterky nebere.';
+  const doKdy = until > Date.now() ? ` (do ${fmtSolTime(until)})` : '';
+  wbMorningHintEl.textContent = manual
+    ? `${co} Ručně na tohle ráno${doKdy}, pak zase podle dne v týdnu.`
+    : `${co} ${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`;
 }
 
 // Výkon wallboxu: přednostně z Infigy (živější), jinak ze Solaxu; vrací kW
@@ -5862,11 +5891,10 @@ function applySnapshot(snap) {
   renderTimers();
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
+  applyWbSwitches(snap);
   wbAutoData = snap.wbAuto !== false;
-  wbNoMorningData = Number(snap.wbNoMorning) || 0;
   renderWallbox();
-  maybeRestoreWbMorning(wbNoMorningData);
-  saveWbMorningLocal();
+  maybeRestoreWbMorning(!!snap.wbMorningManual);
   // Historie režimů wallboxu: server + lokální záloha (přežije deploy)
   const serverWbMode = snap.wbModeHistory || [];
   const localWbMode = loadWbModeHistoryLocal();
@@ -6170,10 +6198,7 @@ function connectStream() {
     saveWallboxHistoryLocal();
   });
   es.addEventListener('wbAuto', e => {
-    const d = JSON.parse(e.data);
-    wbAutoData = d.wbAuto !== false;
-    if (typeof d.wbNoMorning === 'number') wbNoMorningData = d.wbNoMorning;
-    saveWbMorningLocal();
+    applyWbSwitches(JSON.parse(e.data));
     renderWbAuto();
   });
   es.addEventListener('wbModeHistory', e => {

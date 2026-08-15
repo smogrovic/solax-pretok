@@ -111,7 +111,9 @@ const state = {
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
-  wbNoMorning: 0,     // do kdy platí „ráno auto nepotřebuju" (0 = potřebuju, jede se noční FAST)
+  // Ruční přepnutí „ráno auto (ne)potřebuju" pro nejbližší ráno; need null = jede se
+  // podle dne v týdnu (pracovní den ano, víkend ne)
+  wbMorning: { need: null, until: 0 },
   wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (za 48 h)
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
@@ -238,8 +240,7 @@ function snapshot() {
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
-    wbAuto: state.wbAuto,
-    wbNoMorning: state.wbNoMorning || 0,
+    ...wbSwitchPayload(),
     wbModeHistory: state.wbModeHistory,
     infigy: state.infigy,
     infigyEnabled,
@@ -3496,13 +3497,14 @@ app.post('/api/wallbox/set', async (req, res) => {
 // ---------- Řízení režimu wallboxu (ECO ve dne / FAST v noci podle slunce) ----------
 // AUTO: hodinu po východu slunce → ECO (nabíjí z přebytku FVE), hodinu před západem
 // slunce a přes noc → FAST (baterka se přelije do auta). Přepínač FAST = pevně FAST.
-// Když je přepnuté „ráno auto nepotřebuju", jede se místo nočního FAST GREEN —
-// nabíjí se výhradně z přebytku, takže v noci nevezme nic a ráno se rozjede samo.
+// Když auto ráno nepotřebuju, jede se místo nočního FAST GREEN — nabíjí se výhradně
+// z přebytku, takže v noci nevezme nic a ráno se rozjede samo. Výchozí stav dává den
+// v týdnu toho rána (pracovní den ano, víkend ne), ruční přepnutí platí na jedno ráno.
 // Bazén a bojler se řídí samostatně (runPoolAutomation / runBoilerAutomation).
 //
 // MIMO KÓD (ručně v appce střídače/wallboxu):
-//  - Wallbox: ECO úroveň = Level1 6A  (nejnižší proud platí i pro GREEN — určuje, při
-//    jakém přebytku se ráno nabíjení vůbec rozjede; víc než 6 A = rozjede se později)
+//  - Wallbox: ECO i GREEN na 6 A  (nejnižší možný proud — určuje, při jakém přebytku
+//    se nabíjení vůbec rozjede; víc = rozjede se později a ECO si víc dobírá ze sítě)
 //  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme; týká se
 //    jen FAST, GREEN z baterky nebere)
 //  - Střídač: Min SOC nízko (např. 10 %)     (aby se baterka večer skoro vyprázdnila)
@@ -3518,26 +3520,44 @@ function wbEcoStartMs(w) {
   return w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
 }
 
-// „Ráno auto nepotřebuju" platí vždy jen do nejbližšího rána — pak vyprší samo,
-// není potřeba nic resetovat.
-function wbNoMorningActive() {
-  return Date.now() < (state.wbNoMorning || 0);
+// Pražských 8:00 toho dne, do kterého spadá `ms`
+const WB_MORNING_LATEST_HOUR = 8;
+function wbEightOnDayOf(ms) {
+  const p = pragueTime(ms);
+  return ms - (p.hour * 3600000 + p.minute * 60000) + WB_MORNING_LATEST_HOUR * 3600000;
 }
 
-// Nejbližší ráno, kdy se přepínač zase přestane vztahovat: začátek ECO okna. Když už
-// dnešní minul, tak zítřejší (východ se den ode dne posune o pár minut, na tohle stačí).
-// Bez dat o počasí záložně nejbližší 8:00 pražského času.
-function wbNextMorningMs() {
+// Ráno, kterého se rozhodnutí týká: nejbližší otevření denního okna (východ + 1 h),
+// nejpozději ale v 8:00 — v zimě se okno otevírá pozdě a do té doby by se nenabíjelo
+// vůbec. Bez dat o počasí se jede rovnou podle 8:00.
+function wbMorningTargetMs() {
   const now = Date.now();
   const w = weatherCache.data;
+  let next;
   if (w && w.sys && w.sys.sunrise !== undefined) {
     const eco = wbEcoStartMs(w);
-    return eco > now ? eco : eco + 24 * 3600000;
+    next = eco > now ? eco : eco + 24 * 3600000;
+  } else {
+    const eight = wbEightOnDayOf(now);
+    next = eight > now ? eight : eight + 24 * 3600000;
   }
-  const prague = pragueTime();
-  const minutesIn = prague.hour * 3600000 + prague.minute * 60000;
-  const eight = now - minutesIn + 8 * 3600000;
-  return eight > now ? eight : eight + 24 * 3600000;
+  return Math.min(next, wbEightOnDayOf(next));
+}
+
+// Výchozí stav podle dne v týdnu toho rána: v pracovní den se ráno jede (dobít naplno),
+// o víkendu ne (počká se na slunce).
+function wbDefaultNeedFor(ms) {
+  const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(ms);
+  return den !== 'Sat' && den !== 'Sun';
+}
+
+// Platí ruční přepnutí pro nejbližší ráno? Jinak rozhoduje den v týdnu.
+function wbMorningManual() {
+  const m = state.wbMorning || {};
+  return typeof m.need === 'boolean' && Date.now() < (m.until || 0);
+}
+function wbMorningNeed() {
+  return wbMorningManual() ? !!state.wbMorning.need : wbDefaultNeedFor(wbMorningTargetMs());
 }
 
 // Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST)
@@ -3550,10 +3570,11 @@ function ecWallboxTarget() {
   const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
   if (now >= ecoStart && now < fastStart) return 'eco';
   // Večer a v noci: buď se dobíjí naplno, nebo se čeká na slunce
-  return wbNoMorningActive() ? 'green' : 'fast';
+  return wbMorningNeed() ? 'fast' : 'green';
 }
 
 let wbPrevStatus = null;
+let wbPrevMorningNeed = null;   // ať se přepínač v appce sám přepne, když ráno vyprší
 
 async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
@@ -3568,6 +3589,13 @@ async function runEnergyControl() {
     const wasReady = wbPrevStatus === 1 || wbPrevStatus === 2;
     if (carReady && !wasReady) state.wbLastTarget = null; // auto se připojilo → přenastav režim
     wbPrevStatus = st;
+
+    // Ranní rozhodnutí se mění samo (vypršením i přelomem do víkendu) — dej vědět appce
+    const need = wbMorningNeed();
+    if (wbPrevMorningNeed !== need) {
+      if (wbPrevMorningNeed !== null) broadcast('wbAuto', wbSwitchPayload());
+      wbPrevMorningNeed = need;
+    }
 
     const target = ecWallboxTarget();
     if (target && state.wbLastTarget !== target) {
@@ -3585,9 +3613,15 @@ async function runEnergyControl() {
   }
 }
 
-// Do appky chodí oba přepínače pohromadě — patří k sobě
+// Do appky chodí oba přepínače pohromadě — patří k sobě. Ranní rozhodnutí posílá server
+// rovnou vyhodnocené (appka neví, kdy se otevírá okno ani jaký je výchozí stav dne).
 function wbSwitchPayload() {
-  return { wbAuto: state.wbAuto, wbNoMorning: state.wbNoMorning || 0 };
+  return {
+    wbAuto: state.wbAuto,
+    wbMorningNeed: wbMorningNeed(),
+    wbMorningUntil: wbMorningTargetMs(),
+    wbMorningManual: wbMorningManual()
+  };
 }
 
 app.post('/api/wallbox/auto', async (req, res) => {
@@ -3603,29 +3637,31 @@ app.post('/api/wallbox/auto', async (req, res) => {
   runEnergyControl();
 });
 
-// „Ráno auto potřebuju" (need=true, výchozí) vs. „nepotřebuju" → místo nočního FAST
-// se jede GREEN a nabíjí se až z ranního slunce. Platí vždy jen do nejbližšího rána.
+// „Ráno auto potřebuju" → v noci FAST, „nepotřebuju" → GREEN (jen z přebytku, rozjede se
+// ráno se sluncem). Ruční přepnutí platí jen na nejbližší ráno, pak zase rozhoduje den
+// v týdnu (pracovní den = potřebuju, víkend = ne).
 app.post('/api/wallbox/morning', async (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován.' });
   const { need } = req.body || {};
   if (typeof need !== 'boolean') return res.status(400).json({ error: 'need musí být true/false.' });
-  state.wbNoMorning = need ? 0 : wbNextMorningMs();
+  const until = wbMorningTargetMs();
+  state.wbMorning = { need, until };
   broadcast('wbAuto', wbSwitchPayload());
-  addLog(need
-    ? 'Wallbox: ráno auto potřebuju → v noci se dobije naplno'
-    : `Wallbox: ráno auto nepotřebuju → do ${fmtPragueTime(state.wbNoMorning)} jen z přebytku`);
+  addLog(`Wallbox: ráno auto ${need ? 'potřebuju → v noci se dobije naplno' : 'nepotřebuju → jen z přebytku'}`
+    + ` (do ${fmtPragueTime(until)})`);
   res.json(wbSwitchPayload());
   state.wbLastTarget = null; // vynuť okamžité přepnutí režimu
   runEnergyControl();
 });
 
-// Obnova po deployi/uspání služby — telefon drží zálohu. Bereme jen razítko v budoucnu
-// a dál od teď, ať se večerní „nepotřebuju" neztratí a naopak se nic neprodlužuje samo.
+// Obnova po deployi/uspání služby — telefon drží zálohu ručního přepnutí. Bereme jen to,
+// co ještě platí (razítko v budoucnu), ať se večerní rozhodnutí neztratí.
 app.post('/api/wallbox/morning/restore', (req, res) => {
-  const v = Number(req.body && req.body.wbNoMorning);
-  if (Number.isFinite(v) && v > Date.now() && v > (state.wbNoMorning || 0)) {
-    state.wbNoMorning = v;
+  const b = req.body || {};
+  const until = Number(b.until);
+  if (typeof b.need === 'boolean' && Number.isFinite(until) && until > Date.now() && !wbMorningManual()) {
+    state.wbMorning = { need: b.need, until };
     broadcast('wbAuto', wbSwitchPayload());
     state.wbLastTarget = null;
     runEnergyControl();
