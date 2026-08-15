@@ -247,6 +247,8 @@
     grid-template-columns:repeat(2, 1fr);
     gap:14px 10px;
   }
+  /* Světlo u bazénu je na své stránce samo — ať se neroztahuje přes půl karty */
+  .lights-grid.one{grid-template-columns:1fr;}
   .light-cell{
     display:flex;
     flex-direction:column;
@@ -319,16 +321,23 @@
   .pv-avg b{color:var(--navy);font-size:15px;font-weight:800;}
 
   /* Lišta se záložkami stránek (nahoře místo nadpisu) */
-  .page-tabs{
+  /* Lišta je schválně rozdělená: posuvná část NESMÍ sahat na horní hranu displeje,
+     jinak na ni nové iOS nasadí svůj „scroll edge" efekt a záložky jsou rozmazané.
+     Odsazení pod výřez a pozadí drží statický obal. */
+  .page-tabs-bar{
     flex-shrink:0;
+    padding-top:max(8px, env(safe-area-inset-top));
+    background:var(--bg);
+    border-bottom:1px solid rgba(44,62,80,0.10);
+  }
+  .page-tabs{
     display:flex;
     gap:22px;
     overflow-x:auto;
     scrollbar-width:none;
     -webkit-overflow-scrolling:touch;
-    padding:max(8px, env(safe-area-inset-top)) 16px 0;
+    padding:0 16px;
     background:var(--bg);
-    border-bottom:1px solid rgba(44,62,80,0.10);
   }
   .page-tabs::-webkit-scrollbar{display:none;}
   .page-tab{
@@ -1352,7 +1361,9 @@
 </head>
 <body>
 
-<div class="page-tabs" id="pageTabs"></div>
+<div class="page-tabs-bar">
+  <div class="page-tabs" id="pageTabs"></div>
+</div>
 
 <div class="slider-wrap" id="sliderWrap">
 
@@ -1633,6 +1644,73 @@
     </div>
   </div>
 
+  <!-- Stránka: Bazén -->
+  <div class="slide" data-title="Bazén">
+    <div class="page">
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card pool-card lockable">
+        <div class="device-block">
+          <div class="shelly-row">
+            <div class="traffic-light" id="poolLight"></div>
+            <div class="shelly-label">Bazén</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="poolOnBtn">ON</button>
+            <button class="power-btn off-btn" id="poolOffBtn">OFF</button>
+          </div>
+        </div>
+
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="solinatorLight"></div>
+            <div class="shelly-label">Solinátor</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
+            <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
+          </div>
+          <div class="device-power" id="poolTotalPower"></div>
+          <div class="solinator-chlor">
+            <div class="solinator-chlor-label">Podle chloru v bazénu</div>
+            <div class="solinator-btns">
+              <button class="chlor-btn chlor-plus" data-hours="1">+1 h</button>
+              <button class="chlor-btn chlor-minus" data-hours="-1">−1 h</button>
+              <button class="chlor-btn chlor-minus" data-days="1">−1 den</button>
+            </div>
+            <div class="solinator-status" id="solinatorStatus"></div>
+            <div class="solinator-plan" id="solinatorPlan"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card pool-card lockable">
+        <div class="lights-grid one">
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="lightBazenLight2"></div>
+              <div class="shelly-label">Světlo bazén</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="lightBazenOnBtn2">ON</button>
+              <button class="power-btn off-btn" id="lightBazenOffBtn2">OFF</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card stats-card">
+        <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
+        <div id="solinatorCalc"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stránka: Žaluzie -->
   <div class="slide" data-title="Žaluzie">
     <div class="page">
@@ -1735,41 +1813,6 @@
       </div>
 
       <div class="card pool-card lockable">
-        <div class="device-block">
-          <div class="shelly-row">
-            <div class="traffic-light" id="poolLight"></div>
-            <div class="shelly-label">Bazén</div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="poolOnBtn">ON</button>
-            <button class="power-btn off-btn" id="poolOffBtn">OFF</button>
-          </div>
-        </div>
-
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="solinatorLight"></div>
-            <div class="shelly-label">Solinátor</div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
-            <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
-          </div>
-          <div class="device-power" id="poolTotalPower"></div>
-          <div class="solinator-chlor">
-            <div class="solinator-chlor-label">Podle chloru v bazénu</div>
-            <div class="solinator-btns">
-              <button class="chlor-btn chlor-plus" data-hours="1">+1 h</button>
-              <button class="chlor-btn chlor-minus" data-hours="-1">−1 h</button>
-              <button class="chlor-btn chlor-minus" data-days="1">−1 den</button>
-            </div>
-            <div class="solinator-status" id="solinatorStatus"></div>
-            <div class="solinator-plan" id="solinatorPlan"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card pool-card lockable">
         <div class="lights-grid">
           <div class="light-cell">
             <div class="shelly-row">
@@ -1834,10 +1877,6 @@
         <div class="timer-list" id="relayTimerList"></div>
       </div>
 
-      <div class="card stats-card">
-        <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
-        <div id="solinatorCalc"></div>
-      </div>
     </div>
   </div>
 
@@ -2084,14 +2123,16 @@
           <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
             <li>Appka nesleduje konkrétní časy, ale <b>kolik hodin má solinátor za den celkem odběhnout</b>, a podle toho ho sama zapíná i vypíná.</li>
-            <li><b>Cíl na den</b> = <b>1 h</b> základ + <b>1 h</b> když je venku přes <b>20 °C</b> + další <b>1 h</b> když přes <b>25 °C</b> → nejvýš <b>3 h</b>.</li>
-            <li>Přirážka za teplotu <b>jen roste</b> — večerní ochlazení už jednou přiznané hodiny nesebere.</li>
+            <li><b>Cíl na den</b> = <b>1 h</b> základ + <b>1 h</b> když má být přes <b>20 °C</b> + další <b>1 h</b> když přes <b>25 °C</b> → nejvýš <b>3 h</b>.</li>
+            <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b> (v okně 12–20 h), takže dnešní čas je hotový už ráno. Naměřená teplota je pojistka, kdyby bylo tepleji, než se čekalo. Dokud se nic neodběhlo, může upřesněná předpověď cíl i snížit; jakmile solinátor běží, přirážka <b>už jen roste</b>.</li>
             <li>Běží <b>od 12:00 do hodiny před západem</b> slunce, dokud není rozpočet naplněn. Pak se sám vypne.</li>
-            <li><b>Mimo tohle okno je vždy vypnutý</b> — appka ho aktivně vypíná, i po půlnoci a i když vypadnou data ze střídače nebo počasí (náhradní mez <b>20:00</b>). Ruční zapnutí mimo okno tedy do 5 minut zase vypne; na „chci teď navíc" jsou tlačítka +2 h / +4 h.</li>
+            <li><b>Mimo tohle okno je vždy vypnutý</b> — appka ho aktivně vypíná, i po půlnoci a i když vypadnou data ze střídače nebo počasí (náhradní mez <b>20:00</b>). Ruční zapnutí mimo okno tedy do 5 minut zase vypne; na „chci dneska víc" je tlačítko +1 h.</li>
             <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
-            <li><b>+2 h / +4 h</b> (nízký chlor) jen zvýší dnešní cíl. Co se do večera nestihne, <b>přejde na další den</b> — ale <b>nejvýš 2 h</b>, zbytek propadá. Kdyby se přenášelo víc, cíl by přerostl denní okno, nešel by nikdy splnit a dluh by se donekonečna obnovoval sám.</li>
-            <li><b>−1 den / −2 dny</b> (vysoký chlor): ty dny se neběží vůbec a <b>nevzniká žádný dluh</b>. Tlačítko <b>zrušit</b> smaže boost.</li>
-            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“. <b>Dole na stránce Ovládání</b> je celý rozpis — základ, přirážka za teplotu, boost a přenos zvlášť, ať je vidět, z čeho se dnešní cíl skládá.</li>
+            <li><b>+1 h</b> (nízký chlor) zvýší dnešní cíl, <b>−1 h</b> ho sníží — i pod základ a přirážku. Mačkat jde opakovaně, hodiny se sčítají (strop 8 h na obě strany). Do logu se boost nezapisuje.</li>
+            <li>Co se do večera <b>nestihne, přejde na další den</b> — nejvýš <b>3 h</b>, zbytek propadá. Kdyby se přenášelo víc, cíl by přerostl denní okno, nešel by nikdy splnit a dluh by se donekonečna obnovoval sám.</li>
+            <li>Ubrání se přenáší jen tehdy, <b>když ho dnešek nestihne spotřebovat</b>. Když je cíl 3 h a ubereš 2 h, sníží se dnešek a zítřku se nebere nic; teprve co je ubráno pod nulu, jde dál (taky nejvýš 3 h).</li>
+            <li><b>−1 den</b> (vysoký chlor): ten den se neběží vůbec a <b>nevzniká žádný dluh</b>. Dny se sčítají, nejvýš tři dopředu. Tlačítko <b>zrušit</b> smaže boost i zákaz.</li>
+            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“, a pod tím <b>odhad na zítřek</b> (přenos z dneška + teplo z předpovědi). Na <b>stránce Bazén</b> je celý rozpis obou dnů — základ, přirážka, boost a přenos zvlášť.</li>
             <li>Časovač v relé (60 min) zůstává jako <b>pojistka</b> — kdyby appka spadla, solinátor se sám vypne. Rozpočet měří <b>skutečně odběhnutý čas</b>, takže si případnou mezeru sám dožene.</li>
             <li>Umí to i <b>asistent</b>: „pusť solinátor na dvě hodiny", „vypni solinátor na den", „ať jede solinátor normálně".</li>
           </ul>
@@ -2201,92 +2242,93 @@ function renderEnergyTiles() {
   }
 }
 
+// Prvky se hledají jako SEZNAM — některé zařízení (světlo u bazénu) má ovládání na dvou
+// stránkách a musí se překreslovat i ovládat z obou
+const els = (...idList) => idList.map(id => document.getElementById(id)).filter(Boolean);
+
 const devices = {
   shelly: {
     statusUrl: '/api/shelly',
     setUrl: '/api/shelly/set',
-    light: document.getElementById('shellyLight'),
-    state: document.getElementById('shellyState'),
-    onBtn: document.getElementById('onBtn'),
-    offBtn: document.getElementById('offBtn'),
+    light: els('shellyLight'),
+    state: els('shellyState'),
+    onBtn: els('onBtn'),
+    offBtn: els('offBtn'),
     powerEl: document.getElementById('shellyPower'),
     label: 'Bojler'
   },
   pool: {
     statusUrl: '/api/pool',
     setUrl: '/api/pool/set',
-    light: document.getElementById('poolLight'),
-    state: document.getElementById('poolState'),
-    onBtn: document.getElementById('poolOnBtn'),
-    offBtn: document.getElementById('poolOffBtn'),
+    light: els('poolLight'),
+    state: els('poolState'),
+    onBtn: els('poolOnBtn'),
+    offBtn: els('poolOffBtn'),
     label: 'Bazén'
   },
   solinator: {
     statusUrl: '/api/solinator',
     setUrl: '/api/solinator/set',
-    light: document.getElementById('solinatorLight'),
-    state: document.getElementById('solinatorState'),
-    onBtn: document.getElementById('solinatorOnBtn'),
-    offBtn: document.getElementById('solinatorOffBtn'),
+    light: els('solinatorLight'),
+    state: els('solinatorState'),
+    onBtn: els('solinatorOnBtn'),
+    offBtn: els('solinatorOffBtn'),
     label: 'Solinátor'
   },
   lightDole: {
     statusUrl: '/api/light/zahradadole',
     setUrl: '/api/light/zahradadole/set',
-    light: document.getElementById('lightDoleLight'),
-    state: document.getElementById('lightDoleState'),
-    onBtn: document.getElementById('lightDoleOnBtn'),
-    offBtn: document.getElementById('lightDoleOffBtn'),
+    light: els('lightDoleLight'),
+    state: els('lightDoleState'),
+    onBtn: els('lightDoleOnBtn'),
+    offBtn: els('lightDoleOffBtn'),
     label: 'Zahrada dole'
   },
   lightNahore: {
     statusUrl: '/api/light/zahradanahore',
     setUrl: '/api/light/zahradanahore/set',
-    light: document.getElementById('lightNahoreLight'),
-    state: document.getElementById('lightNahoreState'),
-    onBtn: document.getElementById('lightNahoreOnBtn'),
-    offBtn: document.getElementById('lightNahoreOffBtn'),
+    light: els('lightNahoreLight'),
+    state: els('lightNahoreState'),
+    onBtn: els('lightNahoreOnBtn'),
+    offBtn: els('lightNahoreOffBtn'),
     label: 'Zahrada nahoře'
   },
   lightBazen: {
     statusUrl: '/api/light/bazen',
     setUrl: '/api/light/bazen/set',
-    light: document.getElementById('lightBazenLight'),
-    state: document.getElementById('lightBazenState'),
-    onBtn: document.getElementById('lightBazenOnBtn'),
-    offBtn: document.getElementById('lightBazenOffBtn'),
+    light: els('lightBazenLight', 'lightBazenLight2'),
+    state: els('lightBazenState'),
+    onBtn: els('lightBazenOnBtn', 'lightBazenOnBtn2'),
+    offBtn: els('lightBazenOffBtn', 'lightBazenOffBtn2'),
     label: 'Světlo bazén'
   },
   lightNocni: {
     statusUrl: '/api/light/nocni',
     setUrl: '/api/light/nocni/set',
-    light: document.getElementById('lightNocniLight'),
-    state: document.getElementById('lightNocniState'),
-    onBtn: document.getElementById('lightNocniOnBtn'),
-    offBtn: document.getElementById('lightNocniOffBtn'),
+    light: els('lightNocniLight'),
+    state: els('lightNocniState'),
+    onBtn: els('lightNocniOnBtn'),
+    offBtn: els('lightNocniOffBtn'),
     label: 'Noční světla'
   }
 };
 
 function renderDevice(device, data) {
+  // Prvky jsou seznamy — světlo u bazénu má ovládání na dvou stránkách
+  const setLight = cls => device.light.forEach(el => { el.className = cls; });
+  const mark = (list, on) => list.forEach(el => el.classList.toggle('active-state', on));
   // Stav (zapnuto/vypnuto/neznámý) ukazuje semafor, textově se nepíše
   if (!data || data.isOn === null || data.isOn === undefined) {
-    device.light.className = 'traffic-light';
-    device.onBtn.classList.remove('active-state');
-    device.offBtn.classList.remove('active-state');
+    setLight('traffic-light');
+    mark(device.onBtn, false);
+    mark(device.offBtn, false);
     if (device.powerEl) device.powerEl.textContent = '';
     if (device === devices.shelly) { lastShellyPowerW = (data && typeof data.powerW === 'number') ? data.powerW : null; renderBoilerPower(); }
     return;
   }
-  if (data.isOn) {
-    device.light.className = 'traffic-light on';
-    device.onBtn.classList.add('active-state');
-    device.offBtn.classList.remove('active-state');
-  } else {
-    device.light.className = 'traffic-light off';
-    device.offBtn.classList.add('active-state');
-    device.onBtn.classList.remove('active-state');
-  }
+  setLight(data.isOn ? 'traffic-light on' : 'traffic-light off');
+  mark(device.onBtn, !!data.isOn);
+  mark(device.offBtn, !data.isOn);
   if (device.powerEl) {
     device.powerEl.textContent = typeof data.powerW === 'number'
       ? Math.round(data.powerW) + ' W'
@@ -2299,8 +2341,8 @@ function renderDevice(device, data) {
 }
 
 async function setDeviceState(device, turn) {
-  device.onBtn.disabled = true;
-  device.offBtn.disabled = true;
+  const btns = [...device.onBtn, ...device.offBtn];
+  btns.forEach(b => { b.disabled = true; });
   try {
     const res = await fetch(device.setUrl, {
       method: 'POST',
@@ -2319,13 +2361,12 @@ async function setDeviceState(device, turn) {
     errorEl.classList.add('show');
   }
   // Nový stav přijde ze serveru přes SSE stream
-  device.onBtn.disabled = false;
-  device.offBtn.disabled = false;
+  btns.forEach(b => { b.disabled = false; });
 }
 
 Object.values(devices).forEach(device => {
-  device.onBtn.addEventListener('click', () => setDeviceState(device, 'on'));
-  device.offBtn.addEventListener('click', () => setDeviceState(device, 'off'));
+  device.onBtn.forEach(b => b.addEventListener('click', () => setDeviceState(device, 'on')));
+  device.offBtn.forEach(b => b.addEventListener('click', () => setDeviceState(device, 'off')));
 });
 
 function renderPoolPower(totalPowerW) {
@@ -2839,7 +2880,7 @@ function renderSolinatorCalc() {
   foot.textContent = (end
     ? `Běží mezi 12:00 a ${end} (hodina před západem slunce). `
     : 'Běží mezi 12:00 a hodinou před západem slunce. ')
-    + 'Co se nestihne, přejde na další den — a stejně tak namačkané ubrání. Nejvýš 3 h.';
+    + 'Co se nestihne, přejde na další den — a co se dnes nestihlo ubrat, taky. Nejvýš 3 h.';
   solinatorCalcEl.appendChild(foot);
 }
 

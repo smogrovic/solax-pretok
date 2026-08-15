@@ -1416,8 +1416,17 @@ function fmtDur(ms) {
 
 // Kolik má solinátor dnes celkem odběhnout. boostMs může být i záporný (tlačítko −1 h
 // ubírá i ze základu a přirážky), pod nulu ale cíl nikdy nejde.
+function solinatorRawTargetMs() {
+  return SOLINATOR_BASE_MS + state.solinator.bonusMs + state.solinator.boostMs;
+}
 function solinatorTargetMs() {
-  return Math.max(0, SOLINATOR_BASE_MS + state.solinator.bonusMs + state.solinator.boostMs);
+  return Math.max(0, solinatorRawTargetMs());
+}
+
+// O kolik se tlačítky ubralo víc, než dnešek unesl (záporné číslo, jinak 0). Tohle jediné
+// se přenáší na další den — dokud má dnešek z čeho ubírat, minus zůstane na něm.
+function solinatorOverdraftMs() {
+  return Math.min(0, solinatorRawTargetMs());
 }
 
 // Kolik dnes už odběhl (měří updateRuntimes, nuluje se o pražské půlnoci)
@@ -1432,12 +1441,13 @@ function solinatorRanMs() {
 // Při aktivním zákazu se nepřenáší nic — „nechloruj" nemá vyrábět dluh.
 // Samotné pravidlo přenosu. Používá ho přelom dne i odhad na zítřek — jen s jiným
 // „nedoběhnutým zbytkem" (skutečným vs. očekávaným), ať se ta dvě místa nerozejdou.
+// Dopředu jde buď nedoběhnutý zbytek, nebo to, co se dnes už nedalo ubrat. Obojí
+// najednou nastat nemůže: když se přeubralo, je dnešní cíl nula a není co nedoběhnout.
 function solinatorCarryFor(unmet, disabled) {
   if (disabled) return 0;
-  const boost = state.solinator.boostMs;
-  const manual = boost - solinatorCarryPart(boost, state.solinator.carryMs);
-  return manual < 0
-    ? Math.max(-SOLINATOR_CARRY_MAX_MS, manual)
+  const over = solinatorOverdraftMs();
+  return over < 0
+    ? Math.max(-SOLINATOR_CARRY_MAX_MS, over)
     : Math.min(SOLINATOR_CARRY_MAX_MS, Math.max(0, unmet));
 }
 
@@ -1836,11 +1846,9 @@ function applyTempBonus(weather) {
   const bonus = temp > 25 ? SOLINATOR_BONUS_HOT_MS : (temp > 20 ? SOLINATOR_BONUS_WARM_MS : 0);
   if (bonus === state.solinator.bonusMs) return;
   if (bonus < state.solinator.bonusMs && solinatorRanMs() > 0) return;
-  // Kdo si tlačítky umazal dnešek na nulu, chce nulu — přirážka za teplotu ji nesmí
-  // sama zvednout, tak se s ní posune i spodní mez boostu
-  const wasZero = solinatorTargetMs() === 0;
+  // Když je ubráno pod nulu, přirážka napřed umaže to „přeubráno" a cíl se zvedne
+  // až z toho, co zbyde — o dorovnávání se starat nemusíme
   state.solinator.bonusMs = bonus;
-  if (wasZero) state.solinator.boostMs = -(SOLINATOR_BASE_MS + bonus);
   const zdroj = fcTemp !== null && fcTemp >= (nowTemp === null ? -Infinity : nowTemp)
     ? `dnes až ${Math.round(fcTemp)} °C (předpověď)`
     : `venku ${Math.round(nowTemp)} °C`;
@@ -1901,21 +1909,20 @@ function broadcastSolinator() {
 // Večerní vypnutí (hodinu před západem) z posledních dat o počasí; null = neznáme
 // Boost jen zvýší dnešní cíl — kdy se odběhne, si už řídí rozpočtová smyčka.
 // Co se do dnešního večera nevejde, se při přelomu dne přenese na další den.
-// Kladné hodiny přidávají, záporné ubírají — i ze základu a přirážky, až na nulový cíl.
-// Mačkat jde opakovaně, hodiny se sčítají.
+// Kladné hodiny přidávají, záporné ubírají — i ze základu a přirážky. Cíl pod nulu
+// nejde, ale ubírat se dá i dál: co dnešek nespolkne, se přenese na zítřek.
+// Mačkat jde opakovaně, hodiny se sčítají. Do logu se boost nepíše — mačká se po
+// hodině a zaplavilo by to všechno ostatní.
 function solinatorBoost(hours) {
   solinatorRollDay(pragueDateString());
   const before = state.solinator.boostMs;
-  // Dolní mez je přesně tam, kde dnešní cíl padne na nulu — níž už není co ubírat
-  const floor = -(SOLINATOR_BASE_MS + state.solinator.bonusMs);
-  state.solinator.boostMs = Math.max(floor, Math.min(SOLINATOR_MAX_MS, before + hours * 3600000));
+  state.solinator.boostMs = Math.max(-SOLINATOR_MAX_MS,
+    Math.min(SOLINATOR_MAX_MS, before + hours * 3600000));
   const delta = state.solinator.boostMs - before;
-  if (delta === 0) return state.solinator;   // už na dorazu, není co hlásit
+  if (delta === 0) return state.solinator;   // už na dorazu
   state.solinator.carryMs = solinatorCarryPart(state.solinator.boostMs, state.solinator.carryMs);
   // Ubrat hodinu nesmí zrušit „vypnuto na den", přidat ano
   if (delta > 0) state.solinator.disabledUntil = 0;
-  addLog(`Solinátor: boost ${delta > 0 ? '+' : '−'}${fmtDur(Math.abs(delta))}`
-    + ` → dnešní cíl ${fmtDur(solinatorTargetMs())}`);
   broadcastSolinator();
   return state.solinator;
 }
