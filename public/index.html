@@ -201,6 +201,13 @@
     margin-top:6px;
     min-height:16px;
   }
+  /* Dokdy má ruční zapnutí přednost před automatikou (prázdné = odklad neběží) */
+  .manual-hold{
+    font-size:11px;
+    color:var(--orange);
+    margin-top:4px;
+  }
+  .manual-hold:empty{display:none;}
   .power-buttons{
     display:flex;
     gap:14px;
@@ -1687,6 +1694,7 @@
             <button class="power-btn on-btn" id="poolOnBtn">ON</button>
             <button class="power-btn off-btn" id="poolOffBtn">OFF</button>
           </div>
+          <div class="manual-hold" id="poolHold"></div>
         </div>
 
         <div class="device-block last">
@@ -1698,6 +1706,7 @@
             <button class="power-btn on-btn" id="solinatorOnBtn">ON</button>
             <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
           </div>
+          <div class="manual-hold" id="solinatorHold"></div>
           <div class="device-power" id="poolTotalPower"></div>
           <div class="solinator-chlor">
             <div class="solinator-chlor-label">Podle chloru v bazénu</div>
@@ -1830,6 +1839,7 @@
             <button class="power-btn on-btn" id="onBtn">ON</button>
             <button class="power-btn off-btn" id="offBtn">OFF</button>
           </div>
+          <div class="manual-hold" id="shellyHold"></div>
           <div class="device-power" id="shellyPower"></div>
         </div>
       </div>
@@ -2135,6 +2145,18 @@
         </div>
 
         <div class="logic-sec">
+          <div class="logic-h">Ruční zapnutí vs. automatika</div>
+          <ul class="logic-list">
+            <li>Když bojler, bazén nebo solinátor <b>zapneš (nebo vypneš) tlačítkem</b>, má tvoje rozhodnutí <b>30 minut přednost</b> — automatika ho nepřebije.</li>
+            <li>Po půl hodině řízení převezme zpátky, a když podmínky nesedí, <b>vypne to</b>. Je to tedy odklad, ne trvalé vyřazení.</li>
+            <li>Pod tlačítky je vidět, <b>dokdy odklad platí</b>, a do logu se to zapíše taky.</li>
+            <li>Platí to i pro <b>časovače relé</b> a pro zapnutí <b>asistentem</b> — obojí jsou tvoje rozhodnutí, ne automatika.</li>
+            <li>Výjimka: <b>nádrž nad 70 °C</b> vypne bojler i během odkladu. Přehřátou nádrž nepřebije nic.</li>
+            <li>Solinátorové <b>„−1 den"</b> odklad ruší — je to novější rozhodnutí než dřívější zapnutí.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
             <li>Jen mezi <b>8:00 a hodinou před západem</b> slunce.</li>
@@ -2293,6 +2315,7 @@ const devices = {
     onBtn: els('onBtn'),
     offBtn: els('offBtn'),
     powerEl: document.getElementById('shellyPower'),
+    holdEl: document.getElementById('shellyHold'),
     label: 'Bojler'
   },
   pool: {
@@ -2302,6 +2325,7 @@ const devices = {
     state: els('poolState'),
     onBtn: els('poolOnBtn'),
     offBtn: els('poolOffBtn'),
+    holdEl: document.getElementById('poolHold'),
     label: 'Bazén'
   },
   solinator: {
@@ -2311,6 +2335,7 @@ const devices = {
     state: els('solinatorState'),
     onBtn: els('solinatorOnBtn'),
     offBtn: els('solinatorOffBtn'),
+    holdEl: document.getElementById('solinatorHold'),
     label: 'Solinátor'
   },
   lightDole: {
@@ -2350,6 +2375,26 @@ const devices = {
     label: 'Noční světla'
   }
 };
+
+// Ruční zásah má půl hodiny přednost před automatikou — ať je vidět, dokdy to platí
+let manualHoldData = {};
+function renderManualHold() {
+  const now = Date.now();
+  for (const [key, device] of Object.entries(devices)) {
+    if (!device.holdEl) continue;
+    const until = Number(manualHoldData[key]) || 0;
+    device.holdEl.textContent = until > now
+      ? `Ručně — automatika převezme v ${fmtSolTime(until)}`
+      : '';
+  }
+}
+function applyManualHold(d) {
+  if (!d || typeof d !== 'object') return;
+  manualHoldData = d;
+  renderManualHold();
+}
+// Odklad vyprší sám, bez další zprávy ze serveru — řádek se musí schovat i tak
+setInterval(renderManualHold, 30000);
 
 function renderDevice(device, data) {
   // Prvky jsou seznamy — světlo u bazénu má ovládání na dvou stránkách
@@ -5877,6 +5922,7 @@ function applySnapshot(snap) {
     if (devices[key]) renderDevice(devices[key], snap.devices[key]);
   }
   renderPoolPower(snap.poolPowerW);
+  applyManualHold(snap.manualHold);
   const serverHist = snap.history || [];
   const localHist = loadHistoryLocal();
   history = mergeHistories(serverHist, localHist);
@@ -6088,6 +6134,9 @@ function connectStream() {
   });
   es.addEventListener('poolPower', e => {
     renderPoolPower(JSON.parse(e.data).totalPowerW);
+  });
+  es.addEventListener('manualHold', e => {
+    applyManualHold(JSON.parse(e.data).manualHold);
   });
   es.addEventListener('log', e => {
     const d = JSON.parse(e.data);

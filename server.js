@@ -97,6 +97,7 @@ const state = {
   history: [],       // { t, kw } — přetok za posledních 24 h
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
+  manualHold: {},    // key -> dokdy (ms) má ruční zásah přednost před automatikou
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
   // dnešní doba běhu (ms) + denní energie (Wh) + snapshot včerejška
   runtime: {
@@ -223,6 +224,7 @@ function snapshot() {
     history: state.history,
     log: state.log,
     autoEnabled: state.autoEnabled,
+    manualHold: state.manualHold,
     weather: state.weather,
     runtime: runtimePayload(),
     pvDays: state.pvDays,
@@ -741,7 +743,9 @@ function registerSetEndpoint(key) {
       const prev = state.devices[key] || {};
       state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       broadcast('device', { key, status: state.devices[key] });
-      addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} ručně`);
+      setManualHold(key);   // automatika to půl hodiny nepřebije
+      addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} ručně`
+        + (AUTOMATED_KEYS.includes(key) ? ` (automatika převezme v ${fmtPragueTime(state.manualHold[key])})` : ''));
 
       res.json({ success: true, turn });
 
@@ -1663,8 +1667,32 @@ function logAutoSet(key, turn, reason) {
   }
 }
 
-async function autoSet(key, turn, reason) {
+// Ruční zásah má na půl hodiny přednost před automatikou. Bez toho by appka zapnutí
+// tlačítkem do pěti minut zase shodila (solinátor kvůli rozpočtu, bojler kvůli přebytku)
+// a nedalo by se nic pustit „natruc". Po vypršení automatika převezme řízení a když
+// podmínky nesedí, vypne to — proto je to jen odklad, ne trvalé vyřazení.
+const MANUAL_HOLD_MS = 30 * 60 * 1000;
+// Zařízení, do kterých automatika mluví — jen u nich má odklad co odkládat
+const AUTOMATED_KEYS = ['shelly', 'pool', 'solinator'];
+
+function setManualHold(key) {
+  if (!state.manualHold) state.manualHold = {};
+  state.manualHold[key] = Date.now() + MANUAL_HOLD_MS;
+  broadcast('manualHold', { manualHold: state.manualHold });
+}
+function clearManualHold(key) {
+  if (!state.manualHold || !state.manualHold[key]) return;
+  delete state.manualHold[key];
+  broadcast('manualHold', { manualHold: state.manualHold });
+}
+function manualHeld(key) {
+  return Date.now() < ((state.manualHold || {})[key] || 0);
+}
+
+// force = tvrdá pojistka (přehřátá nádrž), kterou ruční zásah přebít nesmí
+async function autoSet(key, turn, reason, { force = false } = {}) {
   const dev = DEVICES[key];
+  if (!force && manualHeld(key)) return false;   // ruční zásah drží, automatika počká
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await setShellyState(dev.serverUri, dev.deviceId, turn);
@@ -1750,9 +1778,12 @@ async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   }
 
   if (poolAuto.underCount >= 3 && isOn && now - poolAuto.lastOnTime >= POOL_MIN_RUN_MS) {
-    await autoSet('pool', 'off', `odběr ze sítě ${formatKwLog(totalW)}`);
-    poolAuto.overCount = 0;
-    poolAuto.underCount = 0;
+    // Počítadla nulujeme jen když povel opravdu odešel. Když ho zdrží ruční zásah,
+    // zůstanou naplněná a bazén se vypne hned prvním cyklem po vypršení odkladu.
+    if (await autoSet('pool', 'off', `odběr ze sítě ${formatKwLog(totalW)}`)) {
+      poolAuto.overCount = 0;
+      poolAuto.underCount = 0;
+    }
   }
 }
 
@@ -1767,7 +1798,8 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
   const aq = (state.aircon && state.aircon.aquarea || [])[0];
   const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   if (tankTemp !== null && tankTemp >= 70) {
-    if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`);
+    // Jediná mez, kterou ruční zapnutí nepřebije — přehřátou nádrž nikdo „natruc" netopí
+    if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`, { force: true });
     if (!notif.boilerHotNotified) { // hláška jednou, odjistí se pod 65 °C
       notif.boilerHotNotified = true;
       sendPushToAll('🔥 Bojler 1 je vyhřátý', `Nádrž má ${Math.round(tankTemp)} °C — topení vypnuto.`);
@@ -1954,6 +1986,8 @@ function solinatorDisable(days) {
   addLog(`Solinátor: vypnut do ${fmtPragueTime(state.solinator.disabledUntil)} (vysoký chlor)`);
   broadcastSolinator();
   const sol = state.devices.solinator;
+  // „−1 den" je novější rozhodnutí než dřívější ruční zapnutí, tak ho odklad nedrží
+  clearManualHold('solinator');
   if (sol && sol.isOn) autoSet('solinator', 'off', 'vypnut (vysoký chlor)').catch(() => {});
   return state.solinator;
 }
@@ -2473,6 +2507,7 @@ async function actuateRelay(key, stateOn, reason) {
   const prev = state.devices[key] || {};
   state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
   broadcast('device', { key, status: state.devices[key] });
+  setManualHold(key);   // časovač i asistent jsou tvoje rozhodnutí, ne automatika
   addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
   setTimeout(() => pollDevice(key), 1500);
 }
