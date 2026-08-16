@@ -2118,12 +2118,17 @@
           <div class="logic-h">Wallbox (FAST / AUTO a ranní jízda)</div>
           <ul class="logic-list">
             <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
-            <li><b>AUTO</b>: hodinu <b>po východu slunce → ECO</b> (nabíjí z přebytku FVE).</li>
-            <li><b>AUTO</b>: hodinu <b>před západem a přes noc → FAST</b> (baterka se přelije do auta).</li>
-            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když je <b>vypnutý</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic a ráno se rozjede sám, jakmile začne výroba.</li>
+            <li><b>AUTO</b> dělí den na čtyři fáze:</li>
+            <li>&nbsp;&nbsp;<b>1. noc</b> (do konce noci) → <b>FAST</b>, nebo <b>GREEN</b>, když auto ráno nepotřebuju.</li>
+            <li>&nbsp;&nbsp;<b>2. čekání na slunce</b> (od konce noci, dokud FVE nerozjede) → <b>GREEN</b>, jen z přebytku.</li>
+            <li>&nbsp;&nbsp;<b>3. den</b> (okno otevřené, do hodiny před západem) → <b>ECO</b>.</li>
+            <li>&nbsp;&nbsp;<b>4. večer</b> (hodinu před západem) → zase <b>FAST/GREEN</b> podle rána, které přijde.</li>
+            <li><b>Konec noci</b> = hodinu po východu slunce, <b>nejpozději v 8:00</b> (v zimě se slunce nedočkáme). Po konci noci se už FAST nevrací — bralo by ze sítě ještě víc než ECO.</li>
+            <li><b>Denní okno (ECO) se neotevírá podle hodin</b>, ale až když <b>FVE opravdu vyrábí: 2,5 kW dvakrát po sobě</b>. ECO má totiž pevné minimum 6 A, takže při slabém slunci dobírá ze sítě. Jednou otevřené okno vydrží do večera, ať režim nebliká podle mraků.</li>
+            <li>Když je <b>zataženo</b> a slunce nepřijde, okno se otevře <b>nejpozději v 10:00</b>, ať se auto přes den aspoň něco dobije.</li>
+            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když je <b>vypnutý</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic.</li>
             <li>Výchozí stav se řídí <b>dnem v týdnu toho rána</b>: <b>pracovní den → potřebuju</b> (v noci FAST), <b>víkend → nepotřebuju</b> (čeká se na slunce). Rozhoduje ráno, ne dnešek — v pátek večer tedy platí sobota.</li>
-            <li><b>Ruční přepnutí</b> platí jen na <b>nejbližší ráno</b>, pak zase rozhoduje den v týdnu. Když ho zmáčkneš po půlnoci, týká se rána téhož dne.</li>
-            <li>Odklad končí <b>otevřením denního okna, nejpozději v 8:00</b> — v zimě se okno otevírá pozdě a do té doby by se nenabíjelo vůbec.</li>
+            <li><b>Ruční přepnutí</b> platí jen na <b>nejbližší ráno</b> (do konce noci), pak zase rozhoduje den v týdnu. Když ho zmáčkneš po půlnoci, týká se rána téhož dne.</li>
             <li><b>Ruční přepnutí</b> (STOP/ECO/FAST) platí, dokud ho automatika při další změně (východ/západ) zase nepřepne.</li>
             <li>Ručně ve střídači/wallboxu: <b>ECO i GREEN na 6 A</b>, „Battery charge EVC" = Enable, Min SOC nízko (~10 %). Těch 6 A je nejnižší možný proud — určuje, při jakém přebytku se nabíjení vůbec rozjede.</li>
           </ul>
@@ -4607,8 +4612,9 @@ let wallboxData = null;
 let wallboxEnabledFlag = null;
 let wbAutoData = true;
 // Ranní rozhodnutí posílá server rovnou vyhodnocené: need = jestli auto ráno potřebuju,
-// until = do kdy to platí, manual = jestli je to ruční přepnutí (jinak podle dne v týdnu)
-let wbMorningData = { need: true, until: 0, manual: false };
+// until = do kdy to platí, manual = jestli je to ruční přepnutí (jinak podle dne v týdnu).
+// waiting = noc už skončila, ale čeká se, až FVE dá pvNeeded kW (jinak by ECO bralo ze sítě)
+let wbMorningData = { need: true, until: 0, manual: false, waiting: false, pv: null, pvNeeded: 2.5, fallbackHour: 10 };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -4679,7 +4685,11 @@ function applyWbSwitches(d) {
     wbMorningData = {
       need: d.wbMorningNeed,
       until: Number(d.wbMorningUntil) || 0,
-      manual: !!d.wbMorningManual
+      manual: !!d.wbMorningManual,
+      waiting: !!d.wbWaitingForSun,
+      pv: typeof d.wbPvKw === 'number' ? d.wbPvKw : null,
+      pvNeeded: typeof d.wbEcoPvKw === 'number' ? d.wbEcoPvKw : wbMorningData.pvNeeded,
+      fallbackHour: typeof d.wbEcoFallbackHour === 'number' ? d.wbEcoFallbackHour : wbMorningData.fallbackHour
     };
     saveWbMorningLocal();
   }
@@ -4759,12 +4769,20 @@ function renderWbAuto() {
 
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
-  const { need, until, manual } = wbMorningData;
+  const { need, until, manual, waiting, pv, pvNeeded, fallbackHour } = wbMorningData;
   wbMorningSwitchEl.classList.toggle('on', need);
   if (!wbMorningHintEl) return;
   if (!wbAutoData) {
     // Na pevném FAST se automatika neuplatní, tak ať přepínač nemate
     wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.';
+    return;
+  }
+  if (waiting) {
+    // Noc skončila, ale ECO by při slabém slunci dobíralo ze sítě — čeká se na výrobu
+    const ted = typeof pv === 'number' ? ` (teď ${pv.toFixed(1).replace('.', ',')} kW)` : '';
+    wbMorningHintEl.textContent = `Čeká se na slunce — jede GREEN, jen z přebytku.`
+      + ` ECO se zapne, až FVE dá ${String(pvNeeded).replace('.', ',')} kW${ted},`
+      + ` nejpozději v ${fallbackHour}:00.`;
     return;
   }
   const co = need

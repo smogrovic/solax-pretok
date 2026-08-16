@@ -3494,12 +3494,19 @@ app.post('/api/wallbox/set', async (req, res) => {
   }
 });
 
-// ---------- Řízení režimu wallboxu (ECO ve dne / FAST v noci podle slunce) ----------
-// AUTO: hodinu po východu slunce → ECO (nabíjí z přebytku FVE), hodinu před západem
-// slunce a přes noc → FAST (baterka se přelije do auta). Přepínač FAST = pevně FAST.
-// Když auto ráno nepotřebuju, jede se místo nočního FAST GREEN — nabíjí se výhradně
-// z přebytku, takže v noci nevezme nic a ráno se rozjede samo. Výchozí stav dává den
-// v týdnu toho rána (pracovní den ano, víkend ne), ruční přepnutí platí na jedno ráno.
+// ---------- Řízení režimu wallboxu (den ECO, noc FAST/GREEN) ----------
+// V režimu AUTO má den čtyři fáze:
+//   noc      (do konce noci = východ + 1 h, nejpozději 8:00)  FAST, nebo GREEN, když
+//                                                             auto ráno nepotřebuju
+//   čekání   (konec noci → otevření denního okna)             GREEN — jen přebytek
+//   den      (okno otevřené → západ − 1 h)                    ECO
+//   večer    (od západu − 1 h)                                zase FAST/GREEN podle rána
+// Denní okno se NEOTEVÍRÁ podle hodin: čeká se, až FVE reálně vyrábí (2× po sobě nad
+// prahem), nejpozději se otevře ve WB_ECO_FALLBACK_HOUR. ECO má totiž pevné minimum
+// 6 A, takže při slabém slunci dobírá ze sítě — a to je přesně to, čemu se ráno vyhýbáme.
+// Po konci noci se už FAST nevrací (bralo by ze sítě ještě víc než ECO).
+// Výchozí stav „ráno auto potřebuju" dává den v týdnu toho rána (pracovní den ano,
+// víkend ne), ruční přepnutí platí na jedno ráno.
 // Bazén a bojler se řídí samostatně (runPoolAutomation / runBoilerAutomation).
 //
 // MIMO KÓD (ručně v appce střídače/wallboxu):
@@ -3509,13 +3516,19 @@ app.post('/api/wallbox/set', async (req, res) => {
 //    jen FAST, GREEN z baterky nebere)
 //  - Střídač: Min SOC nízko (např. 10 %)     (aby se baterka večer skoro vyprázdnila)
 const EC = {
-  SUN_ECO_AFTER_SUNRISE_S: 3600,  // hodinu po východu slunce → ECO
+  SUN_ECO_AFTER_SUNRISE_S: 3600,  // hodinu po východu slunce → nejdřív může začít den
   SUN_FAST_BEFORE_SUNSET_S: 3600  // hodinu před západem slunce → FAST
 };
 
+// Otevření denního (ECO) okna podle skutečné výroby
+const WB_ECO_PV_KW = 2.5;         // výroba, která pokryje 6 A do auta i běžný barák
+const WB_ECO_PV_HITS = 2;         // 2× po sobě, ať okno neotevře jeden pruh slunce
+const WB_ECO_FALLBACK_HOUR = 10;  // zataženo celý den → v 10:00 se otevře stejně
+const WB_PV_MAX_AGE_MS = 15 * 60 * 1000; // starší data o výrobě neberem
+
 let wbControlRunning = false;
 
-// Začátek denního (ECO) okna pro daný den ze slunečních dat
+// Nejdřívější možný začátek denního okna ze slunečních dat (samotné otevření řídí branka)
 function wbEcoStartMs(w) {
   return w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
 }
@@ -3527,9 +3540,16 @@ function wbEightOnDayOf(ms) {
   return ms - (p.hour * 3600000 + p.minute * 60000) + WB_MORNING_LATEST_HOUR * 3600000;
 }
 
-// Ráno, kterého se rozhodnutí týká: nejbližší otevření denního okna (východ + 1 h),
-// nejpozději ale v 8:00 — v zimě se okno otevírá pozdě a do té doby by se nenabíjelo
-// vůbec. Bez dat o počasí se jede rovnou podle 8:00.
+// Konec dnešní noci: východ + 1 h, nejpozději v 8:00 (v zimě se slunce nedočkáme).
+// Od té chvíle se nikdy nejede FAST — buď je otevřené denní okno (ECO), nebo se na
+// jeho otevření čeká v GREEN.
+function wbNightEndMs(w, at = Date.now()) {
+  const eight = wbEightOnDayOf(at);
+  return w && w.sys && w.sys.sunrise !== undefined ? Math.min(wbEcoStartMs(w), eight) : eight;
+}
+
+// Ráno, kterého se rozhodnutí „potřebuju/nepotřebuju" týká: nejbližší konec noci.
+// Bez dat o počasí se jede rovnou podle 8:00.
 function wbMorningTargetMs() {
   const now = Date.now();
   const w = weatherCache.data;
@@ -3560,21 +3580,70 @@ function wbMorningNeed() {
   return wbMorningManual() ? !!state.wbMorning.need : wbDefaultNeedFor(wbMorningTargetMs());
 }
 
-// Cílový režim wallboxu podle slunce (jen v AUTO; v FAST režimu pevně FAST)
+// Aktuální výroba FVE v kW — přednostně z Infigy (živější), jinak ze Solaxu. Stará
+// data neberem: kdyby střídač vypadl, radši se na ECO čeká do záložní hodiny.
+function wbPvKw() {
+  const now = Date.now();
+  const fresh = ts => ts && now - new Date(ts).getTime() <= WB_PV_MAX_AGE_MS;
+  const inf = state.infigy || {};
+  if (typeof inf.pvPower === 'number' && fresh(inf.fetchedAt)) return inf.pvPower;
+  const s = state.solax;
+  if (s && typeof s.fveKw === 'number' && fresh(s.fetchedAt)) return s.fveKw;
+  return null;
+}
+
+// Branka denního okna. Otevře ji až skutečná výroba (WB_ECO_PV_HITS měření po sobě
+// nad prahem) a pak zůstane otevřená do večera — ať režim wallboxu nebliká podle mraků.
+let wbEcoGate = { date: '', open: false, hits: 0 };
+
+function wbEcoGateOpen() {
+  if (wbEcoGate.open && wbEcoGate.date === pragueDateString()) return true;
+  return pragueTime().hour >= WB_ECO_FALLBACK_HOUR;
+}
+
+// Volá se jednou za cyklus (jinak by se počítadlo posunulo víckrát za stejná data)
+function wbUpdateEcoGate() {
+  const today = pragueDateString();
+  if (wbEcoGate.date !== today) wbEcoGate = { date: today, open: false, hits: 0 };
+  if (wbEcoGate.open) return;
+  const pv = wbPvKw();
+  if (pv === null) { wbEcoGate.hits = 0; return; }
+  wbEcoGate.hits = pv >= WB_ECO_PV_KW ? wbEcoGate.hits + 1 : 0;
+  if (wbEcoGate.hits >= WB_ECO_PV_HITS) {
+    wbEcoGate.open = true;
+    addLog(`Wallbox: FVE dává ${formatKwLog(pv * 1000)} → denní okno ECO`);
+  }
+}
+
+// Cílový režim wallboxu (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return null; // bez dat neměníme
   const now = Date.now();
-  const ecoStart = wbEcoStartMs(w);
   const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
-  if (now >= ecoStart && now < fastStart) return 'eco';
-  // Večer a v noci: buď se dobíjí naplno, nebo se čeká na slunce
-  return wbMorningNeed() ? 'fast' : 'green';
+  // Pořadí podmínek: večer musí vyhrát nad denní větví (konec noci je to už dávno za námi)
+  if (now >= fastStart || now < wbNightEndMs(w, now)) {
+    // Večer a v noci: buď se dobíjí naplno, nebo se čeká na slunce
+    return wbMorningNeed() ? 'fast' : 'green';
+  }
+  // Přes den: ECO až od chvíle, kdy FVE opravdu vyrábí. Do té doby GREEN — z přebytku
+  // se nabíjí taky, jen se nic nedobírá ze sítě ani z baterky.
+  return wbEcoGateOpen() ? 'eco' : 'green';
+}
+
+// Čeká se teď na rozjezd výroby? (jen pro nápovědu v appce)
+function wbWaitingForSun() {
+  if (!state.wbAuto) return false;
+  const w = weatherCache.data;
+  if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return false;
+  const now = Date.now();
+  const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  return now >= wbNightEndMs(w, now) && now < fastStart && !wbEcoGateOpen();
 }
 
 let wbPrevStatus = null;
-let wbPrevMorningNeed = null;   // ať se přepínač v appce sám přepne, když ráno vyprší
+let wbPrevMorningState = null;  // ať se přepínač i nápověda v appce samy přepnou
 
 async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
@@ -3590,11 +3659,15 @@ async function runEnergyControl() {
     if (carReady && !wasReady) state.wbLastTarget = null; // auto se připojilo → přenastav režim
     wbPrevStatus = st;
 
-    // Ranní rozhodnutí se mění samo (vypršením i přelomem do víkendu) — dej vědět appce
-    const need = wbMorningNeed();
-    if (wbPrevMorningNeed !== need) {
-      if (wbPrevMorningNeed !== null) broadcast('wbAuto', wbSwitchPayload());
-      wbPrevMorningNeed = need;
+    // Branka denního okna se posouvá jen tady, jednou za cyklus
+    wbUpdateEcoGate();
+
+    // Ranní rozhodnutí i čekání na slunce se mění samy (vypršením, přelomem do víkendu,
+    // rozjezdem výroby) — dej vědět appce, ať přepínač a nápověda sedí
+    const morningState = `${wbMorningNeed()}|${wbWaitingForSun()}`;
+    if (wbPrevMorningState !== morningState) {
+      if (wbPrevMorningState !== null) broadcast('wbAuto', wbSwitchPayload());
+      wbPrevMorningState = morningState;
     }
 
     const target = ecWallboxTarget();
@@ -3620,7 +3693,12 @@ function wbSwitchPayload() {
     wbAuto: state.wbAuto,
     wbMorningNeed: wbMorningNeed(),
     wbMorningUntil: wbMorningTargetMs(),
-    wbMorningManual: wbMorningManual()
+    wbMorningManual: wbMorningManual(),
+    // Čekání na rozjezd výroby — appka z toho skládá nápovědu
+    wbWaitingForSun: wbWaitingForSun(),
+    wbPvKw: wbPvKw(),
+    wbEcoPvKw: WB_ECO_PV_KW,
+    wbEcoFallbackHour: WB_ECO_FALLBACK_HOUR
   };
 }
 
