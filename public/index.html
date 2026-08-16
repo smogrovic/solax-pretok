@@ -902,6 +902,34 @@
     margin-top:6px;
     text-align:center;
   }
+  /* Třípolohový jezdec automatiky (vypnuto / zapnuto / zima) */
+  #autoModeSlider{
+    width:100%;
+    accent-color:var(--orange);
+    margin:10px 0 0;
+  }
+  /* .device-block je flex sloupec s align-items:center, takže bez width:100 %
+     by se popisky smrskly na obsah a slepily doprostřed */
+  .mode-scale{
+    width:100%;
+    display:flex;
+    justify-content:space-between;
+    font-size:11px;
+    color:var(--grey-text);
+    margin-top:2px;
+  }
+  /* Krajní popisky lícují s koncem dráhy, prostřední se drží středu */
+  .mode-scale span:first-child{text-align:left;}
+  .mode-scale span:nth-child(2){text-align:center;}
+  .mode-scale span:last-child{text-align:right;}
+  .mode-scale span.on{color:var(--navy);font-weight:800;}
+  .mode-hint{
+    font-size:11px;
+    color:var(--grey-text);
+    margin-top:8px;
+    line-height:1.5;
+    text-align:center;
+  }
   .tempauto-row{
     display:flex;
     align-items:center;
@@ -1426,10 +1454,15 @@
             <div class="traffic-light" id="autoLight"></div>
             <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
           </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="autoOnBtn">ON</button>
-            <button class="power-btn off-btn" id="autoOffBtn">OFF</button>
+          <input type="range" min="0" max="2" step="1" value="1" id="autoModeSlider"
+                 aria-label="Režim automatiky" list="autoModeTicks">
+          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option></datalist>
+          <div class="mode-scale">
+            <span data-mode="0">Vypnuto</span>
+            <span data-mode="1">Zapnuto</span>
+            <span data-mode="2">Zima</span>
           </div>
+          <div class="mode-hint" id="autoModeHint"></div>
         </div>
       </div>
 
@@ -1438,7 +1471,7 @@
         <div class="tempauto-list" id="tempAutoListOwn"></div>
         <div class="tempauto-thr">
           <div class="tempauto-thr-row">
-            <span class="tempauto-thr-label">Obývák — zapnout při</span>
+            <span class="tempauto-thr-label" id="tempAutoLabelObyvak">Obývák — zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnValObyvak">22 °C</span>
           </div>
           <input type="range" min="22" max="26" step="1" value="22" id="tempAutoOnSliderObyvak">
@@ -1447,7 +1480,7 @@
         <div class="tempauto-list" id="tempAutoList"></div>
         <div class="tempauto-thr">
           <div class="tempauto-thr-row">
-            <span class="tempauto-thr-label">Ostatní pokoje — zapnout při</span>
+            <span class="tempauto-thr-label" id="tempAutoLabel">Ostatní pokoje — zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
           </div>
           <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSlider">
@@ -2058,175 +2091,146 @@
         <div class="logic-sec">
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
-            <li>Automatika běží, jen když je zapnutý <b>hlavní vypínač</b> (stránka Asistent).</li>
-            <li>O <b>přebytku</b> (bazén, bojler) se rozhoduje jen z <b>čerstvých dat</b> ze střídače (max 10 min stará).</li>
-            <li><b>Solinátor na střídači nezávisí</b> — jede podle času a venkovní teploty, takže funguje i v noci, kdy střídač spí a data ze Solaxu zestárnou.</li>
-            <li>Vypnutí <b>po západu slunce</b> (bazén i solinátor) proběhne <b>i bez dat ze střídače</b> — nic nesmí zůstat běžet přes noc.</li>
-            <li>Bazén, bojler a solinátor: přepočet <b>každých 5 min</b>. Režim wallboxu: <b>každou minutu</b>.</li>
-            <li>„Přebytek" = <b>přetok do sítě + výkon nabíjející baterii</b> (feed + bat).</li>
+            <li>Hlavní přepínač (Asistent) má tři polohy: <b>vypnuto · zapnuto · zima</b>.</li>
+            <li>Přepočet každých <b>5 min</b>, režim wallboxu každé <b>2 min</b>.</li>
+            <li>„Přebytek" = <b>přetok do sítě + nabíjení baterie</b>.</li>
+            <li>O přebytku se rozhoduje jen z dat ze střídače <b>max 10 min starých</b>.</li>
+            <li>Solinátor střídač nepotřebuje — jede podle času a teploty.</li>
+            <li>Vypnutí po západu proběhne <b>i bez dat</b> ze střídače.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Načítání dat</div>
+          <div class="logic-h">Zima</div>
           <ul class="logic-list">
-            <li><b>Diagram toku energie bere všechno ze Solaxu</b> (výroba, baterie, dům, přetok) — jeden zdroj v jednom okamžiku, takže součty vždy sedí. Dřív se míchal s Infigy a hodnoty byly z různých časů.</li>
-            <li>Každé <b>2 min</b>: Solax, Shelly (bazén, relé), wallbox.</li>
-            <li>Každých <b>5 min</b>: bojlery (Panasonic pro bojler 1, Infigy pro bojler 2) <b>včetně zápisu do grafu</b>, teploty klimatizací, počasí, přepočet automatiky.</li>
-            <li>Dotazy jsou <b>rozprostřené v čase</b> (každý poller má vlastní offset), takže se nepotkají naráz. Dotazy na Shelly navíc čeká jedna fronta s odstupem <b>1 s</b>.</li>
-            <li>Tlačítko <b>Aktualizovat</b> (stránka Asistent) vynutí okamžité načtení <b>všech</b> zdrojů. Delší dotazy (Shelly, Panasonic, Infigy) dobíhají na pozadí a naskočí samy, jak dorazí.</li>
-            <li>Grafy za 24 h jsou <b>vyhlazené</b> klouzavým průměrem — jde jen o kreslení, <b>součty kWh se počítají z původních dat</b>.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Korekce podle předpovědi výroby</div>
-          <ul class="logic-list">
-            <li>Z Infigy se bere <b>odhad dnešní výroby</b>. Nepočítá se „kolik zbývá vyrobit" (to večer klesá k nule i po skvělém dni), ale <b>kolik zbyde, až se nabije baterie</b>:</li>
-            <li><b>volný přebytek</b> = (odhad výroby − už vyrobeno) − (kolik chybí do plné baterie, kapacita 11,6 kWh)</li>
-            <li>☀️ <b>Silný den</b> (volný přebytek ≥ 15 kWh): bazén SOC práh <b>−15 %</b>, bojler práh <b>−400 W</b> → pustí dřív, ať se přebytek využije.</li>
-            <li>☁️ <b>Slabý den</b> (≤ 5 kWh a SOC &lt; 85 %): bazén SOC práh <b>+10 %</b>, bojler práh <b>+400 W</b> → přednost má nabití baterie.</li>
-            <li>Pojistky: neutahuje se při <b>SOC ≥ 85 %</b> (plnou baterii není proč chránit), SOC práh zůstává v <b>0–95 %</b>, a když data z Infigy chybí, <b>korekce se neuplatní</b>.</li>
-            <li>Auta se to netýká — <b>rezerva na auto se přičítá až nakonec</b>, takže si drží přednost i v silný den.</li>
-            <li>V logu je u zapnutí vidět pásmo i použitý práh, ať je zpětně jasné, proč se tak rozhodlo.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Graf „Odhad vs. skutečnost" (Přehled)</div>
-          <ul class="logic-list">
-            <li>Každý den se ukládá <b>ranní odhad</b> (první hodnota z Infigy po 7:00, dál se nemění), <b>večerní odhad</b> (poslední hodnota dne) a <b>skutečná výroba</b>.</li>
-            <li>V grafu jde mezi ranním a večerním odhadem <b>přepnout</b> — ranní ukazuje, jak dobře Infigy předpovídá den dopředu.</li>
-            <li>Čísla pod sloupci = <b>kolik % odhadu se ten den skutečně vyrobilo</b>; nad grafem je průměr za zobrazené dny.</li>
-            <li>Historie se drží <b>14 dní</b>, graf kreslí posledních <b>10</b>. Plní se postupně — jeden bod za den.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Notifikace do telefonu</div>
-          <ul class="logic-list">
-            <li>🔋 <b>Baterie je plná</b> (≥ 99 %, odjistí se pod 90 %).</li>
-            <li>🚪 <b>Garáž otevřená déle než 10 min.</b></li>
-            <li>🔌 <b>Auto dobito</b> (wallbox přešel na „Dokončeno").</li>
-            <li>🔥 <b>Bojler 1 vyhřátý</b> — nádrž dosáhla 70 °C a topení se vypnulo.</li>
-            <li>⚠️ <b>Výpadek dat</b> — Solax, Infigy nebo klimatizace neodpovídá déle než 30 min (automatika by jela naslepo).</li>
-            <li>Každá hláška přijde <b>jednou</b> a odjistí se, teprve až stav pomine.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Priorita auta (platí pro bazén i bojler)</div>
-          <ul class="logic-list">
-            <li>Auto má přednost — bazén/bojler dostanou jen přebytek <b>nad autem</b>.</li>
-            <li>Rezervuje se autu headroom (až do <b>3,4 kW</b>) jen když se <b>reálně rozjíždí</b> (přidává výkon). K prahu bazénu/bojleru se přičte (3,4 kW − co auto právě bere).</li>
-            <li>Když auto jede <b>ustáleně, klesá nebo stojí</b> (víc už nechce) → rezerva 0 → bazén/bojler jedou z přebytku nad jeho aktuálním odběrem.</li>
-            <li>Auto <b>odpojené nebo dobité</b> → rezerva 0 → čistě prahy níže.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Wallbox (FAST / AUTO a ranní jízda)</div>
-          <ul class="logic-list">
-            <li><b>FAST</b> = pořád rychlé nabíjení (ruční režim).</li>
-            <li><b>AUTO</b> dělí den na čtyři fáze:</li>
-            <li>&nbsp;&nbsp;<b>1. noc</b> (do konce noci) → <b>FAST</b>, nebo <b>GREEN</b>, když auto ráno nepotřebuju.</li>
-            <li>&nbsp;&nbsp;<b>2. čekání na slunce</b> (od konce noci, dokud FVE nerozjede) → <b>GREEN</b>, jen z přebytku.</li>
-            <li>&nbsp;&nbsp;<b>3. den</b> (okno otevřené, do hodiny před západem) → <b>ECO</b>.</li>
-            <li>&nbsp;&nbsp;<b>4. večer</b> (hodinu před západem) → zase <b>FAST/GREEN</b> podle rána, které přijde.</li>
-            <li><b>Konec noci</b> = hodinu po východu slunce, <b>nejpozději v 8:00</b> (v zimě se slunce nedočkáme). Po konci noci se už FAST nevrací — bralo by ze sítě ještě víc než ECO.</li>
-            <li><b>Denní okno (ECO) se neotevírá podle hodin</b>, ale až když <b>FVE opravdu vyrábí: 2,5 kW dvakrát po sobě</b>. ECO má totiž pevné minimum 6 A, takže při slabém slunci dobírá ze sítě. Jednou otevřené okno vydrží do večera, ať režim nebliká podle mraků.</li>
-            <li>Když je <b>zataženo</b> a slunce nepřijde, okno se otevře <b>nejpozději v 10:00</b>, ať se auto přes den aspoň něco dobije.</li>
-            <li>Přepínač <b>„Ráno auto potřebuju"</b> (jen v AUTO): když je <b>vypnutý</b>, jede se místo nočního FAST <b>GREEN</b> — nabíjí se <b>výhradně z přebytku</b>, takže v noci nevezme ze sítě ani z baterky nic.</li>
-            <li>Výchozí stav se řídí <b>dnem v týdnu toho rána</b>: <b>pracovní den → potřebuju</b> (v noci FAST), <b>víkend → nepotřebuju</b> (čeká se na slunce). Rozhoduje ráno, ne dnešek — v pátek večer tedy platí sobota.</li>
-            <li><b>Ruční přepnutí</b> platí jen na <b>nejbližší ráno</b> (do konce noci), pak zase rozhoduje den v týdnu. Když ho zmáčkneš po půlnoci, týká se rána téhož dne.</li>
-            <li><b>Ruční přepnutí</b> (STOP/ECO/FAST) platí, dokud ho automatika při další změně (východ/západ) zase nepřepne.</li>
-            <li>Ručně ve střídači/wallboxu: <b>ECO i GREEN na 6 A</b>, „Battery charge EVC" = Enable, Min SOC nízko (~10 %). Těch 6 A je nejnižší možný proud — určuje, při jakém přebytku se nabíjení vůbec rozjede.</li>
-          </ul>
-        </div>
-
-        <div class="logic-sec">
-          <div class="logic-h">Ruční zapnutí vs. automatika</div>
-          <ul class="logic-list">
-            <li>Když bojler, bazén nebo solinátor <b>zapneš (nebo vypneš) tlačítkem</b>, má tvoje rozhodnutí <b>30 minut přednost</b> — automatika ho nepřebije.</li>
-            <li>Po půl hodině řízení převezme zpátky, a když podmínky nesedí, <b>vypne to</b>. Je to tedy odklad, ne trvalé vyřazení.</li>
-            <li>Pod tlačítky je vidět, <b>dokdy odklad platí</b>, a do logu se to zapíše taky.</li>
-            <li>Platí to i pro <b>časovače relé</b> a pro zapnutí <b>asistentem</b> — obojí jsou tvoje rozhodnutí, ne automatika.</li>
-            <li>Výjimka: <b>nádrž nad 70 °C</b> vypne bojler i během odkladu. Přehřátou nádrž nepřebije nic.</li>
-            <li>Solinátorové <b>„−1 den"</b> odklad ruší — je to novější rozhodnutí než dřívější zapnutí.</li>
+            <li><b>Bazén i solinátor spí</b> — automatika je drží vypnuté.</li>
+            <li>Solinátor <b>nehromadí dluh</b>, na jaře začíná od nuly.</li>
+            <li><b>Bojler 1 se odpojí od bazénu</b> a topí jen z přebytku.</li>
+            <li><b>Wallbox jede pořád FAST</b>, na slunce se nečeká.</li>
+            <li><b>Klimatizace</b> drží nastavenou teplotu v režimu AUTO.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
-            <li>Jen mezi <b>8:00 a hodinou před západem</b> slunce.</li>
-            <li>Ochrana baterie podle hodiny — SOC musí být aspoň: 12h <b>50 %</b>, 13h <b>60 %</b>, 14h <b>70 %</b>, 15h <b>80 %</b>, 16h <b>85 %</b>, 17h+ <b>90 %</b>.</li>
-            <li><b>Zapnout:</b> přebytek 2× po sobě nad <b>1850 W</b> (+ rezerva na auto).</li>
-            <li><b>Vypnout:</b> 3× po sobě pod <b>−200 W</b> a po min. <b>30 min</b> běhu.</li>
-            <li>Hodinu před západem slunce → vypnout. Tohle vypnutí je <b>pojistkou navíc</b>: pošle se, i když nejsou data ze střídače (v noci spí), aby bazén nemohl zůstat běžet do rána.</li>
-            <li>Když <b>vypadne počasí</b> (a s ním čas západu), platí náhradní mez <b>20:00</b>.</li>
+            <li>Jen mezi <b>8:00</b> a <b>hodinou před západem</b> (bez počasí náhradně 20:00).</li>
+            <li><b>Zapnout:</b> 2× po sobě přebytek nad <b>1850 W</b>.</li>
+            <li><b>Vypnout:</b> 3× po sobě pod <b>−200 W</b>, po min. <b>30 min</b> běhu.</li>
+            <li>Minimální SOC baterie: 12h <b>50 %</b> · 13h <b>60 %</b> · 14h <b>70 %</b> · 15h <b>80 %</b> · 16h <b>85 %</b> · 17h+ <b>90 %</b>.</li>
+            <li>Vypnutí po západu je pojistka — pošle se i bez dat ze střídače.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
           <div class="logic-h">Bojler 1 (TČ)</div>
           <ul class="logic-list">
-            <li>Jen ve dne: <b>po 10:00</b>, hodinu před západem → vypnout.</li>
-            <li>Topí <b>jen když běží bazén</b>.</li>
-            <li><b>Nad 70 °C</b> v nádrži → vždy vypnout (má přednost).</li>
-            <li>Rychlá ochrana: odběr ze sítě pod <b>−300 W</b> → hned vypnout.</li>
-            <li><b>Zapnout:</b> přebytek nad prahem podle SOC (+ rezerva na auto): SOC&lt;50 % → <b>2600 W</b>, &lt;80 % → <b>2000 W</b>, jinak <b>1400 W</b>.</li>
+            <li>Jen <b>po 10:00</b> do hodiny před západem.</li>
+            <li>Topí <b>jen když běží bazén</b> (v zimě neplatí).</li>
+            <li><b>Zapnout:</b> přebytek nad prahem podle SOC — &lt;50 % <b>2600 W</b> · &lt;80 % <b>2000 W</b> · jinak <b>1400 W</b>.</li>
+            <li>Odběr ze sítě pod <b>−300 W</b> → hned vypnout.</li>
+            <li><b>Nad 70 °C</b> v nádrži → vypnout vždy, má přednost před vším.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
           <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
-            <li>Appka nesleduje konkrétní časy, ale <b>kolik hodin má solinátor za den celkem odběhnout</b>, a podle toho ho sama zapíná i vypíná.</li>
-            <li><b>Cíl na den</b> = <b>1 h</b> základ + <b>1 h</b> když má být přes <b>20 °C</b> + další <b>1 h</b> když přes <b>25 °C</b> → nejvýš <b>3 h</b>.</li>
-            <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b> (v okně 12–20 h), takže dnešní čas je hotový už ráno. Naměřená teplota je pojistka, kdyby bylo tepleji, než se čekalo. Dokud se nic neodběhlo, může upřesněná předpověď cíl i snížit; jakmile solinátor běží, přirážka <b>už jen roste</b>.</li>
-            <li>Běží <b>od 12:00 do hodiny před západem</b> slunce, dokud není rozpočet naplněn. Pak se sám vypne.</li>
-            <li><b>Mimo tohle okno je vždy vypnutý</b> — appka ho aktivně vypíná, i po půlnoci a i když vypadnou data ze střídače nebo počasí (náhradní mez <b>20:00</b>). Ruční zapnutí mimo okno tedy do 5 minut zase vypne; na „chci dneska víc" je tlačítko +1 h.</li>
-            <li>Když se v poledne nedaří (nedostupné relé, výpadek dat, restart), <b>nic se neztratí</b> — rozpočet se dožene, jakmile to jde.</li>
-            <li><b>+1 h</b> (nízký chlor) zvýší dnešní cíl, <b>−1 h</b> ho sníží — i pod základ a přirážku. Mačkat jde opakovaně, hodiny se sčítají (strop 8 h na obě strany). Do logu se boost nezapisuje.</li>
-            <li>Co se do večera <b>nestihne, přejde na další den</b> — nejvýš <b>3 h</b>, zbytek propadá. Kdyby se přenášelo víc, cíl by přerostl denní okno, nešel by nikdy splnit a dluh by se donekonečna obnovoval sám.</li>
-            <li>Ubrání se přenáší jen tehdy, <b>když ho dnešek nestihne spotřebovat</b>. Když je cíl 3 h a ubereš 2 h, sníží se dnešek a zítřku se nebere nic; teprve co je ubráno pod nulu, jde dál (taky nejvýš 3 h).</li>
-            <li><b>−1 den</b> (vysoký chlor): ten den se neběží vůbec a <b>nevzniká žádný dluh</b>. Dny se sčítají, nejvýš tři dopředu. Tlačítko <b>zrušit</b> smaže boost i zákaz.</li>
-            <li>Pod tlačítky je vidět <b>odběhnuto / cíl</b>, např. „Dnes 1:05 / 3:00“, a pod tím <b>odhad na zítřek</b> (přenos z dneška + teplo z předpovědi). Na <b>stránce Bazén</b> je celý rozpis obou dnů — základ, přirážka, boost a přenos zvlášť.</li>
-            <li>Časovač v relé (60 min) zůstává jako <b>pojistka</b> — kdyby appka spadla, solinátor se sám vypne. Rozpočet měří <b>skutečně odběhnutý čas</b>, takže si případnou mezeru sám dožene.</li>
-            <li>Umí to i <b>asistent</b>: „pusť solinátor na dvě hodiny", „vypni solinátor na den", „ať jede solinátor normálně".</li>
+            <li>Neřídí se časy, ale <b>kolik hodin má za den odběhnout</b>.</li>
+            <li><b>Cíl</b> = <b>1 h</b> + <b>1 h</b> nad 20 °C + <b>1 h</b> nad 25 °C → nejvýš <b>3 h</b>.</li>
+            <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b>, takže cíl je znám už ráno.</li>
+            <li>Běží <b>od 12:00 do hodiny před západem</b>, pak se sám vypne.</li>
+            <li><b>Mimo okno je vždy vypnutý</b> — ruční zapnutí tam do 5 min zhasne.</li>
+            <li><b>+1 h / −1 h</b> se sčítají (strop 8 h). Do logu se nezapisují.</li>
+            <li>Co se nestihne, <b>přejde na další den</b> — nejvýš <b>3 h</b>, zbytek propadá.</li>
+            <li>Ubrání se přenáší, jen když ho dnešek nestihne spotřebovat.</li>
+            <li><b>−1 den</b>: ten den se neběží a nevzniká dluh. Sčítá se, nejvýš 3 dny.</li>
+            <li>Výpadek nevadí — rozpočet se dožene, jakmile to jde.</li>
+            <li>Rozpis obou dnů je na stránce <b>Bazén</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Časovače — hromadná volba</div>
+          <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
-            <li><b>Žaluzie</b>: volba <b>„Všechny žaluzie"</b> ovládne rolety <b>z té stránky</b>, na které časovač zakládáš (Žaluzie / Žaluzie 2).</li>
-            <li><b>Pergola ani garáž se časovačem neovládají</b> — nejsou v seznamu a nespadají ani pod hromadnou volbu.</li>
-            <li><b>Klimatizace</b>: volba <b>„Všechny klimatizace"</b> je jeden časovač, který v daný čas obejde všechny jednotky.</li>
-            <li>Časovač relé (stránka Ovládání) hromadnou volbu <b>záměrně nemá</b> — mísí spotřebiče se světly a hromadné zapnutí by znamenalo velký odběr naráz.</li>
+            <li><b>FAST</b> = pořád rychlé nabíjení. <b>AUTO</b> dělí den na čtyři fáze:</li>
+            <li>&nbsp;&nbsp;<b>1. noc</b> → FAST, nebo GREEN když auto ráno nepotřebuju.</li>
+            <li>&nbsp;&nbsp;<b>2. čekání na slunce</b> → GREEN, jen z přebytku.</li>
+            <li>&nbsp;&nbsp;<b>3. den</b> → ECO.</li>
+            <li>&nbsp;&nbsp;<b>4. večer</b> (hodinu před západem) → zase podle rána.</li>
+            <li><b>Konec noci</b> = hodinu po východu, nejpozději <b>8:00</b>. Pak se FAST nevrací.</li>
+            <li><b>Denní okno otevře až výroba: 2,5 kW dvakrát po sobě</b> — ECO má minimum 6 A a při slabém slunci by dobíralo ze sítě.</li>
+            <li>Když slunce nepřijde, okno se otevře <b>nejpozději v 10:00</b>.</li>
+            <li>Otevřené okno vydrží do večera, ať režim nebliká podle mraků.</li>
+            <li><b>„Ráno auto potřebuju"</b> vypnuto → místo nočního FAST jede GREEN.</li>
+            <li>Výchozí stav podle <b>dne v týdnu toho rána</b>: pracovní den ano, víkend ne.</li>
+            <li>Ruční přepnutí platí <b>na jedno ráno</b>; po půlnoci se týká rána téhož dne.</li>
+            <li>Ruční režim (STOP/ECO/FAST) drží <b>3 h</b>, přepnutí FAST/AUTO ho ruší.</li>
+            <li>Ručně ve střídači: <b>ECO i GREEN na 6 A</b>, „Battery charge EVC" = Enable, Min SOC ~10 %.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
-          <div class="logic-h">Klimatizace — teplotní automatika (Obývák, Ložnice, Elenka, Miky)</div>
+          <div class="logic-h">Klimatizace (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
-            <li>Zapíná se <b>per pokoj přepínačem</b> (stránka Asistent).</li>
-            <li><b>Obývák se řídí podle Shelly čidla</b> v místnosti (měří v obytné zóně). Ostatní pokoje podle čidla v klimatizaci, které je u stropu a ukazuje víc.</li>
-            <li>Obývák se řídí <b>výhradně čidlem</b> — stáří hodnoty se neřeší. Čidlo hlásí jen při <b>změně</b> teploty, takže ticho znamená, že je teplota stabilní, ne že je čidlo mimo. Na teplotu z klimatizace se nepřepíná nikdy.</li>
-            <li>Když čidlo mlčí <b>přes 6 h</b>, zapíše se to jednou do logu (jede se dál podle poslední hodnoty). Kdyby nehlásilo <b>vůbec nic</b> — třeba hned po nasazení nové verze — automatika obývák chvíli přeskočí, než dorazí první hodnota.</li>
-            <li>Při <b>slabé baterce</b> čidla přijde push.</li>
-            <li><b>Spínací teplota se nastavuje jezdcem</b> po 1 °C. <b>Obývák má vlastní jezdec</b> hned pod sebou (<b>22–26 °C</b>) — řídí se podle čidla v obytné zóně, které ukazuje níž. Ložnice, Elenka a Miky mají <b>společný jezdec</b> dole (<b>18–25 °C</b>).</li>
-            <li>Když teplota v pokoji vystoupí na <b>nastavenou mez</b> → zapne chlazení na <b>mez − 2 °C</b>. V ložnici, u Elenky a Miky <b>tiše</b>, v <b>obýváku normálně</b> (denní místnost, nemá smysl ho brzdit).</li>
-            <li>V obýváku se navíc <b>nikdy nechladí na víc než 22 °C</b> — i při vysoké mezi se má pořádně dochladit. Takže 22 → 20, 23 → 21, 24 → 22 a 25 i 26 → pořád 22 °C.</li>
-            <li><b>Vypne</b>, jakmile teplota klesne pod <b>mez − 1 °C</b>.</li>
-            <li>Např. při mezi <b>22 °C</b>: zapne na 22, chladí na 20, vypne pod 21 °C. Při mezi <b>26 °C</b> v obýváku: zapne na 26, chladí na 22, vypne pod 25 °C.</li>
-            <li>Ať kompresor necykluje: po zapnutí automatika nechá běžet aspoň <b>20 min</b>, po vypnutí nechá vypnuto aspoň <b>20 min</b>.</li>
-            <li>Když přepínač <b>vypneš ručně</b>, automatika zároveň <b>vypne i klimatizaci</b> — nenechá ji běžet v tom stavu, v jakém zrovna byla.</li>
-            <li><b>Jakýkoliv zásah do klimatizace přepínač shodí do vypnuto</b> — tlačítka na stránce Klima, dálkový ovladač, <b>časovač</b> i pokyn asistentovi. Automatika ti pak nepřepíše, co sis nastavil: po vypnutí časovačem ve 4:00 se klima sama znovu nespustí. <b>Klimatizací se přitom nehýbe</b>, zůstane tak, jak jsi ji nechal.</li>
-            <li>Znamená to, že po zásahu si musíš <b>přepínač zase sám zapnout</b>, až má automatika zase převzít řízení.</li>
-            <li>Dole na stránce Klima je <b>graf teplot za 24 h</b>. U obýváku jsou obě hodnoty přes sebe: čidlo <b>čárkovaně</b>, klimatizace plnou čarou.</li>
-            <li>Do <b>logu</b> se zapíše i zapnutí nebo vypnutí, které appka neudělala — <b>dálkovým ovladačem</b> nebo appkou Panasonic. Pozná se podle poznámky <b>„mimo appku"</b> a objeví se do 5 minut (podle toho, jak často se stavy načítají).</li>
+            <li>Zapíná se <b>per pokoj přepínačem</b> (Asistent).</li>
+            <li><b>Obývák</b> podle Shelly čidla v místnosti, ostatní podle čidla v jednotce.</li>
+            <li>Jezdec <b>obývák 22–26 °C</b>, ostatní pokoje společně <b>18–25 °C</b>.</li>
+            <li><b>Léto:</b> nad mezí → chladí na <b>mez − 2 °C</b>, vypne pod <b>mez − 1 °C</b>.</li>
+            <li>Obývák se chladí nejvýš na <b>22 °C</b> (26 → 22, ne 26 → 24).</li>
+            <li><b>Zima:</b> jezdec je cílová teplota <b>18–24 °C</b>. Zapne AUTO při rozdílu <b>2 °C</b> na kteroukoli stranu, vypne do <b>1 °C</b> od cíle.</li>
+            <li>Ložnice, Elenka a Miky <b>tiše</b>, obývák naplno.</li>
+            <li>Po zapnutí i vypnutí drží <b>20 min</b>, ať kompresor necykluje.</li>
+            <li><b>Jakýkoliv zásah do klimatizace přepínač shodí</b> — tlačítka, ovladač, časovač i asistent. Klimatizací se přitom nehýbe; přepínač si pak musíš sám zapnout.</li>
+            <li>Vypnutí přepínače <b>vypne i klimatizaci</b>.</li>
+            <li>Zásah mimo appku (ovladač, Panasonic) se objeví <b>v logu</b> do 5 min.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Ruční zásah vs. automatika</div>
+          <ul class="logic-list">
+            <li>Ruční zapnutí i vypnutí bojleru, bazénu a solinátoru má <b>30 min přednost</b>.</li>
+            <li>Potom řízení převezme automatika a <b>když podmínky nesedí, vypne to</b>.</li>
+            <li>Platí i pro <b>časovače relé</b> a <b>asistenta</b>.</li>
+            <li>Dokdy odklad platí je vidět pod tlačítky i v logu.</li>
+            <li>Výjimka: <b>nádrž nad 70 °C</b> vypne bojler i během odkladu.</li>
+            <li>Solinátorové <b>„−1 den"</b> odklad ruší.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Priorita auta</div>
+          <ul class="logic-list">
+            <li>Auto má přednost — bazén a bojler dostanou jen přebytek <b>nad autem</b>.</li>
+            <li>Rezerva (až <b>3,4 kW</b>) se drží, jen když se auto <b>reálně rozjíždí</b>.</li>
+            <li>Když jede ustáleně, klesá, stojí nebo je odpojené → <b>rezerva 0</b>.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Korekce podle předpovědi</div>
+          <ul class="logic-list">
+            <li><b>Volný přebytek</b> = (odhad výroby − vyrobeno) − (co chybí do plné baterie, <b>11,6 kWh</b>).</li>
+            <li>☀️ <b>Silný den</b> (≥ 15 kWh): bazén SOC <b>−15 %</b>, bojler práh <b>−400 W</b>.</li>
+            <li>☁️ <b>Slabý den</b> (≤ 5 kWh a SOC &lt; 85 %): bazén SOC <b>+10 %</b>, bojler <b>+400 W</b>.</li>
+            <li>Při <b>SOC ≥ 85 %</b> se neutahuje, bez dat z Infigy se korekce neuplatní.</li>
+            <li>Rezerva na auto se přičítá až nakonec, takže auto má přednost i tak.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Data, notifikace, časovače</div>
+          <ul class="logic-list">
+            <li>Každé <b>2 min</b>: Solax, Shelly, wallbox. Každých <b>5 min</b>: bojlery, klimatizace, počasí, automatika.</li>
+            <li>Diagram toku energie bere <b>všechno ze Solaxu</b>, ať součty sedí.</li>
+            <li>Dotazy jsou rozprostřené v čase, na Shelly jde jeden za <b>1 s</b>.</li>
+            <li><b>Aktualizovat</b> vynutí načtení všech zdrojů; delší dotazy doběhnou na pozadí.</li>
+            <li>Grafy jsou vyhlazené, <b>kWh se počítají z původních dat</b>.</li>
+            <li>Graf <b>Odhad vs. skutečnost</b>: ranní odhad (první po <b>7:00</b>), večerní odhad a skutečná výroba. Historie 14 dní, kreslí se 10.</li>
+            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž přes 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat přes 30 min.</li>
+            <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
+            <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
         </div>
       </div>
@@ -2705,8 +2709,9 @@ const statB1YestEl = document.getElementById('statB1Yest');
 const statB2YestEl = document.getElementById('statB2Yest');
 const autoLight = document.getElementById('autoLight');
 const autoStateEl = document.getElementById('autoState');
-const autoOnBtn = document.getElementById('autoOnBtn');
-const autoOffBtn = document.getElementById('autoOffBtn');
+const autoModeSliderEl = document.getElementById('autoModeSlider');
+const autoModeHintEl = document.getElementById('autoModeHint');
+const autoModeScaleEls = Array.from(document.querySelectorAll('.mode-scale span'));
 let runtimeData = null;
 
 let weatherData = null;
@@ -2769,21 +2774,37 @@ function renderYesterday() {
   set(statB2YestEl, fmtWhKwh(w.b2));
 }
 
-function renderAutomation(enabled) {
-  autoLight.className = 'traffic-light ' + (enabled ? 'on' : 'off');
-  autoStateEl.textContent = enabled ? 'zapnuta' : 'vypnuta';
-  autoOnBtn.classList.toggle('active-state', enabled);
-  autoOffBtn.classList.toggle('active-state', !enabled);
+// Hlavní přepínač má tři polohy; index jezdce ↔ režim na serveru
+const AUTO_MODES_UI = ['off', 'on', 'winter'];
+const AUTO_MODE_STATE = { off: 'vypnuta', on: 'zapnuta', winter: 'zima' };
+const AUTO_MODE_HINT = {
+  off: 'Nic se nespíná samo — všechno ovládáš ručně.',
+  on: 'Běžný provoz: bazén a solinátor z přebytku, bojler když běží bazén, wallbox podle slunce.',
+  winter: 'Bazén a solinátor spí. Bojler topí z přebytku i bez bazénu, auto se dobíjí pořád na FAST'
+    + ' a klimatizace drží nastavenou teplotu v režimu AUTO.'
+};
+let autoModeData = 'on';
+
+function renderAutomation(mode) {
+  autoModeData = AUTO_MODES_UI.includes(mode) ? mode : 'on';
+  const i = AUTO_MODES_UI.indexOf(autoModeData);
+  autoLight.className = 'traffic-light ' + (autoModeData === 'off' ? 'off' : 'on');
+  autoStateEl.textContent = AUTO_MODE_STATE[autoModeData];
+  if (autoModeSliderEl && document.activeElement !== autoModeSliderEl) autoModeSliderEl.value = String(i);
+  autoModeScaleEls.forEach(el => el.classList.toggle('on', Number(el.dataset.mode) === i));
+  if (autoModeHintEl) autoModeHintEl.textContent = AUTO_MODE_HINT[autoModeData];
+  saveAutoModeLocal();
+  renderTempAutoThreshold();   // v zimě se ukazuje jiný jezdec
+  renderWbAuto();              // a jiná nápověda u wallboxu
 }
 
-async function setAutomation(enabled) {
-  autoOnBtn.disabled = true;
-  autoOffBtn.disabled = true;
+async function setAutomation(mode) {
+  if (autoModeSliderEl) autoModeSliderEl.disabled = true;
   try {
     const res = await fetch('/api/automation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ enabled })
+      body: JSON.stringify({ mode })
     });
     const data = await res.json();
     if (res.status === 401) {
@@ -2791,18 +2812,47 @@ async function setAutomation(enabled) {
       throw new Error(data.error || 'Ovládání je zamčené.');
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
-    renderAutomation(data.enabled);
+    renderAutomation(data.autoMode);
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Automatiku se nepodařilo přepnout: ' + err.message;
     errorEl.classList.add('show');
+    renderAutomation(autoModeData);   // jezdec zpátky na to, co server opravdu má
   }
-  autoOnBtn.disabled = false;
-  autoOffBtn.disabled = false;
+  if (autoModeSliderEl) autoModeSliderEl.disabled = false;
 }
 
-autoOnBtn.addEventListener('click', () => setAutomation(true));
-autoOffBtn.addEventListener('click', () => setAutomation(false));
+// Zimní režim je nastavení na měsíce — po deployi ho serveru vrátíme z telefonu,
+// jinak by naběhl na „zapnuto" a spustil bazén.
+function saveAutoModeLocal() {
+  try { localStorage.setItem('autoMode', autoModeData); } catch {}
+}
+async function maybeRestoreAutoMode() {
+  let local = null;
+  try { local = localStorage.getItem('autoMode'); } catch {}
+  if (!AUTO_MODES_UI.includes(local) || local === autoModeData) return;
+  try {
+    const res = await fetch('/api/automation/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: local })
+    });
+    const data = await res.json();
+    if (data && data.autoMode) renderAutomation(data.autoMode);
+  } catch {}
+}
+
+if (autoModeSliderEl) {
+  autoModeSliderEl.addEventListener('change', () => {
+    setAutomation(AUTO_MODES_UI[Number(autoModeSliderEl.value)] || 'on');
+  });
+  // Popisky reagují už při tažení, povel se pošle až po puštění
+  autoModeSliderEl.addEventListener('input', () => {
+    const i = Number(autoModeSliderEl.value);
+    autoModeScaleEls.forEach(el => el.classList.toggle('on', Number(el.dataset.mode) === i));
+    if (autoModeHintEl) autoModeHintEl.textContent = AUTO_MODE_HINT[AUTO_MODES_UI[i]] || '';
+  });
+}
 
 // ---------- Solinátor: boost (±1 h) a vypnutí (−1 den) podle chloru ----------
 let solinatorData = { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 };
@@ -2832,6 +2882,13 @@ function renderSolinator() {
   const now = Date.now();
   const s = solinatorData || {};
   let txt;
+  if (isWinterUi()) {
+    // V zimě se rozpočet vůbec nepočítá, tak ať appka neukazuje nesmyslná čísla
+    solinatorStatusEl.textContent = 'Zimní režim — bazén i solinátor jsou vypnuté.';
+    if (solinatorPlanEl) solinatorPlanEl.textContent = '';
+    renderSolinatorCalc();
+    return;
+  }
   if (s.disabledUntil && s.disabledUntil > now) {
     txt = 'Vypnuto do ' + fmtSolTime(s.disabledUntil);
   } else {
@@ -2870,6 +2927,7 @@ const solinatorCalcEl = document.getElementById('solinatorCalc');
 function renderSolinatorCalc() {
   if (!solinatorCalcEl) return;
   solinatorCalcEl.textContent = '';
+  if (isWinterUi()) return;   // v zimě není co rozepisovat
   const s = solinatorData || {};
   const row = (label, value, note, strong) => {
     const r = document.createElement('div');
@@ -4734,7 +4792,9 @@ function applyWbSwitches(d) {
       waiting: !!d.wbWaitingForSun,
       pv: typeof d.wbPvKw === 'number' ? d.wbPvKw : null,
       pvNeeded: typeof d.wbEcoPvKw === 'number' ? d.wbEcoPvKw : wbMorningData.pvNeeded,
-      fallbackHour: typeof d.wbEcoFallbackHour === 'number' ? d.wbEcoFallbackHour : wbMorningData.fallbackHour
+      fallbackHour: typeof d.wbEcoFallbackHour === 'number' ? d.wbEcoFallbackHour : wbMorningData.fallbackHour,
+      winter: !!d.wbWinter,
+      manualUntil: Number(d.wbManualUntil) || 0
     };
     saveWbMorningLocal();
   }
@@ -4814,12 +4874,21 @@ function renderWbAuto() {
 
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
-  const { need, until, manual, waiting, pv, pvNeeded, fallbackHour } = wbMorningData;
+  const { need, until, manual, waiting, pv, pvNeeded, fallbackHour, winter, manualUntil } = wbMorningData;
   wbMorningSwitchEl.classList.toggle('on', need);
+  // V zimě a na pevném FAST ranní rozhodnutí nic neovlivní — ať přepínač nemate
+  const bezVyznamu = !wbAutoData || winter;
+  wbMorningSwitchEl.disabled = bezVyznamu;
+  wbMorningSwitchEl.style.opacity = bezVyznamu ? '0.45' : '';
   if (!wbMorningHintEl) return;
+  const rucne = manualUntil > Date.now()
+    ? ` Ručně nastavený režim drží do ${fmtSolTime(manualUntil)}.` : '';
+  if (winter) {
+    wbMorningHintEl.textContent = 'Zimní režim — jede se pořád FAST, na slunce se nečeká.' + rucne;
+    return;
+  }
   if (!wbAutoData) {
-    // Na pevném FAST se automatika neuplatní, tak ať přepínač nemate
-    wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.';
+    wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.' + rucne;
     return;
   }
   if (waiting) {
@@ -4827,16 +4896,16 @@ function renderWbMorning() {
     const ted = typeof pv === 'number' ? ` (teď ${pv.toFixed(1).replace('.', ',')} kW)` : '';
     wbMorningHintEl.textContent = `Čeká se na slunce — jede GREEN, jen z přebytku.`
       + ` ECO se zapne, až FVE dá ${String(pvNeeded).replace('.', ',')} kW${ted},`
-      + ` nejpozději v ${fallbackHour}:00.`;
+      + ` nejpozději v ${fallbackHour}:00.` + rucne;
     return;
   }
   const co = need
     ? 'V noci se dobije naplno (FAST).'
     : 'Nabíjí se jen z přebytku (GREEN) — do rána se ze sítě ani z baterky nebere.';
   const doKdy = until > Date.now() ? ` (do ${fmtSolTime(until)})` : '';
-  wbMorningHintEl.textContent = manual
+  wbMorningHintEl.textContent = (manual
     ? `${co} Ručně na tohle ráno${doKdy}, pak zase podle dne v týdnu.`
-    : `${co} ${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`;
+    : `${co} ${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`) + rucne;
 }
 
 // Výkon wallboxu: přednostně z Infigy (živější), jinak ze Solaxu; vrací kW
@@ -5242,7 +5311,14 @@ let tempAutoData = { obyvak: false, loznice: false, elenka: false, miky: false }
 let tempAutoOnData = 22;                 // společná mez
 let tempAutoOnRoomsData = { obyvak: 22 }; // pokoje s vlastní mezí
 let tempAutoLimitsData = { shared: { min: 18, max: 25, coolMax: null }, rooms: { obyvak: { min: 22, max: 26, coolMax: 22 } } };
+// Zima je jiné číslo se stejným jezdcem: ne spínací mez, ale cílová teplota
+let tempAutoWinterData = 21;
+let tempAutoWinterRoomsData = { obyvak: 21 };
+let tempAutoWinterLimitsData = { min: 18, max: 24 };
+const WINTER_ON_DIFF = 2, WINTER_OFF_DIFF = 1;
+const isWinterUi = () => autoModeData === 'winter';
 function tempAutoLimitsFor(roomKey) {
+  if (isWinterUi()) return tempAutoWinterLimitsData;
   return (roomKey && tempAutoLimitsData.rooms && tempAutoLimitsData.rooms[roomKey])
     || tempAutoLimitsData.shared;
 }
@@ -5258,6 +5334,8 @@ function saveTempAutoOnLocal() {
   try {
     localStorage.setItem('tempAutoOn', String(tempAutoOnData));
     localStorage.setItem('tempAutoOnRooms', JSON.stringify(tempAutoOnRoomsData));
+    localStorage.setItem('tempAutoWinter', String(tempAutoWinterData));
+    localStorage.setItem('tempAutoWinterRooms', JSON.stringify(tempAutoWinterRoomsData));
   } catch {}
 }
 const validThr = (v, roomKey) => {
@@ -5277,22 +5355,46 @@ function loadTempAutoOnRoomsLocal() {
     return Object.keys(out).length ? out : null;
   } catch { return null; }
 }
+// Zimní cíl má jeden rozsah pro všechny pokoje
+const validWinterThr = v =>
+  Number.isInteger(v) && v >= tempAutoWinterLimitsData.min && v <= tempAutoWinterLimitsData.max;
+function loadTempAutoWinterLocal() {
+  const v = Number(localStorage.getItem('tempAutoWinter'));
+  return validWinterThr(v) ? v : null;
+}
+function loadTempAutoWinterRoomsLocal() {
+  try {
+    const o = JSON.parse(localStorage.getItem('tempAutoWinterRooms') || 'null');
+    if (!o || typeof o !== 'object') return null;
+    const out = {};
+    for (const k of Object.keys(o)) if (validWinterThr(Number(o[k]))) out[k] = Number(o[k]);
+    return Object.keys(out).length ? out : null;
+  } catch { return null; }
+}
 
 // Jeden jezdec. Obsluha je společná schválně — je v ní příznak „táhne se prstem",
 // bez kterého se na iOS hodnota při tažení vracela zpět (range input tam nedostane focus).
 // Duplikovat ji dvakrát by koledovalo o návrat té chyby.
-function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
+function setupThresholdSlider({ sliderId, valId, hintId, labelId, roomKey, roomLabel }) {
   const slider = document.getElementById(sliderId);
   const valEl = document.getElementById(valId);
   const hintEl = document.getElementById(hintId);
-  const current = () => (roomKey ? tempAutoOnRoomsData[roomKey] : tempAutoOnData) ?? 22;
+  const labelEl = document.getElementById(labelId);
+  const current = () => (isWinterUi()
+    ? (roomKey ? tempAutoWinterRoomsData[roomKey] : tempAutoWinterData) ?? 21
+    : (roomKey ? tempAutoOnRoomsData[roomKey] : tempAutoOnData) ?? 22);
   let dragging = false;
 
   // Popisky jen podle polohy jezdce — do .value se tady NIKDY nesahá
   function updateLabels() {
     const shown = slider ? Number(slider.value) : current();
     if (valEl) valEl.textContent = fmtC(shown);
-    if (hintEl) hintEl.textContent = `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(tempAutoCoolFor(roomKey, shown))}`;
+    if (labelEl) labelEl.textContent = `${roomLabel} — ${isWinterUi() ? 'držet na' : 'zapnout při'}`;
+    if (!hintEl) return;
+    hintEl.textContent = isWinterUi()
+      ? `Zapne AUTO při rozdílu ${WINTER_ON_DIFF} °C (pod ${fmtC(shown - WINTER_ON_DIFF)} i nad ${fmtC(shown + WINTER_ON_DIFF)})`
+        + ` · vypne do ${WINTER_OFF_DIFF} °C od cíle`
+      : `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(tempAutoCoolFor(roomKey, shown))}`;
   }
   function render() {
     if (slider && !dragging) {
@@ -5306,18 +5408,17 @@ function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
   }
   async function send(temp) {
     try {
+      const body = roomKey ? { temp, key: roomKey } : { temp };
+      if (isWinterUi()) body.winter = true;
       const res = await fetch('/api/tempauto/threshold', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify(roomKey ? { temp, key: roomKey } : { temp })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Zamčené.'); }
       if (!res.ok) throw new Error(data.error || 'Nepodařilo se nastavit.');
-      tempAutoOnData = data.tempAutoOn;
-      tempAutoOnRoomsData = data.tempAutoOnRooms || tempAutoOnRoomsData;
-      if (data.tempAutoLimits) tempAutoLimitsData = data.tempAutoLimits;
-      saveTempAutoOnLocal();
+      applyThresholds(data);
       errorEl.classList.remove('show');
     } catch (err) {
       errorEl.textContent = 'Teplotní automatika: ' + err.message;
@@ -5336,9 +5437,21 @@ function setupThresholdSlider({ sliderId, valId, hintId, roomKey }) {
   return { render };
 }
 
+// Hodnoty ze serveru (odpověď endpointu, SSE i snapshot) na jednom místě
+function applyThresholds(d) {
+  if (!d) return;
+  if (typeof d.tempAutoOn === 'number') tempAutoOnData = d.tempAutoOn;
+  if (d.tempAutoOnRooms) tempAutoOnRoomsData = d.tempAutoOnRooms;
+  if (typeof d.tempAutoWinter === 'number') tempAutoWinterData = d.tempAutoWinter;
+  if (d.tempAutoWinterRooms) tempAutoWinterRoomsData = d.tempAutoWinterRooms;
+  if (d.tempAutoLimits) tempAutoLimitsData = d.tempAutoLimits;
+  if (d.tempAutoWinterLimits) tempAutoWinterLimitsData = d.tempAutoWinterLimits;
+  saveTempAutoOnLocal();
+}
+
 const thresholdSliders = [
-  setupThresholdSlider({ sliderId: 'tempAutoOnSliderObyvak', valId: 'tempAutoOnValObyvak', hintId: 'tempAutoOffHintObyvak', roomKey: 'obyvak' }),
-  setupThresholdSlider({ sliderId: 'tempAutoOnSlider', valId: 'tempAutoOnVal', hintId: 'tempAutoOffHint', roomKey: null })
+  setupThresholdSlider({ sliderId: 'tempAutoOnSliderObyvak', valId: 'tempAutoOnValObyvak', hintId: 'tempAutoOffHintObyvak', labelId: 'tempAutoLabelObyvak', roomKey: 'obyvak', roomLabel: 'Obývák' }),
+  setupThresholdSlider({ sliderId: 'tempAutoOnSlider', valId: 'tempAutoOnVal', hintId: 'tempAutoOffHint', labelId: 'tempAutoLabel', roomKey: null, roomLabel: 'Ostatní pokoje' })
 ];
 function renderTempAutoThreshold() {
   for (const s of thresholdSliders) s.render();
@@ -5937,7 +6050,8 @@ function applySnapshot(snap) {
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
   renderWeather(snap.weather);
-  renderAutomation(snap.autoEnabled !== false);
+  renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on'));
+  maybeRestoreAutoMode();
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
   sensorsData = snap.sensors || {};
@@ -5978,12 +6092,12 @@ function applySnapshot(snap) {
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   renderTempAuto();
   // Spínací teploty: server + záloha v telefonu (přežije deploy)
-  if (typeof snap.tempAutoOn === 'number') tempAutoOnData = snap.tempAutoOn;
-  if (snap.tempAutoOnRooms) tempAutoOnRoomsData = { ...tempAutoOnRoomsData, ...snap.tempAutoOnRooms };
-  if (snap.tempAutoLimits) tempAutoLimitsData = snap.tempAutoLimits;
+  applyThresholds(snap);
   {
     const localThr = loadTempAutoOnLocal();
     const localRooms = loadTempAutoOnRoomsLocal() || {};
+    const localWinter = loadTempAutoWinterLocal();
+    const localWinterRooms = loadTempAutoWinterRoomsLocal() || {};
     const restore = {};
     if (localThr !== null && localThr !== tempAutoOnData) {
       tempAutoOnData = localThr;
@@ -5993,6 +6107,16 @@ function applySnapshot(snap) {
       if (localRooms[k] !== undefined && localRooms[k] !== tempAutoOnRoomsData[k]) {
         tempAutoOnRoomsData[k] = localRooms[k];
         restore.tempAutoOnRooms = { ...(restore.tempAutoOnRooms || {}), [k]: localRooms[k] };
+      }
+    }
+    if (localWinter !== null && localWinter !== tempAutoWinterData) {
+      tempAutoWinterData = localWinter;
+      restore.tempAutoWinter = localWinter;
+    }
+    for (const k of Object.keys(tempAutoWinterRoomsData)) {
+      if (localWinterRooms[k] !== undefined && localWinterRooms[k] !== tempAutoWinterRoomsData[k]) {
+        tempAutoWinterRoomsData[k] = localWinterRooms[k];
+        restore.tempAutoWinterRooms = { ...(restore.tempAutoWinterRooms || {}), [k]: localWinterRooms[k] };
       }
     }
     // Server po deployi startuje s výchozími 22 °C — vrátíme mu naposledy nastavené meze
@@ -6224,11 +6348,8 @@ function connectStream() {
   });
   es.addEventListener('tempAutoOn', e => {
     const d = JSON.parse(e.data);
-    if (typeof d.tempAutoOn === 'number') tempAutoOnData = d.tempAutoOn;
-    if (d.tempAutoOnRooms) tempAutoOnRoomsData = { ...tempAutoOnRoomsData, ...d.tempAutoOnRooms };
-    if (d.tempAutoLimits) tempAutoLimitsData = d.tempAutoLimits;
+    applyThresholds(d);
     renderTempAutoThreshold();
-    saveTempAutoOnLocal();
   });
   es.addEventListener('solinator', e => {
     const d = JSON.parse(e.data);
@@ -6282,7 +6403,7 @@ function connectStream() {
     renderRelayTimers();
   });
   es.addEventListener('automation', e => {
-    renderAutomation(JSON.parse(e.data).enabled);
+    renderAutomation(JSON.parse(e.data).autoMode);
   });
   es.onerror = () => {
     updatedEl.textContent = 'Připojuji…';

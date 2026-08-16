@@ -96,7 +96,10 @@ const state = {
   poolPowerW: null,  // součet 3 PM měření bazénu
   history: [],       // { t, kw } — přetok za posledních 24 h
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
-  autoEnabled: true, // hlavní vypínač automatiky (stránka Přehled)
+  // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
+  // Zima = bazén a solinátor spí, bojler se odpojí od bazénu, wallbox jede pořád FAST
+  // a klimatizace drží teplotu v režimu AUTO.
+  autoMode: 'on',
   manualHold: {},    // key -> dokdy (ms) má ruční zásah přednost před automatikou
   weather: null,     // { tempC, sunsetMs, fetchedAt } pro zobrazení v appce
   // dnešní doba běhu (ms) + denní energie (Wh) + snapshot včerejška
@@ -124,6 +127,10 @@ const state = {
   // Pokoje s vlastní mezí. Obývák se řídí podle Shelly čidla v obytné zóně, které ukazuje
   // níž než čidla v klimatizacích, takže jedna společná hodnota by u něj znamenala něco jiného.
   tempAutoOnRooms: { obyvak: 22 },
+  // Zimní režim klimatizace drží CÍLOVOU teplotu (ne spínací mez jako v létě), proto
+  // vlastní čísla: zapne se při rozdílu 2 °C na kteroukoli stranu, vypne do 1 °C.
+  tempAutoWinter: 21,
+  tempAutoWinterRooms: { obyvak: 21 },
   // Solinátor jede na denní rozpočet hodin: cíl = základ + bonus za teplotu + boost.
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
   // carryMs je JEN informativní: kolik z boostMs pochází z přenosu předchozího dne.
@@ -215,6 +222,11 @@ function addAssistantLog(text) {
   broadcast('assistantLog', { log: state.assistantLog });
 }
 
+// Jede automatika vůbec, a jede v zimním režimu? Zbytek kódu se ptá jen přes tyhle dvě.
+const AUTO_MODES = ['off', 'on', 'winter'];
+function autoRunning() { return state.autoMode !== 'off'; }
+function isWinter() { return state.autoMode === 'winter'; }
+
 function snapshot() {
   pruneHistory();
   return {
@@ -223,7 +235,8 @@ function snapshot() {
     poolPowerW: state.poolPowerW,
     history: state.history,
     log: state.log,
-    autoEnabled: state.autoEnabled,
+    autoMode: state.autoMode,
+    autoEnabled: autoRunning(),   // starší klienti čtou jen tohle
     manualHold: state.manualHold,
     weather: state.weather,
     runtime: runtimePayload(),
@@ -1031,19 +1044,62 @@ app.post('/api/timeline/restore', (req, res) => {
   res.json({ ok: true });
 });
 
-// Hlavní vypínač automatiky (vyžaduje odemčení stejně jako ovládání relé)
+const AUTO_MODE_LABELS = { off: 'vypnuta', on: 'zapnuta', winter: 'zimní režim' };
+
+function automationPayload() {
+  return { autoMode: state.autoMode, enabled: autoRunning() };
+}
+// Sáhl někdo na režim od startu procesu? Pak už ho telefon obnovou nepřebije.
+let autoModeTouched = false;
+function setAutoMode(mode, why) {
+  autoModeTouched = true;
+  if (state.autoMode === mode) return;
+  state.autoMode = mode;
+  addLog(`Automatika: ${AUTO_MODE_LABELS[mode]}${why ? ` (${why})` : ''}`);
+  broadcast('automation', automationPayload());
+  broadcast('tempAutoOn', thresholdPayload());   // appka přepne na zimní jezdec
+  if (wallboxEnabled) broadcast('wbAuto', wbSwitchPayload());
+  // Ať se přepnutí projeví hned — hlavně cesta do zimy, kde má bazén zhasnout
+  state.wbLastTarget = null;
+  runAutomation().catch(() => {});
+  runEnergyControl().catch(() => {});
+}
+
+// Hlavní přepínač automatiky (vyžaduje odemčení stejně jako ovládání relé).
+// Bere `mode` (vypnuto/zapnuto/zima) i staré `enabled` — kvůli asistentovi a starším klientům.
 app.post('/api/automation', (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { enabled } = req.body || {};
-  if (typeof enabled !== 'boolean') {
-    return res.status(400).json({ error: 'Parametr enabled musí být true/false.' });
+  const { mode, enabled } = req.body || {};
+  let next;
+  if (mode !== undefined) {
+    if (!AUTO_MODES.includes(mode)) {
+      return res.status(400).json({ error: 'Parametr mode musí být off, on nebo winter.' });
+    }
+    next = mode;
+  } else if (typeof enabled === 'boolean') {
+    // Zapnutí ze starého klienta nesmí shodit zimu na obyčejné „on"
+    next = enabled ? (isWinter() ? 'winter' : 'on') : 'off';
+  } else {
+    return res.status(400).json({ error: 'Chybí mode (off/on/winter).' });
   }
-  if (state.autoEnabled !== enabled) {
-    state.autoEnabled = enabled;
-    addLog(`Automatika: ${enabled ? 'zapnuta' : 'vypnuta'} ručně`);
-    broadcast('automation', { enabled });
+  setAutoMode(next, 'ručně');
+  res.json(automationPayload());
+});
+
+// Obnova po deployi: zimní režim je nastavení na měsíce, po restartu by se jinak vrátil
+// na „zapnuto" a spustil bazén. Telefon drží zálohu a nabídne ji, dokud na režim
+// od startu procesu nikdo nesáhl.
+app.post('/api/automation/restore', (req, res) => {
+  const { mode } = req.body || {};
+  if (AUTO_MODES.includes(mode) && !autoModeTouched) {
+    if (state.autoMode !== mode) {
+      state.autoMode = mode;
+      addLog(`Automatika: ${AUTO_MODE_LABELS[mode]} (obnoveno z telefonu)`);
+      broadcast('automation', automationPayload());
+    }
+    autoModeTouched = true;   // ať druhý telefon se starší zálohou první nepřebije
   }
-  res.json({ enabled: state.autoEnabled });
+  res.json(automationPayload());
 });
 
 // Teplotní automatika klimatizace — přepínač per pokoj (ložnice/elenka/miky)
@@ -1073,12 +1129,15 @@ function thresholdPayload() {
   return {
     tempAutoOn: state.tempAutoOn,
     tempAutoOnRooms: state.tempAutoOnRooms,
+    tempAutoWinter: state.tempAutoWinter,
+    tempAutoWinterRooms: state.tempAutoWinterRooms,
     // Meze jezdců posílá server, ať je appka nemá napsané zvlášť a nenabídne hodnotu,
     // kterou by pak endpoint odmítl
     tempAutoLimits: {
       shared: tempAutoLimits(),
       rooms: Object.fromEntries(Object.keys(state.tempAutoOnRooms).map(k => [k, tempAutoLimits(k)]))
-    }
+    },
+    tempAutoWinterLimits: { min: TEMP_AUTO_WINTER_MIN, max: TEMP_AUTO_WINTER_MAX }
   };
 }
 // Rozsah je per pokoj — obývák má vlastní (22–26 °C), zbytek společný (18–25 °C)
@@ -1086,27 +1145,42 @@ const validThreshold = (t, roomKey) => {
   const { min, max } = tempAutoLimits(roomKey);
   return Number.isInteger(t) && t >= min && t <= max;
 };
+// Zimní cíl má jeden rozsah pro všechny pokoje
+const validWinterTarget = t =>
+  Number.isInteger(t) && t >= TEMP_AUTO_WINTER_MIN && t <= TEMP_AUTO_WINTER_MAX;
 
 // Spínací teplota. Bez `key` jde o společnou mez (Ložnice, Elenka, Miky),
 // s `key` o mez pokoje, který má vlastní jezdec (obývák).
+// S `winter: true` se nastavuje zimní CÍLOVÁ teplota, ne letní spínací mez.
 app.post('/api/tempauto/threshold', (req, res) => {
   if (!requireAuth(req, res)) return;
   const temp = Number(req.body && req.body.temp);
   const key = req.body && req.body.key;
-  if (key !== undefined && !Object.prototype.hasOwnProperty.call(state.tempAutoOnRooms, key)) {
+  const winter = !!(req.body && req.body.winter);
+  const rooms = winter ? state.tempAutoWinterRooms : state.tempAutoOnRooms;
+  if (key !== undefined && !Object.prototype.hasOwnProperty.call(rooms, key)) {
     return res.status(400).json({ error: 'Tenhle pokoj nemá vlastní mez.' });
   }
-  if (!validThreshold(temp, key)) {
-    const { min, max } = tempAutoLimits(key);
+  if (winter ? !validWinterTarget(temp) : !validThreshold(temp, key)) {
+    const { min, max } = winter
+      ? { min: TEMP_AUTO_WINTER_MIN, max: TEMP_AUTO_WINTER_MAX }
+      : tempAutoLimits(key);
     return res.status(400).json({ error: `Teplota musí být celé číslo ${min}–${max} °C.` });
   }
-  const current = key !== undefined ? state.tempAutoOnRooms[key] : state.tempAutoOn;
+  const current = key !== undefined ? rooms[key] : (winter ? state.tempAutoWinter : state.tempAutoOn);
   if (current !== temp) {
-    if (key !== undefined) state.tempAutoOnRooms[key] = temp;
+    if (key !== undefined) rooms[key] = temp;
+    else if (winter) state.tempAutoWinter = temp;
     else state.tempAutoOn = temp;
-    const l = tempAutoLevels(key);
     const rule = key !== undefined ? TEMP_AUTO_RULES.find(r => r.key === key) : null;
-    addLog(`Teplotní automatika${rule ? ' ' + rule.room : ''}: spínat při ${l.onTemp} °C (vypínat při ${l.offTemp} °C)`);
+    const kde = `Teplotní automatika${rule ? ' ' + rule.room : ''}`;
+    if (winter) {
+      addLog(`${kde}: zima — držet na ${temp} °C`
+        + ` (zapnout při rozdílu ${TEMP_AUTO_WINTER_ON_DIFF} °C, vypnout do ${TEMP_AUTO_WINTER_OFF_DIFF} °C)`);
+    } else {
+      const l = tempAutoLevels(key);
+      addLog(`${kde}: spínat při ${l.onTemp} °C (vypínat při ${l.offTemp} °C)`);
+    }
     broadcast('tempAutoOn', thresholdPayload());
     if (panasonicEnabled) setTimeout(pollAircon, 500); // hned přehodnotit podle nové meze
   }
@@ -1127,6 +1201,19 @@ app.post('/api/tempauto/restore', (req, res) => {
       const v = Number(rooms[key]);
       if (validThreshold(v, key) && state.tempAutoOnRooms[key] !== v) {
         state.tempAutoOnRooms[key] = v; changed = true;
+      }
+    }
+  }
+  const zima = Number(b.tempAutoWinter);
+  if (validWinterTarget(zima) && state.tempAutoWinter !== zima) {
+    state.tempAutoWinter = zima; changed = true;
+  }
+  const zimaRooms = b.tempAutoWinterRooms;
+  if (zimaRooms && typeof zimaRooms === 'object') {
+    for (const key of Object.keys(state.tempAutoWinterRooms)) {
+      const v = Number(zimaRooms[key]);
+      if (validWinterTarget(v) && state.tempAutoWinterRooms[key] !== v) {
+        state.tempAutoWinterRooms[key] = v; changed = true;
       }
     }
   }
@@ -1484,6 +1571,18 @@ function solinatorRollDay(today) {
   state.solinator.bonusMs = 0;
 }
 
+// Zimní přelom dne: den se jen přepíše, nic se nepřenáší a nikde se o tom nepíše.
+// Po návratu ze zimy tak solinátor začíná s čistým štítem.
+function solinatorFreezeDay(today) {
+  const s = state.solinator;
+  if (s.date === today && !s.bonusMs && !s.boostMs && !s.carryMs) return;
+  s.date = today;
+  s.bonusMs = 0;
+  s.boostMs = 0;
+  s.carryMs = 0;
+  broadcastSolinator();
+}
+
 // Odhad, kolik solinátor pojede zítra — ať je po stisku boostu hned vidět, co to
 // s dalším dnem udělá. Přenos se počítá stejným pravidlem jako o půlnoci, jen
 // s odhadem, kolik se do konce dnešního okna ještě stihne odběhnout.
@@ -1715,6 +1814,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
 // Bazén (podle samostatného Shelly skriptu): zapíná z přetoku (2× nad 1850 W),
 // vypíná 3× pod −200 W po min. 30 min běhu, s ochranou baterie podle hodiny a SOC.
 async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
+  if (isWinter()) return;                 // v zimě bazén spí (vypíná ho enforceWinterOff)
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   const isOn = pool.isOn;
@@ -1815,12 +1915,16 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
     return;
   }
 
-  // Bojler smí topit jen když běží bazén
-  const pool = state.devices.pool;
-  if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
-  if (!pool.isOn) {
-    if (isOn) await autoSet('shelly', 'off', 'bazén neběží');
-    return;
+  // Bojler smí topit jen když běží bazén — bazén je levný ukazatel, že je opravdový
+  // přebytek. V zimě ale bazén nejede vůbec, takže by se bojler nikdy nezapnul; tam se
+  // rozhoduje jen podle přebytku (prahy níž zůstávají stejné).
+  if (!isWinter()) {
+    const pool = state.devices.pool;
+    if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
+    if (!pool.isOn) {
+      if (isOn) await autoSet('shelly', 'off', 'bazén neběží');
+      return;
+    }
   }
 
   // Rychlá ochrana: odběr ze sítě pod −300 W → vypnout
@@ -1866,10 +1970,23 @@ function outsideSolinatorWindow(now, prague, weather) {
 // a hlavní automatika se kvůli tomu vůbec neprovede (v noci spí → bazén by jel do rána).
 // Normální rozhodování bazénu zůstává v runPoolAutomation.
 async function enforcePoolOffWindow(now, prague, weather) {
+  if (isWinter()) return;                 // v zimě to řeší enforceWinterOff
   const pool = state.devices.pool;
   if (!pool || pool.isOn !== true) return;
   if (!afterSunsetCutoff(now, prague, weather)) return;
   await autoSet('pool', 'off', 'západ slunce');
+  poolAuto.overCount = 0;
+  poolAuto.underCount = 0;
+}
+
+// Zima: bazén i solinátor spí. Vypíná se běžným autoSet (bez `force`), takže půlhodinový
+// odklad po ručním zásahu platí i tady — filtraci si na chvíli pustíš, když zazimováváš.
+async function enforceWinterOff() {
+  if (!isWinter()) return;
+  for (const key of ['pool', 'solinator']) {
+    const dev = state.devices[key];
+    if (dev && dev.isOn === true) await autoSet(key, 'off', 'zimní režim');
+  }
   poolAuto.overCount = 0;
   poolAuto.underCount = 0;
 }
@@ -1901,6 +2018,14 @@ async function runSolinatorAutomation(now, prague, weather) {
   const sol = state.devices.solinator;
   const isOn = sol && sol.isOn;              // null = stav neznámý (Shelly nedostupné)
   const today = pragueDateString();
+
+  // Zima: rozpočet se vůbec nepočítá. Kdyby se počítal, přenášel by se každý den
+  // nesplněný cíl (strop 3 h) — log by se přes zimu zaplnil hláškami o přenosu a na jaře
+  // by první den začal se třemi hodinami dluhu. Vypnutí řeší enforceWinterOff.
+  if (isWinter()) {
+    solinatorFreezeDay(today);
+    return;
+  }
 
   // Přelom dne: nedoběhnutý zbytek se přenese do dnešního boostu
   solinatorRollDay(today);
@@ -2072,13 +2197,16 @@ async function runAutomation() {
     }
 
     // Hlavní vypínač: počasí se stahuje dál (kvůli zobrazení), ale zařízení nesaháme
-    if (!state.autoEnabled) return;
+    if (!autoRunning()) return;
 
     const now = Date.now();
     const prague = pragueTime();
 
     // Nejdřív to, co se řídí jen časem — solinátor střídač vůbec nepotřebuje a vypnutí
     // po západu se nesmí ztratit, když střídač v noci spí a jeho data zestárnou.
+    // Zimní vypnutí patří sem ze stejného důvodu: v noci střídač spí a bazén by jinak
+    // zůstal běžet do rána.
+    await enforceWinterOff();
     await runSolinatorAutomation(now, prague, weather);
     await enforcePoolOffWindow(now, prague, weather);
 
@@ -3071,6 +3199,18 @@ function tempAutoLevels(roomKey) {
   const coolTemp = coolMax === null ? onTemp - 2 : Math.min(coolMax, onTemp - 2);
   return { onTemp, offTemp: onTemp - 1, coolTemp };
 }
+// Zima: jezdec je CÍLOVÁ teplota, ne spínací mez. Zapne se při rozdílu 2 °C na
+// kteroukoli stranu (topení i chlazení — o to se v režimu AUTO postará jednotka),
+// vypne, jakmile je pokoj do 1 °C od cíle. Rozsah je pro všechny pokoje stejný:
+// cílová teplota znamená totéž bez ohledu na to, kde se měří.
+const TEMP_AUTO_WINTER_MIN = 18;
+const TEMP_AUTO_WINTER_MAX = 24;
+const TEMP_AUTO_WINTER_ON_DIFF = 2;
+const TEMP_AUTO_WINTER_OFF_DIFF = 1;
+function tempAutoWinterTarget(roomKey) {
+  const own = roomKey !== undefined ? state.tempAutoWinterRooms[roomKey] : undefined;
+  return own !== undefined ? own : state.tempAutoWinter;
+}
 // Minimální doby chodu i klidu — ať kompresor necyklu je po pár minutách
 const TEMP_AUTO_MIN_OFF_MS = 20 * 60 * 1000; // po vypnutí drž vypnuté aspoň 20 min
 const TEMP_AUTO_MIN_ON_MS = 20 * 60 * 1000;  // po zapnutí nech běžet aspoň 20 min
@@ -3178,7 +3318,18 @@ async function evaluateTempAuto(devices) {
     const now = Date.now();
     const canTurnOn = now >= (tempAutoOffAt[rule.key] || 0) + TEMP_AUTO_MIN_OFF_MS;
     const canTurnOff = now >= (tempAutoOnAt[rule.key] || 0) + TEMP_AUTO_MIN_ON_MS;
-    if (temp >= onTemp && dev.power !== true && canTurnOn) {
+    if (isWinter()) {
+      // Zima: pásmo kolem cílové teploty, jednotka si v AUTO topení i chlazení řídí sama
+      const cil = tempAutoWinterTarget(rule.key);
+      const rozdil = Math.abs(temp - cil);
+      if (rozdil >= TEMP_AUTO_WINTER_ON_DIFF && dev.power !== true && canTurnOn) {
+        parameters = { operate: 1, operationMode: PCC_MODES.auto, temperatureSet: cil, ecoMode: rule.quiet ? 2 : 0 };
+        msg = `${dev.name}: zapnuto AUTO na ${cil} °C (v pokoji ${temp} °C${src})`;
+      } else if (rozdil <= TEMP_AUTO_WINTER_OFF_DIFF && dev.power === true && canTurnOff) {
+        parameters = { operate: 0 };
+        msg = `${dev.name}: vypnuto (v pokoji ${temp} °C${src}, cíl ${cil} °C)`;
+      }
+    } else if (temp >= onTemp && dev.power !== true && canTurnOn) {
       parameters = { operate: 1, operationMode: PCC_MODES.cool, temperatureSet: coolTemp, ecoMode: rule.quiet ? 2 : 0 };
       msg = `${dev.name}: zapnuto chlazení ${coolTemp} °C (v pokoji ${temp} °C${src}, mez ${onTemp} °C)`;
     } else if (temp <= offTemp && dev.power === true && canTurnOff) {
@@ -3193,7 +3344,7 @@ async function evaluateTempAuto(devices) {
       if (parameters.operate === 0) { tempAutoOffAt[rule.key] = Date.now(); delete tempAutoOnAt[rule.key]; }
       else tempAutoOnAt[rule.key] = Date.now();
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
-      if (parameters.operationMode !== undefined) dev.mode = 'cool';
+      if (parameters.operationMode !== undefined) dev.mode = isWinter() ? 'auto' : 'cool';
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
       addLog(`Teplotní automatika — ${msg}`);
       broadcast('aircon', { aircon: state.aircon });
@@ -3518,9 +3669,12 @@ app.post('/api/wallbox/set', async (req, res) => {
   try {
     await wbSetMode(mode);
     state.wallbox = { ...state.wallbox, mode };
+    state.wbLastTarget = null;
     recordWbMode(mode);
     broadcast('wallbox', { wallbox: state.wallbox });
-    addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]}`);
+    setWbManualHold();   // automatika ho 3 h nepřepíše
+    addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]} ručně`
+      + ` (automatika převezme v ${fmtPragueTime(state.wbManualUntil)})`);
     res.json({ success: true });
     // Po 3 s obnovíme stav, ať se ukáže potvrzený režim
     setTimeout(pollWallbox, 3000);
@@ -3653,6 +3807,9 @@ function wbUpdateEcoGate() {
 // Cílový režim wallboxu (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
+  // Zima: čekat na 2,5 kW z FVE nemá smysl a záloha v 10:00 by ECO otvírala každý den
+  // ze sítě. Radši rovnou FAST — ranní přepínač ani branka denního okna se neuplatní.
+  if (isWinter()) return 'fast';
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return null; // bez dat neměníme
   const now = Date.now();
@@ -3667,9 +3824,25 @@ function ecWallboxTarget() {
   return wbEcoGateOpen() ? 'eco' : 'green';
 }
 
+// Ruční přepnutí režimu wallboxu drží 3 hodiny. Bez toho by ho automatika přepsala do
+// dvou minut (ruční zásah nuluje wbLastTarget) — a v zimě, kde je cíl pořád FAST, by
+// ruční ECO/GREEN nešlo nastavit vůbec. Relé mají svůj odklad v manualHold; wallbox
+// není v DEVICES, tak má vlastní razítko.
+const WB_MANUAL_HOLD_MS = 3 * 60 * 60 * 1000;
+function wbManualHeld() { return Date.now() < (state.wbManualUntil || 0); }
+function setWbManualHold() {
+  state.wbManualUntil = Date.now() + WB_MANUAL_HOLD_MS;
+  broadcast('wbAuto', wbSwitchPayload());
+}
+function clearWbManualHold() {
+  if (!state.wbManualUntil) return;
+  state.wbManualUntil = 0;
+  broadcast('wbAuto', wbSwitchPayload());
+}
+
 // Čeká se teď na rozjezd výroby? (jen pro nápovědu v appce)
 function wbWaitingForSun() {
-  if (!state.wbAuto) return false;
+  if (!state.wbAuto || isWinter()) return false;
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return false;
   const now = Date.now();
@@ -3682,7 +3855,7 @@ let wbPrevMorningState = null;  // ať se přepínač i nápověda v appce samy 
 
 async function runEnergyControl() {
   if (!wallboxEnabled || wbControlRunning) return;
-  if (!state.autoEnabled) return; // hlavní vypínač automatiky
+  if (!autoRunning()) return; // hlavní vypínač automatiky
   wbControlRunning = true;
   try {
     // Když se auto právě PŘIPOJILO (odpojeno/dokončeno → připraveno/nabíjí), vynutíme
@@ -3706,6 +3879,7 @@ async function runEnergyControl() {
     }
 
     const target = ecWallboxTarget();
+    if (wbManualHeld()) return;   // ruční režim drží, automatika ho nepřepisuje
     if (target && state.wbLastTarget !== target) {
       await wbSetMode(target);
       state.wbLastTarget = target;
@@ -3733,7 +3907,10 @@ function wbSwitchPayload() {
     wbWaitingForSun: wbWaitingForSun(),
     wbPvKw: wbPvKw(),
     wbEcoPvKw: WB_ECO_PV_KW,
-    wbEcoFallbackHour: WB_ECO_FALLBACK_HOUR
+    wbEcoFallbackHour: WB_ECO_FALLBACK_HOUR,
+    // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
+    wbWinter: isWinter(),
+    wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0
   };
 }
 
@@ -3743,6 +3920,8 @@ app.post('/api/wallbox/auto', async (req, res) => {
   const { auto } = req.body || {};
   if (typeof auto !== 'boolean') return res.status(400).json({ error: 'auto musí být true/false.' });
   state.wbAuto = auto;
+  // Přepnutí celého wallboxu je novější rozhodnutí než dřívější ruční režim — odklad padá
+  state.wbManualUntil = 0;
   broadcast('wbAuto', wbSwitchPayload());
   addLog(`Wallbox: přepnuto na ${auto ? 'AUTO' : 'FAST'}`);
   res.json(wbSwitchPayload());
@@ -3955,7 +4134,9 @@ async function assistantSetWallbox(mode) {
   if (WB_MODES[mode] === undefined) return `Režim „${mode}" neznám.`;
   await wbSetMode(mode);
   state.wallbox = { ...state.wallbox, mode };
+  state.wbLastTarget = null;
   broadcast('wallbox', { wallbox: state.wallbox });
+  setWbManualHold();   // i pokyn asistentovi je ruční zásah
   addLog(`Wallbox: režim ${WB_MODE_LABELS[mode]} (asistent)`);
   setTimeout(pollWallbox, 3000);
   return `Wallbox: režim ${WB_MODE_LABELS[mode]}.`;
@@ -3965,6 +4146,7 @@ async function assistantSetWallbox(mode) {
 function assistantSetWallboxAuto(auto) {
   if (!wallboxEnabled) return 'Wallbox není nastaven.';
   state.wbAuto = !!auto;
+  state.wbManualUntil = 0;   // novější rozhodnutí ruší odklad ručního režimu
   broadcast('wbAuto', wbSwitchPayload());
   addLog(`Wallbox: přepnuto na ${state.wbAuto ? 'AUTO' : 'FAST'} (asistent)`);
   state.wbLastTarget = null; // vynuť okamžité nastavení režimu
