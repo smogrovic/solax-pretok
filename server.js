@@ -3684,12 +3684,15 @@ app.post('/api/wallbox/set', async (req, res) => {
 });
 
 // ---------- Řízení režimu wallboxu (den ECO, noc FAST/GREEN) ----------
-// V režimu AUTO má den čtyři fáze:
-//   noc      (do konce noci = východ + 1 h, nejpozději 8:00)  FAST, nebo GREEN, když
-//                                                             auto ráno nepotřebuju
+// V režimu AUTO má den pět fází:
+//   večer    (od západu − 1 h do půlnoci)                     GREEN — jen přebytek
+//   noc      (půlnoc → WB_NIGHT_FAST_HOUR)                    GREEN
+//   dobíjení (3:00 → konec noci = východ + 1 h, nejpozd. 8:00) FAST, když auto ráno
+//                                                             potřebuju, jinak GREEN
 //   čekání   (konec noci → otevření denního okna)             GREEN — jen přebytek
 //   den      (okno otevřené → západ − 1 h)                    ECO
-//   večer    (od západu − 1 h)                                zase FAST/GREEN podle rána
+// FAST schválně nezačíná hned po západu: večer se baterka hodí baráku, a do rána se
+// auto stihne dobít i tak. Za celou noc se tedy ze sítě bere jen mezi 3:00 a ránem.
 // Denní okno se NEOTEVÍRÁ podle hodin: čeká se, až FVE reálně vyrábí (2× po sobě nad
 // prahem), nejpozději se otevře ve WB_ECO_FALLBACK_HOUR. ECO má totiž pevné minimum
 // 6 A, takže při slabém slunci dobírá ze sítě — a to je přesně to, čemu se ráno vyhýbáme.
@@ -3713,6 +3716,9 @@ const EC = {
 const WB_ECO_PV_KW = 2.5;         // výroba, která pokryje 6 A do auta i běžný barák
 const WB_ECO_PV_HITS = 2;         // 2× po sobě, ať okno neotevře jeden pruh slunce
 const WB_ECO_FALLBACK_HOUR = 10;  // zataženo celý den → v 10:00 se otevře stejně
+// Noční FAST nezačíná hned po západu, ale až ve 3:00. Večer je baterka potřeba pro
+// barák; do rána se auto stihne dobít i tak (3:00 → konec noci jsou nejmíň 3 hodiny).
+const WB_NIGHT_FAST_HOUR = 3;
 const WB_PV_MAX_AGE_MS = 15 * 60 * 1000; // starší data o výrobě neberem
 
 let wbControlRunning = false;
@@ -3722,12 +3728,13 @@ function wbEcoStartMs(w) {
   return w.sys.sunrise * 1000 + EC.SUN_ECO_AFTER_SUNRISE_S * 1000;
 }
 
-// Pražských 8:00 toho dne, do kterého spadá `ms`
-const WB_MORNING_LATEST_HOUR = 8;
-function wbEightOnDayOf(ms) {
+// Pražská celá hodina toho dne, do kterého spadá `ms`
+function wbHourOnDayOf(ms, hour) {
   const p = pragueTime(ms);
-  return ms - (p.hour * 3600000 + p.minute * 60000) + WB_MORNING_LATEST_HOUR * 3600000;
+  return ms - (p.hour * 3600000 + p.minute * 60000) + hour * 3600000;
 }
+const WB_MORNING_LATEST_HOUR = 8;
+const wbEightOnDayOf = ms => wbHourOnDayOf(ms, WB_MORNING_LATEST_HOUR);
 
 // Konec dnešní noci: východ + 1 h, nejpozději v 8:00 (v zimě se slunce nedočkáme).
 // Od té chvíle se nikdy nejede FAST — buď je otevřené denní okno (ECO), nebo se na
@@ -3813,11 +3820,15 @@ function ecWallboxTarget() {
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return null; // bez dat neměníme
   const now = Date.now();
-  const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  const eveningStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  const nightEnd = wbNightEndMs(w, now);
   // Pořadí podmínek: večer musí vyhrát nad denní větví (konec noci je to už dávno za námi)
-  if (now >= fastStart || now < wbNightEndMs(w, now)) {
-    // Večer a v noci: buď se dobíjí naplno, nebo se čeká na slunce
-    return wbMorningNeed() ? 'fast' : 'green';
+  if (now >= eveningStart || now < nightEnd) {
+    if (!wbMorningNeed()) return 'green';   // čeká se na slunce, celou noc jen přebytek
+    // FAST až od 3:00. Podmínka `now < nightEnd` je podstatná: bez ní by 3:00 téhož dne
+    // platila i večer ve 21:00 a FAST by naskočil přesně tam, odkud ho odsouváme.
+    const fastFrom = wbHourOnDayOf(now, WB_NIGHT_FAST_HOUR);
+    return now < nightEnd && now >= fastFrom ? 'fast' : 'green';
   }
   // Přes den: ECO až od chvíle, kdy FVE opravdu vyrábí. Do té doby GREEN — z přebytku
   // se nabíjí taky, jen se nic nedobírá ze sítě ani z baterky.
@@ -3846,8 +3857,8 @@ function wbWaitingForSun() {
   const w = weatherCache.data;
   if (!w || !w.sys || w.sys.sunrise === undefined || w.sys.sunset === undefined) return false;
   const now = Date.now();
-  const fastStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
-  return now >= wbNightEndMs(w, now) && now < fastStart && !wbEcoGateOpen();
+  const eveningStart = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  return now >= wbNightEndMs(w, now) && now < eveningStart && !wbEcoGateOpen();
 }
 
 let wbPrevStatus = null;
@@ -3908,6 +3919,7 @@ function wbSwitchPayload() {
     wbPvKw: wbPvKw(),
     wbEcoPvKw: WB_ECO_PV_KW,
     wbEcoFallbackHour: WB_ECO_FALLBACK_HOUR,
+    wbNightFastHour: WB_NIGHT_FAST_HOUR,
     // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
     wbWinter: isWinter(),
     wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0
