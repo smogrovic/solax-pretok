@@ -381,7 +381,6 @@
   .chlor-btn:disabled,.force-btn:disabled{opacity:0.55;}
   .pool-force{width:100%;margin-top:10px;}
   .pool-force-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-  .pool-force-btns:has(button[hidden]){grid-template-columns:1fr;}
   .pool-force-left{font-size:11px;color:var(--orange);margin-top:6px;text-align:center;}
   .pool-force-left:empty{display:none;}
   .chlor-btn.active-state{outline:2px solid currentColor;}
@@ -1738,7 +1737,7 @@
           <div class="pool-force">
             <div class="pool-force-btns">
               <button class="force-btn force-plus" id="poolForceBtn">+24 h</button>
-              <button class="force-btn force-minus" id="poolForceClearBtn" hidden>zrušit</button>
+              <button class="force-btn force-minus" id="poolForceClearBtn">zrušit</button>
             </div>
             <div class="pool-force-left" id="poolForceLeft"></div>
           </div>
@@ -3123,7 +3122,8 @@ function renderPoolForce() {
   if (!poolForceLeftEl) return;
   const left = poolForceUntil - Date.now();
   const bezi = left > 0;
-  if (poolForceClearBtn) poolForceClearBtn.hidden = !bezi;
+  // Tlačítko zůstává vidět i když není co rušit — schované by se nedalo najít
+  if (poolForceClearBtn) poolForceClearBtn.disabled = !bezi;
   if (!bezi) { poolForceLeftEl.textContent = ''; return; }
   const m = Math.round(left / 60000);
   poolForceLeftEl.textContent = `Běží natvrdo — zbývá ${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
@@ -3147,7 +3147,8 @@ async function poolForceCall(url, body) {
     errorEl.textContent = 'Bazén: ' + err.message;
     errorEl.classList.add('show');
   }
-  btns.forEach(b => { b.disabled = false; });
+  if (poolForceBtn) poolForceBtn.disabled = false;
+  renderPoolForce();   // zrušit smí zůstat zašedlé, když override doběhl
 }
 
 if (poolForceBtn) poolForceBtn.addEventListener('click', () => poolForceCall('/api/pool/force', { hours: 24 }));
