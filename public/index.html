@@ -2138,8 +2138,8 @@
           <ul class="logic-list">
             <li>Neřídí se časy, ale <b>kolik hodin má za den odběhnout</b>.</li>
             <li><b>Cíl</b> = <b>1 h</b> + <b>1 h</b> nad 20 °C + <b>1 h</b> nad 25 °C → nejvýš <b>3 h</b>.</li>
-            <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b>, takže cíl je znám už ráno.</li>
-            <li>Běží <b>od 12:00 do hodiny před západem</b>, pak se sám vypne.</li>
+            <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b>, takže cíl je znám už ráno. Drží se i odpoledne, kdy v předpovědi zbývají jen chladné večerní hodiny.</li>
+            <li>Běží <b>od 11:00 do hodiny před západem</b>, pak se sám vypne.</li>
             <li><b>Mimo okno je vždy vypnutý</b> — ruční zapnutí tam do 5 min zhasne.</li>
             <li><b>+1 h / −1 h</b> se sčítají (strop 8 h). Do logu se nezapisují.</li>
             <li>Co se nestihne, <b>přejde na další den</b> — nejvýš <b>3 h</b>, zbytek propadá.</li>
@@ -2857,7 +2857,7 @@ if (autoModeSliderEl) {
 }
 
 // ---------- Solinátor: boost (±1 h) a vypnutí (−1 den) podle chloru ----------
-let solinatorData = { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 };
+let solinatorData = { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, boostMs: 0, carryMs: 0, disabledUntil: 0 };
 // Odhad na zítřek počítá server (přenos z dneška + teplo z předpovědi)
 let solinatorPlanData = null;
 const solinatorStatusEl = document.getElementById('solinatorStatus');
@@ -3000,13 +3000,14 @@ function renderSolinatorCalc() {
   const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
 
   row('Základ', hm(3600000), 'každý den');
-  // Přirážku určuje nejvyšší dnešní teplota z předpovědi; bez ní se jede podle naměřené
-  const dnesMax = solinatorPlanData && typeof solinatorPlanData.todayMaxTempC === 'number'
-    ? solinatorPlanData.todayMaxTempC : null;
-  row('Přirážka za teplotu', '+' + hm(bonus),
-    dnesMax !== null
-      ? `z předpovědi ${Math.round(dnesMax)} °C`
-      : (bonus >= 2 * 3600000 ? 'venku bylo přes 25 °C' : (bonus > 0 ? 'venku bylo přes 20 °C' : 'zatím pod 20 °C')));
+  // Píšeme teplotu, ze které přirážka SKUTEČNĚ vznikla. Dopočítávat ji tady živě
+  // z předpovědi nejde: OWM během dne zahazuje uplynulé sloty, takže by k poctivým
+  // +2 h svítilo odpoledne třeba 16 °C.
+  const bt = typeof s.bonusTempC === 'number' ? Math.round(s.bonusTempC) : null;
+  const duvod = bt === null
+    ? (bonus >= 2 * 3600000 ? 'bylo přes 25 °C' : (bonus > 0 ? 'bylo přes 20 °C' : 'zatím pod 20 °C'))
+    : `${s.bonusSrc === 'now' ? 'naměřeno' : 'z předpovědi'} ${bt} °C`;
+  row('Přirážka za teplotu', '+' + hm(bonus), duvod);
   row('Boost tlačítky', sign(manual), manual ? 'mačkáno po hodině' : 'nemačkáno');
   row('Přeneseno ze včerejška', sign(carry),
     carry > 0 ? 'nedoběhnutý zbytek' : (carry < 0 ? 'včera namačkáno ubrat' : 'nic nezbylo'));
@@ -3021,8 +3022,8 @@ function renderSolinatorCalc() {
     ? new Date(weatherData.sunsetMs - 3600000).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
     : null;
   foot.textContent = (end
-    ? `Běží mezi 12:00 a ${end} (hodina před západem slunce). `
-    : 'Běží mezi 12:00 a hodinou před západem slunce. ')
+    ? `Běží mezi 11:00 a ${end} (hodina před západem slunce). `
+    : 'Běží mezi 11:00 a hodinou před západem slunce. ')
     + 'Co se nestihne, přejde na další den — a co se dnes nestihlo ubrat, taky. Nejvýš 3 h.';
   solinatorCalcEl.appendChild(foot);
 }
@@ -6138,6 +6139,8 @@ function applySnapshot(snap) {
   solinatorData = {
     date: serverSol.date || '',
     bonusMs: serverSol.bonusMs || 0,
+    bonusTempC: typeof serverSol.bonusTempC === 'number' ? serverSol.bonusTempC : null,
+    bonusSrc: serverSol.bonusSrc || null,
     boostMs: serverSol.boostMs || 0,
     carryMs: serverSol.carryMs || 0,
     disabledUntil: serverSol.disabledUntil || 0
@@ -6150,7 +6153,12 @@ function applySnapshot(snap) {
     // Rozpočet přebíráme jen pro tentýž den, jinak by se dnešek naplnil včerejškem
     if (localSol.date === todayStr()) {
       if (!solinatorData.date) solinatorData.date = localSol.date;
-      if (localSol.bonusMs > solinatorData.bonusMs) solinatorData.bonusMs = localSol.bonusMs;
+      if (localSol.bonusMs > solinatorData.bonusMs) {
+        solinatorData.bonusMs = localSol.bonusMs;
+        // S přirážkou i důvod, ať popisek po deployi neukazuje na jiné číslo
+        solinatorData.bonusTempC = typeof localSol.bonusTempC === 'number' ? localSol.bonusTempC : null;
+        solinatorData.bonusSrc = localSol.bonusSrc || null;
+      }
       // Boost a přenos můžou být i záporné (namačkané ubrání) — rozhoduje velikost
       for (const k of ['boostMs', 'carryMs']) {
         if (Math.abs(localSol[k] || 0) > Math.abs(solinatorData[k] || 0)) solinatorData[k] = localSol[k];

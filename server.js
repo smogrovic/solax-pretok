@@ -135,7 +135,9 @@ const state = {
   // Odběhnutý čas se bere z state.runtime.ms.solinator (nuluje se o pražské půlnoci).
   // carryMs je JEN informativní: kolik z boostMs pochází z přenosu předchozího dne.
   // Do výpočtu cíle nevstupuje (ten je základ + bonusMs + boostMs), slouží k rozpisu v appce.
-  solinator: { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 },
+  // bonusTempC/bonusSrc ('fc' = předpověď, 'now' = naměřeno) drží DŮVOD přirážky,
+  // ať appka nepíše k číslu teplotu dopočítanou o hodiny později
+  solinator: { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
@@ -1480,14 +1482,14 @@ const poolAuto = { overCount: 0, underCount: 0, lastOnTime: 0 };
 // Místo spouštění v přesné hodiny (kde se pravidlo při jakékoli překážce ztratilo)
 // si appka počítá, kolik hodin má solinátor za den celkem odběhnout, a podle toho
 // ho sama zapíná i vypíná. Boost i přenos do dalšího dne jsou pak jen číslo navíc.
-const SOLINATOR_START_HOUR = 12;              // dřív nezapínáme
+const SOLINATOR_START_HOUR = 11;              // dřív nezapínáme
 const HARD_OFF_HOUR = 20;                     // záložní mez, když není počasí (jinak západ − 1 h)
 const SOLINATOR_BASE_MS = 1 * 3600000;        // základ každý den
 const SOLINATOR_BONUS_WARM_MS = 1 * 3600000;  // + nad 20 °C
 const SOLINATOR_BONUS_HOT_MS = 2 * 3600000;   // + nad 25 °C (celkem, ne navíc k teplému)
 const SOLINATOR_MAX_MS = 8 * 3600000;         // strop ručního boostu (tlačítka po hodině)
 // Strop přenosu na další den, na obě strany (dluh i namačkané ubrání). Musí být tak
-// nízko, aby se denní cíl (1 + 2 + dluh = 6 h) vešel do okna 12:00 → západ − 1 h
+// nízko, aby se denní cíl (1 + 2 + dluh = 6 h) vešel do okna 11:00 → západ − 1 h
 // (v létě ~7,5 h). Jinak zůstane nesplněný zbytek i po dokonalém dni, přenese se,
 // a dluh se donekonečna obnovuje sám.
 const SOLINATOR_CARRY_MAX_MS = 3 * 3600000;
@@ -1569,6 +1571,8 @@ function solinatorRollDay(today) {
   }
   state.solinator.date = today;
   state.solinator.bonusMs = 0;
+  state.solinator.bonusTempC = null;
+  state.solinator.bonusSrc = null;
 }
 
 // Zimní přelom dne: den se jen přepíše, nic se nepřenáší a nikde se o tom nepíše.
@@ -1578,6 +1582,8 @@ function solinatorFreezeDay(today) {
   if (s.date === today && !s.bonusMs && !s.boostMs && !s.carryMs) return;
   s.date = today;
   s.bonusMs = 0;
+  s.bonusTempC = null;
+  s.bonusSrc = null;
   s.boostMs = 0;
   s.carryMs = 0;
   broadcastSolinator();
@@ -1612,11 +1618,7 @@ function solinatorPlan() {
   const disabled = state.solinator.disabledUntil > now - minutesIn + hoursMs(24 + SOLINATOR_START_HOUR);
   const targetMs = disabled ? 0 : Math.max(0, SOLINATOR_BASE_MS + (bonusMs || 0) + carryMs);
 
-  // todayMaxTempC je tu jen kvůli popisku v rozpisu („z předpovědi 33 °C" u dneška)
-  return {
-    date: pragueDateString(now + hoursMs(24)), targetMs, bonusMs, carryMs, maxTempC, disabled,
-    todayMaxTempC: forecastTodayTemp()
-  };
+  return { date: pragueDateString(now + hoursMs(24)), targetMs, bonusMs, carryMs, maxTempC, disabled };
 }
 
 // ---------- Korekce prahů podle předpovědi výroby (Infigy SP_FORECAST_PV) ----------
@@ -1675,15 +1677,23 @@ async function fetchWeather() {
 }
 
 // Předpověď — podle ní se nastaví dnešní čas solinátoru a odhadne zítřejší. Zajímá nás
-// nejvyšší teplota v okně, kdy solinátor vůbec jezdí (12:00 → 20:00), protože přirážka
-// za teplo patří k němu. Maxima se drží po dnech; dotaz nejvýš jednou za hodinu, výpadek
-// nevadí — pak se jede podle aktuální teploty jako dřív.
-let forecastCache = { ts: 0, day: {} };
+// nejvyšší teplota v okně, kdy solinátor vůbec jezdí (11:00 → 20:00), protože přirážka
+// za teplo patří k němu. Dotaz nejvýš jednou za hodinu, výpadek nevadí — pak se jede
+// podle aktuální teploty jako dřív.
+//
+// POZOR na past: OpenWeather posílá sloty po 3 h a JEN DOPŘEDU, uplynulé z odpovědi
+// zmizí. Kdybychom denní maximum skládali pokaždé znovu jen z toho, co v odpovědi je,
+// scvrkávalo by se během dne samo — ráno 26 °C (slot ve 14:00), večer už jen 16 °C
+// (zbylý slot ve 20:00). Proto se drží JEDNOTLIVÉ SLOTY: co v odpovědi je, se přepíše
+// (budoucnost se smí revidovat), co z ní vypadlo, si podrží poslední známou hodnotu.
+let forecastCache = { ts: 0, slots: {} };   // 'YYYY-MM-DD' -> { '14': 26.1, '17': 24 }
 const FORECAST_TTL_MS = 60 * 60 * 1000;
 
 function forecastMaxFor(dateStr) {
-  const v = forecastCache.day[dateStr];
-  return typeof v === 'number' ? v : null;
+  const den = forecastCache.slots[dateStr];
+  if (!den) return null;
+  const hodnoty = Object.values(den).filter(v => typeof v === 'number');
+  return hodnoty.length ? Math.max(...hodnoty) : null;
 }
 function forecastTodayTemp() { return forecastMaxFor(pragueDateString()); }
 function forecastTomorrowTemp() { return forecastMaxFor(pragueDateString(Date.now() + 24 * 3600000)); }
@@ -1693,14 +1703,19 @@ async function refreshForecast() {
   const tomorrow = pragueDateString(Date.now() + 24 * 3600000);
   // Po půlnoci se sice „dnešek" posune, ale ten už v předpovědi stejně je — hlídáme
   // jen to, aby v cache byl zítřek a aby nebyla starší než hodinu
-  if (forecastCache.day[tomorrow] !== undefined && Date.now() - forecastCache.ts < FORECAST_TTL_MS) return;
+  if (forecastCache.slots[tomorrow] !== undefined && Date.now() - forecastCache.ts < FORECAST_TTL_MS) return;
   try {
     const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${WEATHER_LAT}&lon=${WEATHER_LON}&appid=${OWM_API_KEY}&units=metric`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return;
     const data = await res.json();
     if (!data || !Array.isArray(data.list)) return;
-    const day = {};
+    // Staré dny zahodit, ať mapa neroste; zbytek si necháme i pro sloty mimo odpověď
+    const dnes = pragueDateString();
+    const slots = {};
+    for (const d of Object.keys(forecastCache.slots)) {
+      if (d >= dnes) slots[d] = { ...forecastCache.slots[d] };
+    }
     for (const slot of data.list) {
       const t = slot && slot.main && slot.main.temp;
       if (typeof t !== 'number' || typeof slot.dt !== 'number') continue;
@@ -1708,9 +1723,11 @@ async function refreshForecast() {
       const hour = pragueTime(ms).hour;
       if (hour < SOLINATOR_START_HOUR || hour > HARD_OFF_HOUR) continue;
       const d = pragueDateString(ms);
-      if (day[d] === undefined || t > day[d]) day[d] = t;
+      if (d < dnes) continue;              // minulé dny nezajímají (OWM je sice neposílá)
+      if (!slots[d]) slots[d] = {};
+      slots[d][String(hour)] = t;
     }
-    forecastCache = { ts: Date.now(), day };
+    forecastCache = { ts: Date.now(), slots };
   } catch {
     // necháme starou hodnotu; když žádná není, jede se podle aktuální teploty
   }
@@ -2008,7 +2025,13 @@ function applyTempBonus(weather) {
   // Když je ubráno pod nulu, přirážka napřed umaže to „přeubráno" a cíl se zvedne
   // až z toho, co zbyde — o dorovnávání se starat nemusíme
   state.solinator.bonusMs = bonus;
-  const zdroj = fcTemp !== null && fcTemp >= (nowTemp === null ? -Infinity : nowTemp)
+  // Uložíme i DŮVOD. Rozhodnout může předpověď i naměřená teplota, a appka bez toho
+  // psala k přirážce živě dopočítanou předpověď — vedle poctivých +2 h pak svítilo
+  // scvrklých 16 °C, protože z odpovědi OWM mezitím vypadly polední sloty.
+  const zPredpovedi = fcTemp !== null && fcTemp >= (nowTemp === null ? -Infinity : nowTemp);
+  state.solinator.bonusTempC = zPredpovedi ? fcTemp : nowTemp;
+  state.solinator.bonusSrc = zPredpovedi ? 'fc' : 'now';
+  const zdroj = zPredpovedi
     ? `dnes až ${Math.round(fcTemp)} °C (předpověď)`
     : `venku ${Math.round(nowTemp)} °C`;
   addLog(`Solinátor: ${zdroj} → dnešní cíl ${fmtDur(solinatorTargetMs())}`);
@@ -2041,7 +2064,7 @@ async function runSolinatorAutomation(now, prague, weather) {
     return;
   }
 
-  // Povolené okno: od 12:00 do hodiny před západem. Mimo něj solinátor NIKDY nejede —
+  // Povolené okno: od 11:00 do hodiny před západem. Mimo něj solinátor NIKDY nejede —
   // vypínáme natvrdo, ne jen "return". Jinak by cokoliv, co jede o půlnoci, jelo dál
   // až do poledne: večerní mez se totiž po půlnoci zase rozpojí (západ už je zítřejší)
   // a odběhnutý čas se o půlnoci nuluje, takže ani rozpočet by to nezastavil.
@@ -2169,6 +2192,11 @@ app.post('/api/solinator/restore', (req, res) => {
       // Přirážka za teplotu je vždy kladná, boost a přenos můžou jít i do minusu
       if (k === 'bonusMs' ? v > state.solinator[k] : Math.abs(v) > Math.abs(state.solinator[k])) {
         state.solinator[k] = v; changed = true;
+        // S přirážkou se vrátí i důvod, jinak by po deployi popisek zase neseděl
+        if (k === 'bonusMs') {
+          state.solinator.bonusTempC = Number.isFinite(Number(b.bonusTempC)) ? Number(b.bonusTempC) : null;
+          state.solinator.bonusSrc = b.bonusSrc === 'fc' || b.bonusSrc === 'now' ? b.bonusSrc : null;
+        }
       }
     }
   }
