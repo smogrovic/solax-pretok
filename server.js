@@ -94,6 +94,9 @@ const state = {
   solax: null,       // poslední úspěšná data ze střídače
   devices: {},       // key -> { online, isOn, powerW, fetchedAt }
   poolPowerW: null,  // součet 3 PM měření bazénu
+  // Tlačítko „+24 h": bazén jede natvrdo do tohohle času, bez ohledu na přebytek,
+  // okno, SOC i zimní režim. Sčítá se po 24 h do stropu 72 h.
+  poolForce: { until: 0 },
   history: [],       // { t, kw } — přetok za posledních 24 h
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -208,11 +211,15 @@ function pruneHistory() {
   while (state.wallboxHistory.length && state.wallboxHistory[0].t < cutoff) state.wallboxHistory.shift();
 }
 
-function addLog(msg) {
+// level: 'error' se v appce vykreslí tučně červeně. Chybové záznamy si navíc drží
+// `tEnd` — dokud výpadek trvá, neroste počet řádků, jen se posouvá konec rozsahu.
+function addLog(msg, level) {
   const entry = { t: Date.now(), msg };
+  if (level) entry.level = level;
   state.log.push(entry);
   pruneHistory();
   broadcast('log', { entry });
+  return entry;
 }
 
 function addAssistantLog(text) {
@@ -235,6 +242,7 @@ function snapshot() {
     solax: state.solax,
     devices: state.devices,
     poolPowerW: state.poolPowerW,
+    poolForce: state.poolForce,
     history: state.history,
     log: state.log,
     autoMode: state.autoMode,
@@ -759,8 +767,13 @@ function registerSetEndpoint(key) {
       state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       broadcast('device', { key, status: state.devices[key] });
       setManualHold(key);   // automatika to půl hodiny nepřebije
+      // Vypnout bazén ručně a nechat ho +24 h za dvě minuty zase rozsvítit by bylo horší
+      // než kdyby tlačítko nefungovalo vůbec — OFF je novější rozhodnutí, tak override padá
+      const zrusenoForce = key === 'pool' && turn === 'off' && poolForceActive();
+      if (zrusenoForce) clearPoolForce();
       addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} ručně`
-        + (AUTOMATED_KEYS.includes(key) ? ` (automatika převezme v ${fmtPragueTime(state.manualHold[key])})` : ''));
+        + (AUTOMATED_KEYS.includes(key) ? ` (automatika převezme v ${fmtPragueTime(state.manualHold[key])})` : '')
+        + (zrusenoForce ? ' · zrušeno +24 h' : ''));
 
       res.json({ success: true, turn });
 
@@ -1431,19 +1444,69 @@ function checkOutages() {
     if (age > OUTAGE_ALERT_MS) {
       if (!notif.outage[s.key]) {
         notif.outage[s.key] = true;
-        addLog(`${s.label}: neodpovídá déle než 30 min`);
+        // Do logu se nepíše — to řeší logOutages(), tohle je jen push po půl hodině
         sendPushToAll('⚠️ Výpadek dat', `${s.label} neodpovídá déle než 30 min — automatika může jet naslepo.`);
       }
     } else if (notif.outage[s.key]) {
       notif.outage[s.key] = false;
+    }
+  }
+}
+
+// ---------- Výpadky dat v logu (červeně, jeden řádek na výpadek) ----------
+// Zdroj bereme za vypadlý, když jsou jeho data starší než DVA jeho dotazovací cykly —
+// jeden pomalý dotaz tak poplach nedělá. Dokud výpadek trvá, NEPŘIBÝVÁ řádek: posouvá se
+// jen `tEnd` toho stávajícího, takže v logu je „11:15–12:10" místo dvanácti řádků.
+const OUTAGE_LOG_FACTOR = 2;
+const outageLog = {};   // key -> záznam v state.log, který se zrovna prodlužuje
+
+function outageSources() {
+  const inf = state.infigy || {};
+  return [
+    { key: 'solax', label: 'Solax', on: true, every: POLL_INTERVAL_MS, ts: state.solax && state.solax.fetchedAt },
+    { key: 'shelly', label: 'Shelly', on: true, every: POLL_INTERVAL_MS, ts: shellyNewestFetchedAt() },
+    { key: 'wallbox', label: 'Wallbox', on: wallboxEnabled, every: POLL_INTERVAL_MS, ts: state.wallbox && state.wallbox.fetchedAt },
+    { key: 'infigy', label: 'Infigy', on: infigyEnabled, every: 5 * 60 * 1000, ts: inf.fetchedAt },
+    { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, every: 5 * 60 * 1000, ts: state.aircon && state.aircon.fetchedAt },
+    { key: 'weather', label: 'Počasí', on: !!OWM_API_KEY, every: 5 * 60 * 1000, ts: state.weather && state.weather.fetchedAt }
+  ];
+}
+// Shelly nemá jedno společné razítko — bereme nejčerstvější ze všech relé
+function shellyNewestFetchedAt() {
+  let best = 0;
+  for (const d of Object.values(state.devices || {})) {
+    const t = d && d.fetchedAt ? new Date(d.fetchedAt).getTime() : 0;
+    if (t > best) best = t;
+  }
+  return best || null;
+}
+
+function logOutages() {
+  const now = Date.now();
+  // Po startu dáme integracím čas naběhnout, ať nehlásíme planý poplach
+  if (now - SERVER_START_TS < 5 * 60 * 1000) return;
+  for (const s of outageSources()) {
+    if (!s.on) continue;
+    const ts = typeof s.ts === 'number' ? s.ts : (s.ts ? new Date(s.ts).getTime() : 0);
+    const stale = !ts || now - ts > s.every * OUTAGE_LOG_FACTOR;
+    if (stale) {
+      if (outageLog[s.key]) {
+        // Výpadek pokračuje — jen posuneme konec rozsahu, nový řádek nepřibývá
+        outageLog[s.key].tEnd = now;
+        broadcast('logUpdate', { entry: outageLog[s.key] });
+      } else {
+        outageLog[s.key] = addLog(`${s.label}: nedorazila data`, 'error');
+      }
+    } else if (outageLog[s.key]) {
+      outageLog[s.key] = null;
       addLog(`${s.label}: data znovu naskočila`);
     }
   }
 }
 
 // Hlídače pouštíme po 5 min (garáž si musí doptat TaHomu, proto ne častěji)
-setTimeout(() => { checkGarageOpen(); checkOutages(); }, 60000);
-setInterval(() => { checkGarageOpen(); checkOutages(); }, 5 * 60 * 1000);
+setTimeout(() => { checkGarageOpen(); checkOutages(); logOutages(); }, 60000);
+setInterval(() => { checkGarageOpen(); checkOutages(); logOutages(); }, 5 * 60 * 1000);
 
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
@@ -1834,6 +1897,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
 // vypíná 3× pod −200 W po min. 30 min běhu, s ochranou baterie podle hodiny a SOC.
 async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   if (isWinter()) return;                 // v zimě bazén spí (vypíná ho enforceWinterOff)
+  if (poolForceActive()) return;          // +24 h jede bez ohledu na přebytek, okno i SOC
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   const isOn = pool.isOn;
@@ -1990,6 +2054,7 @@ function outsideSolinatorWindow(now, prague, weather) {
 // Normální rozhodování bazénu zůstává v runPoolAutomation.
 async function enforcePoolOffWindow(now, prague, weather) {
   if (isWinter()) return;                 // v zimě to řeší enforceWinterOff
+  if (poolForceActive()) return;          // západ slunce +24 h nepřebije
   const pool = state.devices.pool;
   if (!pool || pool.isOn !== true) return;
   if (!afterSunsetCutoff(now, prague, weather)) return;
@@ -2003,11 +2068,35 @@ async function enforcePoolOffWindow(now, prague, weather) {
 async function enforceWinterOff() {
   if (!isWinter()) return;
   for (const key of ['pool', 'solinator']) {
+    // Bazén puštěný natvrdo tlačítkem +24 h běží i v zimě; solinátor spí dál
+    if (key === 'pool' && poolForceActive()) continue;
     const dev = state.devices[key];
     if (dev && dev.isOn === true) await autoSet(key, 'off', 'zimní režim');
   }
   poolAuto.overCount = 0;
   poolAuto.underCount = 0;
+}
+
+// ---------- Bazén natvrdo (tlačítko +24 h) ----------
+const POOL_FORCE_STEP_MS = 24 * 3600000;
+const POOL_FORCE_MAX_MS = 72 * 3600000;
+
+function poolForceActive() { return Date.now() < ((state.poolForce && state.poolForce.until) || 0); }
+function poolForceLeftMs() { return Math.max(0, ((state.poolForce && state.poolForce.until) || 0) - Date.now()); }
+function poolForcePayload() { return { poolForce: { until: poolForceActive() ? state.poolForce.until : 0 } }; }
+function clearPoolForce() {
+  if (!state.poolForce.until) return;
+  state.poolForce.until = 0;
+  broadcast('poolForce', poolForcePayload());
+}
+
+// Drží bazén zapnutý. Patří do časové části runAutomation — v noci střídač spí a bez
+// jeho dat by se sem řízení vůbec nedostalo. `force` proto, že +24 h je novější
+// rozhodnutí než případný půlhodinový odklad po dřívějším ručním vypnutí.
+async function enforcePoolForce() {
+  if (!poolForceActive()) return;
+  const pool = state.devices.pool;
+  if (pool && pool.isOn !== true) await autoSet('pool', 'on', 'ruční +24 h', { force: true });
 }
 
 // Přirážka za teplo se bere z NEJVYŠŠÍ dnešní teploty podle předpovědi, takže dnešní čas
@@ -2176,6 +2265,49 @@ app.post('/api/solinator/boost', (req, res) => {
   res.json({ solinator: solinatorBoost(hours), solinatorPlan: solinatorPlan() });
 });
 
+// Bazén natvrdo: +24 h se sčítá do stropu 72 h. Strop se počítá od TEĎ, ne od
+// posledního stisku — jinak by se dalo mačkáním doplazit dál, než na kolik je limit.
+app.post('/api/pool/force', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const hours = Number(req.body && req.body.hours);
+  if (!Number.isInteger(hours) || hours <= 0 || hours > 72) {
+    return res.status(400).json({ error: 'hours musí být celé číslo 1 až 72.' });
+  }
+  const now = Date.now();
+  const from = Math.max(now, state.poolForce.until || 0);
+  state.poolForce.until = Math.min(from + hours * 3600000, now + POOL_FORCE_MAX_MS);
+  clearManualHold('pool');   // +24 h je novější rozhodnutí než dřívější ruční vypnutí
+  addLog(`Bazén: +${hours} h natvrdo (do ${fmtPragueTime(state.poolForce.until)})`);
+  broadcast('poolForce', poolForcePayload());
+  res.json(poolForcePayload());
+  runAutomation().catch(() => {});   // ať se rozsvítí hned, ne až za pět minut
+});
+
+app.post('/api/pool/force/clear', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (poolForceActive()) {
+    clearPoolForce();
+    addLog('Bazén: +24 h zrušeno, jede zase automatika');
+  } else {
+    clearPoolForce();
+  }
+  res.json(poolForcePayload());
+  runAutomation().catch(() => {});   // automatika ho podle podmínek klidně hned vypne
+});
+
+// Až 72 h je na paměťový stav Renderu věčnost — telefon drží zálohu a po deployi ji vrátí
+app.post('/api/pool/force/restore', (req, res) => {
+  const until = Number(req.body && req.body.until);
+  if (Number.isFinite(until) && until > Date.now() && until > (state.poolForce.until || 0)
+      && until <= Date.now() + POOL_FORCE_MAX_MS) {
+    state.poolForce.until = until;
+    addLog(`Bazén: +24 h obnoveno z telefonu (do ${fmtPragueTime(until)})`);
+    broadcast('poolForce', poolForcePayload());
+    runAutomation().catch(() => {});
+  }
+  res.json(poolForcePayload());
+});
+
 app.post('/api/solinator/disable', (req, res) => {
   if (!requireAuth(req, res)) return;
   const days = Number(req.body && req.body.days);
@@ -2252,6 +2384,7 @@ async function runAutomation() {
     // Zimní vypnutí patří sem ze stejného důvodu: v noci střídač spí a bazén by jinak
     // zůstal běžet do rána.
     await enforceWinterOff();
+    await enforcePoolForce();
     await runSolinatorAutomation(now, prague, weather);
     await enforcePoolOffWindow(now, prague, weather);
 

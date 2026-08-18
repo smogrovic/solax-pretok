@@ -375,10 +375,15 @@
   .solinator-chlor{width:100%;margin-top:10px;}
   .solinator-chlor-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;}
   .solinator-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
-  .chlor-btn{border:none;border-radius:12px;padding:11px 2px;font-size:12px;font-weight:700;}
-  .chlor-plus{background:rgba(39,174,96,0.14);color:#1e7e46;}
-  .chlor-minus{background:rgba(231,76,60,0.14);color:#b03a2e;}
-  .chlor-btn:disabled{opacity:0.55;}
+  .chlor-btn,.force-btn{border:none;border-radius:12px;padding:11px 2px;font-size:12px;font-weight:700;}
+  .chlor-plus,.force-plus{background:rgba(39,174,96,0.14);color:#1e7e46;}
+  .chlor-minus,.force-minus{background:rgba(231,76,60,0.14);color:#b03a2e;}
+  .chlor-btn:disabled,.force-btn:disabled{opacity:0.55;}
+  .pool-force{width:100%;margin-top:10px;}
+  .pool-force-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .pool-force-btns:has(button[hidden]){grid-template-columns:1fr;}
+  .pool-force-left{font-size:11px;color:var(--orange);margin-top:6px;text-align:center;}
+  .pool-force-left:empty{display:none;}
   .chlor-btn.active-state{outline:2px solid currentColor;}
   .solinator-status{font-size:11px;color:var(--orange);font-weight:600;text-align:center;margin-top:8px;min-height:15px;}
   .solinator-status .cancel{color:var(--grey-text);text-decoration:underline;margin-left:8px;font-weight:600;}
@@ -477,6 +482,8 @@
     font-weight:700;
     white-space:nowrap;
   }
+  /* Výpadek dat — tučně červeně, ať se v logu nedá přehlédnout */
+  .log-entry.log-error, .log-entry.log-error .log-time{color:#c0392b;font-weight:700;}
   .log-empty{
     font-size:13px;
     color:var(--grey-text);
@@ -1728,6 +1735,13 @@
             <button class="power-btn off-btn" id="poolOffBtn">OFF</button>
           </div>
           <div class="manual-hold" id="poolHold"></div>
+          <div class="pool-force">
+            <div class="pool-force-btns">
+              <button class="force-btn force-plus" id="poolForceBtn">+24 h</button>
+              <button class="force-btn force-minus" id="poolForceClearBtn" hidden>zrušit</button>
+            </div>
+            <div class="pool-force-left" id="poolForceLeft"></div>
+          </div>
         </div>
 
         <div class="device-block last">
@@ -2119,6 +2133,7 @@
             <li><b>Vypnout:</b> 3× po sobě pod <b>−200 W</b>, po min. <b>30 min</b> běhu.</li>
             <li>Minimální SOC baterie: 12h <b>50 %</b> · 13h <b>60 %</b> · 14h <b>70 %</b> · 15h <b>80 %</b> · 16h <b>85 %</b> · 17h+ <b>90 %</b>.</li>
             <li>Vypnutí po západu je pojistka — pošle se i bez dat ze střídače.</li>
+            <li><b>+24 h</b> pustí bazén natvrdo <b>bez ohledu na cokoli</b> — přebytek, okno, SOC i zimní režim. Stisky se sčítají do <b>72 h</b>, vedle je odpočet a <b>zrušit</b>. Ruční <b>OFF</b> ho taky zruší.</li>
           </ul>
         </div>
 
@@ -2233,6 +2248,7 @@
             <li>Graf <b>Odhad vs. skutečnost</b>: ranní odhad (první po <b>7:00</b>), večerní odhad a skutečná výroba. Historie 14 dní, kreslí se 10.</li>
             <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž přes 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat přes 30 min.</li>
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
+            <li>Když zdroj (Solax, Shelly, wallbox, Infigy, klima, počasí) nedodá data déle než <b>dva své cykly</b>, objeví se v logu <b>červený řádek</b>. Dokud výpadek trvá, nepřibývají další — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10).
             <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
         </div>
@@ -2640,17 +2656,15 @@ function loadLogLocal() {
 }
 
 function mergeLogs(a, b) {
-  const seen = new Set();
-  const out = [];
+  const podle = new Map();
   for (const e of pruneOldLog(a.concat(b))) {
     const key = e.t + '|' + e.msg;
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(e);
-    }
+    const drivejsi = podle.get(key);
+    // Chybový záznam se v čase prodlužuje (roste tEnd) — vyhrát musí novější verze,
+    // ne ta, která přišla první
+    if (!drivejsi || (e.tEnd || 0) > (drivejsi.tEnd || 0)) podle.set(key, e);
   }
-  out.sort((x, y) => x.t - y.t);
-  return out;
+  return [...podle.values()].sort((x, y) => x.t - y.t);
 }
 
 async function maybeRestoreLogToServer(serverLog, localLog) {
@@ -2680,10 +2694,15 @@ function renderLog() {
   for (let i = logEntries.length - 1; i >= 0; i--) {
     const e = logEntries[i];
     const row = document.createElement('div');
-    row.className = 'log-entry';
+    row.className = 'log-entry' + (e.level === 'error' ? ' log-error' : '');
     const time = document.createElement('span');
     time.className = 'log-time';
-    time.textContent = new Date(e.t).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    const cas = ms => new Date(ms).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    // U trvajícího výpadku je místo jednoho času rozsah. Do minuty ho neukazujeme —
+    // „11:15–11:15" nikomu nic neřekne.
+    time.textContent = e.tEnd && e.tEnd - e.t >= 60000
+      ? `${cas(e.t)}–${cas(e.tEnd)}`
+      : cas(e.t);
     const msg = document.createElement('span');
     msg.textContent = e.msg;
     row.appendChild(time);
@@ -3083,8 +3102,74 @@ async function maybeRestoreSolinator(server, local) {
   } catch {}
 }
 
+// ---------- Bazén natvrdo (+24 h) ----------
+// Server posílá jen razítko „do kdy"; appka z něj kreslí odpočet a tlačítko zrušit.
+let poolForceUntil = 0;
+const poolForceBtn = document.getElementById('poolForceBtn');
+const poolForceClearBtn = document.getElementById('poolForceClearBtn');
+const poolForceLeftEl = document.getElementById('poolForceLeft');
+
+function applyPoolForce(d) {
+  if (!d || !d.poolForce) return;
+  poolForceUntil = Number(d.poolForce.until) || 0;
+  try {
+    if (poolForceUntil > Date.now()) localStorage.setItem('poolForce', String(poolForceUntil));
+    else localStorage.removeItem('poolForce');
+  } catch {}
+  renderPoolForce();
+}
+
+function renderPoolForce() {
+  if (!poolForceLeftEl) return;
+  const left = poolForceUntil - Date.now();
+  const bezi = left > 0;
+  if (poolForceClearBtn) poolForceClearBtn.hidden = !bezi;
+  if (!bezi) { poolForceLeftEl.textContent = ''; return; }
+  const m = Math.round(left / 60000);
+  poolForceLeftEl.textContent = `Běží natvrdo — zbývá ${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}
+
+async function poolForceCall(url, body) {
+  const btns = [poolForceBtn, poolForceClearBtn].filter(Boolean);
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    applyPoolForce(data);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Bazén: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  btns.forEach(b => { b.disabled = false; });
+}
+
+if (poolForceBtn) poolForceBtn.addEventListener('click', () => poolForceCall('/api/pool/force', { hours: 24 }));
+if (poolForceClearBtn) poolForceClearBtn.addEventListener('click', () => poolForceCall('/api/pool/force/clear'));
+
+// Až 72 h nepřežije deploy serveru — telefon drží zálohu a nabídne ji zpátky
+async function maybeRestorePoolForce(serverUntil) {
+  let local = 0;
+  try { local = Number(localStorage.getItem('poolForce')) || 0; } catch {}
+  if (local <= Date.now() || local <= serverUntil) return;
+  try {
+    const res = await fetch('/api/pool/force/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ until: local })
+    });
+    applyPoolForce(await res.json());
+  } catch {}
+}
+
 // Odpočet stavu ať se občas obnoví (vyprší boost/vypnutí)
 setInterval(renderSolinator, 60000);
+setInterval(renderPoolForce, 60000);
 // Přepínač „ráno auto potřebuju" vyprší sám v čase — ať se to na obrazovce projeví
 setInterval(renderWbMorning, 60000);
 
@@ -6044,6 +6129,8 @@ function applySnapshot(snap) {
   }
   renderPoolPower(snap.poolPowerW);
   applyManualHold(snap.manualHold);
+  applyPoolForce(snap);
+  maybeRestorePoolForce(poolForceUntil);
   const serverHist = snap.history || [];
   const localHist = loadHistoryLocal();
   history = mergeHistories(serverHist, localHist);
@@ -6276,6 +6363,9 @@ function connectStream() {
   es.addEventListener('poolPower', e => {
     renderPoolPower(JSON.parse(e.data).totalPowerW);
   });
+  es.addEventListener('poolForce', e => {
+    applyPoolForce(JSON.parse(e.data));
+  });
   es.addEventListener('manualHold', e => {
     applyManualHold(JSON.parse(e.data).manualHold);
   });
@@ -6286,6 +6376,15 @@ function connectStream() {
       renderLog();
       saveLogLocal();
     }
+  });
+  es.addEventListener('logUpdate', e => {
+    // Prodloužený výpadek — přepíšeme stávající záznam, nepřidáváme nový řádek
+    const d = JSON.parse(e.data);
+    if (!d.entry) return;
+    const i = logEntries.findIndex(x => x.t === d.entry.t && x.msg === d.entry.msg);
+    if (i >= 0) logEntries[i] = d.entry; else logEntries.push(d.entry);
+    renderLog();
+    saveLogLocal();
   });
   es.addEventListener('logAll', e => {
     logEntries = JSON.parse(e.data).log || [];
