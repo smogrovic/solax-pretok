@@ -137,7 +137,7 @@ const state = {
   // Do výpočtu cíle nevstupuje (ten je základ + bonusMs + boostMs), slouží k rozpisu v appce.
   // bonusTempC/bonusSrc ('fc' = předpověď, 'now' = naměřeno) drží DŮVOD přirážky,
   // ať appka nepíše k číslu teplotu dopočítanou o hodiny později
-  solinator: { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, boostMs: 0, carryMs: 0, disabledUntil: 0 },
+  solinator: { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, bonusFloored: false, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
@@ -1573,6 +1573,7 @@ function solinatorRollDay(today) {
   state.solinator.bonusMs = 0;
   state.solinator.bonusTempC = null;
   state.solinator.bonusSrc = null;
+  state.solinator.bonusFloored = false;
 }
 
 // Zimní přelom dne: den se jen přepíše, nic se nepřenáší a nikde se o tom nepíše.
@@ -1584,6 +1585,7 @@ function solinatorFreezeDay(today) {
   s.bonusMs = 0;
   s.bonusTempC = null;
   s.bonusSrc = null;
+  s.bonusFloored = false;
   s.boostMs = 0;
   s.carryMs = 0;
   broadcastSolinator();
@@ -2020,11 +2022,25 @@ function applyTempBonus(weather) {
   if (nowTemp === null && fcTemp === null) return;
   const temp = Math.max(nowTemp === null ? -Infinity : nowTemp, fcTemp === null ? -Infinity : fcTemp);
   const bonus = temp > 25 ? SOLINATOR_BONUS_HOT_MS : (temp > 20 ? SOLINATOR_BONUS_WARM_MS : 0);
-  if (bonus === state.solinator.bonusMs) return;
-  if (bonus < state.solinator.bonusMs && solinatorRanMs() > 0) return;
+  // Přirážka smí klesnout, když se předpověď zpřesní dolů — ale ne tak, aby cíl spadl
+  // pod už odběhnutý čas; to by solinátor uprostřed běhu vypnulo. Cíl je
+  // max(0, základ + přirážka + boost), takže při ran > 0 je dno ran − základ − boost.
+  let next = bonus;
+  if (next < state.solinator.bonusMs) {
+    const ran = solinatorRanMs();
+    // Math.min proti současné přirážce: kdyby odběhnutý čas cíl přerostl, vyšlo by dno
+    // nad ni a přirážku by to omylem ZVEDLO. Při ran = 0 neomezuje nic — jinak by velké
+    // záporné ubrání (cíl je stejně 0) vyrobilo nesmyslné dno.
+    const dno = ran > 0 ? ran - SOLINATOR_BASE_MS - state.solinator.boostMs : -Infinity;
+    next = Math.max(next, Math.min(state.solinator.bonusMs, dno));
+  }
+  if (next === state.solinator.bonusMs) return;
   // Když je ubráno pod nulu, přirážka napřed umaže to „přeubráno" a cíl se zvedne
   // až z toho, co zbyde — o dorovnávání se starat nemusíme
-  state.solinator.bonusMs = bonus;
+  state.solinator.bonusMs = next;
+  // Podrželo dno přirážku nad tím, co by teplota dala? Pak by popisek v rozpisu ukazoval
+  // nižší teplotu, než k přirážce sedí — appka to musí umět dovysvětlit.
+  state.solinator.bonusFloored = next > bonus;
   // Uložíme i DŮVOD. Rozhodnout může předpověď i naměřená teplota, a appka bez toho
   // psala k přirážce živě dopočítanou předpověď — vedle poctivých +2 h pak svítilo
   // scvrklých 16 °C, protože z odpovědi OWM mezitím vypadly polední sloty.
@@ -2196,6 +2212,7 @@ app.post('/api/solinator/restore', (req, res) => {
         if (k === 'bonusMs') {
           state.solinator.bonusTempC = Number.isFinite(Number(b.bonusTempC)) ? Number(b.bonusTempC) : null;
           state.solinator.bonusSrc = b.bonusSrc === 'fc' || b.bonusSrc === 'now' ? b.bonusSrc : null;
+          state.solinator.bonusFloored = !!b.bonusFloored;
         }
       }
     }

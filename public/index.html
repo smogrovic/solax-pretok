@@ -2139,6 +2139,7 @@
             <li>Neřídí se časy, ale <b>kolik hodin má za den odběhnout</b>.</li>
             <li><b>Cíl</b> = <b>1 h</b> + <b>1 h</b> nad 20 °C + <b>1 h</b> nad 25 °C → nejvýš <b>3 h</b>.</li>
             <li>Rozhoduje <b>nejvyšší předpovídaná teplota dne</b>, takže cíl je znám už ráno. Drží se i odpoledne, kdy v předpovědi zbývají jen chladné večerní hodiny.</li>
+            <li>Když se předpověď přes den <b>zpřesní dolů</b>, cíl ji následuje — ale nikdy neklesne pod <b>už odběhnutý čas</b>.</li>
             <li>Běží <b>od 11:00 do hodiny před západem</b>, pak se sám vypne.</li>
             <li><b>Mimo okno je vždy vypnutý</b> — ruční zapnutí tam do 5 min zhasne.</li>
             <li><b>+1 h / −1 h</b> se sčítají (strop 8 h). Do logu se nezapisují.</li>
@@ -2857,7 +2858,7 @@ if (autoModeSliderEl) {
 }
 
 // ---------- Solinátor: boost (±1 h) a vypnutí (−1 den) podle chloru ----------
-let solinatorData = { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, boostMs: 0, carryMs: 0, disabledUntil: 0 };
+let solinatorData = { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, bonusFloored: false, boostMs: 0, carryMs: 0, disabledUntil: 0 };
 // Odhad na zítřek počítá server (přenos z dneška + teplo z předpovědi)
 let solinatorPlanData = null;
 const solinatorStatusEl = document.getElementById('solinatorStatus');
@@ -3006,7 +3007,10 @@ function renderSolinatorCalc() {
   const bt = typeof s.bonusTempC === 'number' ? Math.round(s.bonusTempC) : null;
   const duvod = bt === null
     ? (bonus >= 2 * 3600000 ? 'bylo přes 25 °C' : (bonus > 0 ? 'bylo přes 20 °C' : 'zatím pod 20 °C'))
-    : `${s.bonusSrc === 'now' ? 'naměřeno' : 'z předpovědi'} ${bt} °C`;
+    // Když předpověď spadla až po rozběhnutí, drží se přirážka na odběhnutém čase —
+    // jinak by u nižší teploty svítila vyšší přirážka a vypadalo to jako chyba
+    : `${s.bonusSrc === 'now' ? 'naměřeno' : 'z předpovědi'} ${bt} °C`
+      + (s.bonusFloored ? ' · drženo, už se odběhlo' : '');
   row('Přirážka za teplotu', '+' + hm(bonus), duvod);
   row('Boost tlačítky', sign(manual), manual ? 'mačkáno po hodině' : 'nemačkáno');
   row('Přeneseno ze včerejška', sign(carry),
@@ -6141,6 +6145,7 @@ function applySnapshot(snap) {
     bonusMs: serverSol.bonusMs || 0,
     bonusTempC: typeof serverSol.bonusTempC === 'number' ? serverSol.bonusTempC : null,
     bonusSrc: serverSol.bonusSrc || null,
+    bonusFloored: !!serverSol.bonusFloored,
     boostMs: serverSol.boostMs || 0,
     carryMs: serverSol.carryMs || 0,
     disabledUntil: serverSol.disabledUntil || 0
@@ -6158,6 +6163,7 @@ function applySnapshot(snap) {
         // S přirážkou i důvod, ať popisek po deployi neukazuje na jiné číslo
         solinatorData.bonusTempC = typeof localSol.bonusTempC === 'number' ? localSol.bonusTempC : null;
         solinatorData.bonusSrc = localSol.bonusSrc || null;
+        solinatorData.bonusFloored = !!localSol.bonusFloored;
       }
       // Boost a přenos můžou být i záporné (namačkané ubrání) — rozhoduje velikost
       for (const k of ['boostMs', 'carryMs']) {
