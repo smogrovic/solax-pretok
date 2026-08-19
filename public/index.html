@@ -2245,9 +2245,11 @@
             <li><b>Aktualizovat</b> vynutí načtení všech zdrojů; delší dotazy doběhnou na pozadí.</li>
             <li>Grafy jsou vyhlazené, <b>kWh se počítají z původních dat</b>.</li>
             <li>Graf <b>Odhad vs. skutečnost</b>: ranní odhad (první po <b>7:00</b>), večerní odhad a skutečná výroba. Historie 14 dní, kreslí se 10.</li>
-            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž přes 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat přes 30 min.</li>
+            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž přes 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat přes 15 min.</li>
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
-            <li>Když zdroj (Solax, Shelly, wallbox, Infigy, klima, počasí) nedodá data déle než <b>dva své cykly</b>, objeví se v logu <b>červený řádek</b>. Dokud výpadek trvá, nepřibývají další — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10).
+            <li>Hlídá se <b>každé relé i každý měřák zvlášť</b> (ne Shelly jako celek) a k tomu Solax, wallbox, Infigy, klima a počasí. Když něco <b>15 min</b> neodpovídá, přijde <b>červený řádek</b> v logu a <b>notifikace</b>; u relé se v ní pozná, jestli bylo <b>naposledy zapnuté</b>. Víc výpadků naráz = jedna notifikace, ale řádek pro každý.</li>
+            <li>Dokud výpadek trvá, další řádky nepřibývají — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10). Návrat dat se zapíše obyčejně, bez notifikace.</li>
+            <li>Pojistka pro případ, že relé ztratí wifi: v Shelly mají <b>automatické vypnutí po 60 min</b> a appka jim (bojler, bazén, solinátor) posílá <b>každých 15 min ON</b>, aby ten časovač natáhla. Když se relé odmlčí, samo se do hodiny vypne — nic se přitom necvaká.</li>
             <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
         </div>

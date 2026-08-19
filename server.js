@@ -94,6 +94,7 @@ const state = {
   solax: null,       // poslední úspěšná data ze střídače
   devices: {},       // key -> { online, isOn, powerW, fetchedAt }
   poolPowerW: null,  // součet 3 PM měření bazénu
+  pmStatus: {},      // id měřáku -> { ok, at } — každý PM se hlídá zvlášť, součet výpadek schová
   // Tlačítko „+24 h": bazén jede natvrdo do tohohle času, bez ohledu na přebytek,
   // okno, SOC i zimní režim. Sčítá se po 24 h do stropu 72 h.
   poolForce: { until: 0 },
@@ -517,6 +518,7 @@ async function pollDevice(key) {
       break;
     }
   }
+  noteRelayPoll(key);   // jen poller smí rozhodnout, jestli relé žije (viz checkSources)
   broadcast('device', { key, status: state.devices[key] });
 }
 
@@ -580,9 +582,15 @@ async function pollShelly() {
       await pollSensor(room);
     }
 
+    // Součet by mlčky spadl, kdyby jeden ze tří měřáků umřel — proto si vedle něj
+    // držíme i výsledek každého zvlášť (hlídá ho checkSources)
     const powers = [];
     for (let i = 0; i < POOL_PM_IDS.length; i++) {
-      powers.push(await fetchShellyPowerW(POOL_PM_IDS[i]));
+      const id = POOL_PM_IDS[i];
+      const w = await fetchShellyPowerW(id);
+      powers.push(w);
+      const prev = state.pmStatus[id] || {};
+      state.pmStatus[id] = typeof w === 'number' ? { ok: true, at: Date.now() } : { ok: false, at: prev.at || 0 };
     }
     const valid = powers.filter(p => typeof p === 'number');
     state.poolPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
@@ -765,6 +773,7 @@ function registerSetEndpoint(key) {
       // Optimistická aktualizace, ať klienti vidí nový stav okamžitě
       const prev = state.devices[key] || {};
       state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
+      lastCmdAt[key] = Date.now();
       broadcast('device', { key, status: state.devices[key] });
       setManualHold(key);   // automatika to půl hodiny nepřebije
       // Vypnout bazén ručně a nechat ho +24 h za dvě minuty zase rozsvítit by bylo horší
@@ -1381,14 +1390,12 @@ function checkBatteryFull(soc) {
 
 const SERVER_START_TS = Date.now();
 const GARAGE_OPEN_ALERT_MS = 10 * 60 * 1000; // garáž otevřená déle → hláška
-const OUTAGE_ALERT_MS = 30 * 60 * 1000;      // zdroj dat neodpovídá déle → hláška
 
 const notif = {
   garageOpenSince: 0,
   garageNotified: false,
   carDoneNotified: false,
-  boilerHotNotified: false,
-  outage: {} // klíč zdroje -> už nahlášeno
+  boilerHotNotified: false
 };
 
 // Garáž otevřená moc dlouho. Rolety se čtou jen na vyžádání, tak si je doptáme sami.
@@ -1427,86 +1434,146 @@ function checkCarCharged(status) {
   }
 }
 
-// Výpadek zdroje dat — dnes by to skončilo jen v logu, který nikdo nečte
-function checkOutages() {
-  if (!pushEnabled) return;
-  const now = Date.now();
-  // Po startu serveru dáme integracím čas naběhnout, ať nehlásíme planý poplach
-  if (now - SERVER_START_TS < OUTAGE_ALERT_MS) return;
-  const sources = [
-    { key: 'solax', label: 'Solax', on: true, ts: state.solax && state.solax.fetchedAt },
-    { key: 'infigy', label: 'Infigy', on: infigyEnabled, ts: state.infigy && state.infigy.fetchedAt },
-    { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, ts: state.aircon && state.aircon.fetchedAt }
-  ];
-  for (const s of sources) {
-    if (!s.on) continue;
-    const age = s.ts ? now - new Date(s.ts).getTime() : Infinity;
-    if (age > OUTAGE_ALERT_MS) {
-      if (!notif.outage[s.key]) {
-        notif.outage[s.key] = true;
-        // Do logu se nepíše — to řeší logOutages(), tohle je jen push po půl hodině
-        sendPushToAll('⚠️ Výpadek dat', `${s.label} neodpovídá déle než 30 min — automatika může jet naslepo.`);
-      }
-    } else if (notif.outage[s.key]) {
-      notif.outage[s.key] = false;
-    }
-  }
+// ---------- Hlídání zdrojů dat: červený řádek v logu + push ----------
+// Každé relé a každý měřák se hlídá ZVLÁŠŤ. Dřív se Shelly bralo jako jeden celek podle
+// nejčerstvějšího razítka ze všech relé, takže se výpadek jednoho schoval za ostatní —
+// solinátor kvůli tomu jednou běžel deset hodin, aniž by o tom appka cekla. U relé se
+// navíc nedá věřit stáří dat: relé odpojené od wifi cloud ochotně vrátí, jen s
+// `online:false`, a `fetchedAt` tím pádem vypadá čerstvě. Pravdu říká jen `online`.
+//
+// Dokud výpadek trvá, NEPŘIBÝVÁ řádek: posouvá se jen `tEnd` toho stávajícího, takže
+// v logu je „11:15–12:10" místo dvanácti řádků. Push chodí jednou na začátku výpadku
+// a při víc zdrojích naráz jeden společný — při výpadku Shelly cloudu by jinak přišlo
+// deset hlášek za sebou.
+const OUTAGE_MS = 15 * 60 * 1000;   // tak dlouho musí být zdroj mimo, než se hlásí
+const outageLog = {};       // key -> záznam v state.log, který se zrovna prodlužuje
+const relayBadSince = {};   // key relé -> odkdy nehlásí online (0 = v pořádku)
+
+// Volá JEN poller. Povely (autoSet, ruční přepnutí, časovač) si do state.devices zapisují
+// optimistické `online: true`; kdyby přepisovaly i tohle, výpadek by se sám umazal —
+// a s keepalive níž by se umazával spolehlivě každou čtvrthodinu.
+function noteRelayPoll(key) {
+  const zive = (state.devices[key] || {}).online === true;
+  relayBadSince[key] = zive ? 0 : (relayBadSince[key] || Date.now());
 }
 
-// ---------- Výpadky dat v logu (červeně, jeden řádek na výpadek) ----------
-// Zdroj bereme za vypadlý, když jsou jeho data starší než DVA jeho dotazovací cykly —
-// jeden pomalý dotaz tak poplach nedělá. Dokud výpadek trvá, NEPŘIBÝVÁ řádek: posouvá se
-// jen `tEnd` toho stávajícího, takže v logu je „11:15–12:10" místo dvanácti řádků.
-const OUTAGE_LOG_FACTOR = 2;
-const outageLog = {};   // key -> záznam v state.log, který se zrovna prodlužuje
-
+// Seznam sledovaných věcí. `badSince` = odkdy je zdroj mimo (0 = v pořádku); výpadek
+// se hlásí, až když to trvá celých OUTAGE_MS, takže jeden vynechaný dotaz nic nespustí.
 function outageSources() {
-  const inf = state.infigy || {};
-  return [
-    { key: 'solax', label: 'Solax', on: true, every: POLL_INTERVAL_MS, ts: state.solax && state.solax.fetchedAt },
-    { key: 'shelly', label: 'Shelly', on: true, every: POLL_INTERVAL_MS, ts: shellyNewestFetchedAt() },
-    { key: 'wallbox', label: 'Wallbox', on: wallboxEnabled, every: POLL_INTERVAL_MS, ts: state.wallbox && state.wallbox.fetchedAt },
-    { key: 'infigy', label: 'Infigy', on: infigyEnabled, every: 5 * 60 * 1000, ts: inf.fetchedAt },
-    { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, every: 5 * 60 * 1000, ts: state.aircon && state.aircon.fetchedAt },
-    { key: 'weather', label: 'Počasí', on: !!OWM_API_KEY, every: 5 * 60 * 1000, ts: state.weather && state.weather.fetchedAt }
-  ];
-}
-// Shelly nemá jedno společné razítko — bereme nejčerstvější ze všech relé
-function shellyNewestFetchedAt() {
-  let best = 0;
-  for (const d of Object.values(state.devices || {})) {
-    const t = d && d.fetchedAt ? new Date(d.fetchedAt).getTime() : 0;
-    if (t > best) best = t;
+  const ms = ts => (typeof ts === 'number' ? ts : (ts ? new Date(ts).getTime() : 0));
+  const podle = ts => ms(ts) || SERVER_START_TS;   // co nikdy nedorazilo, je mimo od startu
+  const src = [];
+
+  for (const key of Object.keys(DEVICES)) {
+    const d = state.devices[key] || {};
+    src.push({
+      key: 'rele_' + key,
+      label: `${DEVICE_LABELS[key]} (relé)`,
+      on: !!(DEVICES[key].serverUri && DEVICES[key].deviceId),
+      rele: true,
+      // Nedostupné relé, které naposledy svítilo, je něco úplně jiného než zhasnuté:
+      // může topit nebo chlorovat dál a appka mu nemá jak poslat stop.
+      note: d.isOn === true ? 'naposledy ZAPNUTO' : '',
+      badSince: relayBadSince[key] || 0
+    });
   }
-  return best || null;
+  POOL_PM_IDS.forEach((id, i) => {
+    const pm = (state.pmStatus || {})[id] || {};
+    src.push({
+      key: 'pm_' + id,
+      label: `Měřák bazén ${i + 1}`,
+      on: !!SHELLY_AUTH_KEY,
+      rele: true,
+      // Součet poolPowerW mlčky spadne, když jeden ze tří měřáků umře — proto se
+      // hlídá každý zvlášť podle svého posledního povedeného čtení.
+      badSince: pm.ok ? 0 : podle(pm.at)
+    });
+  });
+
+  // Ostatní integrace: `fetchedAt` si každá razítkuje JEN po povedeném dotazu, takže
+  // stáří dat je poctivá míra výpadku (u Infigy se to muselo srovnat — razítkovala si ho
+  // i při chybě, čímž vypadala čerstvě s daty půl hodiny starými).
+  const data = [
+    { key: 'solax', label: 'Solax', on: true, ts: (state.solax || {}).fetchedAt },
+    { key: 'wallbox', label: 'Wallbox', on: wallboxEnabled, ts: (state.wallbox || {}).fetchedAt },
+    { key: 'infigy', label: 'Infigy', on: infigyEnabled, ts: (state.infigy || {}).fetchedAt },
+    { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, ts: (state.aircon || {}).fetchedAt },
+    { key: 'weather', label: 'Počasí', on: !!OWM_API_KEY, ts: (state.weather || {}).fetchedAt }
+  ];
+  for (const s of data) src.push({ key: s.key, label: s.label, on: s.on, badSince: podle(s.ts) });
+
+  return src;
 }
 
-function logOutages() {
+// Teplotní čidla se schválně nehlídají: jsou bateriová a cloud je během spánku běžně
+// hlásí jako offline. Jejich ticho se pozná jinak (SENSOR_SILENCE_LOG_MS, stav „ticho").
+function checkSources() {
   const now = Date.now();
   // Po startu dáme integracím čas naběhnout, ať nehlásíme planý poplach
-  if (now - SERVER_START_TS < 5 * 60 * 1000) return;
+  if (now - SERVER_START_TS < OUTAGE_MS) return;
+  const nove = [];
   for (const s of outageSources()) {
     if (!s.on) continue;
-    const ts = typeof s.ts === 'number' ? s.ts : (s.ts ? new Date(s.ts).getTime() : 0);
-    const stale = !ts || now - ts > s.every * OUTAGE_LOG_FACTOR;
-    if (stale) {
+    const mimo = s.badSince > 0 && now - s.badSince >= OUTAGE_MS;
+    if (mimo) {
       if (outageLog[s.key]) {
         // Výpadek pokračuje — jen posuneme konec rozsahu, nový řádek nepřibývá
         outageLog[s.key].tEnd = now;
         broadcast('logUpdate', { entry: outageLog[s.key] });
       } else {
-        outageLog[s.key] = addLog(`${s.label}: nedorazila data`, 'error');
+        outageLog[s.key] = addLog(
+          s.rele ? `${s.label}: neodpovídá${s.note ? ` (${s.note})` : ''}` : `${s.label}: nedorazila data`, 'error');
+        nove.push(s.note ? `${s.label} — ${s.note}` : s.label);
       }
     } else if (outageLog[s.key]) {
       outageLog[s.key] = null;
-      addLog(`${s.label}: data znovu naskočila`);
+      addLog(s.rele ? `${s.label}: zase odpovídá` : `${s.label}: data znovu naskočila`);
     }
+  }
+  // Návrat zdroje push neposílá — v appce je vidět hned a nemá cenu z toho dělat spam
+  if (nove.length && pushEnabled) {
+    const mins = Math.round(OUTAGE_MS / 60000);
+    sendPushToAll(
+      nove.length === 1 ? '⚠️ Výpadek dat' : `⚠️ Výpadek dat (${nove.length})`,
+      `${nove.join('; ')}. ${nove.length === 1 ? 'Neodpovídá' : 'Neodpovídají'} přes ${mins} min, automatika může jet naslepo.`
+    );
+  }
+}
+
+// ---------- Udržovací ON, aby časovač v relé nezhasl to, co má běžet ----------
+// V Shelly relé je nastavené automatické vypnutí po 60 min. To je jediná pojistka, která
+// funguje i bez sítě: relé odpojené od wifi se vypne samo a nemůže se opakovat solinátor
+// běžící deset hodin. Aby to nekazilo normální dlouhý běh, posíláme zapnutému relé ON
+// znovu — každý ON ten časovač v relé natáhne od začátku. Relé už zapnuté je, takže se
+// nic nerozepne: žádné cvaknutí OFF/ON, žádný záznam do logu, běh se nepřeruší.
+const KEEPALIVE_KEYS = ['solinator', 'pool', 'shelly'];
+const KEEPALIVE_MS = 15 * 60 * 1000;    // čtyři pokusy, než 60minutový časovač doběhne
+const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme (závod s ručním OFF)
+const lastCmdAt = {};                   // key -> kdy šel na relé poslední povel
+
+async function sendKeepalive() {
+  for (const key of KEEPALIVE_KEYS) {
+    const dev = DEVICES[key];
+    if (!dev || !dev.serverUri || !dev.deviceId) continue;
+    const d = state.devices[key] || {};
+    if (d.isOn !== true) continue;        // co neběží, není co udržovat
+    if (d.online === false) continue;     // odpojenému relé nemá smysl posílat nic
+    if (Date.now() - (lastCmdAt[key] || 0) < KEEPALIVE_QUIET_MS) continue;
+    try {
+      await setShellyState(dev.serverUri, dev.deviceId, 'on');
+      lastCmdAt[key] = Date.now();
+    } catch {
+      // Nedostupnost nahlásí checkSources, tady se mlčky zkusí příště znovu
+    }
+    // POZOR: schválně se nesahá na state.devices[key] — ani na `online`, ani na `isOn`.
+    // Optimistické „online: true" by tomuhle relé každou čtvrthodinu smazalo výpadek.
   }
 }
 
 // Hlídače pouštíme po 5 min (garáž si musí doptat TaHomu, proto ne častěji)
-setTimeout(() => { checkGarageOpen(); checkOutages(); logOutages(); }, 60000);
-setInterval(() => { checkGarageOpen(); checkOutages(); logOutages(); }, 5 * 60 * 1000);
+setTimeout(() => { checkGarageOpen(); checkSources(); }, 60000);
+setInterval(() => { checkGarageOpen(); checkSources(); }, 5 * 60 * 1000);
+scheduleEvery(sendKeepalive, KEEPALIVE_MS, 90000);   // 90 s po startu, pak každých 15 min
 
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
@@ -1878,6 +1945,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
     try {
       await setShellyState(dev.serverUri, dev.deviceId, turn);
       state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
+      lastCmdAt[key] = Date.now();
       broadcast('device', { key, status: state.devices[key] });
       logAutoSet(key, turn, reason);
       return true;
@@ -2812,6 +2880,7 @@ async function actuateRelay(key, stateOn, reason) {
   await setShellyState(dev.serverUri, dev.deviceId, stateOn ? 'on' : 'off');
   const prev = state.devices[key] || {};
   state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
+  lastCmdAt[key] = Date.now();
   broadcast('device', { key, status: state.devices[key] });
   setManualHold(key);   // časovač i asistent jsou tvoje rozhodnutí, ne automatika
   addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
@@ -4702,7 +4771,10 @@ async function pollInfigy() {
     };
     broadcast('infigy', { infigy: state.infigy });
   } catch (err) {
-    state.infigy = { ...state.infigy, error: err.message, fetchedAt: new Date().toISOString() };
+    // Razítko se schválně NEobnovuje: fetchedAt znamená „kdy naposledy dorazila data",
+    // ne „kdy jsme se naposledy ptali". Jinak by chybující Infigy vypadala čerstvě
+    // (a hlídač výpadků i pvPower by na to skočily).
+    state.infigy = { ...state.infigy, error: err.message };
     broadcast('infigy', { infigy: state.infigy });
   } finally {
     infigyPollRunning = false;
