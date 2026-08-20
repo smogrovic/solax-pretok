@@ -5004,13 +5004,15 @@ function renderWbMorning() {
     : `${co} ${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`) + rucne;
 }
 
-// Výkon wallboxu: přednostně z Infigy (živější), jinak ze Solaxu; vrací kW
+// Výkon wallboxu v kW: vyšší z Infigy a Solaxu. Jeden z nich hlásí nulu i při nabíjení
+// (každý jindy), takže přednost jednoho z nich znamenala „0,0 kW" vedle stavu „Nabíjí".
 function wbPowerKw() {
   const inf = infigyData || {};
-  if (typeof inf.wbPower === 'number') return inf.wbPower;
   const w = wallboxData || {};
-  if (typeof w.power === 'number') return w.power / 1000;
-  return null;
+  const merene = [];
+  if (typeof inf.wbPower === 'number') merene.push(inf.wbPower);
+  if (typeof w.power === 'number') merene.push(w.power / 1000);
+  return merene.length ? Math.max(...merene) : null;
 }
 
 function renderWallbox() {

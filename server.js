@@ -166,6 +166,28 @@ function mergeSegments(segs) {
   return out;
 }
 
+// Výkon wallboxu ve W. Solax hlásí občas 0 i při nabíjení, Infigy zase někdy nabíjení
+// nevidí vůbec a vrátí poctivou nulu. Dřív měla Infigy přednost, takže její nula přebila
+// tři kilowaty ze Solaxu a wallbox pak chyběl na časové ose i v denních kWh. Bereme toho,
+// kdo něco naměřil; null = nemá to ani jeden.
+function wallboxWatts() {
+  const inf = state.infigy || {};
+  const merene = [];
+  if (typeof inf.wbPower === 'number') merene.push(inf.wbPower * 1000);
+  if (state.wallbox && typeof state.wallbox.power === 'number') merene.push(state.wallbox.power);
+  return merene.length ? Math.max(...merene) : null;
+}
+
+// Dolepení časové osy wallboxu z historie výkonu — je to tentýž údaj, jaký kreslí graf
+// na stránce Wallbox, a po restartu se do serveru vrátí z telefonu. Díra po nasazení
+// (nebo po chvíli, kdy jeden ze zdrojů hlásil nulu) se tím zacelí zpětně.
+function backfillWallboxTimeline() {
+  const nabijelo = state.wallboxHistory.filter(p => p && typeof p.w === 'number' && p.w > 0);
+  if (!nabijelo.length) return;
+  const segs = nabijelo.map(p => ({ from: p.t, to: p.t }));
+  state.timeline.wallbox = mergeSegments(state.timeline.wallbox.concat(segs));
+}
+
 function pruneTimeline() {
   const cutoff = Date.now() - TIMELINE_MAX_AGE_MS;
   for (const k of Object.keys(state.timeline)) {
@@ -346,7 +368,7 @@ async function fetchSolax() {
   // Výrobu a tok baterie bereme přednostně z Infigy (shodné s dlaždicemi, živější), přetok ze Solaxu.
   const pvW = (typeof inf.pvPower === 'number') ? inf.pvPower * 1000 : (dc1 + dc2 + dc3 + dc4);
   const chargeW = (typeof inf.batteryPower === 'number') ? (-inf.batteryPower * 1000) : batPower; // kladné = nabíjení
-  const wallboxSubW = (typeof inf.wbPower === 'number') ? inf.wbPower * 1000 : wallboxW;
+  const wallboxSubW = wallboxWatts() ?? wallboxW;
   const houseKw = Math.max(0, (pvW - chargeW - (r.feedinpower || 0) - wallboxSubW - boiler1W - boiler2W - poolW) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
 
@@ -655,11 +677,8 @@ function updateRuntimes() {
       }
     }
   }
-  // Wallbox: aktivní kdykoli výkon > 0 (nepočítá se do doby běhu relé).
-  // Výkon bereme přednostně z Infigy (živější — Solax často hlásí 0 i při nabíjení).
-  const wbW = (state.infigy && typeof state.infigy.wbPower === 'number')
-    ? state.infigy.wbPower * 1000
-    : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power : 0);
+  // Wallbox: aktivní kdykoli výkon > 0 (nepočítá se do doby běhu relé)
+  const wbW = wallboxWatts() ?? 0;
   if (wbW > 0) {
     const segs = state.timeline.wallbox;
     const last = segs[segs.length - 1];
@@ -674,9 +693,7 @@ function updateRuntimes() {
   const wh = state.runtime.wh;
   const feedKw = state.solax && typeof state.solax.feedinKw === 'number' ? state.solax.feedinKw : 0;
   if (feedKw >= 0) wh.feed += feedKw * 1000 * dtH; else wh.import += -feedKw * 1000 * dtH;
-  const wbKw = (state.infigy && typeof state.infigy.wbPower === 'number') ? state.infigy.wbPower
-    : (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power / 1000 : 0);
-  wh.wb += Math.max(0, wbKw) * 1000 * dtH;
+  wh.wb += Math.max(0, wbW) * dtH;
   const b1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
   wh.b1 += Math.max(0, b1W) * dtH;
   const b2Kw = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower : 0;
@@ -684,6 +701,7 @@ function updateRuntimes() {
 
   state.runtime.lastTs = now;
   recordPvDay();
+  backfillWallboxTimeline();
   pruneTimeline();
   broadcast('runtime', { runtime: runtimePayload() });
   broadcast('timeline', { timeline: state.timeline });
