@@ -78,6 +78,10 @@ function shellyQueued(fn) {
 const POLL_INTERVAL_MS = 2 * 60 * 1000; // jak často poller obchází Solax i Shelly
 const SHELLY_GAP_MS = 1000;             // rozestup mezi dotazy na Shelly cloud (rate limit)
 const HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Log si na rozdíl od grafů pamatuje týden. Strop na počet záznamů je pojistka,
+// ať se pár tisíc řádků nemůže vymknout (den dělá řádově desítky).
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const LOG_MAX_ENTRIES = 3000;
 
 // Centrální stav — jediný zdroj pravdy pro všechny připojené klienty
 const DEVICE_LABELS = {
@@ -210,7 +214,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   }
 }));
-app.use(express.json());
+// Týdenní log z telefonu se do výchozích 100 kB nevejde
+app.use(express.json({ limit: '512kb' }));
 
 // ---------- SSE stream pro živé aktualizace ----------
 
@@ -229,8 +234,10 @@ function broadcast(event, data) {
 
 function pruneHistory() {
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+  const logCutoff = Date.now() - LOG_MAX_AGE_MS;
   while (state.history.length && state.history[0].t < cutoff) state.history.shift();
-  while (state.log.length && state.log[0].t < cutoff) state.log.shift();
+  while (state.log.length && state.log[0].t < logCutoff) state.log.shift();
+  if (state.log.length > LOG_MAX_ENTRIES) state.log = state.log.slice(-LOG_MAX_ENTRIES);
   while (state.wallboxHistory.length && state.wallboxHistory[0].t < cutoff) state.wallboxHistory.shift();
 }
 
@@ -965,22 +972,32 @@ app.post('/api/log/restore', (req, res) => {
   if (!entries) return res.status(400).json({ error: 'Chybí entries.' });
 
   const now = Date.now();
-  const cutoff = now - HISTORY_MAX_AGE_MS;
+  const cutoff = now - LOG_MAX_AGE_MS;
   const clean = entries
     .filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string'
       && e.msg.length > 0 && e.msg.length <= 300 && e.t >= cutoff && e.t <= now)
-    .slice(0, 1000);
+    .slice(-LOG_MAX_ENTRIES);
   if (!clean.length) return res.json({ added: 0 });
 
   const before = state.log.length;
   const seen = new Set();
+  // Vlastní záznamy jdou do nového pole beze změny (ne jako kopie) — na běžící výpadek
+  // drží odkaz checkSources a prodlužuje mu rozsah
   const merged = [];
-  for (const e of state.log.concat(clean)) {
+  for (const e of state.log) {
+    seen.add(e.t + '|' + e.msg);
+    merged.push(e);
+  }
+  for (const e of clean) {
     const key = e.t + '|' + e.msg;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push({ t: e.t, msg: e.msg });
-    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Červené výpadky si nesou `level` a rozsah `tEnd` — bez nich by se po každém
+    // deployi vrátily z telefonu jako obyčejné šedé řádky
+    const zaznam = { t: e.t, msg: e.msg };
+    if (e.level === 'error') zaznam.level = 'error';
+    if (typeof e.tEnd === 'number' && e.tEnd > e.t && e.tEnd <= now) zaznam.tEnd = e.tEnd;
+    merged.push(zaznam);
   }
   merged.sort((a, b) => a.t - b.t);
   state.log = merged;
@@ -1685,36 +1702,48 @@ function solinatorRanMs() {
   return (state.runtime && state.runtime.ms && state.runtime.ms.solinator) || 0;
 }
 
-// Přelom dne: nedoběhnutý zbytek se přenese do boostu dalšího dne, teplotní bonus se nuluje.
-// Přenáší se i namačkané ubrání (záporný boost) — kdo večer zmáčkne −2 h, chce míň
-// chlorovat i zítra. Přenese se ale jen ručně namačkaná část, ne to, co samo přišlo
-// ze včerejška; jinak by jedno −1 h tiše ubíralo napořád.
+// Kolik z dnešního boostu je opravdu namačkané dnes. Zbytek přišel přenosem ze
+// včerejška a znova se přenášet nesmí, jinak by jeden stisk putoval dopředu napořád.
+function solinatorManualBoostMs() {
+  const s = state.solinator;
+  return s.boostMs - solinatorCarryPart(s.boostMs, s.carryMs);
+}
+
+// Přelom dne: teplotní bonus se nuluje a dopředu jde jen to, co se ručně namačkalo.
+// Kladný směr: **nevyužitý boost**. Co nedoběhl základ ani přirážka za teplotu,
+// propadá — jinak by se dluh dělal sám ve dnech, kdy se nic nemačkalo (mraky, vypnuté
+// relé, restart serveru, po kterém je odběhnutý čas chvíli nula).
+// Záporný směr: namačkané ubrání, které dnešek neunesl — kdo večer zmáčkne −2 h, chce
+// míň chlorovat i zítra.
 // Při aktivním zákazu se nepřenáší nic — „nechloruj" nemá vyrábět dluh.
-// Samotné pravidlo přenosu. Používá ho přelom dne i odhad na zítřek — jen s jiným
-// „nedoběhnutým zbytkem" (skutečným vs. očekávaným), ať se ta dvě místa nerozejdou.
-// Dopředu jde buď nedoběhnutý zbytek, nebo to, co se dnes už nedalo ubrat. Obojí
+// Používá to přelom dne i odhad na zítřek, jen s jiným „nedoběhnutým zbytkem"
+// (skutečným vs. očekávaným), ať se ta dvě místa nerozejdou. Kladný i záporný případ
 // najednou nastat nemůže: když se přeubralo, je dnešní cíl nula a není co nedoběhnout.
 function solinatorCarryFor(unmet, disabled) {
   if (disabled) return 0;
   const over = solinatorOverdraftMs();
-  return over < 0
-    ? Math.max(-SOLINATOR_CARRY_MAX_MS, over)
-    : Math.min(SOLINATOR_CARRY_MAX_MS, Math.max(0, unmet));
+  if (over < 0) return Math.max(-SOLINATOR_CARRY_MAX_MS, over);
+  const boost = Math.max(0, solinatorManualBoostMs());
+  return Math.min(SOLINATOR_CARRY_MAX_MS, Math.max(0, Math.min(unmet, boost)));
 }
 
 function solinatorRollDay(today) {
   if (state.solinator.date === today) return;
   if (state.solinator.date) {
     const unmet = Math.max(0, solinatorTargetMs() - solinatorRanMs());
-    const carry = solinatorCarryFor(unmet, Date.now() < state.solinator.disabledUntil);
+    const disabled = Date.now() < state.solinator.disabledUntil;
+    const carry = solinatorCarryFor(unmet, disabled);
     state.solinator.boostMs = carry;
     state.solinator.carryMs = carry;   // kolik z boostMs je přenos (jen pro rozpis)
     // Psát skutečně přenesenou hodnotu, ne tu před ořezem
     if (carry > 0) {
-      addLog(`Solinátor: ${fmtDur(carry)} se přenáší na dnešek`
+      addLog(`Solinátor: ${fmtDur(carry)} nevyužitého boostu se přenáší na dnešek`
         + (unmet > carry ? ` (${fmtDur(unmet - carry)} propadá)` : ''));
     } else if (carry < 0) {
       addLog(`Solinátor: dnešek zkrácen o ${fmtDur(-carry)} (namačkáno včera)`);
+    } else if (unmet > 0 && !disabled) {
+      // Ať je v logu vidět, proč se nic nepřenáší — bez boostu se dluh nedělá
+      addLog(`Solinátor: včerejšek nedoběhl o ${fmtDur(unmet)}, nepřenáší se (nebyl boost)`);
     }
   }
   state.solinator.date = today;
@@ -2241,7 +2270,7 @@ async function runSolinatorAutomation(now, prague, weather) {
     return;
   }
 
-  // Přelom dne: nedoběhnutý zbytek se přenese do dnešního boostu
+  // Přelom dne: nevyužitý boost ze včerejška se přenese do dnešního
   solinatorRollDay(today);
   // Předpověď (dotaz nejvýš jednou za hodinu). Je tu nahoře schválně: dnešní cíl i
   // odhad na zítřek se mají znát od rána, ne až od poledne.
@@ -2289,7 +2318,8 @@ function broadcastSolinator() {
 // povel do relé odletí na pozadí — ať endpoint odpovídá už aktuálním stavem.
 // Večerní vypnutí (hodinu před západem) z posledních dat o počasí; null = neznáme
 // Boost jen zvýší dnešní cíl — kdy se odběhne, si už řídí rozpočtová smyčka.
-// Co se do dnešního večera nevejde, se při přelomu dne přenese na další den.
+// Co se z něj do dnešního večera nevyužije, se při přelomu dne přenese na další den
+// (jako jediné — základ ani přirážka za teplotu se nepřenášejí).
 // Kladné hodiny přidávají, záporné ubírají — i ze základu a přirážky. Cíl pod nulu
 // nejde, ale ubírat se dá i dál: co dnešek nespolkne, se přenese na zítřek.
 // Mačkat jde opakovaně, hodiny se sčítají. Do logu se boost nepíše — mačká se po

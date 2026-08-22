@@ -483,6 +483,15 @@
   }
   /* Výpadek dat — tučně červeně, ať se v logu nedá přehlédnout */
   .log-entry.log-error, .log-entry.log-error .log-time{color:#c0392b;font-weight:700;}
+  .log-day{
+    font-size:12px;
+    font-weight:700;
+    color:var(--grey-text);
+    padding-bottom:4px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+  }
+  .log-day + .log-entry{margin-top:1px;}
+  .log-list > .log-day:not(:first-child){margin-top:8px;}
   .log-empty{
     font-size:13px;
     color:var(--grey-text);
@@ -2157,7 +2166,7 @@
             <li>Běží <b>od 11:00 do hodiny před západem</b>, pak se sám vypne.</li>
             <li><b>Mimo okno je vždy vypnutý</b> — ruční zapnutí tam do 5 min zhasne.</li>
             <li><b>+1 h / −1 h</b> se sčítají (strop 8 h). Do logu se nezapisují.</li>
-            <li>Co se nestihne, <b>přejde na další den</b> — nejvýš <b>3 h</b>, zbytek propadá.</li>
+            <li>Na další den přejde <b>jen nevyužitý boost</b> (+1 h) — nejvýš <b>3 h</b>. Co nedoběhl základ ani přirážka za teplotu, <b>propadá</b>: bez zmáčknutého boostu se dluh nedělá.</li>
             <li>Ubrání se přenáší, jen když ho dnešek nestihne spotřebovat.</li>
             <li><b>−1 den</b>: ten den se neběží a nevzniká dluh. Sčítá se, nejvýš 3 dny.</li>
             <li>Výpadek nevadí — rozpočet se dožene, jakmile to jde.</li>
@@ -2249,6 +2258,7 @@
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
             <li>Hlídá se <b>každé relé i každý měřák zvlášť</b> (ne Shelly jako celek) a k tomu Solax, wallbox, Infigy, klima a počasí. Když něco <b>15 min</b> neodpovídá, přijde <b>červený řádek</b> v logu a <b>notifikace</b>; u relé se v ní pozná, jestli bylo <b>naposledy zapnuté</b>. Víc výpadků naráz = jedna notifikace, ale řádek pro každý.</li>
             <li>Dokud výpadek trvá, další řádky nepřibývají — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10). Návrat dat se zapíše obyčejně, bez notifikace.</li>
+            <li>Log si pamatuje <b>poslední týden</b> a je rozdělený po dnech (grafy dál kreslí 24 h).</li>
             <li>Pojistka pro případ, že relé ztratí wifi: v Shelly mají <b>automatické vypnutí po 60 min</b> a appka jim (bojler, bazén, solinátor) posílá <b>každých 15 min ON</b>, aby ten časovač natáhla. Když se relé odmlčí, samo se do hodiny vypne — nic se přitom necvaká.</li>
             <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
@@ -2636,9 +2646,11 @@ window.addEventListener('resize', renderChart);
 const logListEl = document.getElementById('logList');
 let logEntries = [];
 
-// Lokální kopie logu — přežije deploy/restart serveru, appka ji serveru vrátí
+// Lokální kopie logu — přežije deploy/restart serveru, appka ji serveru vrátí.
+// Drží týden stejně jako server (grafy si dál nechávají jen 24 h).
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 function pruneOldLog(arr) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - LOG_MAX_AGE_MS;
   return arr.filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string' && e.t >= cutoff);
 }
 
@@ -2671,7 +2683,7 @@ function mergeLogs(a, b) {
 async function maybeRestoreLogToServer(serverLog, localLog) {
   if (!localLog.length) return;
   const serverOldest = serverLog.length ? serverLog[0].t : Infinity;
-  const older = localLog.filter(e => e.t < serverOldest - 1000);
+  const older = localLog.filter(e => e.t < serverOldest - 1000).slice(-2000);
   if (!older.length) return;
   try {
     await fetch('/api/log/restore', {
@@ -2680,6 +2692,20 @@ async function maybeRestoreLogToServer(serverLog, localLog) {
       body: JSON.stringify({ entries: older })
     });
   } catch {}
+}
+
+// Log drží týden, takže samotné HH:MM nestačí — každý den dostane nadpis
+function logDenKlic(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+function logDenNadpis(ms) {
+  const dnes = logDenKlic(Date.now());
+  const vcera = logDenKlic(Date.now() - 24 * 60 * 60 * 1000);
+  const klic = logDenKlic(ms);
+  if (klic === dnes) return 'dnes';
+  if (klic === vcera) return 'včera';
+  return new Date(ms).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' });
 }
 
 function renderLog() {
@@ -2691,14 +2717,25 @@ function renderLog() {
     logListEl.appendChild(empty);
     return;
   }
+  const cas = ms => new Date(ms).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+  // Týdenní log má stovky řádků — skládáme je bokem a do stránky dáme naráz
+  const frag = document.createDocumentFragment();
+  let den = null;
   // Nejnovější nahoře
   for (let i = logEntries.length - 1; i >= 0; i--) {
     const e = logEntries[i];
+    const klic = logDenKlic(e.t);
+    if (klic !== den) {
+      den = klic;
+      const nadpis = document.createElement('div');
+      nadpis.className = 'log-day';
+      nadpis.textContent = logDenNadpis(e.t);
+      frag.appendChild(nadpis);
+    }
     const row = document.createElement('div');
     row.className = 'log-entry' + (e.level === 'error' ? ' log-error' : '');
     const time = document.createElement('span');
     time.className = 'log-time';
-    const cas = ms => new Date(ms).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
     // U trvajícího výpadku je místo jednoho času rozsah. Do minuty ho neukazujeme —
     // „11:15–11:15" nikomu nic neřekne.
     time.textContent = e.tEnd && e.tEnd - e.t >= 60000
@@ -2708,8 +2745,9 @@ function renderLog() {
     msg.textContent = e.msg;
     row.appendChild(time);
     row.appendChild(msg);
-    logListEl.appendChild(row);
+    frag.appendChild(row);
   }
+  logListEl.appendChild(frag);
 }
 
 // ---------- Počasí, denní přehled a vypínač automatiky ----------
@@ -2996,7 +3034,7 @@ function renderSolinatorCalc() {
     row('Přirážka za teplotu', noFc ? '?' : '+' + hm(p.bonusMs),
       noFc ? 'předpověď zatím není' : `z předpovědi ${Math.round(p.maxTempC)} °C`);
     row('Přenos z dneška', sign(p.carryMs || 0),
-      p.carryMs > 0 ? 'co se dnes nestihne' : (p.carryMs < 0 ? 'dnes namačkáno ubrat' : 'dnešek se stihne'));
+      p.carryMs > 0 ? 'nevyužitý boost' : (p.carryMs < 0 ? 'dnes namačkáno ubrat' : 'nic se nepřenáší'));
     row('Cíl na zítřek', hm(p.targetMs), '', true);
   };
 
@@ -3034,7 +3072,7 @@ function renderSolinatorCalc() {
   row('Přirážka za teplotu', '+' + hm(bonus), duvod);
   row('Boost tlačítky', sign(manual), manual ? 'mačkáno po hodině' : 'nemačkáno');
   row('Přeneseno ze včerejška', sign(carry),
-    carry > 0 ? 'nedoběhnutý zbytek' : (carry < 0 ? 'včera namačkáno ubrat' : 'nic nezbylo'));
+    carry > 0 ? 'nevyužitý boost ze včerejška' : (carry < 0 ? 'včera namačkáno ubrat' : 'nic nezbylo'));
   row('Cíl na dnešek', hm(target), '', true);
   row('Odběhnuto', hm(ran));
   row('Zbývá', ran >= target ? 'hotovo' : hm(target - ran));
@@ -3048,7 +3086,8 @@ function renderSolinatorCalc() {
   foot.textContent = (end
     ? `Běží mezi 11:00 a ${end} (hodina před západem slunce). `
     : 'Běží mezi 11:00 a hodinou před západem slunce. ')
-    + 'Co se nestihne, přejde na další den — a co se dnes nestihlo ubrat, taky. Nejvýš 3 h.';
+    + 'Na další den přejde jen nevyužitý boost — a co se dnes nestihlo ubrat. Nejvýš 3 h. '
+    + 'Nedoběhnutý základ ani přirážka za teplotu se nepřenášejí.';
   solinatorCalcEl.appendChild(foot);
 }
 
