@@ -171,15 +171,25 @@ function mergeSegments(segs) {
   return out;
 }
 
+// Data starší než tohle už neúčtujeme — zmrzlá hodnota z mrtvého zdroje by jinak
+// „vyráběla" kilowatthodiny a hodiny běhu dál (stejná mez, jakou má runAutomation).
+const DATA_MAX_AGE_MS = 10 * 60 * 1000;
+function cerstve(ts, maxAgeMs = DATA_MAX_AGE_MS) {
+  if (!ts) return false;
+  const t = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  return Number.isFinite(t) && Date.now() - t <= maxAgeMs;
+}
+
 // Výkon wallboxu ve W. Solax hlásí občas 0 i při nabíjení, Infigy zase někdy nabíjení
 // nevidí vůbec a vrátí poctivou nulu. Dřív měla Infigy přednost, takže její nula přebila
 // tři kilowaty ze Solaxu a wallbox pak chyběl na časové ose i v denních kWh. Bereme toho,
 // kdo něco naměřil; null = nemá to ani jeden.
 function wallboxWatts() {
   const inf = state.infigy || {};
+  const wb = state.wallbox || {};
   const merene = [];
-  if (typeof inf.wbPower === 'number') merene.push(inf.wbPower * 1000);
-  if (state.wallbox && typeof state.wallbox.power === 'number') merene.push(state.wallbox.power);
+  if (typeof inf.wbPower === 'number' && cerstve(inf.fetchedAt)) merene.push(inf.wbPower * 1000);
+  if (typeof wb.power === 'number' && cerstve(wb.fetchedAt)) merene.push(wb.power);
   return merene.length ? Math.max(...merene) : null;
 }
 
@@ -696,7 +706,8 @@ function updateRuntimes() {
     state.runtime.wh = emptyWh();
   }
   for (const k of Object.keys(state.runtime.ms)) {
-    if (state.devices[k] && state.devices[k].isOn === true) {
+    // Zamrzlý stav (mrtvý poller) by dobu běhu i pruh na časové ose natahoval donekonečna
+    if (state.devices[k] && state.devices[k].isOn === true && cerstve(state.devices[k].fetchedAt)) {
       state.runtime.ms[k] += dt;
       // Časová osa: prodloužíme běžící segment, nebo začneme nový
       const segs = state.timeline[k];
@@ -719,16 +730,27 @@ function updateRuntimes() {
       segs.push({ from: now, to: now });
     }
   }
-  // Denní energie (Wh): přetok/odběr ze sítě, wallbox, oba bojlery
+  // Denní energie (Wh): přetok/odběr ze sítě, wallbox, oba bojlery. Každý sčítanec si
+  // hlídá stáří SVÉHO zdroje — z mrtvého zdroje se nepřičítá nic. Jinak by appka zrovna
+  // ve chvíli výpadku (kdy o něm křičí v logu) tiše dopočítávala kilowatthodiny z hodinu
+  // staré hodnoty.
   const dtH = dt / 3600000;
   const wh = state.runtime.wh;
-  const feedKw = state.solax && typeof state.solax.feedinKw === 'number' ? state.solax.feedinKw : 0;
-  if (feedKw >= 0) wh.feed += feedKw * 1000 * dtH; else wh.import += -feedKw * 1000 * dtH;
+  const solaxOk = !!(state.solax && cerstve(state.solax.fetchedAt));
+  const feedKw = solaxOk && typeof state.solax.feedinKw === 'number' ? state.solax.feedinKw : null;
+  if (feedKw !== null) {
+    if (feedKw >= 0) wh.feed += feedKw * 1000 * dtH; else wh.import += -feedKw * 1000 * dtH;
+  }
   wh.wb += Math.max(0, wbW) * dtH;
-  recordWbDay(Math.max(0, wbW), feedKw < 0 ? -feedKw * 1000 : 0, dtH);
-  const b1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
+  // Rozdělení „ze sítě / z FVE" potřebuje OBA zdroje najednou. Když o odběru ze sítě
+  // nevíme, vzorek se přeskočí — tvrdit, že to bylo z FVE, by byla lež. Denní součet
+  // v přehledu pak může být o ten kus nižší než wh.wb; to je poctivější než smyšlené číslo.
+  if (feedKw !== null) recordWbDay(Math.max(0, wbW), feedKw < 0 ? -feedKw * 1000 : 0, dtH);
+  const boiler = state.devices.shelly;
+  const b1W = (boiler && typeof boiler.powerW === 'number' && cerstve(boiler.fetchedAt)) ? boiler.powerW : 0;
   wh.b1 += Math.max(0, b1W) * dtH;
-  const b2Kw = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower : 0;
+  const inf = state.infigy || {};
+  const b2Kw = (typeof inf.hwPower === 'number' && cerstve(inf.fetchedAt)) ? inf.hwPower : 0;
   wh.b2 += Math.max(0, b2Kw) * 1000 * dtH;
 
   state.runtime.lastTs = now;
@@ -1562,7 +1584,9 @@ function outageSources() {
       // Nedostupné relé, které naposledy svítilo, je něco úplně jiného než zhasnuté:
       // může topit nebo chlorovat dál a appka mu nemá jak poslat stop.
       note: d.isOn === true ? 'naposledy ZAPNUTO' : '',
-      badSince: relayBadSince[key] || 0
+      // `online` plní jen poller — kdyby se zasekl celý, příznak by zamrzl na „živé".
+      // Druhá podmínka na stáří razítka takový případ pochytá.
+      badSince: relayBadSince[key] || (cerstve(d.fetchedAt, OUTAGE_MS) ? 0 : podle(d.fetchedAt))
     });
   }
   POOL_PM_IDS.forEach((id, i) => {
@@ -1780,10 +1804,23 @@ function solinatorCarryFor(unmet, disabled) {
   return Math.min(SOLINATOR_CARRY_MAX_MS, Math.max(0, Math.min(unmet, boost)));
 }
 
+// Kolik solinátor odběhl VČERA. Past: počítadlo nuluje updateRuntimes z polleru (po
+// 2 min), kdežto přelom dne řeší automatika (po 5 min) — kdo bude o půlnoci první, je
+// věc fáze obou intervalů. Když je první poller, ukazuje živé počítadlo nulu, včerejšek
+// se tváří jako vůbec neodběhnutý a přenesl by se celý boost, i když se celý vyčerpal.
+// Po přelomu proto bereme včerejší snapshot z runtime. Když chybí (čerstvá instalace),
+// vrátíme null a nepřenáší se nic — radši nic než vymyšlený dluh.
+function solinatorRanYesterdayMs(today) {
+  if (state.runtime.date !== today) return solinatorRanMs();   // počítadlo ještě drží včerejšek
+  const y = state.runtime.yesterday;
+  return y && y.ms && typeof y.ms.solinator === 'number' ? y.ms.solinator : null;
+}
+
 function solinatorRollDay(today) {
   if (state.solinator.date === today) return;
   if (state.solinator.date) {
-    const unmet = Math.max(0, solinatorTargetMs() - solinatorRanMs());
+    const ranVcera = solinatorRanYesterdayMs(today);
+    const unmet = ranVcera === null ? 0 : Math.max(0, solinatorTargetMs() - ranVcera);
     const disabled = Date.now() < state.solinator.disabledUntil;
     const carry = solinatorCarryFor(unmet, disabled);
     state.solinator.boostMs = carry;
@@ -2310,6 +2347,8 @@ function applyTempBonus(weather) {
   addLog(`Solinátor: ${zdroj} → dnešní cíl ${fmtDur(solinatorTargetMs())}`);
 }
 
+// POZOR na zapojení: solinátorové relé spíná i bazénové čerpadlo (nezávisle na relé
+// „bazén"), takže průtok cely je zajištěný a rozpočet hodin nemusí na bazén čekat.
 async function runSolinatorAutomation(now, prague, weather) {
   const sol = state.devices.solinator;
   const isOn = sol && sol.isOn;              // null = stav neznámý (Shelly nedostupné)
@@ -2560,8 +2599,7 @@ async function runAutomation() {
     // Zbytek se rozhoduje podle přebytku → bez čerstvých dat ze střídače (a bez
     // počasí kvůli západu) nerozhodujeme
     if (!weather) return;
-    if (!state.solax) return;
-    if (Date.now() - new Date(state.solax.fetchedAt).getTime() > 10 * 60 * 1000) return;
+    if (!state.solax || !cerstve(state.solax.fetchedAt)) return;
 
     // "Přebytek" = přetok do sítě + výkon nabíjející baterii (feed + bat)
     const totalW = Math.round((state.solax.feedinKw + state.solax.batPowerKw) * 1000);
@@ -3744,7 +3782,7 @@ async function pollAircon() {
     state.aircon = { devices: out, aquarea, error: null, fetchedAt: new Date().toISOString() };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
-      addLog(`Klima: připojeno k Panasonic (${out.length + aquaOut.length} zařízení)`);
+      addLog(`Klima: připojeno k Panasonic (${out.length + (aquarea ? aquarea.length : 0)} zařízení)`);
     }
     broadcast('aircon', { aircon: state.aircon });
 
@@ -3900,6 +3938,86 @@ setInterval(async () => {
     }
   }
 }, 30000);
+
+// ---------- Obnova časovačů po restartu ----------
+// Časovače byly jediný stav, který deploy (a ten je po každém pushi) tiše smazal:
+// nastavíš ráno zatáhnout žaluzie v 18:00, v poledne se nasadí nová verze a v 18:00
+// se nestane nic. Telefon si je proto zálohuje a po připojení je vrátí.
+//
+// Časovače nemají datum, jen HH:MM, takže by se po delší odmlce telefonu daly „vzkřísit"
+// i ty, které mezitím doběhly. Klient proto posílá i `savedAt` (kdy naposledy viděl
+// serverový seznam) a bereme jen ty, jejichž nejbližší výskyt od té chvíle je pořád
+// v budoucnu.
+function timerNextRun(time, from) {
+  const [h, m] = time.split(':').map(Number);
+  const p = pragueTime(from);
+  const d = new Date(from);
+  const zacatekDne = from - (p.hour * 3600000 + p.minute * 60000)
+    - (d.getSeconds() * 1000 + d.getMilliseconds());
+  const t = zacatekDne + h * 3600000 + m * 60000;
+  return t > from ? t : t + 24 * 3600000;
+}
+
+app.post('/api/timers/restore', (req, res) => {
+  const b = req.body || {};
+  const savedAt = Number(b.savedAt);
+  if (!Number.isFinite(savedAt) || savedAt > Date.now()) {
+    return res.status(400).json({ error: 'Chybí savedAt.' });
+  }
+  const now = Date.now();
+  const platny = t => t && typeof t.time === 'string' && validTimerTime(t.time)
+    && ['on', 'off', 'up', 'down', 'tilt'].includes(t.action)
+    && timerNextRun(t.time, savedAt) > now;   // mezitím už doběhl → nekřísit
+  const jmeno = (v, zaloha) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : zaloha);
+  const pridano = { relay: 0, blinds: 0, aircon: 0 };
+
+  for (const t of (Array.isArray(b.relay) ? b.relay : []).slice(0, 10)) {
+    if (!platny(t) || !DEVICES[t.key] || !['on', 'off'].includes(t.action)) continue;
+    if (relayTimers.length >= 10) break;
+    if (relayTimers.some(x => x.key === t.key && x.time === t.time && x.action === t.action)) continue;
+    relayTimers.push({ id: relayTimerSeq++, key: t.key, name: DEVICE_LABELS[t.key], time: t.time, action: t.action });
+    pridano.relay++;
+  }
+  for (const t of (Array.isArray(b.blinds) ? b.blinds : []).slice(0, 10)) {
+    if (!platny(t) || !['up', 'down', 'tilt'].includes(t.action)) continue;
+    const urls = Array.isArray(t.deviceURLs) ? t.deviceURLs.filter(u => typeof u === 'string' && u).slice(0, 20) : [];
+    if (!urls.length) continue;
+    const tilt = t.orientation === null || t.orientation === undefined ? null : Number(t.orientation);
+    if (tilt !== null && (!Number.isFinite(tilt) || tilt < 0 || tilt > 100)) continue;
+    if (t.action === 'tilt' && tilt === null) continue;
+    if (blindTimers.length >= 10) break;
+    const klic = urls.join(',');
+    if (blindTimers.some(x => (x.deviceURLs || []).join(',') === klic && x.time === t.time
+      && x.action === t.action && (x.orientation ?? null) === tilt)) continue;
+    blindTimers.push({ id: blindTimerSeq++, deviceURLs: urls, name: jmeno(t.name, 'Roleta'), time: t.time, action: t.action, orientation: tilt });
+    pridano.blinds++;
+  }
+  for (const t of (Array.isArray(b.aircon) ? b.aircon : []).slice(0, 10)) {
+    if (!platny(t) || typeof t.guid !== 'string' || !t.guid || !['on', 'off'].includes(t.action)) continue;
+    if (airconTimers.length >= 10) break;
+    if (airconTimers.some(x => x.guid === t.guid && x.time === t.time && x.action === t.action)) continue;
+    const dev = (state.aircon.devices || []).find(d => d.guid === t.guid);
+    const name = t.guid === 'all' ? 'Všechny klimatizace' : jmeno(dev && dev.name, jmeno(t.name, 'Klima'));
+    airconTimers.push({ id: airconTimerSeq++, guid: t.guid, name, time: t.time, action: t.action, quiet: t.action === 'on' && !!t.quiet });
+    pridano.aircon++;
+  }
+
+  if (pridano.relay) {
+    relayTimers.sort((a, b2) => a.time.localeCompare(b2.time));
+    broadcast('relayTimers', { timers: relayTimers });
+  }
+  if (pridano.blinds) {
+    blindTimers.sort((a, b2) => a.time.localeCompare(b2.time));
+    broadcast('blindTimers', { timers: blindTimers });
+  }
+  if (pridano.aircon) {
+    airconTimers.sort((a, b2) => a.time.localeCompare(b2.time));
+    broadcast('airconTimers', { timers: airconTimers });
+  }
+  const celkem = pridano.relay + pridano.blinds + pridano.aircon;
+  if (celkem) addLog(`Časovače obnoveny z telefonu (${celkem})`);
+  res.json({ ok: true, pridano });
+});
 
 // ---------- Solax wallbox (EV charger přes SolaxCloud pileInfo/pileCmd) ----------
 

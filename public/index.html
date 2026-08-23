@@ -2193,6 +2193,7 @@
             <li>Ubrání se přenáší, jen když ho dnešek nestihne spotřebovat.</li>
             <li><b>−1 den</b>: ten den se neběží a nevzniká dluh. Sčítá se, nejvýš 3 dny.</li>
             <li>Výpadek nevadí — rozpočet se dožene, jakmile to jde.</li>
+            <li><b>Solinátorové relé spíná i čerpadlo</b> (nezávisle na relé „bazén"), takže průtok je vždycky zajištěný. Na časové ose se ten běh čerpadla neobjeví — pruh „Bazén" kreslí jen relé bazénu.</li>
             <li>Rozpis obou dnů je na stránce <b>Bazén</b>.</li>
           </ul>
         </div>
@@ -2223,7 +2224,7 @@
         <div class="logic-sec">
           <div class="logic-h">Klimatizace (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
-            <li>Zapíná se <b>per pokoj přepínačem</b> (Asistent).</li>
+            <li>Zapíná se <b>per pokoj přepínačem</b> (Asistent). <b>Hlavní vypínač automatiky se klimatizací netýká</b> — když je na „Vypnuto", klimatizace jedou dál podle svých přepínačů, ale <b>letním</b> pravidlem. Na zimní držení cílové teploty je potřeba poloha <b>Zima</b>.</li>
             <li><b>Obývák</b> podle Shelly čidla v místnosti, ostatní podle čidla v jednotce.</li>
             <li>Jezdec <b>obývák 22–26 °C</b>, ostatní pokoje společně <b>18–25 °C</b>.</li>
             <li><b>Léto:</b> nad mezí → chladí na <b>mez − 2 °C</b>, vypne pod <b>mez − 1 °C</b>.</li>
@@ -2283,6 +2284,8 @@
             <li>Hlídá se <b>každé relé i každý měřák zvlášť</b> (ne Shelly jako celek) a k tomu Solax, wallbox, Infigy, klima a počasí. Když něco <b>15 min</b> neodpovídá, přijde <b>červený řádek</b> v logu a <b>notifikace</b>; u relé se v ní pozná, jestli bylo <b>naposledy zapnuté</b>. Víc výpadků naráz = jedna notifikace, ale řádek pro každý.</li>
             <li>Dokud výpadek trvá, další řádky nepřibývají — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10). Návrat dat se zapíše obyčejně, bez notifikace.</li>
             <li>Log si pamatuje <b>poslední týden</b> a je rozdělený po dnech (grafy dál kreslí 24 h).</li>
+            <li>Denní kWh a doby běhu se <b>počítají jen z čerstvých dat</b>: co je starší než 10 min, se nepřipočte — po výpadku tak nevznikají vymyšlená čísla.</li>
+            <li><b>Časovače přežijí nasazení</b>: telefon je zálohuje a po připojení vrátí serveru. Nevrací ty, které mezitím doběhly.</li>
             <li>Pojistka pro případ, že relé ztratí wifi: v Shelly mají <b>automatické vypnutí po 60 min</b> a appka jim (bojler, bazén, solinátor) posílá <b>každých 15 min ON</b>, aby ten časovač natáhla. Když se relé odmlčí, samo se do hodiny vypne — nic se přitom necvaká.</li>
             <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
@@ -4782,6 +4785,43 @@ const relayTimerAddBtn = document.getElementById('relayTimerAddBtn');
 const relayTimerListEl = document.getElementById('relayTimerList');
 let relayTimersData = [];
 
+// ---------- Záloha časovačů ----------
+// Časovače žijí jen v paměti serveru a deploy je smaže. Telefon si je proto ukládá
+// i s razítkem, kdy je naposledy viděl — server pak pozná, které mezitím doběhly
+// (mají jen HH:MM, ne datum) a nekřísí je.
+function saveTimersLocal() {
+  try {
+    localStorage.setItem('timers', JSON.stringify({
+      savedAt: Date.now(),
+      relay: relayTimersData,
+      blinds: blindTimersData,
+      aircon: airconTimersData
+    }));
+  } catch {}
+}
+function loadTimersLocal() {
+  try {
+    const t = JSON.parse(localStorage.getItem('timers') || 'null');
+    return t && typeof t.savedAt === 'number' ? t : null;
+  } catch { return null; }
+}
+async function maybeRestoreTimers(snap) {
+  const local = loadTimersLocal();
+  if (!local) return;
+  const chybi = (mine, srv, same) => (mine || []).some(t => !(srv || []).some(x => same(t, x)));
+  const potreba =
+    chybi(local.relay, snap.relayTimers, (a, b) => a.key === b.key && a.time === b.time && a.action === b.action)
+    || chybi(local.aircon, snap.airconTimers, (a, b) => a.guid === b.guid && a.time === b.time && a.action === b.action)
+    || chybi(local.blinds, snap.blindTimers, (a, b) => (a.deviceURLs || []).join() === (b.deviceURLs || []).join()
+        && a.time === b.time && a.action === b.action);
+  if (!potreba) return;
+  try {
+    await fetch('/api/timers/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(local)
+    });
+  } catch {}
+}
+
 for (const d of RELAY_TIMER_DEVICES) {
   const opt = document.createElement('option');
   opt.value = d.key;
@@ -6476,6 +6516,9 @@ function applySnapshot(snap) {
   renderBlindTimers();
   relayTimersData = snap.relayTimers || [];
   renderRelayTimers();
+  // Časovače (i ty klimatizační výš) — nejdřív serveru vrátit, co mu deploy sebral,
+  // a teprve pak přepsat zálohu; jinak by se ztratily i v telefonu
+  maybeRestoreTimers(snap).then(saveTimersLocal);
   // Doba běhu: zobrazíme vyšší z hodnot server/telefon a případně serveru vrátíme jeho ztracená data
   const serverRt = snap.runtime || null;
   const localRt = loadRuntimeLocal();
@@ -6651,6 +6694,7 @@ function connectStream() {
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];
     renderTimers();
+    saveTimersLocal();
   });
   es.addEventListener('tempAuto', e => {
     tempAutoData = JSON.parse(e.data).tempAuto || tempAutoData;
@@ -6712,10 +6756,12 @@ function connectStream() {
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];
     renderBlindTimers();
+    saveTimersLocal();
   });
   es.addEventListener('relayTimers', e => {
     relayTimersData = JSON.parse(e.data).timers || [];
     renderRelayTimers();
+    saveTimersLocal();
   });
   es.addEventListener('automation', e => {
     renderAutomation(JSON.parse(e.data).autoMode);
