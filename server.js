@@ -147,6 +147,7 @@ const state = {
   // ať appka nepíše k číslu teplotu dopočítanou o hodiny později
   solinator: { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, bonusFloored: false, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
+  wbDays: [],        // { d, grid, pv } — kolik si auto vzalo ze sítě a kolik z FVE (Wh, po dnech)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
   // teploty v pokojích za 24 h pro graf: temps = podle guid klimatizace, sens = Shelly čidla
@@ -281,6 +282,7 @@ function snapshot() {
     weather: state.weather,
     runtime: runtimePayload(),
     pvDays: state.pvDays,
+    wbDays: state.wbDays,
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     blindTimers,
@@ -655,6 +657,28 @@ function recordPvDay() {
   }
 }
 
+// ---------- Odkud si auto bralo: ze sítě vs. z FVE ----------
+// Ze sítě je kvůli autu jen to MENŠÍ z odběru ze sítě a výkonu wallboxu: když auto bere
+// 1,4 kW a barák zrovna tahá 3 kW, kvůli autu je jen těch 1,4 kW; když auto bere 7 kW
+// a ze sítě jde 2 kW, ze sítě jsou 2 kW a zbytek jede z FVE. Co nešlo ze sítě, počítáme
+// jako FVE — i když to zrovna teklo z baterky, protože ta se nabíjí ze slunce.
+// Počítá se ze vzorků, které už poller stahuje (po 2 min), žádné dotazy navíc.
+const WB_DAYS_MAX = 14;
+
+function recordWbDay(wbW, importW, dtH) {
+  if (!(wbW > 0) || !(dtH > 0)) return;          // nenabíjí se → den se ani nezakládá
+  const zeSite = Math.min(wbW, Math.max(0, importW));
+  const d = pragueDateString();
+  let rec = state.wbDays.find(r => r.d === d);
+  if (!rec) { rec = { d, grid: 0, pv: 0 }; state.wbDays.push(rec); }
+  rec.grid += zeSite * dtH;
+  rec.pv += (wbW - zeSite) * dtH;                // grid + pv vždy sedne na denní wh.wb
+  if (state.wbDays.length > WB_DAYS_MAX) {
+    state.wbDays.sort((a, b) => a.d.localeCompare(b.d));
+    state.wbDays = state.wbDays.slice(-WB_DAYS_MAX);
+  }
+}
+
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
 function runtimePayload() {
   return { date: state.runtime.date, ms: state.runtime.ms, wh: state.runtime.wh, yesterday: state.runtime.yesterday };
@@ -701,6 +725,7 @@ function updateRuntimes() {
   const feedKw = state.solax && typeof state.solax.feedinKw === 'number' ? state.solax.feedinKw : 0;
   if (feedKw >= 0) wh.feed += feedKw * 1000 * dtH; else wh.import += -feedKw * 1000 * dtH;
   wh.wb += Math.max(0, wbW) * dtH;
+  recordWbDay(Math.max(0, wbW), feedKw < 0 ? -feedKw * 1000 : 0, dtH);
   const b1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
   wh.b1 += Math.max(0, b1W) * dtH;
   const b2Kw = (state.infigy && typeof state.infigy.hwPower === 'number') ? state.infigy.hwPower : 0;
@@ -713,6 +738,7 @@ function updateRuntimes() {
   broadcast('runtime', { runtime: runtimePayload() });
   broadcast('timeline', { timeline: state.timeline });
   broadcast('pvDays', { pvDays: state.pvDays });
+  broadcast('wbDays', { wbDays: state.wbDays });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -1069,6 +1095,33 @@ app.post('/api/pvdays/restore', (req, res) => {
     broadcast('pvDays', { pvDays: state.pvDays });
   }
   res.json({ ok: true, days: state.pvDays.length });
+});
+
+// Obnova přehledu „odkud auto bralo" — po restartu má telefon novější součty
+app.post('/api/wbdays/restore', (req, res) => {
+  const days = req.body && Array.isArray(req.body.wbDays) ? req.body.wbDays : null;
+  if (!days) return res.status(400).json({ error: 'Chybí wbDays.' });
+  const dnes = pragueDateString();
+  // Víc než 300 kWh za den z jedné nabíječky nedává smysl — takový záznam je nesmysl
+  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 300000 ? v : null);
+  let changed = false;
+  for (const inc of days.slice(-WB_DAYS_MAX)) {
+    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
+    if (inc.d > dnes) continue;                       // z budoucnosti se nic nepřijímá
+    const grid = num(inc.grid), pv = num(inc.pv);
+    if (grid === null && pv === null) continue;       // prázdný den nezakládat
+    let rec = state.wbDays.find(r => r.d === inc.d);
+    if (!rec) { rec = { d: inc.d, grid: 0, pv: 0 }; state.wbDays.push(rec); changed = true; }
+    // Bere se vyšší hodnota: server po restartu začíná od nuly, telefon má celý den
+    if (grid !== null && grid > rec.grid) { rec.grid = grid; changed = true; }
+    if (pv !== null && pv > rec.pv) { rec.pv = pv; changed = true; }
+  }
+  if (changed) {
+    state.wbDays.sort((a, b) => a.d.localeCompare(b.d));
+    state.wbDays = state.wbDays.slice(-WB_DAYS_MAX);
+    broadcast('wbDays', { wbDays: state.wbDays });
+  }
+  res.json({ ok: true, days: state.wbDays.length });
 });
 
 // Obnova časové osy po restartu/deployi — sloučení segmentů z telefonu

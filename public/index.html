@@ -483,6 +483,23 @@
   }
   /* Výpadek dat — tučně červeně, ať se v logu nedá přehlédnout */
   .log-entry.log-error, .log-entry.log-error .log-time{color:#c0392b;font-weight:700;}
+  /* Odkud auto bralo — den po dni */
+  .wbsrc-row{padding:7px 2px;border-bottom:1px solid rgba(44,62,80,0.06);}
+  .wbsrc-row:last-child{border-bottom:none;}
+  .wbsrc-head{display:flex;justify-content:space-between;font-size:13px;color:var(--grey-text);}
+  .wbsrc-day{font-weight:700;color:var(--navy);}
+  .wbsrc-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:rgba(44,62,80,0.07);margin:5px 0 3px;}
+  .wbsrc-bar i{display:block;height:100%;}
+  .wbsrc-grid{background:#c0392b;}
+  .wbsrc-pv{background:var(--orange);}
+  .wbsrc-legend{display:flex;justify-content:space-between;font-size:11px;color:var(--grey-text);}
+  .wbsrc-legend b{font-weight:700;}
+  .wbsrc-legend .g{color:#c0392b;}
+  .wbsrc-legend .p{color:var(--orange-dark);}
+  .wbsrc-empty{font-size:11px;color:var(--grey-text);}
+  .wbsrc-total{margin-top:8px;padding-top:8px;border-top:1px solid rgba(44,62,80,0.12);}
+  .wbsrc-total .wbsrc-head{font-size:14px;color:var(--navy);font-weight:700;}
+  .wbsrc-note{font-size:11px;color:var(--grey-text);margin-top:10px;line-height:1.35;}
   .log-day{
     font-size:12px;
     font-weight:700;
@@ -2023,6 +2040,12 @@
         <canvas id="wbModeChart"></canvas>
         <div class="timeline-legend" id="wbModeLegend"></div>
       </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Odkud auto bralo (7 dní)</div>
+        <div class="wbsrc-list" id="wbSrcList"></div>
+        <div class="wbsrc-note">Odhad ze vzorků po 2 min: ze sítě se počítá to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE (i když zrovna teklo z baterky).</div>
+      </div>
     </div>
   </div>
 
@@ -2193,6 +2216,7 @@
             <li>Ruční přepnutí platí <b>na jedno ráno</b>; po půlnoci se týká rána téhož dne.</li>
             <li>Ruční režim (STOP/ECO/FAST) drží <b>3 h</b>, přepnutí FAST/AUTO ho ruší.</li>
             <li>Ručně ve střídači: <b>ECO i GREEN na 6 A</b>, „Battery charge EVC" = Enable, Min SOC ~10 %.</li>
+            <li><b>Odkud auto bralo (7 dní)</b>: ze sítě se počítá <b>to menší</b> z odběru ze sítě a výkonu nabíječky (víc než si auto vzalo, kvůli němu ze sítě přijít nemohlo), zbytek jako <b>FVE</b> — i to, co teklo z baterky. Sbírá se po dnech od nasazení, zpětně to nejde dopočítat.</li>
           </ul>
         </div>
 
@@ -2694,12 +2718,13 @@ async function maybeRestoreLogToServer(serverLog, localLog) {
   } catch {}
 }
 
-// Log drží týden, takže samotné HH:MM nestačí — každý den dostane nadpis
+// Log drží týden, takže samotné HH:MM nestačí — každý den dostane nadpis.
+// Týž popisek používá i přehled „Odkud auto bralo", ať to appka nemá dvakrát jinak.
 function logDenKlic(ms) {
   const d = new Date(ms);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
-function logDenNadpis(ms) {
+function denNadpis(ms) {
   const dnes = logDenKlic(Date.now());
   const vcera = logDenKlic(Date.now() - 24 * 60 * 60 * 1000);
   const klic = logDenKlic(ms);
@@ -2729,7 +2754,7 @@ function renderLog() {
       den = klic;
       const nadpis = document.createElement('div');
       nadpis.className = 'log-day';
-      nadpis.textContent = logDenNadpis(e.t);
+      nadpis.textContent = denNadpis(e.t);
       frag.appendChild(nadpis);
     }
     const row = document.createElement('div');
@@ -5133,6 +5158,124 @@ function integrateWbKwh(pts) {
   return kwh;
 }
 
+// ---------- Odkud auto bralo: ze sítě vs. z FVE (7 dní) ----------
+// Data počítá server ve stejném cyklu jako denní kWh; tady je jen zobrazujeme.
+// Lokální záloha přežije deploy stejně jako u odhadu výroby.
+const wbSrcListEl = document.getElementById('wbSrcList');
+const WB_SRC_DNU = 7;
+let wbDaysData = [];
+
+function saveWbDaysLocal() {
+  try { localStorage.setItem('wbDays', JSON.stringify(wbDaysData)); } catch {}
+}
+function loadWbDaysLocal() {
+  try { return JSON.parse(localStorage.getItem('wbDays') || '[]') || []; } catch { return []; }
+}
+
+// Sloučení serveru s lokální zálohou: u obou hodnot vyhrává vyšší (server po deployi
+// začíná den od nuly, telefon má nastřádaný celý)
+function mergeWbDays(a, b) {
+  const map = new Map();
+  for (const r of [...(a || []), ...(b || [])]) {
+    if (!r || typeof r.d !== 'string') continue;
+    const cur = map.get(r.d) || { d: r.d, grid: 0, pv: 0 };
+    if (typeof r.grid === 'number' && r.grid > cur.grid) cur.grid = r.grid;
+    if (typeof r.pv === 'number' && r.pv > cur.pv) cur.pv = r.pv;
+    map.set(r.d, cur);
+  }
+  return [...map.values()].sort((x, y) => x.d.localeCompare(y.d)).slice(-14);
+}
+
+async function maybeRestoreWbDays(serverDays, localDays) {
+  if (!localDays || !localDays.length) return;
+  const srv = new Map((serverDays || []).map(r => [r.d, r]));
+  const need = localDays.some(r => {
+    const s = srv.get(r.d);
+    return !s || (r.grid || 0) > (s.grid || 0) || (r.pv || 0) > (s.pv || 0);
+  });
+  if (!need) return;
+  try {
+    await fetch('/api/wbdays/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wbDays: localDays })
+    });
+  } catch {}
+}
+
+// 'YYYY-MM-DD' → popisek dne (poledne, ať to nerozhodí přechod letního času)
+function wbSrcDenNadpis(dateStr) {
+  const [r, m, d] = dateStr.split('-').map(Number);
+  return denNadpis(new Date(r, m - 1, d, 12).getTime());
+}
+
+function renderWbSrc() {
+  if (!wbSrcListEl) return;
+  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  // Posledních sedm dní včetně dneška — i ty, kdy se nenabíjelo
+  const dny = [];
+  for (let i = 0; i < WB_SRC_DNU; i++) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const klic = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    dny.push(wbDaysData.find(r => r.d === klic) || { d: klic, grid: 0, pv: 0 });
+  }
+  const frag = document.createDocumentFragment();
+  const radek = (popis, grid, pv, celkovy) => {
+    const row = document.createElement('div');
+    row.className = 'wbsrc-row' + (celkovy ? ' wbsrc-total' : '');
+    const head = document.createElement('div');
+    head.className = 'wbsrc-head';
+    const den = document.createElement('span');
+    den.className = 'wbsrc-day';
+    den.textContent = popis;
+    const soucet = document.createElement('span');
+    const total = grid + pv;
+    soucet.textContent = total > 0 ? kwh(total) : '–';
+    head.appendChild(den);
+    head.appendChild(soucet);
+    row.appendChild(head);
+    if (total > 0) {
+      const bar = document.createElement('div');
+      bar.className = 'wbsrc-bar';
+      const g = document.createElement('i');
+      g.className = 'wbsrc-grid';
+      g.style.width = (grid / total * 100) + '%';
+      const p = document.createElement('i');
+      p.className = 'wbsrc-pv';
+      p.style.width = (pv / total * 100) + '%';
+      bar.appendChild(g);
+      bar.appendChild(p);
+      const leg = document.createElement('div');
+      leg.className = 'wbsrc-legend';
+      const ls = document.createElement('span');
+      ls.className = 'g';
+      ls.innerHTML = `ze sítě <b>${kwh(grid)}</b>`;
+      const lp = document.createElement('span');
+      lp.className = 'p';
+      lp.innerHTML = `<b>${kwh(pv)}</b> z FVE (${Math.round(pv / total * 100)} %)`;
+      leg.appendChild(ls);
+      leg.appendChild(lp);
+      row.appendChild(bar);
+      row.appendChild(leg);
+    } else {
+      const prazdno = document.createElement('div');
+      prazdno.className = 'wbsrc-empty';
+      prazdno.textContent = celkovy ? 'zatím se nenabíjelo' : 'nenabíjelo se';
+      row.appendChild(prazdno);
+    }
+    frag.appendChild(row);
+  };
+
+  for (const r of dny) radek(wbSrcDenNadpis(r.d), r.grid || 0, r.pv || 0, false);
+  radek('Celkem za 7 dní',
+    dny.reduce((a, r) => a + (r.grid || 0), 0),
+    dny.reduce((a, r) => a + (r.pv || 0), 0), true);
+
+  wbSrcListEl.textContent = '';
+  wbSrcListEl.appendChild(frag);
+}
+
 // "Wallbox celkem" na Přehledu = nabito dnes (od půlnoci) v kWh
 function renderWbToday() {
   if (!wbOverviewEl) return;
@@ -6313,6 +6456,13 @@ function applySnapshot(snap) {
   renderPvChart();
   savePvDaysLocal();
   maybeRestorePvDays(serverPv, localPv);
+  // Odkud auto bralo: server + lokální záloha (taky přežije deploy)
+  const serverWbDays = snap.wbDays || [];
+  const localWbDays = loadWbDaysLocal();
+  wbDaysData = mergeWbDays(serverWbDays, localWbDays);
+  renderWbSrc();
+  saveWbDaysLocal();
+  maybeRestoreWbDays(serverWbDays, localWbDays);
   applyHomeFlags(snap);
   applyInfigyFlags(snap);
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
@@ -6524,6 +6674,11 @@ function connectStream() {
     renderPvChart();
     savePvDaysLocal();
   });
+  es.addEventListener('wbDays', e => {
+    wbDaysData = mergeWbDays(JSON.parse(e.data).wbDays || [], wbDaysData);
+    renderWbSrc();
+    saveWbDaysLocal();
+  });
   es.addEventListener('wallbox', e => {
     wallboxData = JSON.parse(e.data).wallbox || null;
     renderWallbox();
@@ -6569,6 +6724,10 @@ function connectStream() {
     updatedEl.textContent = 'Připojuji…';
   };
 }
+
+// Než dorazí snapshot, ukážeme aspoň to, co má telefon uložené z minula
+wbDaysData = loadWbDaysLocal();
+renderWbSrc();
 
 connectStream();
 
