@@ -2195,6 +2195,7 @@
             <li>Ubrání se přenáší, jen když ho dnešek nestihne spotřebovat.</li>
             <li><b>−1 den</b>: ten den se neběží a nevzniká dluh. Sčítá se, nejvýš 3 dny.</li>
             <li>Výpadek nevadí — rozpočet se dožene, jakmile to jde.</li>
+            <li>Po <b>restartu serveru</b> (nasazení) je odběhnutý čas na serveru nula a pravdu má telefon. Než ji vrátí, solinátor se <b>nezapíná</b> — jinak by odběhl celý rozpočet znovu. Čeká se nejvýš 15 min; vypnout se smí pořád.</li>
             <li><b>Solinátorové relé spíná i čerpadlo</b> (nezávisle na relé „bazén"), takže průtok je vždycky zajištěný. Na časové ose se ten běh čerpadla neobjeví — pruh „Bazén" kreslí jen relé bazénu.</li>
             <li>Rozpis obou dnů je na stránce <b>Bazén</b>.</li>
           </ul>
@@ -2290,7 +2291,8 @@
             <li>Log si pamatuje <b>poslední týden</b> a je rozdělený po dnech (grafy dál kreslí 24 h).</li>
             <li>Denní kWh a doby běhu se <b>počítají jen z čerstvých dat</b>: co je starší než 10 min, se nepřipočte — po výpadku tak nevznikají vymyšlená čísla.</li>
             <li><b>Časovače přežijí nasazení</b>: telefon je zálohuje a po připojení vrátí serveru. Nevrací ty, které mezitím doběhly.</li>
-            <li>Pojistka pro případ, že relé ztratí wifi: v Shelly mají <b>automatické vypnutí po 60 min</b> a appka jim (bojler, bazén, solinátor) posílá <b>každých 15 min ON</b>, aby ten časovač natáhla. Když se relé odmlčí, samo se do hodiny vypne — nic se přitom necvaká.</li>
+            <li>Když relé <b>ignoruje povel</b> (půl hodiny marných pokusů), přijde notifikace — appka to jinak jen tiše zkoušela dál.</li>
+            <li>Pojistka pro případ, že relé ztratí wifi: v Shelly mají <b>automatické vypnutí po 60 min</b> a appka jim (bojler, bazén, solinátor) posílá <b>každých 15 min ON</b>, aby ten časovač natáhla. Když se relé odmlčí, samo se do hodiny vypne — nic se přitom necvaká. Relé, kterému appka řekla <b>vypnout</b>, už udržovací ON nedostane: kdyby povel neposlechlo, nechá se dojet na svůj časovač.</li>
             <li>Časovače: <b>„Všechny žaluzie"</b> platí pro tu stránku, kde ho zakládáš. Pergola a garáž se časovačem neovládají. Relé hromadnou volbu nemá.</li>
           </ul>
         </div>
@@ -2951,6 +2953,9 @@ if (autoModeSliderEl) {
 let solinatorData = { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, bonusFloored: false, boostMs: 0, carryMs: 0, disabledUntil: 0 };
 // Odhad na zítřek počítá server (přenos z dneška + teplo z předpovědi)
 let solinatorPlanData = null;
+// Po restartu serveru chvíli neplatí doba běhu — server čeká, až mu ji telefon vrátí,
+// a do té doby solinátor nezapíná. Ať je v appce vidět, na co se čeká.
+let solinatorCatchup = false;
 const solinatorStatusEl = document.getElementById('solinatorStatus');
 const solinatorPlanEl = document.getElementById('solinatorPlan');
 const chlorBtns = Array.from(document.querySelectorAll('.chlor-btn'));
@@ -2989,7 +2994,8 @@ function renderSolinator() {
     const target = Math.max(0, 3600000 + (s.bonusMs || 0) + boost);
     const ran = (runtimeData && runtimeData.ms && runtimeData.ms.solinator) || 0;
     txt = `Dnes ${fmtSolDur(ran)} / ${fmtSolDur(target)}`;
-    if (ran >= target) txt += ' · hotovo';
+    if (solinatorCatchup) txt += ' · po restartu čekám na dopočet z telefonu';
+    else if (ran >= target) txt += ' · hotovo';
     else if (boost > 0) txt += ` · vč. boostu ${fmtSolDur(boost)}`;
     if (boost < 0) txt += ` · zkráceno o ${fmtSolDur(-boost)}`;
   }
@@ -6496,6 +6502,7 @@ function applySnapshot(snap) {
     }
   }
   solinatorPlanData = snap.solinatorPlan || null;
+  solinatorCatchup = !!snap.solinatorCatchup;
   renderSolinator();
   saveSolinatorLocal();
   maybeRestoreSolinator(serverSol, localSol);
@@ -6721,6 +6728,7 @@ function connectStream() {
     const d = JSON.parse(e.data);
     solinatorData = d.solinator || solinatorData;
     if (d.solinatorPlan) solinatorPlanData = d.solinatorPlan;
+    solinatorCatchup = !!d.solinatorCatchup;
     renderSolinator();
     saveSolinatorLocal();
   });

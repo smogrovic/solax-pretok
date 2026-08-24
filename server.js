@@ -305,6 +305,7 @@ function snapshot() {
     ...thresholdPayload(),
     solinator: state.solinator,
     solinatorPlan: solinatorPlan(),
+    solinatorCatchup: !runtimeKnown(),
     wallbox: state.wallbox,
     wallboxEnabled,
     wallboxHistory: state.wallboxHistory,
@@ -701,6 +702,8 @@ function updateRuntimes() {
   const dt = Math.min(now - state.runtime.lastTs, 10 * 60 * 1000);
   if (state.runtime.date !== today) {
     if (state.runtime.date) state.runtime.yesterday = { ms: state.runtime.ms, wh: state.runtime.wh };
+    // Po půlnoci začíná den od nuly doopravdy — na dopočet z telefonu se nečeká
+    if (state.runtime.date) runtimeCatchupDone = true;
     state.runtime.date = today;
     state.runtime.ms = { shelly: 0, pool: 0, solinator: 0 };
     state.runtime.wh = emptyWh();
@@ -846,7 +849,7 @@ function registerSetEndpoint(key) {
       // Optimistická aktualizace, ať klienti vidí nový stav okamžitě
       const prev = state.devices[key] || {};
       state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
-      lastCmdAt[key] = Date.now();
+      noteCmd(key, turn);
       broadcast('device', { key, status: state.devices[key] });
       setManualHold(key);   // automatika to půl hodiny nepřebije
       // Vypnout bazén ručně a nechat ho +24 h za dvě minuty zase rozsvítit by bylo horší
@@ -1085,6 +1088,7 @@ app.post('/api/runtime/restore', (req, res) => {
       }
     }
   }
+  if (date === pragueDateString()) runtimeCatchupDone = true;   // teď už server ví svoje
   if (changed) {
     broadcast('runtime', { runtime: runtimePayload() });
     // Odhad na zítřek stojí na odběhnutém čase — po deployi je na serveru nula a bez
@@ -1092,6 +1096,8 @@ app.post('/api/runtime/restore', (req, res) => {
     broadcastSolinator();
   }
   res.json({ ok: true });
+  // Solinátor může mít rozpočet dávno hotový — ať zhasne hned, ne až za pět minut
+  runAutomation().catch(() => {});
 });
 
 // Obnova denní historie výroby po deployi — telefon drží zálohu.
@@ -1683,19 +1689,26 @@ function checkSources() {
 const KEEPALIVE_KEYS = ['solinator', 'pool', 'shelly'];
 const KEEPALIVE_MS = 15 * 60 * 1000;    // čtyři pokusy, než 60minutový časovač doběhne
 const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme (závod s ručním OFF)
-const lastCmdAt = {};                   // key -> kdy šel na relé poslední povel
+// key -> { turn, at }: co appka relé naposledy poručila a kdy. Směr je podstatný —
+// relé, kterému jsme řekli „vypni" a ono drží (ztracený povel, zaseknutý cloud), nesmí
+// dostávat udržovací ON: natahoval by mu ten šedesátiminutový časovač a appka by tak
+// držela naživu zrovna to, co chce vypnout.
+const lastCmd = {};
+function noteCmd(key, turn) { lastCmd[key] = { turn, at: Date.now() }; }
 
 async function sendKeepalive() {
   for (const key of KEEPALIVE_KEYS) {
     const dev = DEVICES[key];
     if (!dev || !dev.serverUri || !dev.deviceId) continue;
     const d = state.devices[key] || {};
+    const cmd = lastCmd[key];
     if (d.isOn !== true) continue;        // co neběží, není co udržovat
+    if (cmd && cmd.turn === 'off') continue;  // řekli jsme „vypni" → ať dojede na svůj časovač
     if (d.online === false) continue;     // odpojenému relé nemá smysl posílat nic
-    if (Date.now() - (lastCmdAt[key] || 0) < KEEPALIVE_QUIET_MS) continue;
+    if (Date.now() - ((cmd && cmd.at) || 0) < KEEPALIVE_QUIET_MS) continue;
     try {
       await setShellyState(dev.serverUri, dev.deviceId, 'on');
-      lastCmdAt[key] = Date.now();
+      noteCmd(key, 'on');
     } catch {
       // Nedostupnost nahlásí checkSources, tady se mlčky zkusí příště znovu
     }
@@ -1794,6 +1807,24 @@ function solinatorTargetMs() {
 // se přenáší na další den — dokud má dnešek z čeho ubírat, minus zůstane na něm.
 function solinatorOverdraftMs() {
   return Math.min(0, solinatorRawTargetMs());
+}
+
+// Po restartu je počítadlo doby běhu na nule a pravdu má telefon — vrátí ji přes
+// /api/runtime/restore, jakmile se appka připojí. Do té doby solinátor NEZAPÍNÁME:
+// jinak po každém nasazení odběhne celý rozpočet znovu (a appka přitom ukazuje správné
+// číslo, protože bere vyšší ze serveru a telefonu — pak to vypadá jako „hotovo, a přesto
+// jede"). Vypínat se smí pořád. Čeká se nejvýš čtvrt hodiny, ať se chlorování nezasekne,
+// když je appka celý den zavřená.
+const RUNTIME_CATCHUP_MS = 15 * 60 * 1000;
+let runtimeCatchupDone = false;
+let catchupLogged = false;
+function runtimeKnown() {
+  // Server nastartoval před otevřením okna? Pak je nula pravdivá a čekat není na co.
+  // (Počítá se až tady, ne při načtení souboru — pragueTime je o kus níž.)
+  if (!runtimeCatchupDone && pragueTime(SERVER_START_TS).hour < SOLINATOR_START_HOUR) {
+    runtimeCatchupDone = true;
+  }
+  return runtimeCatchupDone || Date.now() - SERVER_START_TS > RUNTIME_CATCHUP_MS;
 }
 
 // Kolik dnes už odběhl (měří updateRuntimes, nuluje se o pražské půlnoci)
@@ -2070,7 +2101,9 @@ function logAutoSet(key, turn, reason) {
   prev.n++;
   if (prev.n >= AUTO_REPEAT_WARN && !prev.warned) {
     prev.warned = true;
-    addLog(`${label}: nereaguje na povel „${word}" (${prev.n}× za sebou)`);
+    // Tohle je jediná chvíle, kdy appka VÍ, že něco nefunguje — půl hodiny marných
+    // povelů. Přesně tak běžel solinátor deset hodin, tak ať se to dozvíš hned.
+    sendPushToAll('⚠️ Relé nereaguje', `${label} ignoruje povel „${word}" (${prev.n}× za sebou).`);
   }
 }
 
@@ -2104,7 +2137,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
     try {
       await setShellyState(dev.serverUri, dev.deviceId, turn);
       state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
-      lastCmdAt[key] = Date.now();
+      noteCmd(key, turn);
       broadcast('device', { key, status: state.devices[key] });
       logAutoSet(key, turn, reason);
       return true;
@@ -2421,6 +2454,14 @@ async function runSolinatorAutomation(now, prague, weather) {
 
   // Zbývá odběhnout
   if (isOn === false) {
+    // Dokud nevíme, kolik dnes odběhl, nezapínáme — po restartu je počítadlo na nule
+    if (!runtimeKnown()) {
+      if (!catchupLogged) {
+        catchupLogged = true;
+        addLog('Solinátor: po restartu čekám na dopočet doby běhu z telefonu');
+      }
+      return;
+    }
     await autoSet('solinator', 'on', `zbývá ${fmtDur(target - ran)} z ${fmtDur(target)}`);
   }
 }
@@ -2428,7 +2469,11 @@ async function runSolinatorAutomation(now, prague, weather) {
 // Solinátor: podle měření chloru — boost (+2h/+4h) při nízkém, vypnutí (−1d/−2d) při vysokém
 // Plán na zítřek se posílá spolu se stavem, ať se řádek přepíše hned po stisku tlačítka
 function broadcastSolinator() {
-  broadcast('solinator', { solinator: state.solinator, solinatorPlan: solinatorPlan() });
+  broadcast('solinator', {
+    solinator: state.solinator,
+    solinatorPlan: solinatorPlan(),
+    solinatorCatchup: !runtimeKnown()   // po restartu se čeká na dobu běhu z telefonu
+  });
 }
 
 // Sdílená logika (používají ji endpointy i asistent). Stav se nastaví hned (synchronně),
@@ -3044,7 +3089,7 @@ async function actuateRelay(key, stateOn, reason) {
   await setShellyState(dev.serverUri, dev.deviceId, stateOn ? 'on' : 'off');
   const prev = state.devices[key] || {};
   state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
-  lastCmdAt[key] = Date.now();
+  noteCmd(key, stateOn ? 'on' : 'off');
   broadcast('device', { key, status: state.devices[key] });
   setManualHold(key);   // časovač i asistent jsou tvoje rozhodnutí, ne automatika
   addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
