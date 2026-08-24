@@ -118,7 +118,8 @@ const state = {
     yesterday: null, // { ms:{...}, wh:{...} }
     lastTs: Date.now()
   },
-  timeline: { shelly: [], pool: [], solinator: [], wallbox: [] }, // segmenty { from, to } zapnutí za 48 h
+  // segmenty { from, to } za 48 h; wbPlugged = kdy bylo auto připojené (graf režimů)
+  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [] },
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
@@ -602,8 +603,7 @@ function checkSensorBattery(room, battery) {
   if (battery <= SENSOR_LOW_BATTERY && !sensorBatteryWarned[room]) {
     sensorBatteryWarned[room] = true;
     const label = (TEMP_AUTO_RULES.find(r => r.key === room) || {}).room || room;
-    addLog(`Čidlo ${label}: slabá baterie (${Math.round(battery)} %)`);
-    sendPushToAll('Slabá baterie čidla', `Teplotní čidlo ${label} hlásí ${Math.round(battery)} %.`);
+    sendPushToAll('🪫 Slabá baterie čidla', `Teplotní čidlo ${label} hlásí ${Math.round(battery)} %.`);
   } else if (battery > SENSOR_LOW_BATTERY + 10) {
     sensorBatteryWarned[room] = false;   // po výměně/nabití se upozornění zase natáhne
   }
@@ -1043,7 +1043,7 @@ app.post('/api/log/restore', (req, res) => {
     // Červené výpadky si nesou `level` a rozsah `tEnd` — bez nich by se po každém
     // deployi vrátily z telefonu jako obyčejné šedé řádky
     const zaznam = { t: e.t, msg: e.msg };
-    if (e.level === 'error') zaznam.level = 'error';
+    if (e.level === 'error' || e.level === 'notif') zaznam.level = e.level;
     if (typeof e.tEnd === 'number' && e.tEnd > e.t && e.tEnd <= now) zaznam.tEnd = e.tEnd;
     merged.push(zaznam);
   }
@@ -1156,7 +1156,7 @@ app.post('/api/timeline/restore', (req, res) => {
   const cutoff = now - TIMELINE_MAX_AGE_MS;
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
-  const validKey = k => /^(shelly|pool|solinator|wallbox|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
@@ -1466,7 +1466,12 @@ app.post('/api/push/subscribe', (req, res) => {
   res.json({ ok: true });
 });
 
-async function sendPushToAll(title, bodyText) {
+// Každá hláška se zapíše i do logu (tučně) — ať se dá zpětně dohledat, co přišlo na
+// telefon a kdy. Zapisuje se i s vypnutými pushi: do logu to patří tak jako tak.
+// `log: false` je jen pro výpadky dat, které mají svoje červené řádky a souhrn by je
+// jen duplikoval.
+async function sendPushToAll(title, bodyText, { log = true } = {}) {
+  if (log) addLog(`${title} — ${bodyText}`, 'notif');
   if (!pushEnabled) return;
   const payload = JSON.stringify({ title, body: bodyText });
   for (const [endpoint, sub] of pushSubscriptions) {
@@ -1481,13 +1486,24 @@ async function sendPushToAll(title, bodyText) {
   }
 }
 
-// Notifikaci pošleme jednou při dosažení 99 %; znovu se odjistí, až baterie klesne pod 90 %
-let batteryFullNotified = false;
+// Hláška o plné baterce chodila po každém nasazení znovu: příznak „už jsem hlásil"
+// žije jen v paměti, a když je baterka zrovna plná, vypadá to po startu jako čerstvé
+// nabití. Proto `null` = ještě nevíme: první vzorek jen nastaví výchozí stav a mlčí.
+// Hlásí se tak jen náběžná hrana, kterou appka opravdu viděla — a nejvýš jednou za den.
+let batteryFullNotified = null;
+let batteryFullDay = '';
 
 function checkBatteryFull(soc) {
   if (typeof soc !== 'number') return;
+  if (batteryFullNotified === null) {          // první vzorek po startu
+    batteryFullNotified = soc >= 99;           // plná už při startu → bereme za nahlášené
+    return;
+  }
   if (soc >= 99 && !batteryFullNotified) {
     batteryFullNotified = true;
+    const dnes = pragueDateString();
+    if (batteryFullDay === dnes) return;       // víc než jednou za den to není zpráva
+    batteryFullDay = dnes;
     sendPushToAll('🔋 Baterie je plná', `Baterie je nabitá na ${Math.round(soc)} %.`);
   } else if (soc <= 90) {
     batteryFullNotified = false;
@@ -1504,8 +1520,10 @@ const GARAGE_OPEN_ALERT_MS = 10 * 60 * 1000; // garáž otevřená déle → hl�
 const notif = {
   garageOpenSince: 0,
   garageNotified: false,
-  carDoneNotified: false,
-  boilerHotNotified: false
+  // null = po startu ještě nevíme; první vzorek jen nastaví výchozí stav, aby nasazení
+  // nové verze nevypadalo jako čerstvě dobité auto / čerstvě vyhřátý bojler
+  carDoneNotified: null,
+  boilerHotNotified: null
 };
 
 // Garáž otevřená moc dlouho. Rolety se čtou jen na vyžádání, tak si je doptáme sami.
@@ -1526,18 +1544,21 @@ async function checkGarageOpen() {
     if (openMs >= GARAGE_OPEN_ALERT_MS && !notif.garageNotified) {
       notif.garageNotified = true;
       const mins = Math.round(openMs / 60000);
-      addLog(`Garáž je otevřená ${mins} min`);
       sendPushToAll('🚪 Garáž je otevřená', `Garáž je otevřená už ${mins} min.`);
     }
   } catch {}
 }
 
-// Auto dobito — stav wallboxu přešel na „Dokončeno"
+// Auto dobito — stav wallboxu přešel na „Dokončeno". `null` po startu: když auto stojí
+// dobité od včerejška, nasazení nové verze není důvod to hlásit znovu.
 function checkCarCharged(status) {
   if (typeof status !== 'number') return;
+  if (notif.carDoneNotified === null) {
+    notif.carDoneNotified = status === 3;
+    return;
+  }
   if (status === 3 && !notif.carDoneNotified) {
     notif.carDoneNotified = true;
-    addLog('Wallbox: nabíjení auta dokončeno');
     sendPushToAll('🔌 Auto je dobité', 'Nabíjení auta je dokončeno.');
   } else if (status === 0 || status === 1) {
     notif.carDoneNotified = false; // odpojeno/připraveno → odjistit
@@ -1647,7 +1668,8 @@ function checkSources() {
     const mins = Math.round(OUTAGE_MS / 60000);
     sendPushToAll(
       nove.length === 1 ? '⚠️ Výpadek dat' : `⚠️ Výpadek dat (${nove.length})`,
-      `${nove.join('; ')}. ${nove.length === 1 ? 'Neodpovídá' : 'Neodpovídají'} přes ${mins} min, automatika může jet naslepo.`
+      `${nove.join('; ')}. ${nove.length === 1 ? 'Neodpovídá' : 'Neodpovídají'} přes ${mins} min, automatika může jet naslepo.`,
+      { log: false }   // červené řádky výš už to říkají podrobněji
     );
   }
 }
@@ -2185,6 +2207,9 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
   // Ochrana: nad 70 °C v nádrži (Aquarea) vždy vypnout — má přednost
   const aq = (state.aircon && state.aircon.aquarea || [])[0];
   const tankTemp = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
+  // První vzorek po startu jen zaznamená stav — vyhřátá nádrž po nasazení nové verze
+  // není čerstvá událost. Od druhého vzorku už se hlásí normálně.
+  if (tankTemp !== null && notif.boilerHotNotified === null) notif.boilerHotNotified = tankTemp >= 70;
   if (tankTemp !== null && tankTemp >= 70) {
     // Jediná mez, kterou ruční zapnutí nepřebije — přehřátou nádrž nikdo „natruc" netopí
     if (isOn) await autoSet('shelly', 'off', `nádrž ${Math.round(tankTemp)} °C (nad 70)`, { force: true });
@@ -4064,6 +4089,23 @@ function recordWbMode(mode) {
   broadcast('wbModeHistory', { history: state.wbModeHistory });
 }
 
+// Kdy bylo auto připojené — vlastní dráha na časové ose (graf režimů ji kreslí nad
+// FAST/ECO/GREEN). Připojeno = připraveno / nabíjí / dokončeno; nepřipojeno, porucha
+// a nedostupné se nekreslí. Veze se to ve `state.timeline`, takže se o mazání po 48 h,
+// rozeslání klientům i zálohu v telefonu stará stávající mašinerie.
+function recordWbPlugged(status) {
+  const pripojeno = status === 1 || status === 2 || status === 3;
+  if (!pripojeno) return;
+  if (!state.timeline.wbPlugged) state.timeline.wbPlugged = [];
+  const segs = state.timeline.wbPlugged;
+  const now = Date.now();
+  const last = segs[segs.length - 1];
+  if (last && now - last.to <= TIMELINE_GAP_MS) last.to = now;
+  else segs.push({ from: now, to: now });
+  pruneTimeline();
+  broadcast('timeline', { timeline: state.timeline });
+}
+
 let wallboxPollRunning = false;
 
 async function pollWallbox() {
@@ -4073,6 +4115,7 @@ async function pollWallbox() {
     const result = await wbFetchStatus();
     state.wallbox = { ...wbParseResult(result), error: null, fetchedAt: new Date().toISOString() };
     checkCarCharged(state.wallbox.status); // notifikace „auto dobito"
+    recordWbPlugged(state.wallbox.status);  // dráha „připojeno" v grafu režimů
     // Do grafu režimů NEzaznamenáváme skutečný stav nabíječky (ta se sama dá do STOP,
     // když auto není připojené / je dobito). Zaznamenáváme jen změny NASTAVENÉHO režimu
     // (viz runEnergyControl a /api/wallbox/set), ať čára FAST/ECO/GREEN běží dál i přes STOP.

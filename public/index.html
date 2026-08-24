@@ -483,6 +483,8 @@
   }
   /* Výpadek dat — tučně červeně, ať se v logu nedá přehlédnout */
   .log-entry.log-error, .log-entry.log-error .log-time{color:#c0392b;font-weight:700;}
+  /* Odeslaná notifikace — tučně, ať je v logu poznat, co přišlo na telefon */
+  .log-entry.log-notif, .log-entry.log-notif .log-time{color:var(--navy);font-weight:700;}
   /* Odkud auto bralo — den po dni */
   .wbsrc-row{padding:7px 2px;border-bottom:1px solid rgba(44,62,80,0.06);}
   .wbsrc-row:last-child{border-bottom:none;}
@@ -2283,6 +2285,8 @@
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
             <li>Hlídá se <b>každé relé i každý měřák zvlášť</b> (ne Shelly jako celek) a k tomu Solax, wallbox, Infigy, klima a počasí. Když něco <b>15 min</b> neodpovídá, přijde <b>červený řádek</b> v logu a <b>notifikace</b>; u relé se v ní pozná, jestli bylo <b>naposledy zapnuté</b>. Víc výpadků naráz = jedna notifikace, ale řádek pro každý.</li>
             <li>Dokud výpadek trvá, další řádky nepřibývají — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10). Návrat dat se zapíše obyčejně, bez notifikace.</li>
+            <li><b>Každá odeslaná notifikace se zapíše i do logu</b> — tučně a s časem, ať se dá zpětně dohledat, co přišlo na telefon. U výpadků to dělají červené řádky, ty se neduplikují.</li>
+            <li>Hlášky „baterie je plná", „auto je dobité" a „bojler je vyhřátý" se po <b>restartu serveru neopakují</b> — appka hlásí jen změnu, kterou opravdu viděla. Plná baterie navíc <b>nejvýš jednou denně</b> (a jen když předtím klesla pod 90 %).</li>
             <li>Log si pamatuje <b>poslední týden</b> a je rozdělený po dnech (grafy dál kreslí 24 h).</li>
             <li>Denní kWh a doby běhu se <b>počítají jen z čerstvých dat</b>: co je starší než 10 min, se nepřipočte — po výpadku tak nevznikají vymyšlená čísla.</li>
             <li><b>Časovače přežijí nasazení</b>: telefon je zálohuje a po připojení vrátí serveru. Nevrací ty, které mezitím doběhly.</li>
@@ -2761,7 +2765,7 @@ function renderLog() {
       frag.appendChild(nadpis);
     }
     const row = document.createElement('div');
-    row.className = 'log-entry' + (e.level === 'error' ? ' log-error' : '');
+    row.className = 'log-entry' + (e.level === 'error' ? ' log-error' : (e.level === 'notif' ? ' log-notif' : ''));
     const time = document.createElement('span');
     time.className = 'log-time';
     // U trvajícího výpadku je místo jednoho času rozsah. Do minuty ho neukazujeme —
@@ -3301,7 +3305,7 @@ function pruneTimelineLocal(tl) {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|wallbox|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|ac_)/.test(k)) continue;
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number' && s.to >= cutoff)
       .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
@@ -5400,7 +5404,8 @@ window.addEventListener('resize', renderWallboxChart);
 
 // ---------- Graf historie režimů wallboxu (24 h) ----------
 
-const WB_MODE_COLORS = { fast: '#f5933d', green: '#27ae60', eco: '#3498db', stop: 'rgba(44,62,80,0.35)' };
+// FAST je červený (bere ze sítě), oranžová zbyla na dráhu „připojeno"
+const WB_MODE_COLORS = { plugged: '#f5933d', fast: '#c0392b', green: '#27ae60', eco: '#3498db', stop: 'rgba(44,62,80,0.35)' };
 const wbModeChartCanvas = document.getElementById('wbModeChart');
 const wbModeLegendEl = document.getElementById('wbModeLegend');
 let wbModeHistoryData = [];
@@ -5441,6 +5446,9 @@ async function maybeRestoreWbModeHistoryToServer(serverHist, localHist) {
 
 // Tři oddělené dráhy (FAST / ECO / GREEN) — jako časová osa na Přehledu
 const WB_MODE_LANES = [
+  // „Připojeno" nahoře jako kontext: režim je zajímavý hlavně tehdy, když auto vůbec
+  // viselo na kabelu. Kreslí se z časové osy, ne ze změn režimu.
+  { key: 'plugged', label: 'Připojeno', color: WB_MODE_COLORS.plugged, zdroj: 'timeline' },
   { key: 'fast', label: 'FAST', color: WB_MODE_COLORS.fast },
   { key: 'eco', label: 'ECO', color: WB_MODE_COLORS.eco },
   { key: 'green', label: 'GREEN', color: WB_MODE_COLORS.green }
@@ -5503,10 +5511,12 @@ function renderWbModeChart() {
     // Slabá linka celé dráhy
     ctx.fillStyle = 'rgba(44,62,80,0.06)';
     ctx.fillRect(padL, yTop, w - padL - padR, laneH);
-    // Segmenty tohoto režimu
+    // Segmenty téhle dráhy: režimy z historie přepnutí, „připojeno" z časové osy
     ctx.fillStyle = lane.color;
-    for (const s of segs) {
-      if (s.mode !== lane.key) continue;
+    const laneSegs = lane.zdroj === 'timeline'
+      ? ((timelineData && timelineData.wbPlugged) || [])
+      : segs.filter(s => s.mode === lane.key);
+    for (const s of laneSegs) {
       const from = Math.max(s.from, start);
       const to = Math.min(s.to, now);
       if (to <= from) continue;
@@ -6557,6 +6567,7 @@ function applySnapshot(snap) {
     timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
   }
   renderTimeline();
+  renderWbModeChart();   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
@@ -6667,6 +6678,7 @@ function connectStream() {
     }
     timelineData = merged;
     renderTimeline();
+    renderWbModeChart();   // dráha „připojeno"
     saveTimelineLocal();
   });
   es.addEventListener('aircon', e => {
