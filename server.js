@@ -4400,6 +4400,82 @@ function wbUpdateEcoGate() {
   }
 }
 
+// ---------- Odpolední FAST z baterky ----------
+// Když auto přijede odpoledne, z přebytku se toho do západu moc nestihne. Pokud ale
+// zbývající výroba pokryje jak dobití auta, tak doplnění baterky do 100 %, může auto
+// brát i z baterky — slunce ji do večera srovná.
+const WB_BAT_MARGIN = 0.9;        // s odhadem výroby počítáme o 10 % níž, jako rezerva
+const WB_BAT_CAR_KWH = 11;        // víc si auto nevezme
+const WB_BAT_HITS = 2;            // dvě měření po sobě, ať režim nebliká podle mraků
+const WB_BAT_DEADBAND_KWH = 1;    // menší schodek běžící FAST neshodí
+
+const kwh1 = v => Math.round(v * 10) / 10;
+const kwhLog = v => kwh1(v).toFixed(1).replace('.', ',') + ' kWh';
+
+let wbBatFast = { date: '', on: false, hits: 0, miss: 0, info: null };
+
+// Bilance zbytku dne. null = chybí data (odhad, výroba, SOC nebo časy slunce).
+function wbBatteryFastCheck(at = Date.now()) {
+  const w = weatherCache.data;
+  if (!w || !w.sys || w.sys.sunset === undefined) return null;
+  const inf = state.infigy || {};
+  const s = state.solax || {};
+  const forecast = typeof inf.forecastPv === 'number' ? inf.forecastPv : null;
+  const produced = typeof s.yieldToday === 'number' ? s.yieldToday : null;
+  const soc = typeof s.batterySoc === 'number' ? s.batterySoc : null;
+  if (forecast === null || produced === null || soc === null) return null;
+  const konecOkna = w.sys.sunset * 1000 - EC.SUN_FAST_BEFORE_SUNSET_S * 1000;
+  const oknoH = Math.max(0, (konecOkna - at) / 3600000);
+  const zbyva = Math.max(0, WB_BAT_MARGIN * forecast - produced);  // co se dnes ještě vyrobí
+  const doPlna = Math.max(0, ((100 - soc) / 100) * BATTERY_KWH);   // kolik chybí do 100 %
+  const auto = Math.min(WB_BAT_CAR_KWH, oknoH * CAR_MAX_KW);       // víc auto nechce ani nestihne
+  const rezerva = zbyva - (doPlna + auto);
+  return { ok: rezerva >= 0, zbyva, doPlna, auto, oknoH, rezerva };
+}
+
+// Stojí auto u nabíječky? (připraveno / nabíjí)
+function wbCarReady() {
+  const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
+  return st === 1 || st === 2;
+}
+
+function wbBatFastOn() {
+  return wbBatFast.on && wbBatFast.date === pragueDateString();
+}
+
+// Volá se jednou za cyklus z runEnergyControl (jinak by se počítadla posunula víckrát
+// za stejná data). Bez dat se nezapíná, ale běžící FAST se taky neruší.
+function wbUpdateBatFast(at = Date.now()) {
+  const today = pragueDateString(at);
+  if (wbBatFast.date !== today) wbBatFast = { date: today, on: false, hits: 0, miss: 0, info: null };
+  const carReady = wbCarReady();
+  const b = wbBatteryFastCheck(at);
+  wbBatFast.info = b;
+  if (wbBatFast.on && !carReady) {         // auto odjelo nebo dojedlo — není co řešit
+    wbBatFast = { ...wbBatFast, on: false, hits: 0, miss: 0 };
+    return;
+  }
+  if (!b) { wbBatFast.hits = 0; wbBatFast.miss = 0; return; }
+  if (wbBatFast.on) {
+    wbBatFast.miss = b.rezerva < -WB_BAT_DEADBAND_KWH ? wbBatFast.miss + 1 : 0;
+    if (wbBatFast.miss >= WB_BAT_HITS) {
+      wbBatFast.on = false; wbBatFast.hits = 0; wbBatFast.miss = 0;
+      addLog('Wallbox: zpátky na ECO — na dobití z baterky by výroba nestačila');
+    }
+    return;
+  }
+  // Dopoledne se pořád čeká na přebytek. Sáhne se po baterce, teprve až není čas čekat:
+  // do konce okna zbývá míň, než kolik by auto potřebovalo při plné rychlosti.
+  const kratkeOkno = b.oknoH > 0 && b.oknoH < WB_BAT_CAR_KWH / CAR_MAX_KW;
+  if (!kratkeOkno || !carReady || !b.ok) { wbBatFast.hits = 0; return; }
+  wbBatFast.hits += 1;
+  if (wbBatFast.hits >= WB_BAT_HITS) {
+    wbBatFast.on = true;
+    wbBatFast.miss = 0;
+    addLog(`Wallbox: FAST z baterky — zbývá vyrobit ${kwhLog(b.zbyva)}, baterka potřebuje ${kwhLog(b.doPlna)} a auto ${kwhLog(b.auto)}`);
+  }
+}
+
 // Cílový režim wallboxu (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget() {
   if (!state.wbAuto) return 'fast';
@@ -4419,6 +4495,9 @@ function ecWallboxTarget() {
     const fastFrom = wbHourOnDayOf(now, WB_NIGHT_FAST_HOUR);
     return now < nightEnd && now >= fastFrom ? 'fast' : 'green';
   }
+  // Odpoledne, když auto stojí u nabíječky a zbývající výroba pokryje i doplnění
+  // baterky, se dobíjí naplno — i z baterky, slunce ji do večera srovná.
+  if (wbBatFastOn()) return 'fast';
   // Přes den: ECO až od chvíle, kdy FVE opravdu vyrábí. Do té doby GREEN — z přebytku
   // se nabíjí taky, jen se nic nedobírá ze sítě ani z baterky.
   return wbEcoGateOpen() ? 'eco' : 'green';
@@ -4467,12 +4546,13 @@ async function runEnergyControl() {
     if (carReady && !wasReady) state.wbLastTarget = null; // auto se připojilo → přenastav režim
     wbPrevStatus = st;
 
-    // Branka denního okna se posouvá jen tady, jednou za cyklus
+    // Branka denního okna a bilance na FAST z baterky se posouvají jen tady, jednou za cyklus
     wbUpdateEcoGate();
+    wbUpdateBatFast();
 
     // Ranní rozhodnutí i čekání na slunce se mění samy (vypršením, přelomem do víkendu,
     // rozjezdem výroby) — dej vědět appce, ať přepínač a nápověda sedí
-    const morningState = `${wbMorningNeed()}|${wbWaitingForSun()}`;
+    const morningState = `${wbMorningNeed()}|${wbWaitingForSun()}|${wbBatFastOn()}`;
     if (wbPrevMorningState !== morningState) {
       if (wbPrevMorningState !== null) broadcast('wbAuto', wbSwitchPayload());
       wbPrevMorningState = morningState;
@@ -4509,6 +4589,14 @@ function wbSwitchPayload() {
     wbEcoPvKw: WB_ECO_PV_KW,
     wbEcoFallbackHour: WB_ECO_FALLBACK_HOUR,
     wbNightFastHour: WB_NIGHT_FAST_HOUR,
+    // Odpolední FAST z baterky — appka z toho skládá nápovědu
+    wbBatFast: wbBatFastOn(),
+    // Auto stojí u nabíječky a okno se krátí, jen bilance nevyjde — appka to řekne taky
+    wbBatFastBlizko: !wbBatFastOn() && wbCarReady() && !!wbBatFast.info
+      && wbBatFast.info.oknoH > 0 && wbBatFast.info.oknoH < WB_BAT_CAR_KWH / CAR_MAX_KW,
+    wbBatFastZbyva: wbBatFast.info ? kwh1(wbBatFast.info.zbyva) : null,
+    wbBatFastChybi: wbBatFast.info ? kwh1(-wbBatFast.info.rezerva) : null,
+    wbBatFastOkno: wbBatFast.info ? kwh1(wbBatFast.info.oknoH) : null,
     // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
     wbWinter: isWinter(),
     wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0
