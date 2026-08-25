@@ -255,8 +255,10 @@ function pruneHistory() {
 
 // level: 'error' se v appce vykreslí tučně červeně. Chybové záznamy si navíc drží
 // `tEnd` — dokud výpadek trvá, neroste počet řádků, jen se posouvá konec rozsahu.
-function addLog(msg, level) {
-  const entry = { t: Date.now(), msg };
+// `at` = kdy se to STALO (ne kdy jsme na to přišli). Používá to hlídač výpadků: řádek
+// má pokrývat celý výpadek, ne jen tu část od jeho odhalení.
+function addLog(msg, level, at) {
+  const entry = { t: at || Date.now(), msg };
   if (level) entry.level = level;
   state.log.push(entry);
   pruneHistory();
@@ -1596,9 +1598,20 @@ function noteRelayPoll(key) {
 
 // Seznam sledovaných věcí. `badSince` = odkdy je zdroj mimo (0 = v pořádku); výpadek
 // se hlásí, až když to trvá celých OUTAGE_MS, takže jeden vynechaný dotaz nic nespustí.
+// Zdroj bez razítka (ještě nikdy nic nedodal, nebo o razítko přišel) není „mimo od
+// startu serveru" — to by po patnácté minutě běhu hlásilo výpadek okamžitě. Počítá se
+// od chvíle, kdy si toho appka všimla.
+const unknownSince = {};
+
 function outageSources() {
+  const now = Date.now();
   const ms = ts => (typeof ts === 'number' ? ts : (ts ? new Date(ts).getTime() : 0));
-  const podle = ts => ms(ts) || SERVER_START_TS;   // co nikdy nedorazilo, je mimo od startu
+  const podle = (key, ts) => {
+    const t = ms(ts);
+    if (t) { unknownSince[key] = 0; return t; }
+    if (!unknownSince[key]) unknownSince[key] = now;
+    return unknownSince[key];
+  };
   const src = [];
 
   for (const key of Object.keys(DEVICES)) {
@@ -1613,7 +1626,7 @@ function outageSources() {
       note: d.isOn === true ? 'naposledy ZAPNUTO' : '',
       // `online` plní jen poller — kdyby se zasekl celý, příznak by zamrzl na „živé".
       // Druhá podmínka na stáří razítka takový případ pochytá.
-      badSince: relayBadSince[key] || (cerstve(d.fetchedAt, OUTAGE_MS) ? 0 : podle(d.fetchedAt))
+      badSince: relayBadSince[key] || (cerstve(d.fetchedAt, OUTAGE_MS) ? 0 : podle('rele_' + key, d.fetchedAt))
     });
   }
   POOL_PM_IDS.forEach((id, i) => {
@@ -1625,7 +1638,7 @@ function outageSources() {
       rele: true,
       // Součet poolPowerW mlčky spadne, když jeden ze tří měřáků umře — proto se
       // hlídá každý zvlášť podle svého posledního povedeného čtení.
-      badSince: pm.ok ? 0 : podle(pm.at)
+      badSince: pm.ok ? 0 : podle('pm_' + id, pm.at)
     });
   });
 
@@ -1639,7 +1652,7 @@ function outageSources() {
     { key: 'aircon', label: 'Klimatizace', on: panasonicEnabled, ts: (state.aircon || {}).fetchedAt },
     { key: 'weather', label: 'Počasí', on: !!OWM_API_KEY, ts: (state.weather || {}).fetchedAt }
   ];
-  for (const s of data) src.push({ key: s.key, label: s.label, on: s.on, badSince: podle(s.ts) });
+  for (const s of data) src.push({ key: s.key, label: s.label, on: s.on, badSince: podle(s.key, s.ts) });
 
   return src;
 }
@@ -1660,8 +1673,14 @@ function checkSources() {
         outageLog[s.key].tEnd = now;
         broadcast('logUpdate', { entry: outageLog[s.key] });
       } else {
+        // Řádek začíná časem, kdy výpadek začal — ne kdy jsme si ho všimli. Jinak by
+        // dvacetiminutový výpadek v logu vypadal jako pětiminutový.
         outageLog[s.key] = addLog(
-          s.rele ? `${s.label}: neodpovídá${s.note ? ` (${s.note})` : ''}` : `${s.label}: nedorazila data`, 'error');
+          s.rele ? `${s.label}: neodpovídá${s.note ? ` (${s.note})` : ''}` : `${s.label}: nedorazila data`,
+          'error', s.badSince);
+        // Rozsah rovnou ukazuje, jak dlouho už to trvá (řádek vznikl 15 min po začátku)
+        outageLog[s.key].tEnd = now;
+        broadcast('logUpdate', { entry: outageLog[s.key] });
         nove.push(s.note ? `${s.label} — ${s.note}` : s.label);
       }
     } else if (outageLog[s.key]) {
@@ -3859,7 +3878,11 @@ async function pollAircon() {
     // Teplotní automatika vyhodnotíme z čerstvých teplot
     await evaluateTempAuto(out);
   } catch (err) {
-    state.aircon = { devices: state.aircon.devices || [], aquarea: state.aircon.aquarea || [], error: err.message };
+    // Razítko posledního POVEDENÉHO dotazu si necháme (stejně jako wallbox a Infigy) —
+    // bez něj by hlídač neměl podle čeho počítat stáří a jeden neúspěšný dotaz na
+    // Panasonic (vypršelý token, zaseknutý cloud) by hlásil výpadek okamžitě.
+    state.aircon = { devices: state.aircon.devices || [], aquarea: state.aircon.aquarea || [],
+      error: err.message, fetchedAt: state.aircon.fetchedAt };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
       addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140));

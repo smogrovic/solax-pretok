@@ -6628,6 +6628,10 @@ function connectStream() {
     const d = JSON.parse(e.data);
     if (d.entry) {
       logEntries.push(d.entry);
+      // Řádek o výpadku nese čas jeho ZAČÁTKU, ne odhalení — může tedy přijít „ze
+      // včerejška" a musí zapadnout na správné místo, ne na konec
+      const last = logEntries[logEntries.length - 2];
+      if (last && last.t > d.entry.t) logEntries.sort((a, b) => a.t - b.t);
       renderLog();
       saveLogLocal();
     }
