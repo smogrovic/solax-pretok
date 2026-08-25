@@ -98,6 +98,7 @@ const state = {
   solax: null,       // poslední úspěšná data ze střídače
   devices: {},       // key -> { online, isOn, powerW, fetchedAt }
   poolPowerW: null,  // součet 3 PM měření bazénu
+  poolPowerAt: null, // kdy se ten součet naposledy povedl (co je staré, se nepředstírá)
   pmStatus: {},      // id měřáku -> { ok, at } — každý PM se hlídá zvlášť, součet výpadek schová
   // Tlačítko „+24 h": bazén jede natvrdo do tohohle času, bez ohledu na přebytek,
   // okno, SOC i zimní režim. Sčítá se po 24 h do stropu 72 h.
@@ -286,6 +287,7 @@ function snapshot() {
     solax: state.solax,
     devices: state.devices,
     poolPowerW: state.poolPowerW,
+    poolPowerAt: state.poolPowerAt,
     poolForce: state.poolForce,
     history: state.history,
     log: state.log,
@@ -383,14 +385,22 @@ async function fetchSolax() {
   // Odběry, které mají vlastní dlaždici — měříme je zvlášť a odečteme, ať nejsou ve
   // "spotřebě domu" započítané dvakrát (Bojler 1 = Shelly, Bojler 2 = Infigy, bazén, wallbox)
   const wallboxW = (state.wallbox && typeof state.wallbox.power === 'number') ? state.wallbox.power : 0;
-  const boiler1W = (state.devices.shelly && typeof state.devices.shelly.powerW === 'number') ? state.devices.shelly.powerW : 0;
-  const boiler2W = (typeof inf.hwPower === 'number') ? inf.hwPower * 1000 : 0;
-  const poolW = (typeof state.poolPowerW === 'number') ? state.poolPowerW : 0;
+  // Odečítat se smí jen to, co UMÍME ZMĚŘIT. Odběr nedostupného relé (nebo zmrzlých dat)
+  // se do domu započítá — jinak by dům vycházel menší, než je, podle staré hodnoty.
+  // Infigy jen dokud jsou její data čerstvá — jinak by zmrzlá výroba rozhodila součet
+  const infOk = cerstve(inf.fetchedAt);
+  const releW = key => {
+    const d = state.devices[key];
+    return d && d.online === true && cerstve(d.fetchedAt) && typeof d.powerW === 'number' ? d.powerW : 0;
+  };
+  const boiler1W = releW('shelly');
+  const boiler2W = (infOk && typeof inf.hwPower === 'number') ? inf.hwPower * 1000 : 0;
+  const poolW = (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) ? state.poolPowerW : 0;
 
   // Spotřeba domu (zbytek baráku) = výroba − do baterie − přetok − oba bojlery − bazén − wallbox.
   // Výrobu a tok baterie bereme přednostně z Infigy (shodné s dlaždicemi, živější), přetok ze Solaxu.
-  const pvW = (typeof inf.pvPower === 'number') ? inf.pvPower * 1000 : (dc1 + dc2 + dc3 + dc4);
-  const chargeW = (typeof inf.batteryPower === 'number') ? (-inf.batteryPower * 1000) : batPower; // kladné = nabíjení
+  const pvW = (infOk && typeof inf.pvPower === 'number') ? inf.pvPower * 1000 : (dc1 + dc2 + dc3 + dc4);
+  const chargeW = (infOk && typeof inf.batteryPower === 'number') ? (-inf.batteryPower * 1000) : batPower; // kladné = nabíjení
   const wallboxSubW = wallboxWatts() ?? wallboxW;
   const houseKw = Math.max(0, (pvW - chargeW - (r.feedinpower || 0) - wallboxSubW - boiler1W - boiler2W - poolW) / 1000);
   const batterySoc = typeof r.soc === 'number' ? r.soc : null;
@@ -638,7 +648,9 @@ async function pollShelly() {
     }
     const valid = powers.filter(p => typeof p === 'number');
     state.poolPowerW = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) : null;
-    broadcast('poolPower', { totalPowerW: state.poolPowerW });
+    // Razítko: bez něj by appka i výpočet spotřeby domu bral zmrzlý součet za platný
+    state.poolPowerAt = valid.length > 0 ? Date.now() : null;
+    broadcast('poolPower', { totalPowerW: state.poolPowerW, at: state.poolPowerAt });
 
     updateRuntimes();
   } finally {

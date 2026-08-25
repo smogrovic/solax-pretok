@@ -2284,6 +2284,7 @@
             <li>Graf <b>Odhad vs. skutečnost</b>: ranní odhad (první po <b>7:00</b>), večerní odhad a skutečná výroba. Historie 14 dní, kreslí se 10.</li>
             <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž přes 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat přes 15 min.</li>
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine.</li>
+            <li>Když je relé <b>nedostupné</b> nebo jsou jeho data starší než 15 min, appka to nepředstírá: semafor je <b>šedý</b>, příkon <b>vyčárkovaný</b> a pod tlačítky stojí, jaký byl jeho poslední známý stav. Odběr, který se nedá změřit, se započítá do <b>spotřeby domu</b> — jinak by dům vycházel menší, než je.</li>
             <li>Hlídá se <b>každé relé i každý měřák zvlášť</b> (ne Shelly jako celek) a k tomu Solax, wallbox, Infigy, klima a počasí. Když něco <b>15 min</b> neodpovídá, přijde <b>červený řádek</b> v logu a <b>notifikace</b>; u relé se v ní pozná, jestli bylo <b>naposledy zapnuté</b>. Víc výpadků naráz = jedna notifikace, ale řádek pro každý.</li>
             <li>Dokud výpadek trvá, další řádky nepřibývají — jen se vlevo místo času ukáže <b>rozsah</b> (11:15–12:10). Návrat dat se zapíše obyčejně, bez notifikace.</li>
             <li><b>Každá odeslaná notifikace se zapíše i do logu</b> — tučně a s časem, ať se dá zpětně dohledat, co přišlo na telefon. U výpadků to dělají červené řádky, ty se neduplikují.</li>
@@ -2449,10 +2450,17 @@ function renderManualHold() {
   const now = Date.now();
   for (const [key, device] of Object.entries(devices)) {
     if (!device.holdEl) continue;
+    const d = deviceData[key];
     const until = Number(manualHoldData[key]) || 0;
-    device.holdEl.textContent = until > now
-      ? `Ručně — automatika převezme v ${fmtSolTime(until)}`
-      : '';
+    if (d && !deviceZname(d)) {
+      // Nedostupnost má přednost: dokud nevíme, co relé dělá, je odklad podružný
+      const naposled = d.isOn === true ? 'zapnuto' : (d.isOn === false ? 'vypnuto' : 'neznámý stav');
+      device.holdEl.textContent = `Nedostupné — naposledy ${naposled}`;
+    } else {
+      device.holdEl.textContent = until > now
+        ? `Ručně — automatika převezme v ${fmtSolTime(until)}`
+        : '';
+    }
   }
 }
 function applyManualHold(d) {
@@ -2463,17 +2471,36 @@ function applyManualHold(d) {
 // Odklad vyprší sám, bez další zprávy ze serveru — řádek se musí schovat i tak
 setInterval(renderManualHold, 30000);
 
+// Relé odpojené od wifi cloud stejně obslouží — vrátí `online:false` a k tomu POSLEDNÍ
+// ZNÁMÝ stav. Kdybychom ho brali vážně, svítil by semafor zeleně u zařízení, o kterém
+// dávno nic nevíme (přesně tak vypadal solinátor, když byl mimo). Neznámé je proto
+// všechno, co není online, a data starší než 15 min (tedy mez, po které hlídač hlásí
+// výpadek). Ovládání se tím nemění — povely se posílají dál.
+const DEVICE_STALE_MS = 15 * 60 * 1000;
+const deviceData = {};        // poslední známý stav každého relé (pro hlášku o nedostupnosti)
+function deviceZname(data) {
+  if (!data || data.isOn === null || data.isOn === undefined) return false;
+  if (data.online !== true) return false;
+  const t = data.fetchedAt ? new Date(data.fetchedAt).getTime() : 0;
+  return !!t && Date.now() - t <= DEVICE_STALE_MS;
+}
+
 function renderDevice(device, data) {
+  // Klíč zařízení si dopočítáme jednou — potřebuje ho hláška o nedostupnosti níž
+  if (device.key === undefined) device.key = Object.keys(devices).find(k => devices[k] === device) || null;
+  if (device.key) deviceData[device.key] = data;
   // Prvky jsou seznamy — světlo u bazénu má ovládání na dvou stránkách
   const setLight = cls => device.light.forEach(el => { el.className = cls; });
   const mark = (list, on) => list.forEach(el => el.classList.toggle('active-state', on));
   // Stav (zapnuto/vypnuto/neznámý) ukazuje semafor, textově se nepíše
-  if (!data || data.isOn === null || data.isOn === undefined) {
-    setLight('traffic-light');
+  if (!deviceZname(data)) {
+    setLight('traffic-light');            // šedá = nevíme
     mark(device.onBtn, false);
     mark(device.offBtn, false);
-    if (device.powerEl) device.powerEl.textContent = '';
-    if (device === devices.shelly) { lastShellyPowerW = (data && typeof data.powerW === 'number') ? data.powerW : null; renderBoilerPower(); }
+    if (device.powerEl) device.powerEl.textContent = '–';
+    // Do dlaždice nepatří poslední naměřený příkon — o tom, co teče, taky nic nevíme
+    if (device === devices.shelly) { lastShellyPowerW = null; renderBoilerPower(); }
+    renderManualHold();
     return;
   }
   setLight(data.isOn ? 'traffic-light on' : 'traffic-light off');
@@ -2488,6 +2515,7 @@ function renderDevice(device, data) {
     lastShellyPowerW = typeof data.powerW === 'number' ? data.powerW : null;
     renderBoilerPower();
   }
+  renderManualHold();
 }
 
 async function setDeviceState(device, turn) {
@@ -2519,12 +2547,16 @@ Object.values(devices).forEach(device => {
   device.offBtn.forEach(b => b.addEventListener('click', () => setDeviceState(device, 'off')));
 });
 
-function renderPoolPower(totalPowerW) {
-  poolTotalPowerEl.textContent = typeof totalPowerW === 'number'
+// `at` = kdy se součet měřáků naposledy povedl. Zmrzlé číslo nepředstíráme — když
+// měřáky mlčí, jsou tam pomlčky (a ten odběr se na serveru započítá do spotřeby domu).
+function renderPoolPower(totalPowerW, at) {
+  const zname = typeof totalPowerW === 'number'
+    && !!at && Date.now() - new Date(at).getTime() <= DEVICE_STALE_MS;
+  poolTotalPowerEl.textContent = zname
     ? 'Bazén: ' + Math.round(totalPowerW) + ' W'
-    : '';
+    : (typeof totalPowerW === 'number' ? 'Bazén: –' : '');
   if (poolValueEl) {
-    poolValueEl.textContent = typeof totalPowerW === 'number'
+    poolValueEl.textContent = zname
       ? (totalPowerW / 1000).toFixed(1).replace('.', ',') + ' kW'
       : '– kW';
   }
@@ -6370,7 +6402,7 @@ function applySnapshot(snap) {
   for (const key of Object.keys(snap.devices || {})) {
     if (devices[key]) renderDevice(devices[key], snap.devices[key]);
   }
-  renderPoolPower(snap.poolPowerW);
+  renderPoolPower(snap.poolPowerW, snap.poolPowerAt);
   applyManualHold(snap.manualHold);
   applyPoolForce(snap);
   maybeRestorePoolForce(poolForceUntil);
@@ -6616,7 +6648,8 @@ function connectStream() {
     if (devices[d.key]) renderDevice(devices[d.key], d.status);
   });
   es.addEventListener('poolPower', e => {
-    renderPoolPower(JSON.parse(e.data).totalPowerW);
+    const pp = JSON.parse(e.data);
+    renderPoolPower(pp.totalPowerW, pp.at);
   });
   es.addEventListener('poolForce', e => {
     applyPoolForce(JSON.parse(e.data));
