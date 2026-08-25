@@ -284,18 +284,18 @@
     text-align:center;
     margin-bottom:6px;
   }
-  #feedinChart,
-  #wbChart,
-  #batteryChart{
+  /* Posouvací grafy (FVE, Wallbox): výšku si počítá engine podle počtu panelů.
+     touch-action: pan-y — vodorovné tažení patří grafu, ne přepínání stránek. */
+  .pan-chart{
     width:100%;
-    height:96px;
     display:block;
+    touch-action:pan-y;
+    cursor:grab;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
   }
-  #boilerChart{
-    width:100%;
-    height:144px;
-    display:block;
-  }
+  .pan-chart.dragging{cursor:grabbing;}
   #airconChart{
     width:100%;
     height:160px;
@@ -1318,10 +1318,6 @@
   .wb-manual{margin-top:16px;width:100%;}
   .wb-manual-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;font-weight:600;}
   .wb-manual-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
-  #wbModeChart{
-    width:100%;
-    display:block;
-  }
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -1668,21 +1664,12 @@
       </div>
 
       <div class="card graph-card">
-        <div class="graph-title">Teplota bojlerů za 24 h (°C)</div>
-        <canvas id="boilerChart"></canvas>
-        <div class="timeline-legend" id="boilerLegend"></div>
-      </div>
-
-      <div class="card graph-card">
-        <div class="graph-title">Baterie za 24 h (%)</div>
-        <canvas id="batteryChart"></canvas>
-      </div>
-
-      <div class="card graph-card">
-        <div class="graph-title">Přetok za 24 h (kW)</div>
-        <canvas id="feedinChart"></canvas>
+        <div class="graph-title">Průběh dne — posuň prstem do minulosti</div>
+        <canvas id="fveChart" class="pan-chart"></canvas>
+        <div class="graph-total" id="fveRange"></div>
         <div class="graph-total" id="feedinTotal"></div>
         <div class="graph-total" id="importTotal"></div>
+        <div class="timeline-legend" id="boilerLegend"></div>
       </div>
 
       <div class="meta">
@@ -2032,14 +2019,9 @@
       </div>
 
       <div class="card graph-card">
-        <div class="graph-title">Výkon za 24 h (kW)</div>
-        <canvas id="wbChart"></canvas>
+        <div class="graph-title">Výkon a režimy — posuň prstem do minulosti</div>
+        <canvas id="wbChart" class="pan-chart"></canvas>
         <div class="graph-total" id="wbEnergyTotal"></div>
-      </div>
-
-      <div class="card stats-card">
-        <div class="graph-title">Historie režimů (24 h)</div>
-        <canvas id="wbModeChart"></canvas>
         <div class="timeline-legend" id="wbModeLegend"></div>
       </div>
 
@@ -2269,6 +2251,8 @@
             <li>Dotazy jsou rozprostřené, na Shelly jde jeden za <b>1 s</b>. <b>Aktualizovat</b> načte všechno hned.</li>
             <li>Diagram toku energie bere všechno ze Solaxu.</li>
             <li>Grafy jsou vyhlazené, <b>kWh se počítají z původních dat</b> — a jen z těch do 10 min stáří.</li>
+            <li>Grafy na FVE a Wallboxu mají <b>jednu časovou osu</b> a jdou <b>posunout prstem 4 dny</b> zpátky; po minutě bez doteku se vrátí na teď.</li>
+            <li>Data starší než den se ukládají <b>po 6 min</b> (ze šestiminutovky se nechává špička), čerstvý den po 2 min.</li>
             <li><b>Odhad vs. skutečnost</b>: ranní odhad (první po 7:00), večerní a skutečná výroba. 14 dní zpět.</li>
             <li>Notifikace: 🔋 baterie <b>99 %</b> (1× denně) · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
             <li>Každá hláška přijde <b>jednou</b> a odjistí se, až stav pomine. Po restartu serveru se neopakuje.</li>
@@ -2550,6 +2534,228 @@ function renderPoolPower(totalPowerW, at) {
 
 // ---------- Graf přetoku za 24 h ----------
 
+// ---------- Posouvací grafy: jedna osa X pro několik panelů pod sebou ----------
+// Wallbox i FVE měly každý graf ve vlastní kartě s vlastní osou a člověk musel
+// očima přenášet čas mezi obrázky. Tenhle engine kreslí jednu osu pro všechny
+// panely pod sebou a umí s ní posouvat prstem čtyři dny zpátky.
+const PAN_WINDOW_MS = 24 * 60 * 60 * 1000;         // šířka okna zůstává den
+const PAN_MAX_BACK_MS = 4 * 24 * 60 * 60 * 1000;   // tak daleko sahají uložená data
+let PAN_RETURN_MS = 60000;                         // po minutě bez doteku zpátky na živo
+const PAN_PAD_L = 34, PAN_PAD_R = 8, PAN_PAD_T = 10, PAN_AXIS_H = 16, PAN_GAP = 10;
+const PAN_GREY = 'rgba(44,62,80,0.4)';
+
+// Nejbližší celá hodina dělitelná šesti po čase `t` (0:00 · 6:00 · 12:00 · 18:00).
+// Značky se tak drží skutečných hodin, ne okraje okna — po posunu prstem to pak
+// nejsou popisky typu 14:37.
+function panNextTick(t) {
+  const d = new Date(t);
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() + (6 - (d.getHours() % 6)) % 6);
+  return d.getTime() < t ? d.getTime() + 6 * 3600000 : d.getTime();
+}
+
+// panels: [{ h, draw(ctx, g) }] — g = { x(t), start, end, live, top, h, padL, plotW }
+// footer(g): volitelný popisek pod grafem (rozsah okna, součty…)
+function makePanChart(canvas, opts) {
+  const stav = { end: null, dragging: false, timer: null, raf: 0 };
+  if (!canvas) return { draw() {}, stav };
+
+  function draw() {
+    stav.raf = 0;
+    const now = Date.now();
+    const live = stav.end === null;
+    const end = live ? now : stav.end;
+    const start = end - PAN_WINDOW_MS;
+    const w = canvas.clientWidth || 300;
+    const panels = opts.panels;
+    const h = PAN_PAD_T + panels.reduce((a, p) => a + p.h, 0)
+      + PAN_GAP * (panels.length - 1) + PAN_AXIS_H;
+    canvas.style.height = h + 'px';
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+    const plotW = Math.max(1, w - PAN_PAD_L - PAN_PAD_R);
+    const x = t => PAN_PAD_L + ((t - start) / PAN_WINDOW_MS) * plotW;
+    const telo = h - PAN_AXIS_H;
+
+    // Svislé značky přes všechny panely + popisky dole. Půlnoc dostane den.
+    ctx.textAlign = 'center';
+    for (let t = panNextTick(start); t <= end; t += 6 * 3600000) {
+      const pulnoc = new Date(t).getHours() === 0;
+      ctx.strokeStyle = pulnoc ? 'rgba(44,62,80,0.18)' : 'rgba(44,62,80,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x(t), PAN_PAD_T);
+      ctx.lineTo(x(t), telo);
+      ctx.stroke();
+      ctx.fillStyle = PAN_GREY;
+      ctx.fillText(pulnoc ? denNadpis(t) : new Date(t).getHours() + ':00', x(t), h - 4);
+    }
+
+    let top = PAN_PAD_T;
+    for (const p of panels) {
+      const vrch = top;
+      const g = {
+        x, start, end, now, live, w, plotW, padL: PAN_PAD_L, padR: PAN_PAD_R, top, h: p.h,
+        // Ořez na plochu panelu — křivka nesmí přetéct do popisků ani k sousedům.
+        // Popisky osy Y se kreslí vlevo mimo, takže si o ořez řekne jen kreslení dat.
+        clip(fn) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(PAN_PAD_L, vrch - 1, plotW, p.h + 2);
+          ctx.clip();
+          fn();
+          ctx.restore();
+        }
+      };
+      p.draw(ctx, g);
+      panPopisek(ctx, { ...g, label: p.label });
+      top += p.h + PAN_GAP;
+    }
+
+    if (opts.footer) opts.footer({ x, start, end, now, live });
+  }
+
+  function schedule() {
+    if (stav.raf) return;
+    stav.raf = requestAnimationFrame(draw);
+  }
+
+  // ---- posouvání prstem ----
+  let pointerId = null, startX = 0, startEnd = 0;
+  const blockScroll = e => e.preventDefault();
+
+  function konec() {
+    if (!stav.dragging) return;
+    stav.dragging = false;
+    try { canvas.releasePointerCapture(pointerId); } catch {}
+    document.removeEventListener('touchmove', blockScroll);
+    canvas.classList.remove('dragging');
+    // Po chvíli bez doteku se graf sám vrátí na „teď" a zase jede živě
+    if (stav.end !== null) {
+      clearTimeout(stav.timer);
+      stav.timer = setTimeout(() => { stav.end = null; draw(); }, PAN_RETURN_MS);
+    }
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startEnd = stav.end === null ? Date.now() : stav.end;
+    stav.dragging = true;
+    clearTimeout(stav.timer);
+    try { canvas.setPointerCapture(pointerId); } catch {}
+    canvas.classList.add('dragging');
+    // Prst se zatím nehnul, takže rolování stránky ještě nezačalo
+    document.addEventListener('touchmove', blockScroll, { passive: false });
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!stav.dragging || e.pointerId !== pointerId) return;
+    const plotW = Math.max(1, (canvas.clientWidth || 300) - PAN_PAD_L - PAN_PAD_R);
+    const now = Date.now();
+    const posun = (e.clientX - startX) * (PAN_WINDOW_MS / plotW);
+    const nejdal = now - PAN_MAX_BACK_MS + PAN_WINDOW_MS;
+    const end = Math.min(now, Math.max(nejdal, startEnd - posun));
+    // U pravého okraje se graf zase chytne „teď" a jede živě
+    stav.end = now - end < 60000 ? null : end;
+    schedule();
+  });
+  canvas.addEventListener('pointerup', konec);
+  canvas.addEventListener('pointercancel', konec);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  window.addEventListener('resize', schedule);
+
+  return { draw, schedule, stav };
+}
+
+// Název panelu vlevo nahoře uvnitř plochy (osa Y má vlevo svoje čísla)
+function panPopisek(ctx, g) {
+  if (!g.label) return;
+  ctx.fillStyle = 'rgba(44,62,80,0.55)';
+  ctx.textAlign = 'left';
+  ctx.fillText(g.label, g.padL + 3, g.top + 9);
+}
+
+function panPrazdny(ctx, g) {
+  ctx.fillStyle = PAN_GREY;
+  ctx.textAlign = 'center';
+  ctx.fillText('Zatím sbírám data…', g.padL + g.plotW / 2, g.top + g.h / 2 + 3);
+  return false;
+}
+
+// Body okna i s kouskem přesahu, ať křivka nekončí před okrajem
+function panPts(all, g, ok) {
+  const okraj = 20 * 60000;
+  return (all || []).filter(p => p && typeof p.t === 'number'
+    && p.t >= g.start - okraj && p.t <= g.end + okraj && (!ok || ok(p)));
+}
+
+// Rozsah okna slovy — „Posledních 24 h" nebo „21. 8. 14:00 → 22. 8. 14:00"
+function panRozsah(g) {
+  return g.live ? 'Posledních 24 h' : fmtSolTime(g.start) + ' → ' + fmtSolTime(g.end);
+}
+
+// Osa Y panelu: hodnota → pixel
+function panY(g, min, max) {
+  const rozsah = (max - min) || 1;
+  return v => g.top + (1 - (v - min) / rozsah) * g.h;
+}
+
+// Popisky osy Y vlevo (mimo ořez). Krajní se drží uvnitř panelu.
+function panOsaY(ctx, g, radky, y) {
+  ctx.fillStyle = PAN_GREY;
+  ctx.textAlign = 'right';
+  for (const [v, text] of radky) {
+    const py = Math.min(Math.max(y(v) + 3, g.top + 8), g.top + g.h);
+    ctx.fillText(text, g.padL - 4, py);
+  }
+}
+
+function panNula(ctx, g, py) {
+  ctx.strokeStyle = 'rgba(44,62,80,0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(g.padL, py);
+  ctx.lineTo(g.padL + g.plotW, py);
+  ctx.stroke();
+}
+
+const panCis = v => v.toFixed(1).replace('.', ',');
+
+// ---------- Prořídění historie (stejná pravidla jako na serveru) ----------
+// Grafy sahají čtyři dny zpátky; v plném rozlišení by to byly tisíce bodů
+// v localStorage. Co je starší než den, se slučuje do 6min kbelíků — server dělá
+// totéž, takže se záloha v telefonu a data ze serveru nerozejdou.
+const HIST_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+const THIN_AFTER_MS = 24 * 60 * 60 * 1000;
+const THIN_BUCKET_MS = 6 * 60 * 1000;
+
+// Očekává body seřazené podle času; pick(a, b) vybírá vzorek kbelíku
+function thinPoints(points, pick, now = Date.now()) {
+  const hranice = now - THIN_AFTER_MS;
+  const out = [];
+  let bucket = null, best = null;
+  const flush = () => { if (best) out.push(best); bucket = null; best = null; };
+  for (const p of points) {
+    if (p.t >= hranice) { flush(); out.push(p); continue; }
+    const b = Math.floor(p.t / THIN_BUCKET_MS);
+    if (b !== bucket) { flush(); bucket = b; best = p; }
+    else best = pick(best, p);
+  }
+  flush();
+  return out;
+}
+
+const PICK_MAX_KW = (a, b) => (Math.abs(b.kw) > Math.abs(a.kw) ? b : a);
+const PICK_MAX_W = (a, b) => (b.w > a.w ? b : a);
+const PICK_LAST = (a, b) => b;
+
 const chartCanvas = document.getElementById('feedinChart');
 const feedinTotalEl = document.getElementById('feedinTotal');
 const importTotalEl = document.getElementById('importTotal');
@@ -2574,9 +2780,10 @@ function formatKwh(kwh) {
 }
 
 // Lokální kopie historie: přežije deploy/restart serveru — appka ji serveru vrátí
+// Čeká seřazené body (grafy i merge je tak drží) — starší den se prořídí
 function pruneOld(arr) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return arr.filter(p => p && typeof p.t === 'number' && typeof p.kw === 'number' && p.t >= cutoff);
+  const cutoff = Date.now() - HIST_MAX_AGE_MS;
+  return thinPoints(arr.filter(p => p && typeof p.t === 'number' && typeof p.kw === 'number' && p.t >= cutoff), PICK_MAX_KW);
 }
 
 function saveHistoryLocal() {
@@ -2594,7 +2801,7 @@ function loadHistoryLocal() {
 }
 
 function mergeHistories(a, b) {
-  const all = pruneOld(a.concat(b)).sort((x, y) => x.t - y.t);
+  const all = pruneOld(a.concat(b).sort((x, y) => x.t - y.t));
   const out = [];
   for (const p of all) {
     if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
@@ -2617,80 +2824,114 @@ async function maybeRestoreHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
-function renderChart() {
-  const ctx = chartCanvas.getContext('2d');
-  const w = chartCanvas.clientWidth || 300;
-  const h = chartCanvas.clientHeight || 120;
-  const dpr = window.devicePixelRatio || 1;
-  chartCanvas.width = w * dpr;
-  chartCanvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
+// ---------- Graf na stránce FVE: výkon FVE → baterie → přetok → bojlery ----------
+// Čtyři panely pod sebou nad jednou osou X, kterou lze posouvat prstem.
 
-  const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
-  const pts = history.filter(p => p.t >= start);
+const fveChartCanvas = document.getElementById('fveChart');
+const fveRangeEl = document.getElementById('fveRange');
+let fveChart = null;
 
-  const grey = 'rgba(44,62,80,0.4)';
-  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+const FVE_PANELS = [
+  { h: 72, label: 'Výkon FVE (kW)', draw: panelPv },
+  { h: 60, label: 'Baterie (%)', draw: panelSoc },
+  { h: 72, label: 'Přetok (kW)', draw: panelFeedin },
+  { h: 86, label: 'Bojlery (°C)', draw: panelBoilers }
+];
 
-  if (pts.length < 2) {
-    ctx.fillStyle = grey;
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
-    feedinTotalEl.textContent = '';
-    importTotalEl.textContent = '';
-    return;
-  }
+function renderFveChart() {
+  if (!fveChart) fveChart = makePanChart(fveChartCanvas, { panels: FVE_PANELS, footer: fveFooter });
+  renderBoilerLegend();
+  fveChart.draw();
+  renderStats();   // denní přehled počítá ze stejné historie
+}
 
-  feedinTotalEl.textContent = 'Přetok za 24 h: '
-    + formatKwh(integrateKwh(pts, p => Math.max(0, p.kw)));
-  importTotalEl.textContent = 'Odběr ze sítě za 24 h: '
-    + formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw)));
+// Součty se počítají z původních dat přesně v okně (kreslení se vyhlazuje zvlášť)
+function fveFooter(g) {
+  if (fveRangeEl) fveRangeEl.textContent = panRozsah(g);
+  const pts = (history || []).filter(p => p && typeof p.kw === 'number' && p.t >= g.start && p.t <= g.end);
+  const dost = pts.length >= 2;
+  feedinTotalEl.textContent = dost ? 'Přetok: ' + formatKwh(integrateKwh(pts, p => Math.max(0, p.kw))) : '';
+  importTotalEl.textContent = dost ? 'Odběr ze sítě: ' + formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw))) : '';
+}
 
-  const padL = 32, padR = 8, padT = 10, padB = 18;
+function panelPv(ctx, g) {
+  const pts = panPts(history, g, p => typeof p.pv === 'number');
+  if (pts.length < 2) return panPrazdny(ctx, g);
+  let max = 1;
+  for (const p of pts) if (p.pv > max) max = p.pv;
+  const y = panY(g, 0, max);
+  panNula(ctx, g, y(0));
+  panOsaY(ctx, g, [[max, panCis(max)], [0, '0']], y);
+  g.clip(() => drawSmoothArea(ctx, pts, p => p.pv, g.x, y, {
+    half: 3, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
+  }));
+}
+
+function panelSoc(ctx, g) {
+  const pts = panPts(history, g, p => typeof p.soc === 'number');
+  if (pts.length < 2) return panPrazdny(ctx, g);
+  const y = panY(g, 0, 100);
+  panOsaY(ctx, g, [[100, '100'], [0, '0']], y);
+  // SOC sám nekmitá — klouzavý průměr by jen zaoblil reálné zlomy (např. ostrý
+  // večerní pokles), takže tady vyhlazujeme jen tvarem křivky
+  g.clip(() => drawSmoothArea(ctx, pts, p => p.soc, g.x, y, {
+    half: 0, baseV: 0, stroke: '#27ae60', fill: 'rgba(39,174,96,0.16)'
+  }));
+}
+
+function panelFeedin(ctx, g) {
+  const pts = panPts(history, g, p => typeof p.kw === 'number');
+  if (pts.length < 2) return panPrazdny(ctx, g);
   let min = 0, max = 0.5;
   for (const p of pts) {
     if (p.kw < min) min = p.kw;
     if (p.kw > max) max = p.kw;
   }
-
-  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
-  const y = kw => padT + (1 - (kw - min) / (max - min)) * (h - padT - padB);
-
-  // Nulová linka
-  ctx.strokeStyle = 'rgba(44,62,80,0.12)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padL, y(0));
-  ctx.lineTo(w - padR, y(0));
-  ctx.stroke();
-
-  // Popisky osy Y
-  ctx.fillStyle = grey;
-  ctx.textAlign = 'right';
-  ctx.fillText(max.toFixed(1).replace('.', ','), padL - 5, y(max) + 8);
-  ctx.fillText('0', padL - 5, y(0) + 3);
-  if (min < 0) ctx.fillText(min.toFixed(1).replace('.', ','), padL - 5, y(min) - 2);
-
-  // Časové značky po 6 hodinách
-  ctx.textAlign = 'center';
-  for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
-    const d = new Date(t);
-    ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
-  }
-
-  // Vyhlazená plocha + křivka (součty kWh se počítají z původních dat výše)
-  drawSmoothArea(ctx, pts, p => p.kw, x, y, {
+  const y = panY(g, min, max);
+  panNula(ctx, g, y(0));
+  const radky = [[max, panCis(max)], [0, '0']];
+  if (min < 0) radky.push([min, panCis(min)]);
+  panOsaY(ctx, g, radky, y);
+  g.clip(() => drawSmoothArea(ctx, pts, p => p.kw, g.x, y, {
     half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
-  });
-
-  renderStats(); // denní přehled počítá ze stejné historie
+  }));
 }
 
-window.addEventListener('resize', renderChart);
+function panelBoilers(ctx, g) {
+  const pts = panPts(boilerHistory, g);
+  const dost = pts.filter(p => typeof p.b1 === 'number' || typeof p.b2 === 'number').length >= 2;
+  if (!dost) return panPrazdny(ctx, g);
+  const min = 15, max = 75;   // pevný rozsah osy Y
+  const yr = panY(g, min, max);
+  const y = v => yr(Math.max(min, Math.min(max, v)));
+  ctx.lineWidth = 1;
+  for (const v of [15, 30, 45, 60, 75]) {
+    ctx.strokeStyle = 'rgba(44,62,80,0.06)';
+    ctx.beginPath();
+    ctx.moveTo(g.padL, y(v));
+    ctx.lineTo(g.padL + g.plotW, y(v));
+    ctx.stroke();
+  }
+  panOsaY(ctx, g, [[75, '75°'], [45, '45°'], [15, '15°']], yr);
+  // Chybějící úseky se nepřemosťují přímkou — vzorkuje se po 5 min, takže díra
+  // nad 25 min znamená, že data prostě chybí.
+  g.clip(() => {
+    for (const key of ['b1', 'b2']) {
+      const raw = pts.filter(q => typeof q[key] === 'number').map(q => ({ t: q.t, v: q[key] }));
+      for (const seg of splitGaps(raw, 25 * 60 * 1000)) {
+        if (seg.length < 2) continue;
+        const line = smoothSeries(seg, 2);
+        ctx.strokeStyle = BOILER_COLORS[key];
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        drawSmoothPath(ctx, line.map(q => ({ x: g.x(q.t), y: y(q.v) })));
+        ctx.stroke();
+      }
+    }
+  });
+}
+
 
 // ---------- Log zapínání/vypínání ----------
 
@@ -3326,10 +3567,12 @@ const TIMELINE_AC_COLORS = ['#7d5fd6', '#e8a13a', '#18a999', '#c94f4f', '#4a7c2f
 let timelineData = { shelly: [], pool: [], solinator: [], wallbox: [] };
 
 function pruneTimelineLocal(tl) {
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const now = Date.now();
   const out = {};
   for (const k of Object.keys(tl || {})) {
     if (!/^(shelly|pool|solinator|wallbox|wbPlugged|ac_)/.test(k)) continue;
+    // Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, tak se drží 4 dny
+    const cutoff = now - (k === 'wbPlugged' ? HIST_MAX_AGE_MS : 48 * 60 * 60 * 1000);
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number' && s.to >= cutoff)
       .map(s => ({ from: Math.max(s.from, cutoff), to: s.to }));
@@ -5188,15 +5431,15 @@ function renderWallbox() {
   renderWbAuto();
 }
 
-// ---------- Graf výkonu wallboxu za 24 h ----------
+// ---------- Historie výkonu wallboxu (data pro graf) ----------
 
 const wbChartCanvas = document.getElementById('wbChart');
 const wbEnergyTotalEl = document.getElementById('wbEnergyTotal');
 let wallboxHistory = [];
 
 function pruneOldWb(arr) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return arr.filter(p => p && typeof p.t === 'number' && typeof p.w === 'number' && p.t >= cutoff);
+  const cutoff = Date.now() - HIST_MAX_AGE_MS;
+  return thinPoints(arr.filter(p => p && typeof p.t === 'number' && typeof p.w === 'number' && p.t >= cutoff), PICK_MAX_W);
 }
 
 function saveWallboxHistoryLocal() {
@@ -5208,7 +5451,7 @@ function loadWallboxHistoryLocal() {
 }
 
 function mergeWbHistories(a, b) {
-  const all = pruneOldWb(a.concat(b)).sort((x, y) => x.t - y.t);
+  const all = pruneOldWb(a.concat(b).sort((x, y) => x.t - y.t));
   const out = [];
   for (const p of all) {
     if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
@@ -5369,90 +5612,98 @@ function renderWbToday() {
   wbOverviewEl.textContent = kwh.toFixed(1).replace('.', ',') + ' kWh';
 }
 
+// ---------- Graf na stránce Wallbox: výkon + dráhy režimů na jedné ose ----------
+
+let wbChart = null;
+const WB_PANELS = [
+  { h: 84, label: 'Výkon (kW)', draw: panelWbPower },
+  { h: 76, label: '', draw: panelWbLanes }
+];
+
 function renderWallboxChart() {
   renderWbToday();
-  if (!wbChartCanvas) return;
-  const ctx = wbChartCanvas.getContext('2d');
-  const w = wbChartCanvas.clientWidth || 300;
-  const h = wbChartCanvas.clientHeight || 120;
-  const dpr = window.devicePixelRatio || 1;
-  wbChartCanvas.width = w * dpr;
-  wbChartCanvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
+  if (!wbChart) wbChart = makePanChart(wbChartCanvas, { panels: WB_PANELS, footer: wbFooter });
+  renderWbModeLegend();
+  wbChart.draw();
+}
 
-  const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
-  const pts = wallboxHistory.filter(p => p.t >= start);
+function wbFooter(g) {
+  if (!wbEnergyTotalEl) return;
+  const pts = (wallboxHistory || []).filter(p => p && typeof p.w === 'number' && p.t >= g.start && p.t <= g.end);
+  wbEnergyTotalEl.textContent = pts.length >= 2
+    ? panRozsah(g) + ' · nabito ' + integrateWbKwh(pts).toFixed(1).replace('.', ',') + ' kWh'
+    : panRozsah(g);
+}
 
-  const grey = 'rgba(44,62,80,0.4)';
-  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
-  if (pts.length < 2) {
-    ctx.fillStyle = grey;
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
-    if (wbEnergyTotalEl) wbEnergyTotalEl.textContent = '';
-    return;
-  }
-
-  if (wbEnergyTotalEl) {
-    wbEnergyTotalEl.textContent = 'Celková spotřeba za 24 h: '
-      + integrateWbKwh(pts).toFixed(1).replace('.', ',') + ' kWh';
-  }
-
-  const padL = 32, padR = 8, padT = 10, padB = 18;
+function panelWbPower(ctx, g) {
+  const pts = panPts(wallboxHistory, g, p => typeof p.w === 'number');
+  if (pts.length < 2) return panPrazdny(ctx, g);
   let max = 0.5;
-  for (const p of pts) {
-    const kw = p.w / 1000;
-    if (kw > max) max = kw;
-  }
-
-  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
-  const y = kw => padT + (1 - kw / max) * (h - padT - padB);
-
-  // Nulová linka
-  ctx.strokeStyle = 'rgba(44,62,80,0.12)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padL, y(0));
-  ctx.lineTo(w - padR, y(0));
-  ctx.stroke();
-
-  // Popisky osy Y
-  ctx.fillStyle = grey;
-  ctx.textAlign = 'right';
-  ctx.fillText(max.toFixed(1).replace('.', ','), padL - 5, y(max) + 8);
-  ctx.fillText('0', padL - 5, y(0) + 3);
-
-  // Časové značky po 6 hodinách
-  ctx.textAlign = 'center';
-  for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
-    const d = new Date(t);
-    ctx.fillText(d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'), x(t), h - 5);
-  }
-
-  // Vyhlazená plocha + křivka
-  drawSmoothArea(ctx, pts, p => p.w / 1000, x, y, {
+  for (const p of pts) if (p.w / 1000 > max) max = p.w / 1000;
+  const y = panY(g, 0, max);
+  panNula(ctx, g, y(0));
+  panOsaY(ctx, g, [[max, panCis(max)], [0, '0']], y);
+  g.clip(() => drawSmoothArea(ctx, pts, p => p.w / 1000, g.x, y, {
     half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
+  }));
+}
+
+// Dráhy pod křivkou: ze záznamů změn režimu se poskládají souvislé segmenty
+// (režim platí do další změny), „připojeno" se bere z časové osy.
+function panelWbLanes(ctx, g) {
+  const laneH = 10, laneGap = 12;
+  const hist = (wbModeHistoryData || [])
+    .filter(e => e && typeof e.t === 'number' && e.mode)
+    .sort((a, b) => a.t - b.t);
+  const segs = [];
+  for (let i = 0; i < hist.length; i++) {
+    segs.push({ from: hist[i].t, to: i + 1 < hist.length ? hist[i + 1].t : g.now, mode: hist[i].mode });
+  }
+  WB_MODE_LANES.forEach((lane, i) => {
+    const yTop = g.top + i * (laneH + laneGap);
+    ctx.fillStyle = 'rgba(44,62,80,0.55)';
+    ctx.textAlign = 'left';
+    ctx.fillText(lane.short || lane.label, 2, yTop + laneH / 2 + 3);
+    ctx.fillStyle = 'rgba(44,62,80,0.06)';
+    ctx.fillRect(g.padL, yTop, g.plotW, laneH);
+    ctx.fillStyle = lane.color;
+    const laneSegs = lane.zdroj === 'timeline'
+      ? ((timelineData && timelineData.wbPlugged) || [])
+      : segs.filter(sg => sg.mode === lane.key);
+    for (const sg of laneSegs) {
+      const from = Math.max(sg.from, g.start);
+      const to = Math.min(sg.to, g.end);
+      if (to <= from) continue;
+      const x1 = g.x(from), x2 = g.x(to);
+      ctx.fillRect(x1, yTop, Math.max(x2 - x1, 2), laneH);
+    }
   });
 }
 
-window.addEventListener('resize', renderWallboxChart);
+function renderWbModeLegend() {
+  if (!wbModeLegendEl) return;
+  wbModeLegendEl.textContent = '';
+  for (const lane of WB_MODE_LANES) {
+    const span = document.createElement('span');
+    const dot = document.createElement('i');
+    dot.style.background = lane.color;
+    span.appendChild(dot);
+    span.appendChild(document.createTextNode(lane.label));
+    wbModeLegendEl.appendChild(span);
+  }
+}
 
-// ---------- Graf historie režimů wallboxu (24 h) ----------
+
+// ---------- Režimy wallboxu: barvy, dráhy a jejich historie ----------
 
 // FAST je červený (bere ze sítě), oranžová zbyla na dráhu „připojeno"
 const WB_MODE_COLORS = { plugged: '#f5933d', fast: '#c0392b', green: '#27ae60', eco: '#3498db', stop: 'rgba(44,62,80,0.35)' };
-const wbModeChartCanvas = document.getElementById('wbModeChart');
 const wbModeLegendEl = document.getElementById('wbModeLegend');
 let wbModeHistoryData = [];
 
 // Záloha historie režimů wallboxu v telefonu — přežije nový deploy serveru
 function pruneWbMode(arr) {
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const cutoff = Date.now() - HIST_MAX_AGE_MS;
   const valid = ['fast', 'green', 'eco', 'stop'];
   return (arr || []).filter(e => e && typeof e.t === 'number' && valid.includes(e.mode) && e.t >= cutoff);
 }
@@ -5488,96 +5739,13 @@ async function maybeRestoreWbModeHistoryToServer(serverHist, localHist) {
 const WB_MODE_LANES = [
   // „Připojeno" nahoře jako kontext: režim je zajímavý hlavně tehdy, když auto vůbec
   // viselo na kabelu. Kreslí se z časové osy, ne ze změn režimu.
-  { key: 'plugged', label: 'Připojeno', color: WB_MODE_COLORS.plugged, zdroj: 'timeline' },
+  { key: 'plugged', label: 'Připojeno', short: 'Kabel', color: WB_MODE_COLORS.plugged, zdroj: 'timeline' },
   { key: 'fast', label: 'FAST', color: WB_MODE_COLORS.fast },
   { key: 'eco', label: 'ECO', color: WB_MODE_COLORS.eco },
   { key: 'green', label: 'GREEN', color: WB_MODE_COLORS.green }
 ];
 
-function renderWbModeChart() {
-  if (!wbModeChartCanvas || !wbModeLegendEl) return;
-  const padL = 44, padR = 8, padT = 8, padB = 16;
-  const laneH = 10, laneGap = 12;
-  const targetH = padT + WB_MODE_LANES.length * laneH + (WB_MODE_LANES.length - 1) * laneGap + padB;
-  wbModeChartCanvas.style.height = targetH + 'px';
-  const ctx = wbModeChartCanvas.getContext('2d');
-  const w = wbModeChartCanvas.clientWidth || 300;
-  const h = targetH;
-  const dpr = window.devicePixelRatio || 1;
-  wbModeChartCanvas.width = w * dpr;
-  wbModeChartCanvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
 
-  const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
-  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
-
-  // Ze záznamů změn režimu poskládáme souvislé segmenty (mode aktivní do další změny / do teď)
-  const hist = (wbModeHistoryData || [])
-    .filter(e => e && typeof e.t === 'number' && e.mode)
-    .sort((a, b) => a.t - b.t);
-  const segs = [];
-  for (let i = 0; i < hist.length; i++) {
-    segs.push({ from: hist[i].t, to: i + 1 < hist.length ? hist[i + 1].t : now, mode: hist[i].mode });
-  }
-
-  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
-  // Svislá mřížka + popisky hodin po 6 h
-  ctx.textAlign = 'center';
-  for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
-    const fx = x(t);
-    ctx.strokeStyle = 'rgba(44,62,80,0.08)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(fx, padT);
-    ctx.lineTo(fx, h - padB);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(44,62,80,0.4)';
-    const d = new Date(t);
-    ctx.fillText(d.getHours() + ':00', fx, h - 4);
-  }
-
-  // Dráhy
-  WB_MODE_LANES.forEach((lane, i) => {
-    const yTop = padT + i * (laneH + laneGap);
-    const yMid = yTop + laneH / 2;
-    // Popisek dráhy vlevo
-    ctx.fillStyle = 'rgba(44,62,80,0.55)';
-    ctx.textAlign = 'left';
-    ctx.fillText(lane.label, 2, yMid + 3);
-    // Slabá linka celé dráhy
-    ctx.fillStyle = 'rgba(44,62,80,0.06)';
-    ctx.fillRect(padL, yTop, w - padL - padR, laneH);
-    // Segmenty téhle dráhy: režimy z historie přepnutí, „připojeno" z časové osy
-    ctx.fillStyle = lane.color;
-    const laneSegs = lane.zdroj === 'timeline'
-      ? ((timelineData && timelineData.wbPlugged) || [])
-      : segs.filter(s => s.mode === lane.key);
-    for (const s of laneSegs) {
-      const from = Math.max(s.from, start);
-      const to = Math.min(s.to, now);
-      if (to <= from) continue;
-      const x1 = x(from), x2 = x(to);
-      ctx.fillRect(x1, yTop, Math.max(x2 - x1, 2), laneH);
-    }
-  });
-
-  // Legenda
-  wbModeLegendEl.textContent = '';
-  for (const lane of WB_MODE_LANES) {
-    const span = document.createElement('span');
-    const dot = document.createElement('i');
-    dot.style.background = lane.color;
-    span.appendChild(dot);
-    span.appendChild(document.createTextNode(lane.label));
-    wbModeLegendEl.appendChild(span);
-  }
-}
-
-window.addEventListener('resize', renderWbModeChart);
 
 // ---------- AI asistent ----------
 
@@ -5975,70 +6143,14 @@ function renderBoilerPower() {
   if (boiler2PowerEl) boiler2PowerEl.textContent = fmtKwVal(infigyData && typeof infigyData.hwPower === 'number' ? infigyData.hwPower : null);
 }
 
-// Graf nabití baterie za 24 h (stránka FVE) — čte pole `history` (body { t, kw, soc })
-const batteryChartCanvas = document.getElementById('batteryChart');
-function renderBatteryChart() {
-  if (!batteryChartCanvas) return;
-  const ctx = batteryChartCanvas.getContext('2d');
-  const w = batteryChartCanvas.clientWidth || 300;
-  const h = batteryChartCanvas.clientHeight || 96;
-  const dpr = window.devicePixelRatio || 1;
-  batteryChartCanvas.width = w * dpr;
-  batteryChartCanvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-
-  const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
-  const pts = (history || []).filter(p => p && typeof p.t === 'number' && typeof p.soc === 'number' && p.t >= start);
-  const grey = 'rgba(44,62,80,0.4)';
-  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
-  if (pts.length < 2) {
-    ctx.fillStyle = grey;
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
-    return;
-  }
-
-  const padL = 26, padR = 8, padT = 10, padB = 18;
-  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
-  const y = soc => padT + (1 - soc / 100) * (h - padT - padB);
-
-  // Popisky osy Y (0 / 100 %)
-  ctx.fillStyle = grey;
-  ctx.textAlign = 'right';
-  ctx.fillText('100', padL - 4, y(100) + 8);
-  ctx.fillText('0', padL - 4, y(0) + 3);
-
-  // Časové značky po 6 h
-  ctx.textAlign = 'center';
-  for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
-    const d = new Date(t);
-    ctx.fillText(d.getHours() + ':00', x(t), h - 5);
-  }
-
-  // Vyhlazená plocha + křivka
-  drawSmoothArea(ctx, pts, p => p.soc, x, y, {
-    // SOC sám nekmitá — klouzavý průměr by jen zaoblil reálné zlomy (např. ostrý
-    // večerní pokles), takže tady vyhlazujeme jen tvarem křivky
-    half: 0, baseV: 0, stroke: '#27ae60', fill: 'rgba(39,174,96,0.16)'
-  });
-}
-
-window.addEventListener('resize', renderBatteryChart);
-
-// Graf teploty bojlerů za 24 h (stránka FVE)
+// Barvy a legenda bojlerů (panel v grafu na stránce FVE)
 const BOILER_COLORS = { b1: '#f5933d', b2: '#3498db' };
-const boilerChartCanvas = document.getElementById('boilerChart');
 const boilerLegendEl = document.getElementById('boilerLegend');
 let boilerHistory = [];
 
 function pruneBoiler(arr) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return (arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff);
+  const cutoff = Date.now() - HIST_MAX_AGE_MS;
+  return thinPoints((arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff), PICK_LAST);
 }
 
 // Záloha historie teplot bojlerů v telefonu — přežije nový deploy serveru
@@ -6051,7 +6163,7 @@ function loadBoilerHistoryLocal() {
 // Sloučí dvě časové řady { t, … } a zahodí body bližší než 30 s (server i záloha
 // vzorkují nezávisle). Používá se pro teploty bojlerů i pro teploty v pokojích.
 function mergeByTime(a, b) {
-  const all = pruneBoiler((a || []).concat(b || [])).sort((x, y) => x.t - y.t);
+  const all = pruneBoiler((a || []).concat(b || []).sort((x, y) => x.t - y.t));
   const out = [];
   for (const p of all) {
     if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
@@ -6071,83 +6183,16 @@ async function maybeRestoreBoilerHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
-function renderBoilerChart() {
-  if (!boilerChartCanvas) return;
-  const ctx = boilerChartCanvas.getContext('2d');
-  const w = boilerChartCanvas.clientWidth || 300;
-  const h = boilerChartCanvas.clientHeight || 96;
-  const dpr = window.devicePixelRatio || 1;
-  boilerChartCanvas.width = w * dpr;
-  boilerChartCanvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-
-  const now = Date.now();
-  const start = now - 24 * 60 * 60 * 1000;
-  const pts = pruneBoiler(boilerHistory);
-  const grey = 'rgba(44,62,80,0.4)';
-  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
-  // Legenda
-  if (boilerLegendEl) {
-    boilerLegendEl.textContent = '';
-    for (const [key, label] of [['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
-      const span = document.createElement('span');
-      const dot = document.createElement('i');
-      dot.style.background = BOILER_COLORS[key];
-      span.appendChild(dot);
-      span.appendChild(document.createTextNode(label));
-      boilerLegendEl.appendChild(span);
-    }
-  }
-
-  const hasData = pts.filter(p => typeof p.b1 === 'number' || typeof p.b2 === 'number').length >= 2;
-  if (!hasData) {
-    ctx.fillStyle = grey;
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Zatím sbírám data…', w / 2, h / 2);
-    return;
-  }
-
-  const padL = 30, padR = 8, padT = 10, padB = 18;
-  const min = 15, max = 75; // pevný rozsah osy Y
-  const x = t => padL + ((t - start) / (now - start)) * (w - padL - padR);
-  const y = v => padT + (1 - (Math.max(min, Math.min(max, v)) - min) / (max - min)) * (h - padT - padB);
-
-  // Vodorovné vodicí linky + popisky osy Y
-  ctx.lineWidth = 1;
-  ctx.textAlign = 'right';
-  for (const v of [15, 30, 45, 60, 75]) {
-    ctx.strokeStyle = 'rgba(44,62,80,0.06)';
-    ctx.beginPath(); ctx.moveTo(padL, y(v)); ctx.lineTo(w - padR, y(v)); ctx.stroke();
-    ctx.fillStyle = grey;
-    ctx.fillText(v + '°', padL - 4, y(v) + 3);
-  }
-
-  // Časové značky po 6 h
-  ctx.textAlign = 'center';
-  ctx.fillStyle = grey;
-  for (let i = 0; i <= 4; i++) {
-    const t = start + i * 6 * 60 * 60 * 1000;
-    const d = new Date(t);
-    ctx.fillText(d.getHours() + ':00', x(t), h - 5);
-  }
-
-  // Vyhlazené křivky pro oba bojlery. Chybějící úseky se nepřemosťují přímkou —
-  // vzorkuje se po 5 min, takže díra nad 25 min znamená, že data prostě chybí.
-  for (const key of ['b1', 'b2']) {
-    const raw = pts.filter(p => typeof p[key] === 'number').map(p => ({ t: p.t, v: p[key] }));
-    for (const seg of splitGaps(raw, 25 * 60 * 1000)) {
-      if (seg.length < 2) continue;
-      const line = smoothSeries(seg, 2); // po 5 min → ±2 body = ±10 min
-      ctx.strokeStyle = BOILER_COLORS[key];
-      ctx.lineWidth = 2;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      drawSmoothPath(ctx, line.map(p => ({ x: x(p.t), y: y(p.v) })));
-      ctx.stroke();
-    }
+function renderBoilerLegend() {
+  if (!boilerLegendEl) return;
+  boilerLegendEl.textContent = '';
+  for (const [key, label] of [['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
+    const span = document.createElement('span');
+    const dot = document.createElement('i');
+    dot.style.background = BOILER_COLORS[key];
+    span.appendChild(dot);
+    span.appendChild(document.createTextNode(label));
+    boilerLegendEl.appendChild(span);
   }
 }
 
@@ -6217,8 +6262,6 @@ function drawSmoothPath(ctx, p) {
   }
   ctx.lineTo(p[p.length - 1].x, p[p.length - 1].y);
 }
-
-window.addEventListener('resize', renderBoilerChart);
 
 // Odhad vs. skutečná výroba FVE (Přehled)
 const prodForecastEl = document.getElementById('prodForecast');
@@ -6411,8 +6454,7 @@ function applySnapshot(snap) {
   const serverHist = snap.history || [];
   const localHist = loadHistoryLocal();
   history = mergeHistories(serverHist, localHist);
-  renderChart();
-  renderBatteryChart();
+  renderFveChart();
   saveHistoryLocal();
   maybeRestoreHistoryToServer(serverHist, localHist);
   const serverLog = snap.log || [];
@@ -6449,7 +6491,7 @@ function applySnapshot(snap) {
   const serverWbMode = snap.wbModeHistory || [];
   const localWbMode = loadWbModeHistoryLocal();
   wbModeHistoryData = mergeWbModeHistories(serverWbMode, localWbMode);
-  renderWbModeChart();
+  renderWallboxChart();
   saveWbModeHistoryLocal();
   maybeRestoreWbModeHistoryToServer(serverWbMode, localWbMode);
   // Historie výkonu wallboxu: spojíme server + lokální zálohu, chybějící vrátíme serveru
@@ -6560,7 +6602,7 @@ function applySnapshot(snap) {
   const serverBoiler = snap.boilerHistory || [];
   const localBoiler = loadBoilerHistoryLocal();
   boilerHistory = mergeByTime(serverBoiler, localBoiler);
-  renderBoilerChart();
+  renderFveChart();
   saveBoilerHistoryLocal();
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
@@ -6608,7 +6650,7 @@ function applySnapshot(snap) {
     timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
   }
   renderTimeline();
-  renderWbModeChart();   // dráha „připojeno" se kreslí z časové osy
+  renderWallboxChart();   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
@@ -6628,16 +6670,14 @@ function connectStream() {
     renderSolax(d.solax);
     if (d.historyPoint) {
       history.push(d.historyPoint);
-      renderChart();
-      renderBatteryChart();
+      renderFveChart();
       saveHistoryLocal();
     }
     errorEl.classList.remove('show');
   });
   es.addEventListener('history', e => {
     history = JSON.parse(e.data).history || [];
-    renderChart();
-    renderBatteryChart();
+    renderFveChart();
     saveHistoryLocal();
   });
   es.addEventListener('solaxError', e => {
@@ -6724,7 +6764,7 @@ function connectStream() {
     }
     timelineData = merged;
     renderTimeline();
-    renderWbModeChart();   // dráha „připojeno"
+    renderWallboxChart();   // dráha „připojeno"
     saveTimelineLocal();
   });
   es.addEventListener('aircon', e => {
@@ -6793,7 +6833,7 @@ function connectStream() {
     const d = JSON.parse(e.data);
     if (Array.isArray(d.history)) boilerHistory = mergeByTime(d.history, boilerHistory);
     else if (d.point) boilerHistory = mergeByTime(boilerHistory, [d.point]);
-    renderBoilerChart();
+    renderFveChart();
     saveBoilerHistoryLocal();
   });
   es.addEventListener('wallboxHistory', e => {
@@ -6809,7 +6849,7 @@ function connectStream() {
   });
   es.addEventListener('wbModeHistory', e => {
     wbModeHistoryData = mergeWbModeHistories(JSON.parse(e.data).history || [], wbModeHistoryData);
-    renderWbModeChart();
+    renderWallboxChart();
     saveWbModeHistoryLocal();
   });
   es.addEventListener('blindTimers', e => {

@@ -77,7 +77,37 @@ function shellyQueued(fn) {
 
 const POLL_INTERVAL_MS = 2 * 60 * 1000; // jak často poller obchází Solax i Shelly
 const SHELLY_GAP_MS = 1000;             // rozestup mezi dotazy na Shelly cloud (rate limit)
-const HISTORY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Grafy se dají posouvat prstem čtyři dny zpátky, takže tolik dat se i drží.
+const HISTORY_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+// V plném rozlišení (vzorek po 2 min) by to byly tisíce bodů v každém snapshotu
+// i v záloze v telefonu. Co je starší než den, se proto slučuje do 6min kbelíků —
+// na 24h okně grafu je to pořád hladká křivka.
+const THIN_AFTER_MS = 24 * 60 * 60 * 1000;
+const THIN_BUCKET_MS = 6 * 60 * 1000;
+
+// Z každého kbelíku zůstane jeden vzorek — který, o tom rozhoduje `pick(a, b)`.
+// Kbelíky jsou zarovnané na absolutní čas, takže opakované volání už nic neubere.
+// Očekává body seřazené podle času (tak je všechny řady drží).
+function thinPoints(points, pick, now = Date.now()) {
+  const hranice = now - THIN_AFTER_MS;
+  const out = [];
+  let bucket = null, best = null;
+  const flush = () => { if (best) out.push(best); bucket = null; best = null; };
+  for (const p of points) {
+    if (p.t >= hranice) { flush(); out.push(p); continue; }
+    const b = Math.floor(p.t / THIN_BUCKET_MS);
+    if (b !== bucket) { flush(); bucket = b; best = p; }
+    else best = pick(best, p);
+  }
+  flush();
+  return out;
+}
+
+// Špička kbelíku, ať se krátké nabíjení nebo špička přetoku neztratí; u teplot
+// (mění se pomalu) stačí poslední vzorek.
+const PICK_MAX_KW = (a, b) => (Math.abs(b.kw) > Math.abs(a.kw) ? b : a);
+const PICK_MAX_W = (a, b) => (b.w > a.w ? b : a);
+const PICK_LAST = (a, b) => b;
 // Log si na rozdíl od grafů pamatuje týden. Strop na počet záznamů je pojistka,
 // ať se pár tisíc řádků nemůže vymknout (den dělá řádově desítky).
 const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -103,7 +133,7 @@ const state = {
   // Tlačítko „+24 h": bazén jede natvrdo do tohohle času, bez ohledu na přebytek,
   // okno, SOC i zimní režim. Sčítá se po 24 h do stropu 72 h.
   poolForce: { until: 0 },
-  history: [],       // { t, kw } — přetok za posledních 24 h
+  history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
   // Zima = bazén a solinátor spí, bojler se odpojí od bazénu, wallbox jede pořád FAST
@@ -123,15 +153,15 @@ const state = {
   timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [] },
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
-  wallboxHistory: [], // { t, w } — výkon nabíječky za posledních 24 h
+  wallboxHistory: [], // { t, w } — výkon nabíječky za poslední 4 dny
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
   // Ruční přepnutí „ráno auto (ne)potřebuju" pro nejbližší ráno; need null = jede se
   // podle dne v týdnu (pracovní den ano, víkend ne)
   wbMorning: { need: null, until: 0 },
-  wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (za 48 h)
+  wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (4 dny, jako graf)
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
-  boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za posledních 24 h
+  boilerHistory: [],  // { t, b1, b2 } — teploty bojlerů za poslední 4 dny
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false }, // teplotní automatika klimatizace (zap/vyp per pokoj)
   tempAutoOn: 22,    // společná spínací teplota (18–25 °C, jezdec v appce) — Ložnice, Elenka, Miky
   // Pokoje s vlastní mezí. Obývák se řídí podle Shelly čidla v obytné zóně, které ukazuje
@@ -205,9 +235,16 @@ function backfillWallboxTimeline() {
   state.timeline.wallbox = mergeSegments(state.timeline.wallbox.concat(segs));
 }
 
+// Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, takže se drží stejně
+// dlouho jako jeho data; ostatní dráhy stačí na 48 h (osa na Přehledu kreslí 24 h).
+function timelineMaxAge(key) {
+  return key === 'wbPlugged' ? HISTORY_MAX_AGE_MS : TIMELINE_MAX_AGE_MS;
+}
+
 function pruneTimeline() {
-  const cutoff = Date.now() - TIMELINE_MAX_AGE_MS;
+  const now = Date.now();
   for (const k of Object.keys(state.timeline)) {
+    const cutoff = now - timelineMaxAge(k);
     state.timeline[k] = state.timeline[k].filter(s => s.to >= cutoff);
     for (const s of state.timeline[k]) {
       if (s.from < cutoff) s.from = cutoff;
@@ -252,6 +289,9 @@ function pruneHistory() {
   while (state.log.length && state.log[0].t < logCutoff) state.log.shift();
   if (state.log.length > LOG_MAX_ENTRIES) state.log = state.log.slice(-LOG_MAX_ENTRIES);
   while (state.wallboxHistory.length && state.wallboxHistory[0].t < cutoff) state.wallboxHistory.shift();
+  state.history = thinPoints(state.history, PICK_MAX_KW);
+  state.wallboxHistory = thinPoints(state.wallboxHistory, PICK_MAX_W);
+  state.boilerHistory = thinPoints(state.boilerHistory.filter(p => p.t >= cutoff), PICK_LAST);
 }
 
 // level: 'error' se v appce vykreslí tučně červeně. Chybové záznamy si navíc drží
@@ -438,7 +478,7 @@ async function pollSolax() {
     let historyPoint = null;
     const last = state.history[state.history.length - 1];
     if (!last || Date.now() - last.t > 30000) {
-      historyPoint = { t: Date.now(), kw: data.feedinKw, soc: data.batterySoc };
+      historyPoint = { t: Date.now(), kw: data.feedinKw, soc: data.batterySoc, pv: data.fveKw };
       state.history.push(historyPoint);
       pruneHistory();
     }
@@ -906,7 +946,7 @@ app.post('/api/history/restore', (req, res) => {
   const clean = points
     .filter(p => p && typeof p.t === 'number' && typeof p.kw === 'number'
       && p.t >= cutoff && p.t <= now && p.kw > -100 && p.kw < 100)
-    .slice(0, 2000);
+    .slice(0, 4000);
   if (!clean.length) return res.json({ added: 0 });
 
   const before = state.history.length;
@@ -932,7 +972,7 @@ app.post('/api/wallbox-history/restore', (req, res) => {
   const clean = points
     .filter(p => p && typeof p.t === 'number' && typeof p.w === 'number'
       && p.t >= cutoff && p.t <= now && p.w >= 0 && p.w < 100000)
-    .slice(0, 2000);
+    .slice(0, 4000);
   if (!clean.length) return res.json({ added: 0 });
 
   const before = state.wallboxHistory.length;
@@ -990,7 +1030,7 @@ app.post('/api/boiler-history/restore', (req, res) => {
     .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now && okTemp(p.b1) && okTemp(p.b2)
       && (typeof p.b1 === 'number' || typeof p.b2 === 'number'))
     .map(p => ({ t: p.t, b1: typeof p.b1 === 'number' ? p.b1 : null, b2: typeof p.b2 === 'number' ? p.b2 : null }))
-    .slice(0, 2000);
+    .slice(0, 4000);
   if (!clean.length) return res.json({ added: 0 });
 
   const before = state.boilerHistory.length;
@@ -999,7 +1039,7 @@ app.post('/api/boiler-history/restore', (req, res) => {
   for (const p of all) {
     if (!merged.length || p.t - merged[merged.length - 1].t > 30000) merged.push(p);
   }
-  state.boilerHistory = merged.filter(p => p.t >= now - HISTORY_MAX_AGE_MS);
+  state.boilerHistory = thinPoints(merged.filter(p => p.t >= now - HISTORY_MAX_AGE_MS), PICK_LAST);
   const added = state.boilerHistory.length - before;
   if (added > 0) broadcast('boilerHistory', { history: state.boilerHistory });
   res.json({ added });
@@ -1011,7 +1051,7 @@ app.post('/api/wb-mode-history/restore', (req, res) => {
   if (!entries) return res.status(400).json({ error: 'Chybí entries.' });
 
   const now = Date.now();
-  const cutoff = now - TIMELINE_MAX_AGE_MS;
+  const cutoff = now - HISTORY_MAX_AGE_MS;
   const validModes = ['stop', 'fast', 'eco', 'green'];
   const clean = entries
     .filter(e => e && typeof e.t === 'number' && validModes.includes(e.mode) && e.t >= cutoff && e.t <= now)
@@ -1025,7 +1065,7 @@ app.post('/api/wb-mode-history/restore', (req, res) => {
     const last = merged[merged.length - 1];
     if (!last || last.mode !== e.mode) merged.push({ t: e.t, mode: e.mode }); // po sobě jdoucí stejné sloučíme
   }
-  state.wbModeHistory = merged.filter(e => e.t >= now - TIMELINE_MAX_AGE_MS);
+  state.wbModeHistory = merged.filter(e => e.t >= now - HISTORY_MAX_AGE_MS);
   const added = state.wbModeHistory.length - before;
   if (added > 0) broadcast('wbModeHistory', { history: state.wbModeHistory });
   res.json({ added });
@@ -1173,13 +1213,13 @@ app.post('/api/timeline/restore', (req, res) => {
     return res.status(400).json({ error: 'Chybí timeline.' });
   }
   const now = Date.now();
-  const cutoff = now - TIMELINE_MAX_AGE_MS;
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
   const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
+    const cutoff = now - timelineMaxAge(k);
     const incoming = Array.isArray(tl[k]) ? tl[k] : [];
     const clean = incoming
       .filter(s => s && typeof s.from === 'number' && typeof s.to === 'number'
@@ -4163,7 +4203,7 @@ function recordWbMode(mode) {
   if (!mode) return;
   const last = state.wbModeHistory[state.wbModeHistory.length - 1];
   if (last && last.mode === mode) return; // beze změny
-  const cutoff = Date.now() - TIMELINE_MAX_AGE_MS;
+  const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   state.wbModeHistory = state.wbModeHistory.filter(e => e.t >= cutoff);
   state.wbModeHistory.push({ t: Date.now(), mode });
   broadcast('wbModeHistory', { history: state.wbModeHistory });
@@ -5224,8 +5264,8 @@ function recordBoilerTemps() {
   const b1 = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   const b2 = state.infigy && typeof state.infigy.hwTemp === 'number' ? state.infigy.hwTemp : null;
   if (b1 === null && b2 === null) return; // ještě nemáme co ukládat
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  state.boilerHistory = state.boilerHistory.filter(p => p.t >= cutoff);
+  const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+  state.boilerHistory = thinPoints(state.boilerHistory.filter(p => p.t >= cutoff), PICK_LAST);
   const point = { t: Date.now(), b1, b2 };
   state.boilerHistory.push(point);
   broadcast('boilerHistory', { point });
