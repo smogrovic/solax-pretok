@@ -1752,18 +1752,24 @@ function checkSources() {
 }
 
 // ---------- Udržovací ON, aby časovač v relé nezhasl to, co má běžet ----------
-// V Shelly relé je nastavené automatické vypnutí po 60 min. To je jediná pojistka, která
-// funguje i bez sítě: relé odpojené od wifi se vypne samo a nemůže se opakovat solinátor
-// běžící deset hodin. Aby to nekazilo normální dlouhý běh, posíláme zapnutému relé ON
-// znovu — každý ON ten časovač v relé natáhne od začátku. Relé už zapnuté je, takže se
-// nic nerozepne: žádné cvaknutí OFF/ON, žádný záznam do logu, běh se nepřeruší.
+// V Shelly relé je nastavené automatické vypnutí. To je jediná pojistka, která funguje
+// i bez sítě: relé odpojené od wifi se vypne samo a nemůže se opakovat solinátor běžící
+// deset hodin. Aby to nekazilo normální dlouhý běh, posíláme zapnutému relé ON znovu —
+// každý ON ten časovač v relé natáhne od začátku. Relé už zapnuté je, takže se nic
+// nerozepne: žádné cvaknutí OFF/ON, žádný záznam do logu, běh se nepřeruší.
+// POZOR: tohle číslo musí odpovídat tomu, co je nastavené v samotných relé. Je to ta
+// kratší z hodnot (bazén a bojler 15 min, solinátor smí mít delší) — podle ní se počítá,
+// jak často se udržovací ON posílá.
+const RELAY_AUTO_OFF_MS = 15 * 60 * 1000;
 const KEEPALIVE_KEYS = ['solinator', 'pool', 'shelly'];
-const KEEPALIVE_MS = 15 * 60 * 1000;    // čtyři pokusy, než 60minutový časovač doběhne
+// Čtyři pokusy, než časovač v relé doběhne: tři ztracené povely za sebou (zaseknutý
+// cloud) běh ještě neshodí. Kratší časovač v relé = častější udržovací ON.
+const KEEPALIVE_MS = Math.round(RELAY_AUTO_OFF_MS / 4);
 const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme (závod s ručním OFF)
 // key -> { turn, at }: co appka relé naposledy poručila a kdy. Směr je podstatný —
 // relé, kterému jsme řekli „vypni" a ono drží (ztracený povel, zaseknutý cloud), nesmí
-// dostávat udržovací ON: natahoval by mu ten šedesátiminutový časovač a appka by tak
-// držela naživu zrovna to, co chce vypnout.
+// dostávat udržovací ON: natahoval by mu ten časovač a appka by tak držela naživu
+// zrovna to, co chce vypnout.
 const lastCmd = {};
 function noteCmd(key, turn) { lastCmd[key] = { turn, at: Date.now() }; }
 
@@ -1791,7 +1797,7 @@ async function sendKeepalive() {
 // Hlídače pouštíme po 5 min (garáž si musí doptat TaHomu, proto ne častěji)
 setTimeout(() => { checkGarageOpen(); checkSources(); }, 60000);
 setInterval(() => { checkGarageOpen(); checkSources(); }, 5 * 60 * 1000);
-scheduleEvery(sendKeepalive, KEEPALIVE_MS, 90000);   // 90 s po startu, pak každých 15 min
+scheduleEvery(sendKeepalive, KEEPALIVE_MS, 90000);   // 90 s po startu, pak čtvrtina časovače v relé
 
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
