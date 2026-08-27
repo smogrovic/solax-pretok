@@ -5618,7 +5618,7 @@ function renderWbToday() {
 let wbChart = null;
 const WB_PANELS = [
   { h: 84, label: 'Výkon (kW)', draw: panelWbPower },
-  { h: 76, label: '', draw: panelWbLanes }
+  { h: 38, label: '', draw: panelWbLanes }
 ];
 
 function renderWallboxChart() {
@@ -5649,33 +5649,42 @@ function panelWbPower(ctx, g) {
   }));
 }
 
-// Dráhy pod křivkou: ze záznamů změn režimu se poskládají souvislé segmenty
-// (režim platí do další změny), „připojeno" se bere z časové osy.
-function panelWbLanes(ctx, g) {
-  const laneH = 10, laneGap = 12;
+// Dvě dráhy pod křivkou: nahoře kdy visel kabel, pod ním jeden pruh s režimem.
+// Režimy nikdy neběží souběžně, takže vlastní řádek pro každý byl jen šum — stačí
+// barva a legenda. Segmenty se skládají ze záznamů změn (režim platí do další změny),
+// „připojeno" se bere z časové osy.
+function wbLaneRows(g) {
   const hist = (wbModeHistoryData || [])
     .filter(e => e && typeof e.t === 'number' && e.mode)
     .sort((a, b) => a.t - b.t);
-  const segs = [];
+  const rezim = [];
   for (let i = 0; i < hist.length; i++) {
-    segs.push({ from: hist[i].t, to: i + 1 < hist.length ? hist[i + 1].t : g.now, mode: hist[i].mode });
+    rezim.push({
+      from: hist[i].t,
+      to: i + 1 < hist.length ? hist[i + 1].t : g.now,
+      color: WB_MODE_COLORS[hist[i].mode] || WB_MODE_COLORS.stop
+    });
   }
-  WB_MODE_LANES.forEach((lane, i) => {
+  const kabel = ((timelineData && timelineData.wbPlugged) || [])
+    .map(sg => ({ from: sg.from, to: sg.to, color: WB_MODE_COLORS.plugged }));
+  return [{ label: 'Kabel', segs: kabel }, { label: 'Režim', segs: rezim }];
+}
+
+function panelWbLanes(ctx, g) {
+  const laneH = 12, laneGap = 14;
+  wbLaneRows(g).forEach((radek, i) => {
     const yTop = g.top + i * (laneH + laneGap);
     ctx.fillStyle = 'rgba(44,62,80,0.55)';
     ctx.textAlign = 'left';
-    ctx.fillText(lane.short || lane.label, 2, yTop + laneH / 2 + 3);
+    ctx.fillText(radek.label, 2, yTop + laneH / 2 + 3);
     ctx.fillStyle = 'rgba(44,62,80,0.06)';
     ctx.fillRect(g.padL, yTop, g.plotW, laneH);
-    ctx.fillStyle = lane.color;
-    const laneSegs = lane.zdroj === 'timeline'
-      ? ((timelineData && timelineData.wbPlugged) || [])
-      : segs.filter(sg => sg.mode === lane.key);
-    for (const sg of laneSegs) {
+    for (const sg of radek.segs) {
       const from = Math.max(sg.from, g.start);
       const to = Math.min(sg.to, g.end);
       if (to <= from) continue;
       const x1 = g.x(from), x2 = g.x(to);
+      ctx.fillStyle = sg.color;
       ctx.fillRect(x1, yTop, Math.max(x2 - x1, 2), laneH);
     }
   });
@@ -5684,12 +5693,12 @@ function panelWbLanes(ctx, g) {
 function renderWbModeLegend() {
   if (!wbModeLegendEl) return;
   wbModeLegendEl.textContent = '';
-  for (const lane of WB_MODE_LANES) {
+  for (const [key, label] of WB_MODE_LEGEND) {
     const span = document.createElement('span');
     const dot = document.createElement('i');
-    dot.style.background = lane.color;
+    dot.style.background = WB_MODE_COLORS[key];
     span.appendChild(dot);
-    span.appendChild(document.createTextNode(lane.label));
+    span.appendChild(document.createTextNode(label));
     wbModeLegendEl.appendChild(span);
   }
 }
@@ -5736,14 +5745,14 @@ async function maybeRestoreWbModeHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
-// Tři oddělené dráhy (FAST / ECO / GREEN) — jako časová osa na Přehledu
-const WB_MODE_LANES = [
-  // „Připojeno" nahoře jako kontext: režim je zajímavý hlavně tehdy, když auto vůbec
-  // viselo na kabelu. Kreslí se z časové osy, ne ze změn režimu.
-  { key: 'plugged', label: 'Připojeno', short: 'Kabel', color: WB_MODE_COLORS.plugged, zdroj: 'timeline' },
-  { key: 'fast', label: 'FAST', color: WB_MODE_COLORS.fast },
-  { key: 'eco', label: 'ECO', color: WB_MODE_COLORS.eco },
-  { key: 'green', label: 'GREEN', color: WB_MODE_COLORS.green }
+// Co je v grafu vidět za barvy: „Připojeno" je horní dráha (kdy visel kabel),
+// zbytek jsou režimy v jednom pruhu pod ní.
+const WB_MODE_LEGEND = [
+  ['plugged', 'Připojeno'],
+  ['fast', 'FAST'],
+  ['eco', 'ECO'],
+  ['green', 'GREEN'],
+  ['stop', 'STOP']
 ];
 
 
