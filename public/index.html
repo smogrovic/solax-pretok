@@ -502,6 +502,8 @@
   .wbsrc-total{margin-top:8px;padding-top:8px;border-top:1px solid rgba(44,62,80,0.12);}
   .wbsrc-total .wbsrc-head{font-size:14px;color:var(--navy);font-weight:700;}
   .wbsrc-note{font-size:11px;color:var(--grey-text);margin-top:10px;line-height:1.35;}
+  .sauna-power{font-size:34px;font-weight:800;color:var(--orange);text-align:center;margin:10px 0 2px;}
+  .traffic-light.warm{background:var(--orange);}
   .log-day{
     font-size:12px;
     font-weight:700;
@@ -1678,6 +1680,28 @@
       </div>
     </div>
   </div>
+  <!-- Stránka: Sauna -->
+  <div class="slide" data-title="Sauna" id="saunaSlide">
+    <div class="page">
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="saunaLight"></div>
+            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
+          </div>
+          <div class="sauna-power" id="saunaPower">– kW</div>
+          <div class="manual-hold" id="saunaHint"></div>
+        </div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Spotřeba za 7 dní</div>
+        <div class="wbsrc-list" id="saunaList"></div>
+        <div class="wbsrc-note">Sauna visí na stejném jističi jako bazén a solinátor. Když topí, appka je vypne a nechá vypnuté ještě 30 min po dotopení — jistič to jinak nemusí unést. Pro rychlé vypnutí to samé hlídá i skript přímo v Shelly.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stránka: Klima -->
   <div class="slide" data-title="Klima">
     <div class="page">
@@ -2151,6 +2175,20 @@
         </div>
 
         <div class="logic-sec">
+          <div class="logic-h">Sauna</div>
+          <ul class="logic-list">
+            <li>Sauna visí na <b>stejném jističi</b> jako bazén a solinátor — když topí, obě relé jdou dolů.</li>
+            <li>„Topí" = odběr nad <b>500 W</b> (měří Shelly 3EM za jističem sauny).</li>
+            <li>Vypnuté zůstanou ještě <b>30 min po posledním nátopu</b> — termostat sauny cykluje.</li>
+            <li>Přebíjí to i <b>ruční zapnutí</b> a bazénové <b>„+24 h"</b>: jistič má přednost.</li>
+            <li>Solinátor o rozpočet nepřijde, nedoběhnutý čas se přenese na další den.</li>
+            <li>Do vteřiny to hlídá i <b>skript přímo v Shelly</b> u sauny; appka je pomalejší pojistka.</li>
+            <li>Notifikace, když sauna topí <b>2 h v kuse</b>; když jede dál, připomene se po 6 h.</li>
+            <li>Stránka <b>Sauna</b>: semafor, aktuální odběr a spotřeba za 7 dní.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec">
           <div class="logic-h">Bojler 1 (TČ)</div>
           <ul class="logic-list">
             <li>Okno: <b>10:00</b> → hodina před západem.</li>
@@ -2181,19 +2219,14 @@
         <div class="logic-sec">
           <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
-            <li><b>FAST</b> = pořád rychlé nabíjení. <b>AUTO</b> dělí den na pět fází:</li>
-            <li>&nbsp;&nbsp;<b>1. ráno</b>, než se rozjede výroba → GREEN, jen z přebytku.</li>
-            <li>&nbsp;&nbsp;<b>2. den</b> → ECO.</li>
-            <li>&nbsp;&nbsp;<b>3. odpoledne</b>, když auto čeká a výroba stačí → FAST i z baterky.</li>
-            <li>&nbsp;&nbsp;<b>4. večer</b> (hodinu před západem) <b>a noc do 3:00</b> → GREEN.</li>
-            <li>&nbsp;&nbsp;<b>5. od 3:00 do konce noci</b> → FAST, když auto ráno potřebuju.</li>
-            <li>Denní okno (ECO) otevře <b>2,5 kW z FVE 2× po sobě</b>, nejpozději v <b>10:00</b>, a vydrží do večera.</li>
-            <li><b>Konec noci</b> = hodina po východu, nejpozději <b>8:00</b>.</li>
-            <li><b>FAST z baterky:</b> zbývající výroba (<b>90 % odhadu</b>) musí pokrýt auto (<b>11 kWh</b> při 3,4 kW) i baterku do 100 %.</li>
-            <li>Zapne se, jen když auto čeká a do konce okna zbývá <b>míň než 3:15</b>.</li>
-            <li>Zpátky na ECO, když schodek přesáhne <b>1 kWh</b> 2× po sobě nebo auto odjede.</li>
-            <li><b>„Ráno auto potřebuju"</b> vypnuto → místo nočního FAST jede GREEN.</li>
-            <li>Výchozí stav podle <b>dne v týdnu</b>: pracovní den ano, víkend ne. Ručně jde přepnout na jedno ráno.</li>
+            <li><b>FAST</b> = pořád naplno. <b>AUTO</b> jede podle denní doby a stavu auta:</li>
+            <li>&nbsp;&nbsp;<b>noc do 3:00</b> a <b>večer</b> (hodinu před západem) → GREEN, jen přebytek.</li>
+            <li>&nbsp;&nbsp;<b>3:00 → konec noci</b> (východ + 1 h, nejpozději 8:00) → FAST, když auto ráno potřebuju.</li>
+            <li>&nbsp;&nbsp;<b>ráno</b>, než se rozjede výroba → GREEN.</li>
+            <li>&nbsp;&nbsp;<b>den</b> → ECO. Okno otevře <b>2,5 kW z FVE 2× po sobě</b>, nejpozději v 10:00.</li>
+            <li><b>Nedobité auto má přednost:</b> jakmile FVE dá <b>3 kW 2× po sobě</b>, jede FAST a baterka dostane až to, co zbyde. Končí to, když auto hlásí dokončeno.</li>
+            <li><b>FAST z baterky odpoledne:</b> když do konce okna zbývá míň než 3:15, auto čeká a zbývající výroba (90 % odhadu) pokryje auto i baterku do 100 %. Při schodku nad 1 kWh se vrací ECO.</li>
+            <li><b>„Ráno auto potřebuju"</b> vypnuto → v noci se nenabíjí, jen přebytek. Výchozí stav podle <b>dne v týdnu</b> (pracovní den ano, víkend ne), ručně na jedno ráno.</li>
             <li>Ruční režim (STOP/ECO/FAST) drží <b>3 h</b>, přepnutí FAST/AUTO ho ruší.</li>
             <li>Ve střídači nastav: <b>ECO i GREEN 6 A</b>, „Battery charge EVC" Enable, Min SOC ~10 %.</li>
             <li><b>Odkud auto bralo (7 dní):</b> ze sítě to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE.</li>
@@ -2427,6 +2460,9 @@ function renderManualHold() {
       // Nedostupnost má přednost: dokud nevíme, co relé dělá, je odklad podružný
       const naposled = d.isOn === true ? 'zapnuto' : (d.isOn === false ? 'vypnuto' : 'neznámý stav');
       device.holdEl.textContent = `Nedostupné — naposledy ${naposled}`;
+    } else if ((key === 'pool' || key === 'solinator') && saunaBlokujeUi()) {
+      // Sauna přebíjí i ruční zapnutí — jistič je přednější
+      device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;
     } else {
       device.holdEl.textContent = until > now
         ? `Ručně — automatika převezme v ${fmtSolTime(until)}`
@@ -3554,24 +3590,25 @@ async function maybeRestoreRuntimeToServer(serverRt, localRt) {
 
 const timelineCanvas = document.getElementById('timelineChart');
 const timelineLegendEl = document.getElementById('timelineLegend');
-const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox'];
+const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox', 'sauna'];
 const TIMELINE_BASE = {
   shelly: { label: 'Bojler', color: '#e5534b' },
   pool: { label: 'Bazén', color: '#3b82c4' },
   solinator: { label: 'Solinátor', color: '#3fb950' },
-  wallbox: { label: 'Wallbox', color: '#f5933d' }
+  wallbox: { label: 'Wallbox', color: '#f5933d' },
+  sauna: { label: 'Sauna', color: '#8e44ad' }
 };
 // Ověřeno validátorem na barvosleposti přes všechny dvojice. Původní růžová a tyrkysová
 // byly pro deuteranopii prakticky totožné (ΔE 1,4) — ve čtyřech křivkách přes sebe
 // v grafu teplot to bylo nečitelné. Pořadí je pevné, barvy se necyklují.
 const TIMELINE_AC_COLORS = ['#7d5fd6', '#e8a13a', '#18a999', '#c94f4f', '#4a7c2f'];
-let timelineData = { shelly: [], pool: [], solinator: [], wallbox: [] };
+let timelineData = { shelly: [], pool: [], solinator: [], wallbox: [], sauna: [] };
 
 function pruneTimelineLocal(tl) {
   const now = Date.now();
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|ac_)/.test(k)) continue;
     // Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, tak se drží 4 dny
     const cutoff = now - (k === 'wbPlugged' ? HIST_MAX_AGE_MS : 48 * 60 * 60 * 1000);
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
@@ -5188,7 +5225,7 @@ let wbAutoData = true;
 // Ranní rozhodnutí posílá server rovnou vyhodnocené: need = jestli auto ráno potřebuju,
 // until = do kdy to platí, manual = jestli je to ruční přepnutí (jinak podle dne v týdnu).
 // waiting = noc už skončila, ale čeká se, až FVE dá pvNeeded kW (jinak by ECO bralo ze sítě)
-let wbMorningData = { need: true, until: 0, manual: false, waiting: false, pv: null, pvNeeded: 2.5, fallbackHour: 10, nightFastHour: 3, batFast: false, batZbyva: null, batChybi: null, batBlizko: false };
+let wbMorningData = { need: true, until: 0, manual: false, waiting: false, pv: null, pvNeeded: 2.5, fallbackHour: 10, nightFastHour: 3, prio: false, prioPv: 3, batFast: false, batZbyva: null, batChybi: null, batBlizko: false };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -5267,6 +5304,8 @@ function applyWbSwitches(d) {
       winter: !!d.wbWinter,
       manualUntil: Number(d.wbManualUntil) || 0,
       nightFastHour: typeof d.wbNightFastHour === 'number' ? d.wbNightFastHour : wbMorningData.nightFastHour,
+      prio: !!d.wbPrio,
+      prioPv: typeof d.wbPrioPvKw === 'number' ? d.wbPrioPvKw : wbMorningData.prioPv,
       batFast: !!d.wbBatFast,
       batZbyva: typeof d.wbBatFastZbyva === 'number' ? d.wbBatFastZbyva : null,
       batChybi: typeof d.wbBatFastChybi === 'number' ? d.wbBatFastChybi : null,
@@ -5351,7 +5390,7 @@ function renderWbAuto() {
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
   const { need, until, manual, waiting, pv, pvNeeded, fallbackHour, winter, manualUntil, nightFastHour,
-          batFast, batZbyva, batChybi, batBlizko } = wbMorningData;
+          batFast, batZbyva, batChybi, batBlizko, prio, prioPv } = wbMorningData;
   wbMorningSwitchEl.classList.toggle('on', need);
   // V zimě a na pevném FAST ranní rozhodnutí nic neovlivní — ať přepínač nemate
   const bezVyznamu = !wbAutoData || winter;
@@ -5366,6 +5405,11 @@ function renderWbMorning() {
   }
   if (!wbAutoData) {
     wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.' + rucne;
+    return;
+  }
+  if (prio) {
+    wbMorningHintEl.textContent = 'Auto se dobíjí přednostně (FAST) — baterka dostane, co zbyde.'
+      + ' Přednost skončí, jakmile bude auto dobité.' + rucne;
     return;
   }
   if (batFast) {
@@ -5756,6 +5800,131 @@ const WB_MODE_LEGEND = [
 ];
 
 
+
+// ---------- Sauna (Shelly 3EM za jističem) ----------
+// Sauna nemá vypínač v appce — jen se měří. Podstatné je, že když topí, jde bazén
+// i solinátor dolů (visí na stejném jističi) a ještě půl hodiny po dotopení se
+// nevracejí. Tady se to jen ukazuje.
+const saunaLightEl = document.getElementById('saunaLight');
+const saunaStateEl = document.getElementById('saunaState');
+const saunaPowerEl = document.getElementById('saunaPower');
+const saunaHintEl = document.getElementById('saunaHint');
+const saunaListEl = document.getElementById('saunaList');
+const SAUNA_DNU = 7;
+let saunaData = null;
+let saunaDaysData = [];
+
+function saunaBlokujeUi() {
+  return !!(saunaData && saunaData.blockUntil > Date.now());
+}
+
+function renderSauna() {
+  if (!saunaLightEl) return;
+  const d = saunaData || {};
+  const zname = typeof d.powerW === 'number' && d.fetchedAt
+    && Date.now() - new Date(d.fetchedAt).getTime() <= DEVICE_STALE_MS;
+  if (!zname) {
+    saunaLightEl.className = 'traffic-light';
+    saunaStateEl.textContent = 'nedostupná';
+    saunaPowerEl.textContent = '–';
+    saunaHintEl.textContent = d.error || 'Z měřáku sauny nechodí data.';
+    return;
+  }
+  const topi = !!d.topi;
+  const blok = saunaBlokujeUi();
+  // Termostat sauny cykluje: mezi nátopy je odběr malý, ale sauna pořád „běží"
+  saunaLightEl.className = 'traffic-light' + (topi ? ' on' : (blok ? ' warm' : ' off'));
+  saunaStateEl.textContent = topi ? 'topí' : (blok ? 'v pauze' : 'vypnutá');
+  saunaPowerEl.textContent = (d.powerW / 1000).toFixed(1).replace('.', ',') + ' kW';
+  const kusy = [];
+  if (d.since) kusy.push(`Topí ${fmtSolDur(Date.now() - d.since)}`);
+  if (blok) kusy.push(`bazén a solinátor drží vypnuté do ${fmtSolTime(d.blockUntil)}`);
+  if (!kusy.length && typeof d.limitW === 'number') kusy.push(`Zapnuto se počítá od ${d.limitW} W`);
+  saunaHintEl.textContent = kusy.join(' · ');
+}
+setInterval(renderSauna, 30000);   // „topí 1:20" musí běžet i bez zprávy ze serveru
+
+function renderSaunaDays() {
+  if (!saunaListEl) return;
+  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  const frag = document.createDocumentFragment();
+  let celkem = 0, celkemMs = 0;
+  const radek = (popis, wh, ms, celkovy) => {
+    const row = document.createElement('div');
+    row.className = 'wbsrc-row' + (celkovy ? ' wbsrc-total' : '');
+    const head = document.createElement('div');
+    head.className = 'wbsrc-head';
+    const den = document.createElement('span');
+    den.className = 'wbsrc-day';
+    den.textContent = popis;
+    const val = document.createElement('span');
+    val.textContent = wh > 0 ? kwh(wh) : '–';
+    head.appendChild(den);
+    head.appendChild(val);
+    row.appendChild(head);
+    if (wh > 0) {
+      const leg = document.createElement('div');
+      leg.className = 'wbsrc-legend';
+      const l = document.createElement('span');
+      l.textContent = ms > 0 ? `topila ${fmtSolDur(ms)}` : 'jen klidový odběr';
+      leg.appendChild(l);
+      if (celkovy) l.textContent = ms > 0 ? `topila celkem ${fmtSolDur(ms)}` : '';
+      row.appendChild(leg);
+    }
+    frag.appendChild(row);
+  };
+  for (let i = 0; i < SAUNA_DNU; i++) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const klic = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const rec = saunaDaysData.find(r => r.d === klic) || { wh: 0, ms: 0 };
+    celkem += rec.wh || 0;
+    celkemMs += rec.ms || 0;
+    radek(wbSrcDenNadpis(klic), rec.wh || 0, rec.ms || 0, false);
+  }
+  radek('Celkem za 7 dní', celkem, celkemMs, true);
+  saunaListEl.textContent = '';
+  saunaListEl.appendChild(frag);
+}
+
+// Denní spotřeba se zálohuje v telefonu — server po deployi začíná od nuly
+function saveSaunaDaysLocal() {
+  try { localStorage.setItem('saunaDays', JSON.stringify(saunaDaysData)); } catch {}
+}
+function loadSaunaDaysLocal() {
+  try { return JSON.parse(localStorage.getItem('saunaDays') || '[]') || []; } catch { return []; }
+}
+function mergeSaunaDays(a, b) {
+  const mapa = new Map();
+  for (const r of [...(a || []), ...(b || [])]) {
+    if (!r || typeof r.d !== 'string') continue;
+    const m = mapa.get(r.d) || { d: r.d, wh: 0, ms: 0 };
+    m.wh = Math.max(m.wh, Number(r.wh) || 0);
+    m.ms = Math.max(m.ms, Number(r.ms) || 0);
+    mapa.set(r.d, m);
+  }
+  return [...mapa.values()].sort((x, y) => x.d.localeCompare(y.d)).slice(-SAUNA_DNU);
+}
+async function maybeRestoreSaunaDays(server, local) {
+  if (!local.length) return;
+  const chybi = local.some(l => {
+    const r = (server || []).find(x => x.d === l.d);
+    return !r || (Number(l.wh) || 0) > (r.wh || 0) + 1;
+  });
+  if (!chybi) return;
+  try {
+    await fetch('/api/sauna-days/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saunaDays: saunaDaysData })
+    });
+  } catch {}
+}
+
+function hideSaunaSlide() {
+  const slide = document.getElementById('saunaSlide');
+  if (slide) { slide.remove(); rebuildDots(); }
+}
 
 // ---------- AI asistent ----------
 
@@ -6511,6 +6680,17 @@ function applySnapshot(snap) {
   renderWallboxChart();
   saveWallboxHistoryLocal();
   maybeRestoreWbHistoryToServer(serverWb, localWb);
+  if (snap.saunaEnabled === false) {
+    hideSaunaSlide();
+  } else {
+    saunaData = snap.sauna || null;
+    const serverDny = snap.saunaDays || [];
+    saunaDaysData = mergeSaunaDays(serverDny, loadSaunaDaysLocal());
+    renderSauna();
+    renderSaunaDays();
+    saveSaunaDaysLocal();
+    maybeRestoreSaunaDays(serverDny, loadSaunaDaysLocal());
+  }
   if (snap.assistantEnabled === false) hideAssistantSlide();
   renderAssistantLog(snap.assistantLog || []);
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
@@ -6852,6 +7032,16 @@ function connectStream() {
     else if (d.point) wallboxHistory = mergeWbHistories(wallboxHistory, [d.point]);
     renderWallboxChart();
     saveWallboxHistoryLocal();
+  });
+  es.addEventListener('sauna', e => {
+    saunaData = JSON.parse(e.data).sauna || null;
+    renderSauna();
+    renderManualHold();   // „vypnuto saunou" u bazénu a solinátoru
+  });
+  es.addEventListener('saunaDays', e => {
+    saunaDaysData = mergeSaunaDays(JSON.parse(e.data).saunaDays || [], saunaDaysData);
+    renderSaunaDays();
+    saveSaunaDaysLocal();
   });
   es.addEventListener('wbAuto', e => {
     applyWbSwitches(JSON.parse(e.data));
