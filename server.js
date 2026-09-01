@@ -168,9 +168,8 @@ const state = {
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za poslední 4 dny
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
-  // Ruční přepnutí „ráno auto (ne)potřebuju" pro nejbližší ráno; need null = jede se
-  // podle dne v týdnu (pracovní den ano, víkend ne)
-  wbMorning: { need: null, until: 0 },
+  // Typ dne pro wallbox: null = podle kalendáře, jinak ruční volba s platností
+  wbDayType: { manual: null, until: 0 },  // ruční „pracovní den / víkend" do zítřejších 12:00
   wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (4 dny, jako graf)
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
@@ -199,6 +198,7 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
   // teploty v pokojích za 24 h pro graf: temps = podle guid klimatizace, sens = Shelly čidla
@@ -360,6 +360,7 @@ function snapshot() {
     saunaEnabled,
     sauna: saunaPayload(),
     saunaDays: state.saunaDays,
+    months: state.months,
     timeline: state.timeline,
     blindsEnabled: tahomaEnabled,
     blindTimers,
@@ -853,6 +854,29 @@ function recordSaunaDay(w, dtH) {
   }
 }
 
+// ---------- Spotřeba po měsících ----------
+// Sauna, bazén a wallbox si vedle denních čísel drží i měsíční součty, ať je za rok
+// vidět, co který okruh spotřeboval. Sčítá se ze stejných vzorků jako denní kWh
+// (jednou za cyklus pollu, s dt zastropovaným na 10 min).
+const MONTHS_MAX = 13;
+const MONTH_KEYS = ['sauna', 'pool', 'wb'];
+
+function pragueMonthString(at) {
+  return pragueDateString(at).slice(0, 7);
+}
+
+function recordMonth(kus, w, dtH) {
+  if (!MONTH_KEYS.includes(kus) || !(w > 0) || !(dtH > 0)) return;
+  const m = pragueMonthString();
+  let rec = state.months.find(r => r.m === m);
+  if (!rec) { rec = { m, sauna: 0, pool: 0, wb: 0 }; state.months.push(rec); }
+  rec[kus] += w * dtH;
+  if (state.months.length > MONTHS_MAX) {
+    state.months.sort((a, b) => a.m.localeCompare(b.m));
+    state.months = state.months.slice(-MONTHS_MAX);
+  }
+}
+
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
 function runtimePayload() {
   return { date: state.runtime.date, ms: state.runtime.ms, wh: state.runtime.wh, yesterday: state.runtime.yesterday };
@@ -931,6 +955,13 @@ function updateRuntimes() {
     ? state.sauna.powerW : null;
   if (saunaW !== null) recordSaunaDay(saunaW, dtH);
 
+  // Měsíční součty — každý okruh jen z čerstvého měření
+  if (saunaW !== null) recordMonth('sauna', saunaW, dtH);
+  if (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) {
+    recordMonth('pool', state.poolPowerW, dtH);
+  }
+  recordMonth('wb', Math.max(0, wbW), dtH);
+
   state.runtime.lastTs = now;
   recordPvDay();
   backfillWallboxTimeline();
@@ -940,6 +971,7 @@ function updateRuntimes() {
   broadcast('pvDays', { pvDays: state.pvDays });
   broadcast('wbDays', { wbDays: state.wbDays });
   if (saunaEnabled) broadcast('saunaDays', { saunaDays: state.saunaDays });
+  broadcast('months', { months: state.months });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -1380,6 +1412,32 @@ app.post('/api/sauna/active', (req, res) => {
   broadcast('sauna', { sauna: saunaPayload() });
   enforceSaunaOff().catch(() => {});   // ať se nečeká na další kolo automatiky
   res.json({ ok: true, blockUntil: state.saunaBlockUntil });
+});
+
+// Obnova měsíčních součtů po deployi — vyšší hodnota vyhrává (server po restartu
+// začíná měsíc od nuly, telefon má nastřádáno)
+app.post('/api/months/restore', (req, res) => {
+  const mesice = req.body && Array.isArray(req.body.months) ? req.body.months : null;
+  if (!mesice) return res.status(400).json({ error: 'Chybí months.' });
+  const ted = pragueMonthString();
+  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 5000000 ? v : null);
+  let changed = false;
+  for (const inc of mesice.slice(-MONTHS_MAX)) {
+    if (!inc || typeof inc.m !== 'string' || !/^\d{4}-\d{2}$/.test(inc.m)) continue;
+    if (inc.m > ted) continue;
+    let rec = state.months.find(r => r.m === inc.m);
+    if (!rec) { rec = { m: inc.m, sauna: 0, pool: 0, wb: 0 }; state.months.push(rec); changed = true; }
+    for (const k of MONTH_KEYS) {
+      const v = num(inc[k]);
+      if (v !== null && v > rec[k]) { rec[k] = v; changed = true; }
+    }
+  }
+  if (changed) {
+    state.months.sort((a, b) => a.m.localeCompare(b.m));
+    state.months = state.months.slice(-MONTHS_MAX);
+    broadcast('months', { months: state.months });
+  }
+  res.json({ ok: true, months: state.months.length });
 });
 
 // Obnova denní spotřeby sauny po deployi — stejný princip jako u wallboxu
@@ -4546,29 +4604,35 @@ app.post('/api/wallbox/set', async (req, res) => {
 });
 
 // ---------- Řízení režimu wallboxu ----------
-// V režimu AUTO jsou tři fáze:
-//   ráno  (3:00 → 10:00, nebo dřív, jakmile FVE dá WB_RANO_KONEC_KW)
-//         FAST, když auto ráno potřebuju, jinak GREEN (jen přebytek)
-//   den   (konec rána → západ − 1 h)
-//         FAST, když dnes zbývá vyrobit aspoň WB_DEN_FAST_KWH; jinak ECO
-//   noc a večer (zbytek dne)  GREEN — jen přebytek, nic ze sítě ani z baterky
+// V režimu AUTO rozhoduje hodina a typ dne, odpoledne pak přebytek z FVE:
+//
+//              pracovní den      víkend
+//   GREEN      00:00–04:00       00:00–08:00      (jen přebytek)
+//   FAST       04:00–07:00       08:00–10:00      (dobití naplno)
+//   hystereze  07:00–24:00       10:00–24:00      (ECO ↔ FAST podle přebytku)
+//
+// Hystereze: z ECO na FAST, když je přebytek 10 minut v kuse nad 3,5 kW; z FASTu na
+// ECO, když je 10 minut pod 2,5 kW. Mezi tím se nechává, co jede — jinak by režim
+// cvakal s každým mrakem. Do okna se vstupuje z FASTu (předchozí fáze).
+//
+// PŘEBYTEK SE POČÍTÁ PŘED AUTEM: přetok + nabíjení baterie + co si zrovna bere
+// wallbox. Kdyby se bral až po autě, FAST by si vlastní přebytek sežral, spadl na ECO,
+// přebytek by vyskočil a celé by to každých deset minut oscilovalo.
+//
 // Zima: pořád FAST. Ruční přepnutí režimu drží 3 h a automatika ho nepřepisuje.
-// Výchozí „ráno auto potřebuju" dává den v týdnu (pracovní den ano, víkend ne);
-// ruční přepnutí platí jen na nejbližší ráno.
 //
 // MIMO KÓD (ručně v appce střídače/wallboxu):
-//  - Wallbox: ECO i GREEN na 6 A  (nejnižší možný proud — určuje, při jakém přebytku
-//    se nabíjení vůbec rozjede)
-//  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme; týká se
-//    jen FAST, GREEN z baterky nebere)
+//  - Wallbox: ECO i GREEN na 6 A  (nejnižší možný proud)
+//  - Střídač: "Battery charge EVC" = Enable  (jinak si auto z baterky nevezme)
 //  - Střídač: Min SOC nízko (např. 10 %)
-const WB_RANO_OD_HOUR = 3;        // dřív než ve 3:00 se ze sítě nedobíjí
-const WB_RANO_DO_HOUR = 10;       // nejpozději v 10:00 ráno končí
-const WB_RANO_KONEC_KW = 3.5;     // jakmile FVE dá tolik, ráno končí dřív
-const WB_DEN_FAST_KWH = 10;       // tolik musí dnes zbývat vyrobit, aby se jelo naplno
-const WB_VECER_PRED_ZAPADEM_S = 3600;  // hodinu před západem začíná večer
-const WB_VECER_HOUR = 20;         // bez dat o počasí se večer počítá od 20:00
-const WB_PV_MAX_AGE_MS = 15 * 60 * 1000; // starší data o výrobě neberem
+const WB_PLAN = {
+  weekday: { green: 4, fast: 7 },   // GREEN do 4:00, FAST do 7:00, pak hystereze
+  weekend: { green: 8, fast: 10 }
+};
+const WB_HYST_UP_KW = 3.5;             // z ECO na FAST
+const WB_HYST_DOWN_KW = 2.5;           // z FASTu na ECO
+const WB_HYST_MS = 10 * 60 * 1000;     // jak dlouho musí práh vydržet
+const WB_DAYTYPE_HOUR = 12;            // ruční přepnutí typu dne platí do zítřejších 12:00
 
 let wbControlRunning = false;
 
@@ -4578,64 +4642,20 @@ function wbHourOnDayOf(ms, hour) {
   return ms - (p.hour * 3600000 + p.minute * 60000) + hour * 3600000;
 }
 
-// Začátek večera: hodinu před západem, bez počasí náhradně ve 20:00
-function wbEveningMs(at = Date.now()) {
-  const w = weatherCache.data;
-  return w && w.sys && w.sys.sunset !== undefined
-    ? w.sys.sunset * 1000 - WB_VECER_PRED_ZAPADEM_S * 1000
-    : wbHourOnDayOf(at, WB_VECER_HOUR);
+// Typ dne: pracovní den, nebo víkend. Ruční přepnutí platí od té chvíle do zítřejších
+// 12:00, pak zase rozhoduje kalendář.
+function wbDayTypeManual(at = Date.now()) {
+  const d = state.wbDayType || {};
+  return (d.manual === 'weekday' || d.manual === 'weekend') && at < (d.until || 0);
 }
-
-// Ráno končí v 10:00, nebo dřív — jakmile FVE jednou dá 3,5 kW, je pro dnešek po ránu.
-// Bez západky by se to při zataženém nebi vracelo zpátky do FASTu.
-let wbRanoKonec = { date: '', pvHotovo: false };
-function wbRanoSkoncilo() {
-  const today = pragueDateString();
-  if (wbRanoKonec.date !== today) wbRanoKonec = { date: today, pvHotovo: false };
-  if (wbRanoKonec.pvHotovo) return true;
-  const pv = wbPvKw();
-  if (pv !== null && pv >= WB_RANO_KONEC_KW) {
-    wbRanoKonec.pvHotovo = true;
-    addLog(`Wallbox: FVE dává ${formatKwLog(pv * 1000)} → konec ranního dobíjení`);
-    return true;
-  }
-  return pragueTime().hour >= WB_RANO_DO_HOUR;
+function wbDayType(at = Date.now()) {
+  if (wbDayTypeManual(at)) return state.wbDayType.manual;
+  const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(at);
+  return den === 'Sat' || den === 'Sun' ? 'weekend' : 'weekday';
 }
-
-// Ráno, kterého se týká přepínač „potřebuju": nejbližší 10:00. Ruční přepnutí platí
-// jen do něj, pak zase rozhoduje den v týdnu.
-function wbMorningTargetMs() {
-  const now = Date.now();
-  const dnes = wbHourOnDayOf(now, WB_RANO_DO_HOUR);
-  return dnes > now ? dnes : dnes + 24 * 3600000;
-}
-
-// Výchozí stav podle dne v týdnu toho rána: v pracovní den se ráno jede (dobít naplno),
-// o víkendu ne (počká se na slunce).
-function wbDefaultNeedFor(ms) {
-  const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(ms);
-  return den !== 'Sat' && den !== 'Sun';
-}
-
-// Platí ruční přepnutí pro nejbližší ráno? Jinak rozhoduje den v týdnu.
-function wbMorningManual() {
-  const m = state.wbMorning || {};
-  return typeof m.need === 'boolean' && Date.now() < (m.until || 0);
-}
-function wbMorningNeed() {
-  return wbMorningManual() ? !!state.wbMorning.need : wbDefaultNeedFor(wbMorningTargetMs());
-}
-
-// Aktuální výroba FVE v kW — přednostně z Infigy (živější), jinak ze Solaxu. Stará
-// data neberem: kdyby střídač vypadl, ráno se radši dojede do 10:00.
-function wbPvKw() {
-  const now = Date.now();
-  const fresh = ts => ts && now - new Date(ts).getTime() <= WB_PV_MAX_AGE_MS;
-  const inf = state.infigy || {};
-  if (typeof inf.pvPower === 'number' && fresh(inf.fetchedAt)) return inf.pvPower;
-  const s = state.solax;
-  if (s && typeof s.fveKw === 'number' && fresh(s.fetchedAt)) return s.fveKw;
-  return null;
+// Dokdy bude ruční přepnutí platit, když ho někdo zmáčkne teď
+function wbDayTypeUntil(at = Date.now()) {
+  return wbHourOnDayOf(at, WB_DAYTYPE_HOUR) + 24 * 3600000;
 }
 
 // Stojí auto u nabíječky? (připraveno / nabíjí)
@@ -4644,33 +4664,56 @@ function wbCarReady() {
   return st === 1 || st === 2;
 }
 
-// Kolik se dnes ještě vyrobí (kWh) — odhad z Infigy minus dnešní výroba ze Solaxu.
-// null = jeden z těch dvou údajů chybí.
-function wbZbyvaVyrobit() {
-  const inf = state.infigy || {};
-  const s = state.solax || {};
-  if (typeof inf.forecastPv !== 'number' || typeof s.yieldToday !== 'number') return null;
-  return Math.max(0, inf.forecastPv - s.yieldToday);
+// Přebytek PŘED autem: co by z FVE zbylo nad barákem, kdyby wallbox nenabíjel.
+// null = střídač nemá čerstvá data (pak se hystereze neposouvá).
+function wbPrebytekW() {
+  const s = state.solax;
+  if (!s || !cerstve(s.fetchedAt)) return null;
+  if (typeof s.feedinKw !== 'number' || typeof s.batPowerKw !== 'number') return null;
+  return Math.round((s.feedinKw + s.batPowerKw) * 1000) + Math.max(0, wallboxWatts() ?? 0);
 }
 
-// Ve které fázi dne jsme: 'rano' | 'den' | 'noc'
+// Hystereze mezi ECO a FAST. Posouvá se jednou za cyklus z runEnergyControl.
+let wbHyst = { mode: 'fast', overSince: 0, underSince: 0 };
+
+function wbUpdateHyst(at = Date.now()) {
+  const w = wbPrebytekW();
+  if (w === null) { wbHyst.overSince = 0; wbHyst.underSince = 0; return; }
+  const nad = w >= WB_HYST_UP_KW * 1000;
+  const pod = w <= WB_HYST_DOWN_KW * 1000;
+  wbHyst.overSince = nad ? (wbHyst.overSince || at) : 0;
+  wbHyst.underSince = pod ? (wbHyst.underSince || at) : 0;
+  if (wbHyst.mode !== 'fast' && wbHyst.overSince && at - wbHyst.overSince >= WB_HYST_MS) {
+    wbHyst = { mode: 'fast', overSince: 0, underSince: 0 };
+    addLog(`Wallbox: přebytek ${formatKwLog(w)} přes 10 min → FAST`);
+  } else if (wbHyst.mode !== 'eco' && wbHyst.underSince && at - wbHyst.underSince >= WB_HYST_MS) {
+    wbHyst = { mode: 'eco', overSince: 0, underSince: 0 };
+    addLog(`Wallbox: přebytek ${formatKwLog(w)} přes 10 min → ECO`);
+  }
+}
+
+// Do hysterezního okna se vstupuje z FASTu (fáze těsně před ním)
+function wbHystReset() {
+  wbHyst = { mode: 'fast', overSince: 0, underSince: 0 };
+}
+
+// Ve které fázi dne jsme: 'green' | 'fast' | 'hyst'
 function wbFaze(at = Date.now()) {
-  const p = pragueTime(at);
-  if (p.hour < WB_RANO_OD_HOUR) return 'noc';
-  if (at >= wbEveningMs(at)) return 'noc';
-  return wbRanoSkoncilo() ? 'den' : 'rano';
+  const plan = WB_PLAN[wbDayType(at)];
+  const h = pragueTime(at).hour;
+  if (h < plan.green) return 'green';
+  if (h < plan.fast) return 'fast';
+  return 'hyst';
 }
 
 // Cílový režim wallboxu (jen v AUTO; v FAST režimu pevně FAST)
 function ecWallboxTarget(at = Date.now()) {
   if (!state.wbAuto) return 'fast';
-  if (isWinter()) return 'fast';          // v zimě se na slunce nečeká
+  if (isWinter()) return 'fast';        // v zimě se na slunce nečeká
   const faze = wbFaze(at);
-  if (faze === 'noc') return 'green';     // večer a do 3:00 jen přebytek
-  if (faze === 'rano') return wbMorningNeed() ? 'fast' : 'green';
-  // Den: naplno, jen když je z čeho — jinak stačí přebytek s minimem ze sítě
-  const zbyva = wbZbyvaVyrobit();
-  return zbyva !== null && zbyva >= WB_DEN_FAST_KWH ? 'fast' : 'eco';
+  if (faze === 'green') return 'green';
+  if (faze === 'fast') return 'fast';
+  return wbHyst.mode;
 }
 
 // Ruční přepnutí režimu wallboxu drží 3 hodiny. Bez toho by ho automatika přepsala do
@@ -4708,7 +4751,11 @@ async function runEnergyControl() {
 
     // Fáze dne i ranní rozhodnutí se mění samy (vypršením, přelomem do víkendu,
     // rozjezdem výroby) — dej vědět appce, ať přepínač a nápověda sedí
-    const morningState = `${wbMorningNeed()}|${wbFaze()}|${ecWallboxTarget()}`;
+    // Hystereze se posouvá jen tady, jednou za cyklus. V pevných fázích (GREEN/FAST
+    // podle hodin) se drží na FASTu — do okna se pak vstupuje z něj.
+    if (wbFaze() === 'hyst') wbUpdateHyst(); else wbHystReset();
+
+    const morningState = `${wbDayType()}|${wbFaze()}|${ecWallboxTarget()}`;
     if (wbPrevMorningState !== morningState) {
       if (wbPrevMorningState !== null) broadcast('wbAuto', wbSwitchPayload());
       wbPrevMorningState = morningState;
@@ -4734,20 +4781,19 @@ async function runEnergyControl() {
 // Do appky chodí oba přepínače pohromadě — patří k sobě. Ranní rozhodnutí posílá server
 // rovnou vyhodnocené (appka neví, kdy se otevírá okno ani jaký je výchozí stav dne).
 function wbSwitchPayload() {
-  const faze = state.wbAuto && !isWinter() ? wbFaze() : null;
+  const typ = wbDayType();
   return {
     wbAuto: state.wbAuto,
-    wbMorningNeed: wbMorningNeed(),
-    wbMorningUntil: wbMorningTargetMs(),
-    wbMorningManual: wbMorningManual(),
-    // Fáze dne + čísla, ze kterých appka skládá nápovědu
-    wbFaze: faze,
-    wbPvKw: wbPvKw(),
-    wbRanoDoHour: WB_RANO_DO_HOUR,
-    wbRanoKoncePvKw: WB_RANO_KONEC_KW,
-    wbRanoOdHour: WB_RANO_OD_HOUR,
-    wbZbyva: wbZbyvaVyrobit(),
-    wbDenFastKwh: WB_DEN_FAST_KWH,
+    // Typ dne (pracovní den / víkend) a plán, který z něj plyne
+    wbDayType: typ,
+    wbDayTypeManual: wbDayTypeManual(),
+    wbDayTypeUntil: wbDayTypeManual() ? state.wbDayType.until : 0,
+    wbPlan: WB_PLAN[typ],
+    wbFaze: state.wbAuto && !isWinter() ? wbFaze() : null,
+    wbHystMode: wbHyst.mode,
+    wbHystUpKw: WB_HYST_UP_KW,
+    wbHystDownKw: WB_HYST_DOWN_KW,
+    wbPrebytekW: wbPrebytekW(),
     wbCarReady: wbCarReady(),
     // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
     wbWinter: isWinter(),
@@ -4770,31 +4816,35 @@ app.post('/api/wallbox/auto', async (req, res) => {
   runEnergyControl();
 });
 
-// „Ráno auto potřebuju" → v noci FAST, „nepotřebuju" → GREEN (jen z přebytku, rozjede se
-// ráno se sluncem). Ruční přepnutí platí jen na nejbližší ráno, pak zase rozhoduje den
-// v týdnu (pracovní den = potřebuju, víkend = ne).
-app.post('/api/wallbox/morning', async (req, res) => {
+// Přepínač „pracovní den / víkend". Sám se řídí kalendářem; ruční přepnutí platí od
+// té chvíle do zítřejších 12:00, pak zase rozhoduje den v týdnu.
+app.post('/api/wallbox/daytype', async (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!wallboxEnabled) return res.status(500).json({ error: 'Wallbox není nakonfigurován.' });
-  const { need } = req.body || {};
-  if (typeof need !== 'boolean') return res.status(400).json({ error: 'need musí být true/false.' });
-  const until = wbMorningTargetMs();
-  state.wbMorning = { need, until };
+  const { dayType } = req.body || {};
+  if (dayType !== 'weekday' && dayType !== 'weekend') {
+    return res.status(400).json({ error: 'dayType musí být weekday/weekend.' });
+  }
+  const until = wbDayTypeUntil();
+  state.wbDayType = { manual: dayType, until };
+  wbHystReset();
   broadcast('wbAuto', wbSwitchPayload());
-  addLog(`Wallbox: ráno auto ${need ? 'potřebuju → v noci se dobije naplno' : 'nepotřebuju → jen z přebytku'}`
+  addLog(`Wallbox: ručně ${dayType === 'weekday' ? 'pracovní den' : 'víkend'}`
     + ` (do ${fmtPragueTime(until)})`);
   res.json(wbSwitchPayload());
   state.wbLastTarget = null; // vynuť okamžité přepnutí režimu
   runEnergyControl();
 });
 
-// Obnova po deployi/uspání služby — telefon drží zálohu ručního přepnutí. Bereme jen to,
-// co ještě platí (razítko v budoucnu), ať se večerní rozhodnutí neztratí.
-app.post('/api/wallbox/morning/restore', (req, res) => {
+// Po deployi startuje server bez ruční volby — telefon mu ji vrátí (bez tokenu,
+// stejně jako ostatní /restore)
+app.post('/api/wallbox/daytype/restore', (req, res) => {
   const b = req.body || {};
   const until = Number(b.until);
-  if (typeof b.need === 'boolean' && Number.isFinite(until) && until > Date.now() && !wbMorningManual()) {
-    state.wbMorning = { need: b.need, until };
+  const typ = b.dayType;
+  if ((typ === 'weekday' || typ === 'weekend') && Number.isFinite(until) && until > Date.now()
+      && !wbDayTypeManual()) {
+    state.wbDayType = { manual: typ, until };
     broadcast('wbAuto', wbSwitchPayload());
     state.wbLastTarget = null;
     runEnergyControl();

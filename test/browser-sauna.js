@@ -63,20 +63,15 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - i);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   };
-  saunaDaysData = [{ d: den(0), wh: 12500, ms: 2 * H }, { d: den(2), wh: 8000, ms: 90 * MIN }];
+  saunaDaysData = [{ d: den(0), wh: 12500, ms: 2 * H }, { d: den(2), wh: 8000, ms: 90 * MIN },
+                   { d: den(9), wh: 4000, ms: 60 * MIN }];
   renderSaunaDays();
-  const radky = Array.from(saunaList.querySelectorAll('.wbsrc-row'));
-  check('sedm dní a součet', radky.length, 8);
-  check('  dnešek první', radky[0].querySelector('.wbsrc-day').textContent, 'dnes');
-  check('  s kWh', radky[0].textContent.includes('12,5 kWh'), 'true');
-  check('  a dobou topení', /topila 2:00/.test(radky[0].textContent), 'true');
-  check('  den bez sauny má pomlčku', radky[1].textContent.includes('–'), 'true');
-  check('  součet za týden', radky[7].textContent.includes('20,5 kWh'), 'true');
-  check('  a je označený jako celkový', radky[7].className.includes('wbsrc-total'), 'true');
+  check('ukazuje se jen součet za 7 dní', saunaTotal.textContent, '20,5 kWh');
+  check('  rozpis po dnech je pryč', document.getElementById('saunaList'), 'null');
 
   OUT.push('\\n4) Záloha v telefonu');
   saveSaunaDaysLocal();
-  check('uloží se a načte zpátky', loadSaunaDaysLocal().length, 2);
+  check('uloží se a načte zpátky', loadSaunaDaysLocal().length, saunaDaysData.length);
   check('slučování bere vyšší hodnotu', JSON.stringify(mergeSaunaDays(
     [{ d: '2026-08-20', wh: 100, ms: 60 }], [{ d: '2026-08-20', wh: 900, ms: 30 }])),
     '[{"d":"2026-08-20","wh":900,"ms":60}]');

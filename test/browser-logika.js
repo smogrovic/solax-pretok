@@ -41,9 +41,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('nic nepřetéká do stran', page.scrollWidth <= page.clientWidth + 1, 'true');
   const txt = li.map(e => e.textContent).join(' ');
   check('sauna má pravidlo o jističi', /stejném jističi/.test(txt), 'true');
-  check('wallbox má ranní okno', /ráno 3:00 → 10:00/.test(txt), 'true');
-  check('  i denní práh', /zbývá vyrobit aspoň 10 kWh/.test(txt), 'true');
-  check('  a večerní GREEN', /večer a noc do 3:00/.test(txt), 'true');
+  check('wallbox má plán pracovního dne', /GREEN 0:00–4:00 · FAST 4:00–7:00/.test(txt), 'true');
+  check('  i víkendu', /GREEN 0:00–8:00 · FAST 8:00–10:00/.test(txt), 'true');
+  check('  a hysterezi s prahy', /10 min v kuse nad 3,5 kW/.test(txt) && /10 min pod 2,5 kW/.test(txt), 'true');
+  check('  a že přebytek je před autem', /před autem/.test(txt), 'true');
 
   OUT.push('\\n2) Nastavení sauny');
   saunaData = { powerW: 0, fetchedAt: new Date().toISOString(), topi: false, since: 0,
