@@ -4,6 +4,7 @@ try { require('dotenv').config(); } catch {}
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const webpush = require('web-push');
 
 const app = express();
@@ -383,6 +384,7 @@ function snapshot() {
     boilerHistory: state.boilerHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
+    store: storePayload(),
     nukiEnabled,
     pushEnabled,
     lockEnabled,
@@ -5478,6 +5480,250 @@ app.post('/api/nuki/lock', async (req, res) => {
   }
 });
 
+// ---------- Trvalé úložiště (Upstash Redis přes REST) ----------
+// Render free tier startuje po každém nasazení s prázdnou pamětí a nemá disk, takže
+// historie doteď žila jen v telefonu — a ten umí vrátit jen to, co sám viděl otevřený.
+// Server si proto ukládá vlastní zálohu do Upstash (jeden klíč, gzip + base64) a po
+// startu si ji sám natáhne. Obnova jde SCHVÁLNĚ přes vlastní /restore endpointy: jsou
+// to tytéž cesty, kterými data vrací telefon, takže platí stejná kontrola i stejné
+// slučování a není to napsané dvakrát.
+const STORE_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
+const STORE_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const STORE_KEY = `${process.env.STORE_PREFIX || 'solax'}:state`;
+const storeEnabled = !!(STORE_URL && STORE_TOKEN);
+const STORE_SAVE_MS = 10 * 60 * 1000;   // Upstash free tier má strop na počet příkazů
+const STORE_TIMEOUT_MS = 8000;
+
+// Pořadí je pořadí obnovy. Režim automatiky jde první (zima mění chování všeho
+// ostatního), typ dne u wallboxu poslední — spouští přepočet režimu a ten už má
+// mít pod sebou hotová data.
+const STORE_POSTS = [
+  '/api/automation/restore',
+  '/api/tempauto/restore',
+  '/api/sauna/limits/restore',
+  '/api/pool/force/restore',
+  '/api/history/restore',
+  '/api/wallbox-history/restore',
+  '/api/boiler-history/restore',
+  '/api/aircon-history/restore',
+  '/api/wb-mode-history/restore',
+  '/api/log/restore',
+  '/api/timeline/restore',
+  '/api/pvdays/restore',
+  '/api/wbdays/restore',
+  '/api/sauna-days/restore',
+  '/api/months/restore',
+  '/api/solinator/restore',
+  '/api/timers/restore',
+  '/api/runtime/restore',
+  '/api/wallbox/daytype/restore'
+];
+
+// Pro každý endpoint přesně to tělo, jaké mu posílá telefon — jiný tvar by neprošel
+// jeho kontrolou.
+function storeSnapshot() {
+  const rt = state.runtime;
+  const posts = {
+    '/api/automation/restore': { mode: state.autoMode },
+    '/api/tempauto/restore': {
+      tempAutoOn: state.tempAutoOn,
+      tempAutoOnRooms: state.tempAutoOnRooms,
+      tempAutoWinter: state.tempAutoWinter,
+      tempAutoWinterRooms: state.tempAutoWinterRooms
+    },
+    '/api/sauna/limits/restore': { limitW: state.saunaLimitW, holdMin: state.saunaHoldMin },
+    '/api/pool/force/restore': { until: state.poolForce.until },
+    '/api/history/restore': { points: state.history },
+    '/api/wallbox-history/restore': { points: state.wallboxHistory },
+    '/api/boiler-history/restore': { points: state.boilerHistory },
+    '/api/aircon-history/restore': { points: state.airconHistory },
+    '/api/wb-mode-history/restore': { entries: state.wbModeHistory },
+    '/api/log/restore': { entries: state.log },
+    '/api/timeline/restore': { timeline: state.timeline },
+    '/api/pvdays/restore': { pvDays: state.pvDays },
+    '/api/wbdays/restore': { wbDays: state.wbDays },
+    '/api/sauna-days/restore': { saunaDays: state.saunaDays },
+    '/api/months/restore': { months: state.months },
+    '/api/solinator/restore': { ...state.solinator },
+    '/api/timers/restore': {
+      savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers
+    },
+    '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
+    '/api/wallbox/daytype/restore': {
+      dayType: state.wbDayType.manual, until: state.wbDayType.until
+    }
+  };
+  // Drobnosti, které vlastní /restore endpoint nemají. Po startu je server přebírá
+  // rovnou — do prázdného stavu není co slučovat.
+  const primo = {
+    wbAuto: state.wbAuto,
+    tempAuto: state.tempAuto,
+    manualHold: state.manualHold,
+    assistantLog: state.assistantLog,
+    push: Array.from(pushSubscriptions.values())
+  };
+  return { v: 1, at: Date.now(), posts, primo };
+}
+
+function storeApplyPrimo(p) {
+  if (!p || typeof p !== 'object') return;
+  const now = Date.now();
+  if (typeof p.wbAuto === 'boolean') state.wbAuto = p.wbAuto;
+  if (p.tempAuto && typeof p.tempAuto === 'object') {
+    for (const k of Object.keys(state.tempAuto)) {
+      if (typeof p.tempAuto[k] === 'boolean') state.tempAuto[k] = p.tempAuto[k];
+    }
+  }
+  if (p.manualHold && typeof p.manualHold === 'object') {
+    for (const [k, v] of Object.entries(p.manualHold)) {
+      // Ruční zásah drží pár hodin; cokoli dál v budoucnu je poškozená záloha
+      if (typeof k === 'string' && k.length <= 32 && Number.isFinite(v)
+          && v > now && v <= now + 24 * 3600000) state.manualHold[k] = v;
+    }
+  }
+  if (Array.isArray(p.assistantLog) && !state.assistantLog.length) {
+    state.assistantLog = p.assistantLog
+      .filter(e => e && typeof e.t === 'number' && typeof e.text === 'string'
+        && e.t <= now && e.t >= now - 24 * 3600000 && e.text.length <= 500)
+      .slice(-30);
+  }
+  // Bez tohohle chodí notifikace až po prvním otevření appky — telefon se přihlašuje
+  // znovu při startu, ale mezitím by hlášky mizely do prázdna
+  if (Array.isArray(p.push)) {
+    for (const sub of p.push.slice(0, 20)) {
+      if (sub && typeof sub.endpoint === 'string' && /^https:\/\//.test(sub.endpoint)
+          && sub.keys && typeof sub.keys === 'object') pushSubscriptions.set(sub.endpoint, sub);
+    }
+  }
+}
+
+function storeEncode(obj) {
+  return 'gz1:' + zlib.gzipSync(Buffer.from(JSON.stringify(obj), 'utf8')).toString('base64');
+}
+
+function storeDecode(txt) {
+  if (typeof txt !== 'string' || !txt) return null;
+  try {
+    const json = txt.startsWith('gz1:')
+      ? zlib.gunzipSync(Buffer.from(txt.slice(4), 'base64')).toString('utf8')
+      : txt;
+    const obj = JSON.parse(json);
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+  } catch {
+    return null;   // rozbitá záloha se chová jako žádná, server jede dál
+  }
+}
+
+async function storeFetch(cesta, init = {}) {
+  const ctrl = new AbortController();
+  const stopka = setTimeout(() => ctrl.abort(), STORE_TIMEOUT_MS);
+  try {
+    const r = await fetch(`${STORE_URL}${cesta}`, {
+      ...init,
+      signal: ctrl.signal,
+      headers: { Authorization: `Bearer ${STORE_TOKEN}`, ...(init.headers || {}) }
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally {
+    clearTimeout(stopka);
+  }
+}
+
+// Co o záloze ví appka (řádek na stránce Log) — ať je vidět, že to opravdu jede
+const storeStav = { enabled: storeEnabled, loadedAt: 0, savedAt: 0, error: null };
+function storePayload() { return { ...storeStav }; }
+
+// Dokud se záloha nenačte, se NEUKLÁDÁ: kdyby Upstash při startu jen kýchl, uložil by
+// se o deset minut později prázdný stav a čtyři dny historie by byly pryč.
+let storeLoaded = false;
+let storeLast = '';   // co je uložené — beze změny se neposílá nic
+
+// Porovnání „změnilo se něco?" — bez razítka časovačů, které je pokaždé jiné
+// (je to „kdy jsem je naposledy viděl", ne data). Jinak by se posílalo pořád dokola.
+function storeOtisk(snap) {
+  const posts = { ...snap.posts };
+  const t = posts['/api/timers/restore'];
+  if (t) posts['/api/timers/restore'] = { relay: t.relay, blinds: t.blinds, aircon: t.aircon };
+  return JSON.stringify(posts) + JSON.stringify(snap.primo);
+}
+
+async function storeSave() {
+  if (!storeEnabled || !storeLoaded) return false;
+  const snap = storeSnapshot();
+  const otisk = storeOtisk(snap);
+  if (otisk === storeLast) return false;
+  try {
+    await storeFetch(`/set/${encodeURIComponent(STORE_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: storeEncode(snap)
+    });
+    storeLast = otisk;
+    storeStav.savedAt = Date.now();
+    storeStav.error = null;
+    broadcast('store', storePayload());
+    return true;
+  } catch (err) {
+    console.error('Záloha do Upstash selhala:', err.message);
+    storeStav.error = err.message;
+    broadcast('store', storePayload());
+    return false;
+  }
+}
+
+async function storeLoad(port) {
+  if (!storeEnabled) return;
+  let snap = null;
+  try {
+    const r = await storeFetch(`/get/${encodeURIComponent(STORE_KEY)}`);
+    snap = storeDecode(r && r.result);
+  } catch (err) {
+    console.error('Načtení zálohy z Upstash selhalo:', err.message);
+    storeStav.error = err.message;
+    return;
+  }
+  storeLoaded = true;          // prázdný klíč je taky platná odpověď (první spuštění)
+  if (!snap) return;
+  storeApplyPrimo(snap.primo);
+  const posts = snap.posts && typeof snap.posts === 'object' ? snap.posts : {};
+  let obnoveno = 0;
+  for (const cesta of STORE_POSTS) {
+    const telo = posts[cesta];
+    if (!telo || typeof telo !== 'object') continue;
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}${cesta}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(telo)
+      });
+      if (r.ok) obnoveno++;
+      else console.error(`Obnova ${cesta}: HTTP ${r.status}`);
+    } catch (err) {
+      console.error(`Obnova ${cesta}: ${err.message}`);
+    }
+  }
+  storeStav.loadedAt = Date.now();
+  console.log(`Záloha načtena (${obnoveno}/${STORE_POSTS.length}, ${fmtPragueTime(snap.at)})`);
+}
+
+function storeStart() {
+  if (!storeEnabled) {
+    console.log('Trvalé úložiště vypnuto (chybí UPSTASH_REDIS_REST_URL / _TOKEN).');
+    return;
+  }
+  setInterval(() => { storeSave().catch(() => {}); }, STORE_SAVE_MS);
+  // Render posílá před každým nasazením SIGTERM — tohle je poslední šance uložit
+  let konci = false;
+  for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.on(sig, () => {
+      if (konci) return;
+      konci = true;
+      storeSave().finally(() => process.exit(0));
+    });
+  }
+}
+
 // ---------- Keep-alive a start ----------
 
 app.get('/healthz', (req, res) => res.send('ok'));
@@ -5499,10 +5745,13 @@ function scheduleEvery(fn, intervalMs, offsetMs) {
   setTimeout(() => { fn(); setInterval(fn, intervalMs); }, offsetMs);
 }
 
-pollSolax();                                             //   0 s — hned po startu
-scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
-scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
-
-app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`Server běží na portu ${PORT}`);
+  // Nejdřív záloha, pak teprve pollery — ať čerstvá data přibývají do obnovené
+  // historie, ne aby se obnova prala s prvním vzorkem
+  await storeLoad(server.address().port);
+  storeStart();
+  pollSolax();                                             //   0 s — hned po startu
+  scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
+  scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
 });

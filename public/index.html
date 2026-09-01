@@ -527,6 +527,13 @@
     color:var(--grey-text);
     text-align:center;
   }
+  .store-note{
+    margin-top:10px;
+    font-size:12px;
+    color:var(--grey-text);
+    text-align:center;
+  }
+  .store-note.bad{color:var(--red);}
   .stats-card{
     margin-top:12px;
     align-items:stretch;
@@ -2159,6 +2166,7 @@
       </div>
 
       <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
+      <div class="store-note" id="storeNote"></div>
     </div>
   </div>
 
@@ -2355,6 +2363,27 @@ function formatTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   return d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Záloha na serveru: historie žije v paměti Renderu a ta se každým nasazením smaže.
+// Server si ji proto ukládá k sobě — tenhle řádek na stránce Log říká, jestli to jede.
+const storeNoteEl = document.getElementById('storeNote');
+function renderStore(d) {
+  if (!storeNoteEl) return;
+  storeNoteEl.classList.remove('bad');
+  if (!d || !d.enabled) {
+    storeNoteEl.textContent = 'Záloha na serveru: vypnutá — data drží jen tenhle telefon.';
+    return;
+  }
+  if (d.error) {
+    storeNoteEl.textContent = 'Záloha na serveru: nejde uložit (' + d.error + ')';
+    storeNoteEl.classList.add('bad');
+    return;
+  }
+  const casti = [];
+  if (d.loadedAt) casti.push('obnoveno v ' + formatTime(d.loadedAt));
+  casti.push(d.savedAt ? 'uloženo v ' + formatTime(d.savedAt) : 'čeká na první uložení');
+  storeNoteEl.textContent = 'Záloha na serveru: ' + casti.join(', ') + '.';
 }
 
 let lastSolaxData = null;
@@ -6759,6 +6788,7 @@ function applySnapshot(snap) {
   renderWeather(snap.weather);
   renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on'));
   maybeRestoreAutoMode();
+  renderStore(snap.store);
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
   sensorsData = snap.sensors || {};
@@ -7169,6 +7199,9 @@ function connectStream() {
     saunaDaysData = mergeSaunaDays(JSON.parse(e.data).saunaDays || [], saunaDaysData);
     renderSaunaDays();
     saveSaunaDaysLocal();
+  });
+  es.addEventListener('store', e => {
+    renderStore(JSON.parse(e.data));
   });
   es.addEventListener('wbAuto', e => {
     applyWbSwitches(JSON.parse(e.data));

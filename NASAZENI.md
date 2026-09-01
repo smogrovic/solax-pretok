@@ -16,9 +16,10 @@ zapínat bojler, otevírat garáž a odemykat dveře. V kódu je sice připraven
 **vypnutý** (`server.js`, `lockEnabled = false`). Adresa z Renderu je náhodná a nikde
 se nezveřejňuje, ale je to jediná ochrana, kterou máš. Nedávej ji nikam veřejně.
 
-**2. Appka si nic trvale neukládá.** Historie grafů, doby běhu i rozpočet solinátoru jsou
-jen v paměti serveru. **Každé nasazení nové verze i každý restart je vynuluje.** Část dat
-se zálohuje v telefonu a po otevření appky se serveru vrátí, ale spolehlivé to není.
+**2. Appka nemá databázi.** Historie grafů, doby běhu i rozpočet solinátoru žijí v paměti
+serveru a **každé nasazení i každý restart paměť vynuluje**. Proto si server dělá zálohu do
+Upstash (Redis přes HTTPS, zdarma) — viz *Úložiště* v kroku 2. Bez něj zbývá jen záloha
+v telefonu, a ta umí vrátit jen to, co appka viděla otevřená.
 
 **3. Nepotřebuješ všechno.** Solax, Shelly, Panasonic, Somfy, Nuki, Infigy — když některou
 z těch věcí nemáš, prostě její klíče nevyplníš. Appka tu část tiše vypne a zbytek jede dál.
@@ -89,6 +90,22 @@ Přihlašovací údaje do Infigy portálu: `INFIGY_EMAIL`, `INFIGY_PASSWORD`.
 > hodnoty od původního majitele. Když je nevyplníš vlastními, appka bude číst **cizí
 > zařízení**. Vlastní hodnoty vyčteš z adresního řádku Infigy portálu, nebo Infigy
 > nepoužívej vůbec (nech `INFIGY_EMAIL` prázdné).
+
+### Úložiště — Upstash Redis (zdarma, důrazně doporučené)
+Bez něj se po každém nasazení ztratí historie grafů, doby běhu, měsíční spotřeby i log.
+
+1. [upstash.com](https://upstash.com) → **Sign up** (stačí přihlášení GitHubem).
+2. **Create Database** → typ **Redis**, jméno třeba `fve`, region nejblíž Renderu
+   (`eu-central-1`), plán **Free**.
+3. V detailu databáze sjeď na **REST API** a zkopíruj dvě hodnoty:
+   - `UPSTASH_REDIS_REST_URL` (vypadá jako `https://neco-12345.upstash.io`)
+   - `UPSTASH_REDIS_REST_TOKEN` (dlouhý řetězec)
+4. Volitelně `STORE_PREFIX` — jen když do jedné databáze ukládá víc instalací.
+
+Server si ukládá **jeden klíč** (`solax:state`), zabalený gzipem — kolem 100 kB. Zapisuje
+jednou za 10 minut, a jen když se něco změnilo, plus vždycky před vypnutím. Free plán
+Upstash to utáhne s velkou rezervou. Že to jede, poznáš dole na stránce **Log**:
+*„Záloha na serveru: obnoveno v 8:15, uloženo v 8:25."*
 
 ### Počasí — OpenWeatherMap (zdarma, doporučené)
 1. [openweathermap.org](https://openweathermap.org) → registrace → **My API keys**.
@@ -192,6 +209,8 @@ Kompletní popis toho, co a kdy se spíná, je přímo v appce na stránce **Log
 | `NUKI_SMARTLOCK_ID` | ne | vezme se první zámek na účtu |
 | `INFIGY_EMAIL`, `INFIGY_PASSWORD` | pro bojler 2 | chybí bojler 2, výkon wallboxu a odhad výroby |
 | `INFIGY_DEVICE_ID`, `INFIGY_SUPABASE_REF`, `INFIGY_SUPABASE_ANON` | **ano, když používáš Infigy** | čte se **cizí zařízení** původního majitele |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | důrazně doporučeno | historie, doby běhu, měsíční spotřeby a log se ztratí při každém nasazení |
+| `STORE_PREFIX` | ne | klíč se jmenuje `solax:state` |
 | `OWM_API_KEY` | doporučeno | neběží korekce podle předpovědi; vypínání bazénu a solinátoru padá na náhradní mez 20:00 |
 | `WEATHER_LAT`, `WEATHER_LON` | doporučeno | počasí a západ slunce z původního místa v ČR |
 | `BATTERY_KWH` | doporučeno | počítá se s 11,6 kWh |
