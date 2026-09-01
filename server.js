@@ -4799,7 +4799,10 @@ function wbSwitchPayload() {
     wbCarReady: wbCarReady(),
     // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
     wbWinter: isWinter(),
-    wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0
+    wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0,
+    // Kam automatika míří teď — appka tím rozsvítí tlačítko režimu, dokud
+    // nabíječka nenahlásí, co doopravdy jede
+    wbTarget: ecWallboxTarget()
   };
 }
 

@@ -1006,17 +1006,6 @@
   .tempauto-temp-alt{opacity:0.65;}
 
   /* DOČASNÉ: karta s daty čidel na porovnání */
-  .sensor-now{font-size:12px;color:var(--navy);line-height:1.6;padding-bottom:6px;}
-  .sensor-now b{font-weight:800;}
-  .sensor-log{
-    max-height:220px;
-    overflow-y:auto;
-    font-size:11px;
-    color:var(--grey-text);
-    font-variant-numeric:tabular-nums;
-  }
-  .sensor-log div{display:flex;justify-content:space-between;padding:2px 0;}
-  .sensor-log span:first-child{opacity:0.7;}
   .toggle-switch{
     position:relative;
     width:46px;
@@ -1335,7 +1324,7 @@
   }
   .wb-manual{margin-top:16px;width:100%;}
   .wb-manual-label{font-size:11px;color:var(--grey-text);text-align:center;margin-bottom:6px;font-weight:600;}
-  .wb-manual-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .wb-manual-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
   .blind-tilt{
     display:flex;
     align-items:center;
@@ -1734,14 +1723,6 @@
         <canvas id="airconChart"></canvas>
         <div class="timeline-legend" id="airconChartLegend"></div>
       </div>
-
-      <!-- DOČASNÉ: porovnání Shelly čidla s čidlem v klimatizaci. Až bude jasné,
-           kterému věřit, smaže se celá tahle karta i state.sensorLog na serveru. -->
-      <div class="card stats-card" id="sensorCard" hidden>
-        <div class="graph-title">Data čidel (dočasné, na porovnání)</div>
-        <div id="sensorNow"></div>
-        <div class="sensor-log" id="sensorLog"></div>
-      </div>
     </div>
   </div>
 
@@ -1954,6 +1935,7 @@
           <div class="wb-manual-btns" id="wbManualBtns">
             <button class="wb-mode-btn" data-mode="stop">STOP</button>
             <button class="wb-mode-btn" data-mode="eco">ECO</button>
+            <button class="wb-mode-btn" data-mode="green">GREEN</button>
             <button class="wb-mode-btn" data-mode="fast">FAST</button>
           </div>
         </div>
@@ -4622,73 +4604,6 @@ function renderAirconChart() {
 window.addEventListener('resize', renderAirconChart);
 
 // ---------- DOČASNÉ: porovnání čidla s klimatizací (celý blok půjde smazat) ----------
-const sensorCardEl = document.getElementById('sensorCard');
-const sensorNowEl = document.getElementById('sensorNow');
-const sensorLogEl = document.getElementById('sensorLog');
-
-function fmtAge(ms) {
-  const m = Math.round(ms / 60000);
-  if (m < 1) return 'teď';
-  if (m < 60) return `před ${m} min`;
-  const h = Math.floor(m / 60);
-  return `před ${h} h ${String(m % 60).padStart(2, '0')} min`;
-}
-function fmtC1(v) {
-  return typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '–';
-}
-
-function renderSensorCard() {
-  if (!sensorCardEl) return;
-  const rooms = Object.keys(sensorsData);
-  if (!rooms.length) { sensorCardEl.hidden = true; return; }
-  sensorCardEl.hidden = false;
-
-  sensorNowEl.textContent = '';
-  for (const key of rooms) {
-    const s = sensorsData[key];
-    const room = TEMP_AUTO_ROOMS.find(r => r.key === key);
-    const pcc = room ? roomInsideTemp(room.label) : null;
-    const line = document.createElement('div');
-    line.className = 'sensor-now';
-    const b = document.createElement('b');
-    b.textContent = `${room ? room.label : key}: ${fmtC1(s.tempC)} °C`;
-    line.appendChild(b);
-    const rest = [];
-    if (typeof s.humidity === 'number') rest.push(Math.round(s.humidity) + ' %');
-    if (typeof s.battery === 'number') rest.push('baterie ' + Math.round(s.battery) + ' %');
-    rest.push(s.reportedAt ? fmtAge(Date.now() - s.reportedAt) : 'čas hlášení neznámý');
-    if (pcc !== null) {
-      rest.push(`klima ${fmtC1(pcc)} °C`);
-      rest.push(`rozdíl ${(s.tempC - pcc >= 0 ? '+' : '') + fmtC1(s.tempC - pcc)} °C`);
-    }
-    line.appendChild(document.createTextNode(' · ' + rest.join(' · ')));
-    sensorNowEl.appendChild(line);
-  }
-
-  // Vzorky bere ze společné historie teplot (graf výš), ať nejsou dva sklady
-  const devs = (airconData && airconData.devices) || [];
-  sensorLogEl.textContent = '';
-  for (const p of pruneAirconHistory(airconHistory).slice().reverse()) {
-    for (const key of Object.keys(p.sens || {})) {
-      const sensorC = p.sens[key];
-      if (typeof sensorC !== 'number') continue;
-      const room = TEMP_AUTO_ROOMS.find(r => r.key === key);
-      const dev = room ? devs.find(d => (d.name || '').toLowerCase().includes(room.label.toLowerCase())) : null;
-      const pccC = dev && p.temps && typeof p.temps[dev.guid] === 'number' ? p.temps[dev.guid] : null;
-      const row = document.createElement('div');
-      const t = new Date(p.t);
-      const left = document.createElement('span');
-      left.textContent = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
-      const right = document.createElement('span');
-      const diff = pccC !== null ? sensorC - pccC : null;
-      right.textContent = `čidlo ${fmtC1(sensorC)} · klima ${fmtC1(pccC)}`
-        + (diff !== null ? ` · ${(diff >= 0 ? '+' : '') + fmtC1(diff)}` : '');
-      row.appendChild(left);
-      row.appendChild(right);
-      sensorLogEl.appendChild(row);
-    }
-  }
-}
 let airconEnabled = null;
 
 const AIRCON_MODE_LABELS = { auto: 'Auto', dry: 'Vysoušení', cool: 'Chlazení', heat: 'Topení', fan: 'Ventilátor' };
@@ -5270,7 +5185,7 @@ let wbAutoData = true;
 // waiting = noc už skončila, ale čeká se, až FVE dá pvNeeded kW (jinak by ECO bralo ze sítě)
 let wbMorningData = { dayType: 'weekday', manual: false, until: 0, plan: { green: 4, fast: 7 },
   faze: null, hystMode: 'fast', hystUp: 3.5, hystDown: 2.5, prebytekW: null,
-  winter: false, manualUntil: 0 };
+  winter: false, manualUntil: 0, target: null };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -5347,7 +5262,8 @@ function applyWbSwitches(d) {
       hystDown: typeof d.wbHystDownKw === 'number' ? d.wbHystDownKw : wbMorningData.hystDown,
       prebytekW: typeof d.wbPrebytekW === 'number' ? d.wbPrebytekW : null,
       winter: !!d.wbWinter,
-      manualUntil: Number(d.wbManualUntil) || 0
+      manualUntil: Number(d.wbManualUntil) || 0,
+      target: d.wbTarget || null
     };
     saveWbMorningLocal();
   }
@@ -5440,6 +5356,36 @@ function wbPowerKw() {
   return merene.length ? Math.max(...merene) : null;
 }
 
+// Ruční přepnutí režimu (STOP/ECO/GREEN/FAST). Server ho drží 3 h, pak zase
+// rozhoduje automatika.
+const wbManualBtnsEl = document.getElementById('wbManualBtns');
+async function wbSetMode(mode, btn) {
+  if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+  try {
+    const res = await fetch('/api/wallbox/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ mode })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Wallbox: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+}
+if (wbManualBtnsEl) {
+  for (const btn of wbManualBtnsEl.querySelectorAll('.wb-mode-btn')) {
+    btn.addEventListener('click', () => wbSetMode(btn.dataset.mode, btn));
+  }
+}
+
 function renderWallbox() {
   if (wallboxEnabledFlag === false) {
     wbPowerEl.textContent = '–';
@@ -5456,10 +5402,12 @@ function renderWallbox() {
   if (wallboxValueEl) wallboxValueEl.textContent = kwStr;
   wbStatusValEl.textContent = (typeof w.status === 'number' && WB_STATUS_LABELS_UI[w.status]) || '–';
   wbHintEl.textContent = w.error || '';
-  // Zvýraznění aktuálního režimu na ručních tlačítkách
+  // Zvýraznění aktuálního režimu na ručních tlačítkách. Nabíječka svůj režim hlásí
+  // se zpožděním (a po deployi vůbec) — než dorazí, svítí cíl automatiky.
+  const rezim = w.mode || wbMorningData.target;
   if (wbManualBtnsEl) {
     for (const btn of wbManualBtnsEl.querySelectorAll('.wb-mode-btn')) {
-      btn.classList.toggle('active', btn.dataset.mode === w.mode);
+      btn.classList.toggle('active', btn.dataset.mode === rezim);
     }
   }
   renderWbAuto();
@@ -6764,31 +6712,38 @@ window.addEventListener('resize', renderPvChart);
 
 let es = null;
 
+// Jeden rozbitý render nesmí utnout zbytek snapshotu. Dřív stačila jedna výjimka
+// uprostřed a všechno pod ní se tiše nenačetlo — grafy pak zůstaly prázdné a nebylo
+// podle čeho poznat proč. Data se přiřazují mimo, tady se hlídá jen kreslení.
+function bezpecne(fn) {
+  try { fn(); } catch (err) { console.error('render:', err); }
+}
+
 function applySnapshot(snap) {
-  renderSolax(snap.solax);
+  bezpecne(() => renderSolax(snap.solax));
   for (const key of Object.keys(snap.devices || {})) {
-    if (devices[key]) renderDevice(devices[key], snap.devices[key]);
+    if (devices[key]) bezpecne(() => renderDevice(devices[key], snap.devices[key]));
   }
-  renderPoolPower(snap.poolPowerW, snap.poolPowerAt);
-  applyManualHold(snap.manualHold);
-  applyPoolForce(snap);
+  bezpecne(() => renderPoolPower(snap.poolPowerW, snap.poolPowerAt));
+  bezpecne(() => applyManualHold(snap.manualHold));
+  bezpecne(() => applyPoolForce(snap));
   maybeRestorePoolForce(poolForceUntil);
   const serverHist = snap.history || [];
   const localHist = loadHistoryLocal();
   history = mergeHistories(serverHist, localHist);
-  renderFveChart();
+  bezpecne(renderFveChart);
   saveHistoryLocal();
   maybeRestoreHistoryToServer(serverHist, localHist);
   const serverLog = snap.log || [];
   const localLog = loadLogLocal();
   logEntries = mergeLogs(serverLog, localLog);
-  renderLog();
+  bezpecne(renderLog);
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
-  renderWeather(snap.weather);
-  renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on'));
+  bezpecne(() => renderWeather(snap.weather));
+  bezpecne(() => renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on')));
   maybeRestoreAutoMode();
-  renderStore(snap.store);
+  bezpecne(() => renderStore(snap.store));
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
   sensorsData = snap.sensors || {};
@@ -6799,54 +6754,53 @@ function applySnapshot(snap) {
     saveAirconHistoryLocal();
     maybeRestoreAirconHistoryToServer(serverHist, localHist);
   }
-  renderAirconChart();
-  renderSensorCard();
-  renderAircon();
+  bezpecne(renderAirconChart);
+  bezpecne(renderAircon);
   airconTimersData = snap.airconTimers || [];
-  renderTimers();
+  bezpecne(renderTimers);
   wallboxEnabledFlag = snap.wallboxEnabled !== false;
   wallboxData = snap.wallbox || null;
-  applyWbSwitches(snap);
+  bezpecne(() => applyWbSwitches(snap));
   wbAutoData = snap.wbAuto !== false;
-  renderWallbox();
+  bezpecne(renderWallbox);
   maybeRestoreWbMorning(!!snap.wbDayTypeManual);
   // Historie režimů wallboxu: server + lokální záloha (přežije deploy)
   const serverWbMode = snap.wbModeHistory || [];
   const localWbMode = loadWbModeHistoryLocal();
   wbModeHistoryData = mergeWbModeHistories(serverWbMode, localWbMode);
-  renderWallboxChart();
+  bezpecne(renderWallboxChart);
   saveWbModeHistoryLocal();
   maybeRestoreWbModeHistoryToServer(serverWbMode, localWbMode);
   // Historie výkonu wallboxu: spojíme server + lokální zálohu, chybějící vrátíme serveru
   const serverWb = snap.wallboxHistory || [];
   const localWb = loadWallboxHistoryLocal();
   wallboxHistory = mergeWbHistories(serverWb, localWb);
-  renderWallboxChart();
+  bezpecne(renderWallboxChart);
   saveWallboxHistoryLocal();
   maybeRestoreWbHistoryToServer(serverWb, localWb);
   saunaEnabledFlag = snap.saunaEnabled !== false;
   saunaData = snap.sauna || null;
-  renderSaunaSet();
+  bezpecne(renderSaunaSet);
   saveSaunaSetLocal();
   maybeRestoreSaunaSet(snap.sauna);
   {
     monthsData = mergeMonths(snap.months || [], loadMonthsLocal());
-    renderMonths();
+    bezpecne(renderMonths);
     saveMonthsLocal();
     maybeRestoreMonths(snap.months || []);
     const serverDny = snap.saunaDays || [];
     saunaDaysData = mergeSaunaDays(serverDny, loadSaunaDaysLocal());
-    renderSauna();
-    renderSaunaDays();
+    bezpecne(renderSauna);
+    bezpecne(renderSaunaDays);
     saveSaunaDaysLocal();
     maybeRestoreSaunaDays(serverDny, loadSaunaDaysLocal());
   }
   if (snap.assistantEnabled === false) hideAssistantSlide();
-  renderAssistantLog(snap.assistantLog || []);
+  bezpecne(() => renderAssistantLog(snap.assistantLog || []));
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
-  renderTempAuto();
+  bezpecne(renderTempAuto);
   // Spínací teploty: server + záloha v telefonu (přežije deploy)
-  applyThresholds(snap);
+  bezpecne(() => applyThresholds(snap));
   {
     const localThr = loadTempAutoOnLocal();
     const localRooms = loadTempAutoOnRoomsLocal() || {};
@@ -6881,7 +6835,7 @@ function applySnapshot(snap) {
       }).catch(() => {});
     }
   }
-  renderTempAutoThreshold();
+  bezpecne(renderTempAutoThreshold);
   saveTempAutoOnLocal();
   // Solinátor (rozpočet + zákaz): server + lokální záloha (přežije deploy)
   const serverSol = snap.solinator || {};
@@ -6919,36 +6873,36 @@ function applySnapshot(snap) {
   }
   solinatorPlanData = snap.solinatorPlan || null;
   solinatorCatchup = !!snap.solinatorCatchup;
-  renderSolinator();
+  bezpecne(renderSolinator);
   saveSolinatorLocal();
   maybeRestoreSolinator(serverSol, localSol);
   // Denní odhad vs. skutečnost: server + lokální záloha (přežije deploy)
   const serverPv = snap.pvDays || [];
   const localPv = loadPvDaysLocal();
   pvDaysData = mergePvDays(serverPv, localPv);
-  renderPvChart();
+  bezpecne(renderPvChart);
   savePvDaysLocal();
   maybeRestorePvDays(serverPv, localPv);
   // Odkud auto bralo: server + lokální záloha (taky přežije deploy)
   const serverWbDays = snap.wbDays || [];
   const localWbDays = loadWbDaysLocal();
   wbDaysData = mergeWbDays(serverWbDays, localWbDays);
-  renderWbSrc();
+  bezpecne(renderWbSrc);
   saveWbDaysLocal();
   maybeRestoreWbDays(serverWbDays, localWbDays);
-  applyHomeFlags(snap);
-  applyInfigyFlags(snap);
+  bezpecne(() => applyHomeFlags(snap));
+  bezpecne(() => applyInfigyFlags(snap));
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
   const serverBoiler = snap.boilerHistory || [];
   const localBoiler = loadBoilerHistoryLocal();
   boilerHistory = mergeByTime(serverBoiler, localBoiler);
-  renderFveChart();
+  bezpecne(renderFveChart);
   saveBoilerHistoryLocal();
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
-  renderBlindTimers();
+  bezpecne(renderBlindTimers);
   relayTimersData = snap.relayTimers || [];
-  renderRelayTimers();
+  bezpecne(renderRelayTimers);
   // Časovače (i ty klimatizační výš) — nejdřív serveru vrátit, co mu deploy sebral,
   // a teprve pak přepsat zálohu; jinak by se ztratily i v telefonu
   maybeRestoreTimers(snap).then(saveTimersLocal);
@@ -6979,9 +6933,9 @@ function applySnapshot(snap) {
   if (runtimeData && !runtimeData.yesterday && localRt && localRt.yesterday) runtimeData.yesterday = localRt.yesterday;
   saveRuntimeLocal();
   maybeRestoreRuntimeToServer(serverRt, localRt);
-  renderStats();
+  bezpecne(renderStats);
   // Stav solinátoru se kreslil dřív, ještě se serverovou (po deployi nulovou) dobou běhu
-  renderSolinator();
+  bezpecne(renderSolinator);
   // Časová osa: spojíme serverová data s lokální zálohou a chybějící vrátíme serveru
   const serverTl = pruneTimelineLocal(snap.timeline);
   const localTl = loadTimelineLocal();
@@ -6989,8 +6943,8 @@ function applySnapshot(snap) {
   for (const k of new Set([...Object.keys(serverTl), ...Object.keys(localTl)])) {
     timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
   }
-  renderTimeline();
-  renderWallboxChart();   // dráha „připojeno" se kreslí z časové osy
+  bezpecne(renderTimeline);
+  bezpecne(renderWallboxChart);   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
   if (snap.pushEnabled === false) notifBtn.style.display = 'none';
@@ -7112,7 +7066,6 @@ function connectStream() {
     renderAircon();
     renderTimeline(); // názvy klimatizací v legendě osy
     renderTempAuto(); // aktuální teploty v pokojích
-    renderSensorCard();
     renderAirconChart(); // názvy a barvy řad se berou ze seznamu jednotek
   });
   es.addEventListener('sensor', e => {
@@ -7120,14 +7073,12 @@ function connectStream() {
     if (d.room) sensorsData[d.room] = d.sensor;
     renderAircon();
     renderTempAuto();
-    renderSensorCard();
   });
   es.addEventListener('airconHistory', e => {
     const d = JSON.parse(e.data);
     if (Array.isArray(d.history)) airconHistory = mergeByTime(d.history, airconHistory);
     saveAirconHistoryLocal();
     renderAirconChart();
-    renderSensorCard();
   });
   es.addEventListener('airconTimers', e => {
     airconTimersData = JSON.parse(e.data).timers || [];

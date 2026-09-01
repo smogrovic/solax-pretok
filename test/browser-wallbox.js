@@ -74,6 +74,37 @@ function stav(d) {
   check('klik pošle opačný typ', poslano && poslano.url, '/api/wallbox/daytype');
   check('  a je to víkend', JSON.stringify(poslano.body), '{"dayType":"weekend"}');
   check('  odpověď se hned promítne', wbDayTypeLabel.textContent, 'Víkend');
+
+  OUT.push('\\n5) Ruční tlačítka režimu');
+  const tlacitka = Array.from(wbManualBtnsEl.querySelectorAll('.wb-mode-btn'));
+  check('jsou čtyři', tlacitka.length, 4);
+  check('  a GREEN je mezi nimi', tlacitka.map(b => b.dataset.mode).join(','), 'stop,eco,green,fast');
+  const aktivni = () => tlacitka.filter(b => b.classList.contains('active')).map(b => b.dataset.mode).join(',');
+
+  wallboxEnabledFlag = true;
+  stav({ wbTarget: 'green' });
+  wallboxData = { power: 1200, energy: 3, mode: 'green', status: 2, error: null };
+  renderWallbox();
+  check('svítí režim, který hlásí nabíječka', aktivni(), 'green');
+  wallboxData = { power: 0, energy: 3, mode: null, status: 1, error: null };
+  renderWallbox();
+  check('bez hlášení svítí cíl automatiky', aktivni(), 'green');
+  stav({ wbTarget: 'eco' });
+  renderWallbox();
+  check('  a mění se s ním', aktivni(), 'eco');
+  wallboxData = { power: 0, energy: 3, mode: 'fast', status: 1, error: null };
+  renderWallbox();
+  check('skutečnost má přednost před cílem', aktivni(), 'fast');
+
+  poslano = null;
+  tlacitka.find(b => b.dataset.mode === 'green').click();
+  await wait(120);
+  check('klik na GREEN pošle povel', poslano && poslano.url, '/api/wallbox/set');
+  check('  se správným režimem', JSON.stringify(poslano.body), '{"mode":"green"}');
+  poslano = null;
+  tlacitka.find(b => b.dataset.mode === 'stop').click();
+  await wait(120);
+  check('a STOP taky', JSON.stringify(poslano.body), '{"mode":"stop"}');
  } catch (e) { OUT.push('CHYBA výjimka: ' + e.message); }
 
   const bad = OUT.filter(l => l.startsWith('CHYBA')).length;
