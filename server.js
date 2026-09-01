@@ -32,8 +32,9 @@ const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
 const SAUNA_DEVICE_ID = process.env.SAUNA_DEVICE_ID || process.env.SAUNA_PM_ID || '';
 const SAUNA_SERVER_URI = process.env.SAUNA_SERVER_URI || SHELLY_SERVER_URI;
 const saunaEnabled = !!(SAUNA_DEVICE_ID && SHELLY_AUTH_KEY);
+// Výchozí meze; obojí se dá přenastavit z appky (stránka Logika automatiky)
 const SAUNA_ON_W = Number(process.env.SAUNA_ON_W) || 500;      // nad tímhle sauna „topí"
-const SAUNA_BLOCK_MS = 30 * 60 * 1000;   // jak dlouho po poklesu držet bazén a solinátor vypnuté
+const SAUNA_HOLD_MIN = Number(process.env.SAUNA_HOLD_MIN) || 30; // držet vypnuté po posledním nátopu
 const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení notifikace
 const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
 const SAUNA_DAYS_MAX = 7;
@@ -194,6 +195,8 @@ const state = {
   wbDays: [],        // { d, grid, pv } — kolik si auto vzalo ze sítě a kolik z FVE (Wh, po dnech)
   // Sauna: aktuální odběr, kdy začalo topení a dokdy kvůli ní drží bazén a solinátor vypnuté
   sauna: { powerW: null, fetchedAt: null, since: 0, alertAt: 0, error: null },
+  saunaLimitW: SAUNA_ON_W,     // od kolika W se bere, že sauna topí
+  saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
@@ -776,11 +779,14 @@ function recordWbDay(wbW, importW, dtH) {
 // ---------- Sauna ----------
 // Sauna visí na stejném jističi jako bazén a solinátor, takže když topí, musí ta dvě
 // relé vypnout — jinak jistič spadne. Termostat sauny cykluje, proto se „topí" drží
-// ještě SAUNA_BLOCK_MS po posledním odběru nad prahem: bazén se nesmí vracet mezi
+// ještě nastavenou dobu po posledním odběru nad prahem: bazén se nesmí vracet mezi
 // dvěma nátopy. Stejné okno určuje i konec topení pro notifikaci.
+function saunaLimitW() { return state.saunaLimitW; }
+function saunaHoldMs() { return state.saunaHoldMin * 60000; }
+
 function saunaTopi() {
   return typeof state.sauna.powerW === 'number' && cerstve(state.sauna.fetchedAt)
-    && state.sauna.powerW > SAUNA_ON_W;
+    && state.sauna.powerW > saunaLimitW();
 }
 function saunaBlokuje() {
   return Date.now() < (state.saunaBlockUntil || 0);
@@ -792,7 +798,8 @@ function saunaPayload() {
     topi: saunaTopi(),
     since: state.sauna.since,
     blockUntil: state.saunaBlockUntil || 0,
-    limitW: SAUNA_ON_W,
+    limitW: state.saunaLimitW,
+    holdMin: state.saunaHoldMin,
     error: state.sauna.error
   };
 }
@@ -808,7 +815,7 @@ function updateSauna(powerW) {
       state.sauna.since = now;
       addLog(`Sauna: topí (${Math.round(state.sauna.powerW)} W) — bazén a solinátor jdou dolů`);
     }
-    state.saunaBlockUntil = now + SAUNA_BLOCK_MS;
+    state.saunaBlockUntil = now + saunaHoldMs();
   } else if (state.sauna.since && !saunaBlokuje()) {
     // Doběhlo okno po posledním nátopu → topení skončilo
     state.sauna.since = 0;
@@ -817,6 +824,8 @@ function updateSauna(powerW) {
   }
   checkSaunaForgotten();
   broadcast('sauna', { sauna: saunaPayload() });
+  // Nečekat na automatiku (běží po 5 min) — jistič má přednost před vším
+  if (saunaBlokuje()) enforceSaunaOff().catch(() => {});
 }
 
 // „Nezapomněls saunu vypnout?" — po dvou hodinách topení, pak připomínka po šesti
@@ -837,7 +846,7 @@ function recordSaunaDay(w, dtH) {
   let rec = state.saunaDays.find(r => r.d === d);
   if (!rec) { rec = { d, wh: 0, ms: 0 }; state.saunaDays.push(rec); }
   rec.wh += Math.max(0, w) * dtH;
-  if (w > SAUNA_ON_W) rec.ms += dtH * 3600000;
+  if (w > saunaLimitW()) rec.ms += dtH * 3600000;
   if (state.saunaDays.length > SAUNA_DAYS_MAX) {
     state.saunaDays.sort((a, b) => a.d.localeCompare(b.d));
     state.saunaDays = state.saunaDays.slice(-SAUNA_DAYS_MAX);
@@ -1319,6 +1328,44 @@ app.post('/api/wbdays/restore', (req, res) => {
   res.json({ ok: true, days: state.wbDays.length });
 });
 
+// Meze sauny se dají přenastavit z appky (stránka Logika automatiky). Práh ve
+// skriptu uvnitř Shelly je vlastní — ten se musí změnit ručně, viz SAUNA.md.
+app.post('/api/sauna/limits', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const b = req.body || {};
+  let changed = false;
+  const limitW = Number(b.limitW);
+  if (Number.isFinite(limitW) && limitW >= 50 && limitW <= 10000 && limitW !== state.saunaLimitW) {
+    state.saunaLimitW = Math.round(limitW); changed = true;
+  }
+  const holdMin = Number(b.holdMin);
+  if (Number.isFinite(holdMin) && holdMin >= 5 && holdMin <= 240 && holdMin !== state.saunaHoldMin) {
+    state.saunaHoldMin = Math.round(holdMin); changed = true;
+  }
+  if (changed) {
+    addLog(`Sauna: práh ${state.saunaLimitW} W, drží ${state.saunaHoldMin} min po nátopu`);
+    broadcast('sauna', { sauna: saunaPayload() });
+  }
+  res.json({ ok: true, limitW: state.saunaLimitW, holdMin: state.saunaHoldMin });
+});
+
+// Po deployi server startuje s výchozími mezemi — telefon mu vrátí poslední
+// nastavené (bez tokenu, stejně jako ostatní /restore).
+app.post('/api/sauna/limits/restore', (req, res) => {
+  const b = req.body || {};
+  let changed = false;
+  const limitW = Number(b.limitW);
+  if (Number.isFinite(limitW) && limitW >= 50 && limitW <= 10000 && limitW !== state.saunaLimitW) {
+    state.saunaLimitW = Math.round(limitW); changed = true;
+  }
+  const holdMin = Number(b.holdMin);
+  if (Number.isFinite(holdMin) && holdMin >= 5 && holdMin <= 240 && holdMin !== state.saunaHoldMin) {
+    state.saunaHoldMin = Math.round(holdMin); changed = true;
+  }
+  if (changed) broadcast('sauna', { sauna: saunaPayload() });
+  res.json({ ok: true, limitW: state.saunaLimitW, holdMin: state.saunaHoldMin });
+});
+
 // Rychlá cesta ze Shelly: webhook (nebo skript) u sauny sem střelí, jakmile odběr
 // přeskočí práh, a blokace naskočí hned — nečeká se na poller (až 2 min). Bez tokenu,
 // stejně jako ostatní /restore endpointy: nic to nezapíná, jen to vypíná bazén.
@@ -1329,7 +1376,7 @@ app.post('/api/sauna/active', (req, res) => {
     state.sauna.since = now;
     addLog('Sauna: topí (hlásí to samo Shelly) — bazén a solinátor jdou dolů');
   }
-  state.saunaBlockUntil = now + SAUNA_BLOCK_MS;
+  state.saunaBlockUntil = now + saunaHoldMs();
   broadcast('sauna', { sauna: saunaPayload() });
   enforceSaunaOff().catch(() => {});   // ať se nečeká na další kolo automatiky
   res.json({ ok: true, blockUntil: state.saunaBlockUntil });
@@ -1937,6 +1984,9 @@ async function sendKeepalive() {
     const d = state.devices[key] || {};
     const cmd = lastCmd[key];
     if (d.isOn !== true) continue;        // co neběží, není co udržovat
+    // Sauna topí → bazén a solinátor mají být dole. Udržovací ON by křísil zrovna
+    // to, co před chvílí shodil skript v Shelly (appka o tom ví až za dvě minuty).
+    if (saunaBlokuje() && (key === 'pool' || key === 'solinator')) continue;
     if (cmd && cmd.turn === 'off') continue;  // řekli jsme „vypni" → ať dojede na svůj časovač
     if (d.online === false) continue;     // odpojenému relé nemá smysl posílat nic
     if (Date.now() - ((cmd && cmd.at) || 0) < KEEPALIVE_QUIET_MS) continue;
@@ -2370,7 +2420,9 @@ async function enforceSaunaOff() {
   if (!saunaEnabled || !saunaBlokuje()) return;
   for (const key of ['pool', 'solinator']) {
     const d = state.devices[key];
-    if (d && d.isOn === true) await autoSet(key, 'off', 'sauna topí', { force: true });
+    // I neznámý stav (poller zrovna selhal) se pošle dolů — dokud nevíme, že je
+    // vypnuto, nemůžeme spoléhat, že relé neběží. Povedený povel `isOn` srovná.
+    if (d && d.isOn !== false) await autoSet(key, 'off', 'sauna topí', { force: true });
   }
 }
 
@@ -4629,6 +4681,7 @@ function wbUpdateEcoGate() {
 // „dokončeno" a tím přednost pro dnešek končí.
 const WB_PRIO_PV_KW = 3;     // od téhle výroby má smysl cpát do auta 3,4 kW
 const WB_PRIO_HITS = 2;      // 2× po sobě, ať přednost nespustí jeden pruh slunce
+const WB_PRIO_MIN_SOC = 20;  // s prázdnou baterkou se přednost nezačíná
 let wbPrio = { date: '', on: false, hits: 0, hotovo: false };
 
 function wbPrioOn() {
@@ -4636,7 +4689,7 @@ function wbPrioOn() {
 }
 
 // Volá se jednou za cyklus z runEnergyControl
-function wbUpdatePrio() {
+function wbUpdatePrio(at = Date.now()) {
   const today = pragueDateString();
   if (wbPrio.date !== today) wbPrio = { date: today, on: false, hits: 0, hotovo: false };
   const st = state.wallbox && typeof state.wallbox.status === 'number' ? state.wallbox.status : null;
@@ -4646,6 +4699,14 @@ function wbUpdatePrio() {
   }
   if (wbPrio.hotovo || !wbCarReady()) { wbPrio.on = false; wbPrio.hits = 0; return; }
   if (wbPrio.on) return;
+  // Odpoledne už přednost nezačíná: od chvíle, kdy do konce okna zbývá míň, než
+  // kolik auto potřebuje naplno, rozhoduje bilance (wbBatteryFastCheck) — ta hlídá,
+  // že se baterka do večera stihne dorovnat.
+  const b = wbBatteryFastCheck(at);
+  if (b && b.oknoH > 0 && b.oknoH < WB_BAT_CAR_KWH / CAR_MAX_KW) { wbPrio.hits = 0; return; }
+  // S prázdnou baterkou by FAST jel ze sítě — na to je tu ECO
+  const soc = state.solax && typeof state.solax.batterySoc === 'number' ? state.solax.batterySoc : null;
+  if (soc !== null && soc < WB_PRIO_MIN_SOC) { wbPrio.hits = 0; return; }
   const pv = wbPvKw();
   if (pv === null) { wbPrio.hits = 0; return; }
   wbPrio.hits = pv >= WB_PRIO_PV_KW ? wbPrio.hits + 1 : 0;

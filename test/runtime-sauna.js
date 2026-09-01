@@ -10,7 +10,9 @@ const SRC = fs.readFileSync(SERVER, 'utf8')
   .replace('const SHELLY_GAP_MS = 1000;', 'const SHELLY_GAP_MS = 10;')
   .replace('const CACHE_TTL_MS = 5000;', 'const CACHE_TTL_MS = 10;')
   .replace('scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);', 'scheduleEvery(pollShelly, POLL_INTERVAL_MS, 200);')
-  .replace('scheduleEvery(runAutomation, AUTOMATION_INTERVAL_MS, 110000);', 'scheduleEvery(runAutomation, 1500, 800);');
+  // Automatika schválně JEN po 15 s: co se stane dřív, musí přijít z pollu sauny
+  .replace('scheduleEvery(runAutomation, AUTOMATION_INTERVAL_MS, 110000);', 'scheduleEvery(runAutomation, 15000, 500);')
+  .replace('scheduleEvery(sendKeepalive, KEEPALIVE_MS, 90000);', 'scheduleEvery(sendKeepalive, 1500, 1000);');
 fs.writeFileSync(tmp, SRC);
 
 process.env.PORT = '3996';
@@ -61,15 +63,25 @@ const proId = (id, turn, od = 0) => povely.filter(p => p.id === id && p.turn ===
   const vysledky = [];
   const ok = (popis, podminka) => vysledky.push([popis, !!podminka]);
 
-  // Sauna se rozjede a obě relé zrovna běží
+  // Sauna se rozjede a obě relé zrovna běží. Automatika je až za 15 s, takže OFF
+  // musí přijít z pollu sauny — jinak by se čekalo minuty.
   const start = Date.now();
   saunaW = 6200;
   rele.pool1 = true;
   rele.sol1 = true;
   await spanek(4500);
-  ok('sauna začne topit → bazén dostane OFF', proId('pool1', 'off', start).length >= 1);
-  ok('  a solinátor taky', proId('sol1', 'off', start).length >= 1);
+  const prvni = proId('pool1', 'off', start)[0];
+  ok('sauna začne topit → bazén dostane OFF', !!prvni);
+  ok('  a je to do dvou pollů, ne až s automatikou', prvni && prvni.t - start < 5000);
+  ok('  solinátor taky', proId('sol1', 'off', start).length >= 1);
   ok('  a obě relé jsou vypnutá', rele.pool1 === false && rele.sol1 === false);
+
+  // Udržovací ON nesmí křísit, co sauna srazila
+  const ka = Date.now();
+  rele.pool1 = true;                    // appka si bude myslet, že bazén zase běží
+  await spanek(4000);
+  const onPovely = povely.filter(p => p.turn === 'on' && p.t >= ka && (p.id === 'pool1' || p.id === 'sol1'));
+  ok('během sauny nechodí udržovací ON', onPovely.length === 0);
 
   const snap = async () => {
     const res = await puvodni('http://127.0.0.1:3996/api/stream', { headers: { Accept: 'text/event-stream' } });
@@ -91,13 +103,13 @@ const proId = (id, turn, od = 0) => povely.filter(p => p.id === id && p.turn ===
   ok('zapnutý bazén sauna zase srazí', proId('pool1', 'off', znovu).length >= 1);
   ok('  a je zase vypnutý', rele.pool1 === false);
 
-  // „+24 h" taky nesmí vyhrát
+  // „+24 h" taky nesmí vyhrát (tohle už řeší automatika, tak počkáme na její kolo)
   const force = Date.now();
   await puvodni('http://127.0.0.1:3996/api/pool/force', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
   }).catch(() => {});
   rele.pool1 = true;
-  await spanek(4500);
+  await spanek(16000);
   ok('ani „+24 h" bazén během sauny neudrží', rele.pool1 === false);
   ok('  a šel na něj OFF', proId('pool1', 'off', force).length >= 1);
 

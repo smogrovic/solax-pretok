@@ -25,14 +25,14 @@ function pragueAt(dateStr, hhmm) {
 const dnes = hhmm => pragueAt(DNES, hhmm);
 
 // stav: 0 nepřipojeno · 1 připraveno · 2 nabíjí · 3 dokončeno
-function build({ nowAt = '09:00', pv = 0.5, stav = 1, auto = true, mode = 'on' } = {}) {
+function build({ nowAt = '09:00', pv = 0.5, stav = 1, auto = true, mode = 'on', soc = 60 } = {}) {
   let now = typeof nowAt === 'number' ? nowAt : dnes(nowAt);
   const logs = [];
   const state = {
     wbAuto: auto, wbMorning: { need: null, until: 0 }, autoMode: mode, wbManualUntil: 0,
     wallbox: { status: stav },
     infigy: { pvPower: pv, forecastPv: 20, fetchedAt: new Date(now).toISOString() },
-    solax: { yieldToday: 5, batterySoc: 60, fveKw: pv, fetchedAt: new Date(now).toISOString() }
+    solax: { yieldToday: 5, batterySoc: soc, fveKw: pv, fetchedAt: new Date(now).toISOString() }
   };
   const weatherCache = { data: null };
   const setDay = den => {
@@ -51,7 +51,7 @@ function build({ nowAt = '09:00', pv = 0.5, stav = 1, auto = true, mode = 'on' }
     'state', 'weatherCache', 'pragueTime', 'pragueDateString', 'addLog', 'formatKwLog', 'broadcast',
     'isWinter', 'wbSwitchPayload', 'BATTERY_KWH', 'CAR_MAX_KW', 'Date',
     CODE + '\n; return { ecWallboxTarget, wbUpdateEcoGate, wbUpdatePrio, wbPrioOn, wbUpdateBatFast,'
-         + ' WB_PRIO_PV_KW, WB_PRIO_HITS };'
+         + ' WB_PRIO_PV_KW, WB_PRIO_HITS, WB_PRIO_MIN_SOC, wbBatteryFastCheck };'
   )(
     state, weatherCache,
     at => pClock(at === undefined ? now : at),
@@ -119,7 +119,44 @@ nadpis('2) Komu přednost patří');
   check('  a už se dnes nevrátí', h.api.ecWallboxTarget(), 'eco');
 }
 
-nadpis('3) Ráno, večer a ostatní režimy');
+nadpis('3) Kdy přednost nezačíná');
+{
+  // Západ 20:30 → konec okna 19:30; 3:15 před tím je 16:15
+  const h = build({ nowAt: '17:00', pv: 4, stav: 1 });
+  h.dvakrat();
+  check('pozdě odpoledne přednost nenaskočí', h.api.ecWallboxTarget() !== 'fast', 'true');
+  const brzy = build({ nowAt: '15:30', pv: 4, stav: 1 });
+  brzy.dvakrat();
+  check('  ještě v 15:30 (víc než 3:15 do konce) ano', brzy.api.ecWallboxTarget(), 'fast');
+}
+{
+  const h = build({ nowAt: '13:00', pv: 4, stav: 1 });
+  h.dvakrat();
+  check('odpoledne s dost času přednost jede', h.api.ecWallboxTarget(), 'fast');
+  h.setNow(dnes('17:00'));
+  h.setPv(4);
+  h.cyklus();
+  check('  a rozjetá přednost se pozdějc nepřeruší', h.api.wbPrioOn(), 'true');
+}
+{
+  check('práh baterky je 20 %', build().api.WB_PRIO_MIN_SOC, 20);
+  const h = build({ pv: 4, stav: 1, soc: 15 });
+  h.dvakrat();
+  check('s prázdnou baterkou přednost nezačne', h.api.ecWallboxTarget(), 'eco');
+  const ok = build({ pv: 4, stav: 1, soc: 21 });
+  ok.dvakrat();
+  check('  nad 20 % ano', ok.api.ecWallboxTarget(), 'fast');
+}
+{
+  const h = build({ pv: 4, stav: 1, soc: 60 });
+  h.dvakrat();
+  check('rozjetá přednost jede dál', h.api.ecWallboxTarget(), 'fast');
+  h.state.solax = { ...h.state.solax, batterySoc: 12 };
+  h.cyklus();
+  check('  i když baterka mezitím spadla', h.api.ecWallboxTarget(), 'fast');
+}
+
+nadpis('4) Ráno, večer a ostatní režimy');
 {
   const h = build({ nowAt: '05:30', pv: 4, stav: 1 });   // ještě noc (východ 5:00 → konec noci 6:00)
   h.dvakrat();

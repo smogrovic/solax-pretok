@@ -9,6 +9,7 @@ node test/sauna.js                    # logika sauny (blokace, notifikace, denn�
 node test/wallbox-prednost.js         # přednost nedobitého auta před baterkou
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 ./test/browser-run.sh test/browser-sauna.js    # stránka Sauna v headless Chromiu
+./test/browser-run.sh test/browser-logika.js   # Logika automatiky + nastavení mezí sauny
 ./test/browser-run.sh test/browser-smoke.js    # celá appka se načte a vykreslí bez chyby
 ```
 
