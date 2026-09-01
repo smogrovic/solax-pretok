@@ -81,11 +81,16 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     [{ d: '2026-08-20', wh: 100, ms: 60 }], [{ d: '2026-08-20', wh: 900, ms: 30 }])),
     '[{"d":"2026-08-20","wh":900,"ms":60}]');
 
-  OUT.push('\\n5) Bez nastaveného měřáku stránka zmizí');
+  OUT.push('\\n5) Bez nastaveného měřáku stránka zůstává');
   check('stránka existuje', !!document.getElementById('saunaSlide'), 'true');
-  hideSaunaSlide();
-  check('  a po skrytí ne', document.getElementById('saunaSlide'), 'null');
-  check('  záložka taky zmizela', Array.from(document.querySelectorAll('#pageTabs .page-tab')).some(t => t.textContent === 'Sauna'), 'false');
+  saunaEnabledFlag = false;
+  renderSauna();
+  check('  a nezmizí, jen řekne co chybí', !!document.getElementById('saunaSlide'), 'true');
+  check('  semafor je šedý', saunaLight.className, 'traffic-light');
+  check('  stav: zatím nenastavená', saunaState.textContent, 'zatím nenastavená');
+  check('  záložka Sauna je v liště', Array.from(document.querySelectorAll('#pageTabs .page-tab')).some(t => t.textContent === 'Sauna'), 'true');
+  saunaEnabledFlag = true;
+
  } catch (e) { OUT.push('CHYBA výjimka: ' + e.message); }
 
   const bad = OUT.filter(l => l.startsWith('CHYBA')).length;

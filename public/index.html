@@ -2226,15 +2226,17 @@
         <div class="logic-sec">
           <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
-            <li><b>FAST</b> = pořád naplno. <b>AUTO</b> jede podle denní doby:</li>
-            <li>&nbsp;&nbsp;<b>noc do 3:00</b> a <b>večer</b> (hodinu před západem) → GREEN.</li>
-            <li>&nbsp;&nbsp;<b>3:00 → konec noci</b> (východ + 1 h, nejpozději 8:00) → FAST, když auto ráno potřebuju.</li>
-            <li>&nbsp;&nbsp;<b>ráno</b> do rozjezdu výroby → GREEN, pak <b>den</b> → ECO (2,5 kW z FVE 2× po sobě, nejpozději v 10:00).</li>
-            <li><b>Nedobité auto má přednost:</b> od <b>3 kW z FVE 2× po sobě</b> jede FAST a baterka dostane zbytek. Končí to při „dokončeno", pod SOC 20 % nezačne.</li>
-            <li>Posledních <b>3:15</b> okna rozhoduje bilance: <b>FAST z baterky</b>, jen když zbývající výroba (90 % odhadu) pokryje auto i baterku do 100 %.</li>
-            <li>Při schodku nad <b>1 kWh</b> se vrací ECO.</li>
-            <li><b>„Ráno auto potřebuju"</b> vypnuto → v noci jen přebytek. Výchozí podle dne v týdnu, ručně na jedno ráno.</li>
-            <li>Ruční režim (STOP/ECO/FAST) drží <b>3 h</b>.</li>
+            <li><b>FAST</b> = pořád naplno. <b>Zima</b> = taky pořád FAST.</li>
+            <li>Ruční přepnutí (STOP/ECO/FAST) drží <b>3 h</b>, automatika do toho nemluví.</li>
+            <li><b>AUTO</b> má tři fáze:</li>
+            <li>&nbsp;&nbsp;<b>ráno 3:00 → 10:00</b> (nebo dřív, jakmile FVE dá <b>3,5 kW</b>):
+              FAST, když auto ráno potřebuju, jinak GREEN.</li>
+            <li>&nbsp;&nbsp;<b>den</b> (konec rána → hodina před západem): <b>FAST</b>, když
+              dnes zbývá vyrobit aspoň <b>10 kWh</b>; jinak <b>ECO</b>.</li>
+            <li>&nbsp;&nbsp;<b>večer a noc do 3:00</b>: GREEN, jen přebytek.</li>
+            <li>„Zbývá vyrobit" = odhad dnešní výroby minus co se už vyrobilo.</li>
+            <li><b>„Ráno auto potřebuju"</b>: výchozí podle dne v týdnu (pracovní den ano, víkend ne).</li>
+            <li>Ruční přepnutí platí <b>jen na nejbližší ráno</b>.</li>
             <li>Ve střídači nastav: ECO i GREEN <b>6 A</b>, „Battery charge EVC" Enable, Min SOC ~10 %.</li>
             <li><b>Odkud auto bralo (7 dní):</b> ze sítě to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE.</li>
           </ul>
@@ -5219,7 +5221,8 @@ let wbAutoData = true;
 // Ranní rozhodnutí posílá server rovnou vyhodnocené: need = jestli auto ráno potřebuju,
 // until = do kdy to platí, manual = jestli je to ruční přepnutí (jinak podle dne v týdnu).
 // waiting = noc už skončila, ale čeká se, až FVE dá pvNeeded kW (jinak by ECO bralo ze sítě)
-let wbMorningData = { need: true, until: 0, manual: false, waiting: false, pv: null, pvNeeded: 2.5, fallbackHour: 10, nightFastHour: 3, prio: false, prioPv: 3, batFast: false, batZbyva: null, batChybi: null, batBlizko: false };
+let wbMorningData = { need: true, until: 0, manual: false, winter: false, manualUntil: 0,
+  faze: null, pv: null, ranoDo: 10, ranoPv: 3.5, ranoOd: 3, zbyva: null, denFast: 10, carReady: false };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -5291,21 +5294,18 @@ function applyWbSwitches(d) {
       need: d.wbMorningNeed,
       until: Number(d.wbMorningUntil) || 0,
       manual: !!d.wbMorningManual,
-      waiting: !!d.wbWaitingForSun,
-      pv: typeof d.wbPvKw === 'number' ? d.wbPvKw : null,
-      pvNeeded: typeof d.wbEcoPvKw === 'number' ? d.wbEcoPvKw : wbMorningData.pvNeeded,
-      fallbackHour: typeof d.wbEcoFallbackHour === 'number' ? d.wbEcoFallbackHour : wbMorningData.fallbackHour,
       winter: !!d.wbWinter,
       manualUntil: Number(d.wbManualUntil) || 0,
-      nightFastHour: typeof d.wbNightFastHour === 'number' ? d.wbNightFastHour : wbMorningData.nightFastHour,
-      prio: !!d.wbPrio,
-      prioPv: typeof d.wbPrioPvKw === 'number' ? d.wbPrioPvKw : wbMorningData.prioPv,
-      batFast: !!d.wbBatFast,
-      batZbyva: typeof d.wbBatFastZbyva === 'number' ? d.wbBatFastZbyva : null,
-      batChybi: typeof d.wbBatFastChybi === 'number' ? d.wbBatFastChybi : null,
-      batBlizko: !!d.wbBatFastBlizko
+      faze: d.wbFaze || null,
+      pv: typeof d.wbPvKw === 'number' ? d.wbPvKw : null,
+      ranoDo: typeof d.wbRanoDoHour === 'number' ? d.wbRanoDoHour : wbMorningData.ranoDo,
+      ranoPv: typeof d.wbRanoKoncePvKw === 'number' ? d.wbRanoKoncePvKw : wbMorningData.ranoPv,
+      ranoOd: typeof d.wbRanoOdHour === 'number' ? d.wbRanoOdHour : wbMorningData.ranoOd,
+      zbyva: typeof d.wbZbyva === 'number' ? d.wbZbyva : null,
+      denFast: typeof d.wbDenFastKwh === 'number' ? d.wbDenFastKwh : wbMorningData.denFast,
+      carReady: !!d.wbCarReady
     };
-    saveWbMorningLocal();
+        saveWbMorningLocal();
   }
 }
 
@@ -5383,8 +5383,8 @@ function renderWbAuto() {
 
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
-  const { need, until, manual, waiting, pv, pvNeeded, fallbackHour, winter, manualUntil, nightFastHour,
-          batFast, batZbyva, batChybi, batBlizko, prio, prioPv } = wbMorningData;
+  const { need, until, manual, winter, manualUntil, faze, pv, ranoDo, ranoPv, ranoOd,
+          zbyva, denFast, carReady } = wbMorningData;
   wbMorningSwitchEl.classList.toggle('on', need);
   // V zimě a na pevném FAST ranní rozhodnutí nic neovlivní — ať přepínač nemate
   const bezVyznamu = !wbAutoData || winter;
@@ -5394,44 +5394,37 @@ function renderWbMorning() {
   const rucne = manualUntil > Date.now()
     ? ` Ručně nastavený režim drží do ${fmtSolTime(manualUntil)}.` : '';
   if (winter) {
-    wbMorningHintEl.textContent = 'Zimní režim — jede se pořád FAST, na slunce se nečeká.' + rucne;
+    wbMorningHintEl.textContent = 'Zimní režim — jede se pořád FAST.' + rucne;
     return;
   }
   if (!wbAutoData) {
     wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.' + rucne;
     return;
   }
-  if (prio) {
-    wbMorningHintEl.textContent = 'Auto se dobíjí přednostně (FAST) — baterka dostane, co zbyde.'
-      + ' Přednost skončí, jakmile bude auto dobité.' + rucne;
-    return;
-  }
-  if (batFast) {
-    // Odpoledne: auto bere i z baterky, zbývající výroba ji do večera doplní zpátky
-    const kolik = typeof batZbyva === 'number' ? ` (zbývá vyrobit ${fmtC1(batZbyva)} kWh)` : '';
-    wbMorningHintEl.textContent = `Auto se dobíjí naplno i z baterky — slunce ji do večera doplní${kolik}.` + rucne;
-    return;
-  }
-  if (batBlizko) {
-    const kolik = typeof batChybi === 'number' && batChybi > 0 ? ` — chybí ${fmtC1(batChybi)} kWh` : '';
-    wbMorningHintEl.textContent = `Nabíjí se z přebytku (ECO). Na dobití z baterky by dnešní výroba nestačila${kolik}.` + rucne;
-    return;
-  }
-  if (waiting) {
-    // Noc skončila, ale ECO by při slabém slunci dobíralo ze sítě — čeká se na výrobu
-    const ted = typeof pv === 'number' ? ` (teď ${pv.toFixed(1).replace('.', ',')} kW)` : '';
-    wbMorningHintEl.textContent = `Čeká se na slunce — jede GREEN, jen z přebytku.`
-      + ` ECO se zapne, až FVE dá ${String(pvNeeded).replace('.', ',')} kW${ted},`
-      + ` nejpozději v ${fallbackHour}:00.` + rucne;
-    return;
-  }
-  const co = need
-    ? `Dobije se naplno, ale až od ${nightFastHour}:00 (FAST) — večer se baterka hodí baráku.`
-    : 'Nabíjí se jen z přebytku (GREEN) — do rána se ze sítě ani z baterky nebere.';
+  const cis = v => v.toFixed(1).replace('.', ',');
   const doKdy = until > Date.now() ? ` (do ${fmtSolTime(until)})` : '';
-  wbMorningHintEl.textContent = (manual
-    ? `${co} Ručně na tohle ráno${doKdy}, pak zase podle dne v týdnu.`
-    : `${co} ${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`) + rucne;
+  const podle = manual
+    ? `Ručně na tohle ráno${doKdy}, pak zase podle dne v týdnu.`
+    : `${need ? 'Ráno je pracovní den' : 'Ráno je víkend'} — podle dne v týdnu.`;
+
+  if (faze === 'rano') {
+    wbMorningHintEl.textContent = (need
+      ? `Ráno se dobíjí naplno (FAST) do ${ranoDo}:00, nebo než FVE dá ${cis(ranoPv)} kW.`
+      : `Ráno se nabíjí jen z přebytku (GREEN).`) + ' ' + podle + rucne;
+    return;
+  }
+  if (faze === 'den') {
+    const kolik = typeof zbyva === 'number' ? `Dnes zbývá vyrobit ${cis(zbyva)} kWh` : 'Bez odhadu výroby';
+    const rezim = typeof zbyva === 'number' && zbyva >= denFast
+      ? `→ auto se dobíjí naplno (FAST).`
+      : `→ nabíjí se z přebytku (ECO).`;
+    const prah = ` Na FAST je potřeba aspoň ${denFast} kWh.`;
+    wbMorningHintEl.textContent = kolik + ' ' + rezim + prah + rucne;
+    return;
+  }
+  // noc a večer
+  wbMorningHintEl.textContent = `Teď jen z přebytku (GREEN). Od ${ranoOd}:00 ` +
+    (need ? 'se auto dobije naplno.' : 'se dál jede jen z přebytku.') + ' ' + podle + rucne;
 }
 
 // Výkon wallboxu v kW: vyšší z Infigy a Solaxu. Jeden z nich hlásí nulu i při nabíjení
@@ -5807,6 +5800,7 @@ const saunaListEl = document.getElementById('saunaList');
 const SAUNA_DNU = 7;
 let saunaData = null;
 let saunaDaysData = [];
+let saunaEnabledFlag = null;   // null = ještě nevíme, false = chybí měřák
 
 const saunaLimitInput = document.getElementById('saunaLimitInput');
 const saunaHoldInput = document.getElementById('saunaHoldInput');
@@ -5820,6 +5814,15 @@ function saunaBlokujeUi() {
 
 function renderSauna() {
   if (!saunaLightEl) return;
+  if (saunaEnabledFlag === false) {
+    // Měřák ještě není nastavený — stránka zůstává, ať je vidět, co přijde
+    saunaLightEl.className = 'traffic-light';
+    saunaStateEl.textContent = 'zatím nenastavená';
+    saunaPowerEl.textContent = '–';
+    saunaHintEl.textContent = 'Chybí ID měřáku sauny (SAUNA_DEVICE_ID na serveru). Až ho doplníš,'
+      + ' začne se měřit a bazén se solinátorem půjdou při topení dolů.';
+    return;
+  }
   const d = saunaData || {};
   const zname = typeof d.powerW === 'number' && d.fetchedAt
     && Date.now() - new Date(d.fetchedAt).getTime() <= DEVICE_STALE_MS;
@@ -5987,10 +5990,6 @@ async function maybeRestoreSaunaDays(server, local) {
   } catch {}
 }
 
-function hideSaunaSlide() {
-  const slide = document.getElementById('saunaSlide');
-  if (slide) { slide.remove(); rebuildDots(); }
-}
 
 // ---------- AI asistent ----------
 
@@ -6746,13 +6745,12 @@ function applySnapshot(snap) {
   renderWallboxChart();
   saveWallboxHistoryLocal();
   maybeRestoreWbHistoryToServer(serverWb, localWb);
-  if (snap.saunaEnabled === false) {
-    hideSaunaSlide();
-  } else {
-    saunaData = snap.sauna || null;
-    renderSaunaSet();
-    saveSaunaSetLocal();
-    maybeRestoreSaunaSet(snap.sauna);
+  saunaEnabledFlag = snap.saunaEnabled !== false;
+  saunaData = snap.sauna || null;
+  renderSaunaSet();
+  saveSaunaSetLocal();
+  maybeRestoreSaunaSet(snap.sauna);
+  {
     const serverDny = snap.saunaDays || [];
     saunaDaysData = mergeSaunaDays(serverDny, loadSaunaDaysLocal());
     renderSauna();

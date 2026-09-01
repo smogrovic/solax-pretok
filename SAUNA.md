@@ -19,7 +19,7 @@ o svůj denní rozpočet nepřijde — nedoběhnutý čas se přenáší na dal�
 
 | Proměnná | Význam | Výchozí |
 |---|---|---|
-| `SAUNA_DEVICE_ID` | ID toho 3EM v Shelly Cloud (např. `54320470d17c`). Bez ní se stránka Sauna v appce vůbec neukáže. | – |
+| `SAUNA_DEVICE_ID` | ID toho 3EM v Shelly Cloud (např. `54320470d17c`). Bez ní stránka Sauna zůstává, jen hlásí, že měřák chybí. | – |
 | `SAUNA_SERVER_URI` | Server Shelly Cloud, když je jiný než u ostatních zařízení | `SHELLY_SERVER_URI` |
 | `SAUNA_ON_W` | Od kolika wattů se bere, že sauna topí (dá se přenastavit v appce) | `500` |
 | `SAUNA_HOLD_MIN` | Kolik minut po posledním nátopu držet relé dole (taky v appce) | `30` |
@@ -30,7 +30,8 @@ o svůj denní rozpočet nepřijde — nedoběhnutý čas se přenáší na dal�
 > níž, který běží uvnitř tvojí sítě.
 
 ID najdeš stejně jako u bazénových měřáků. Dokud proměnná chybí, appka jede přesně
-jako dosud, jen bez sauny.
+jako dosud — stránka Sauna je vidět, ale místo odběru na ní stojí, že měřák ještě
+není nastavený.
 
 ## 2. Skript do Shelly (rychlá vrstva)
 
