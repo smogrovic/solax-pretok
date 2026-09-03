@@ -33,6 +33,16 @@ const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
 const SAUNA_DEVICE_ID = process.env.SAUNA_DEVICE_ID || process.env.SAUNA_PM_ID || '';
 const SAUNA_SERVER_URI = process.env.SAUNA_SERVER_URI || SHELLY_SERVER_URI;
 const saunaEnabled = !!(SAUNA_DEVICE_ID && SHELLY_AUTH_KEY);
+// Kamna HUUM s jednotkou UKU WiFi. Vlastní cloudové API (lokální jednotka nemá),
+// přihlášení je stejné jméno a heslo jako do appky HUUM. Zatím JEN ČTENÍ — start/stop
+// (POST /start s targetTemperature, POST /stop, GET /light) se schválně nezapojuje.
+// POZOR: hlídání jističe zůstává na měření 3EM. To je fyzická pravda a reaguje do
+// vteřiny; „HUUM říká, že topí" jen opisuje termostat a chodí z cloudu po dvou minutách.
+const HUUM_USER = process.env.HUUM_USER || '';
+const HUUM_PASS = process.env.HUUM_PASS || '';
+const HUUM_URL = (process.env.HUUM_URL || 'https://sauna.huum.eu/action/home').replace(/\/+$/, '');
+const huumEnabled = !!(HUUM_USER && HUUM_PASS);
+
 // Výchozí meze; obojí se dá přenastavit z appky (stránka Logika automatiky)
 const SAUNA_ON_W = Number(process.env.SAUNA_ON_W) || 500;      // nad tímhle sauna „topí"
 const SAUNA_HOLD_MIN = Number(process.env.SAUNA_HOLD_MIN) || 30; // držet vypnuté po posledním nátopu
@@ -205,6 +215,7 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
@@ -381,6 +392,7 @@ function snapshot() {
     usageHistory: state.usageHistory,
     saunaEnabled,
     sauna: saunaPayload(),
+    huum: huumPayload(),
     saunaDays: state.saunaDays,
     months: state.months,
     timeline: state.timeline,
@@ -5603,6 +5615,104 @@ function recordBoilerTemps() {
 // Vzorkujeme po 5 min — stejně jako se obnovují teploty samotné (Panasonic + Infigy),
 // častější zápis by jen kopíroval tu samou hodnotu. Nedělá žádné dotazy, čte jen stav.
 scheduleEvery(recordBoilerTemps, 5 * 60 * 1000, 100000); // offset 100 s
+
+// ---------- Kamna HUUM (UKU WiFi) ----------
+// API je cloudové a HUUM ho pro cizí aplikace sám povoluje (stojí na něm i integrace
+// v Home Assistantu). Odpověď /status je mělká a teploty v ní chodí jako ŘETĚZCE.
+const HUUM_STAVY = {
+  230: 'offline',
+  231: 'topí',
+  232: 'připravená',
+  233: 'ovládá ji někdo jiný',
+  400: 'nouzové zastavení'
+};
+// config: co má jednotka osazené
+const HUUM_VYBAVA = { 1: 'parní vyvíječ', 2: 'světlo', 3: 'vyvíječ i světlo' };
+
+function huumStavText(code) {
+  return HUUM_STAVY[code] || (code === null || code === undefined ? null : `neznámý stav (${code})`);
+}
+
+// Číslo z hodnoty, která může přijít jako text ("23") i jako číslo. Prázdno → null,
+// ať se z chybějící cílové teploty nestane NaN (API ji nevrací, dokud sauna netopí).
+function huumNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function huumMap(d) {
+  const cfg = d.saunaConfig || {};
+  const code = huumNum(d.statusCode);
+  return {
+    statusCode: code,
+    statusText: huumStavText(code),
+    heating: code === 231,
+    temperature: huumNum(d.temperature),
+    targetTemperature: huumNum(d.targetTemperature),
+    // POZOR na význam: `door: true` znamená ZAVŘENÉ. S otevřenými dveřmi nejde spustit.
+    doorClosed: typeof d.door === 'boolean' ? d.door : null,
+    humidity: huumNum(d.humidity),
+    targetHumidity: huumNum(d.targetHumidity),
+    light: huumNum(d.light),
+    steamerError: huumNum(d.steamerError),
+    config: huumNum(d.config),
+    configText: HUUM_VYBAVA[huumNum(d.config)] || null,
+    startDate: huumNum(d.startDate),
+    endDate: huumNum(d.endDate),
+    duration: huumNum(d.duration),
+    saunaName: typeof d.saunaName === 'string' ? d.saunaName : null,
+    limits: {
+      minTemp: huumNum(cfg.minTemp),
+      maxTemp: huumNum(cfg.maxTemp),
+      minHeatingTime: huumNum(cfg.minHeatingTime),
+      maxHeatingTime: huumNum(cfg.maxHeatingTime),
+      minTimer: huumNum(cfg.minTimer),
+      maxTimer: huumNum(cfg.maxTimer),
+      childLock: cfg.childLock === undefined ? null : cfg.childLock
+    }
+  };
+}
+
+async function fetchHuum() {
+  const auth = Buffer.from(`${HUUM_USER}:${HUUM_PASS}`).toString('base64');
+  const res = await fetch(`${HUUM_URL}/status`, {
+    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error('HUUM: neplatné jméno nebo heslo.');
+  }
+  if (!res.ok) throw new Error(`HUUM API HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || typeof data !== 'object') throw new Error('HUUM: nečekaná odpověď.');
+  return huumMap(data);
+}
+
+let huumPollRunning = false;
+async function pollHuum() {
+  if (!huumEnabled || huumPollRunning) return;
+  huumPollRunning = true;
+  try {
+    state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
+  } catch (err) {
+    // Razítko se schválně NEobnovuje — stejně jako u Infigy znamená „kdy naposledy
+    // dorazila data", ne „kdy jsme se ptali". Zmrzlá teplota nesmí vypadat čerstvě.
+    state.huum = { ...state.huum, error: err.message };
+  } finally {
+    huumPollRunning = false;
+  }
+  broadcast('huum', { huum: huumPayload() });
+}
+
+function huumPayload() {
+  return { ...state.huum, enabled: huumEnabled };
+}
+
+if (huumEnabled) {
+  // Vlastní služba, se Shelly nemá nic společného. Offset 70 s je mezi ostatními volný.
+  scheduleEvery(pollHuum, POLL_INTERVAL_MS, 70000);
+}
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.

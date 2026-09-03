@@ -86,6 +86,78 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  záložka Sauna je v liště', Array.from(document.querySelectorAll('#pageTabs .page-tab')).some(t => t.textContent === 'Sauna'), 'true');
   saunaEnabledFlag = true;
 
+  OUT.push('\\n6) Kamna HUUM — náhled bez připojení');
+  const radek = k => document.querySelector('[data-huum="' + k + '"]');
+  const vidi = k => { const r = radek(k); return !!r && !r.hidden; };
+  huumData = { enabled: false, error: null };
+  renderHuum();
+  check('semafor je šedý', huumLight.className, 'traffic-light');
+  check('stav: zatím nepřipojená', huumState.textContent, 'zatím nepřipojená');
+  check('teplota je pomlčka', huumTemp.textContent, '– °C');
+  check('cíl taky', huumTarget.textContent, '– °C');
+  check('hláška řekne, co doplnit', /HUUM_USER a HUUM_PASS/.test(huumHint.textContent), 'true');
+  // Náhled: ukazují se VŠECHNY řádky, ať je co ladit
+  const vsechny = ['door', 'end', 'left', 'humidity', 'light', 'steamer', 'name',
+                   'lTemp', 'lHeat', 'lTimer', 'lLock'];
+  check('všech 11 řádků je vidět', vsechny.filter(vidi).length, 11);
+  check('  a všechny mají pomlčku',
+    vsechny.every(k => radek(k).querySelector('.stat-val').textContent === '–'), 'true');
+
+  OUT.push('\\n7) Kamna HUUM — s daty');
+  huumData = { enabled: true, statusCode: 231, statusText: 'topí', heating: true,
+    temperature: 78, targetTemperature: 90, doorClosed: true, humidity: 35,
+    targetHumidity: 40, light: 1, steamerError: 0, config: 3, configText: 'vyvíječ i světlo',
+    endDate: Math.round((T + 80 * MIN) / 1000), saunaName: 'Chata',
+    limits: { minTemp: 40, maxTemp: 110, minHeatingTime: 1, maxHeatingTime: 3,
+              minTimer: 0, maxTimer: 12, childLock: 'OFF' },
+    fetchedAt: new Date(T).toISOString(), error: null };
+  renderHuum();
+  check('semafor svítí, když topí', huumLight.className, 'traffic-light on');
+  check('stav slovy', huumState.textContent, 'topí');
+  check('teplota v sauně', huumTemp.textContent, '78 °C');
+  check('cílová teplota', huumTarget.textContent, '90 °C');
+  check('dveře zavřené', huumDoor.textContent, 'zavřené');
+  check('zbývá se dopočítá', huumLeft.textContent, '1:20');
+  check('vlhkost i s cílem', huumHumidity.textContent, '35 % (cíl 40 %)');
+  check('světlo', huumLightState.textContent, 'zapnuto');
+  check('vyvíječ v pořádku', huumSteamer.textContent, 'v pořádku');
+  check('název sauny', huumName.textContent, 'Chata');
+  check('meze teploty', huumLimTemp.textContent, '40–110 °C');
+  check('meze doby topení', huumLimHeat.textContent, '1–3 h');
+  check('dětský zámek', huumLimLock.textContent, 'vypnutý');
+  check('hláška ukáže vybavení', /vyvíječ i světlo/.test(huumHint.textContent), 'true');
+
+  OUT.push('\\n8) Kamna HUUM — mezní stavy');
+  // Cílovou teplotu API nevrací, dokud sauna netopí
+  huumData = { ...huumData, statusCode: 232, statusText: 'připravená', heating: false,
+    targetTemperature: null, endDate: null, humidity: null, steamerError: null };
+  renderHuum();
+  check('bez cíle je pomlčka', huumTarget.textContent, '– °C');
+  check('  ale teplota zůstane', huumTemp.textContent, '78 °C');
+  check('semafor zhasne', huumLight.className, 'traffic-light off');
+  check('prázdné řádky se po připojení schovají', vidi('humidity'), 'false');
+  check('  i „topí do"', vidi('end'), 'false');
+  check('  ale dveře zůstanou', vidi('door'), 'true');
+  huumData = { ...huumData, doorClosed: false };
+  renderHuum();
+  check('otevřené dveře se poznají', huumDoor.textContent, 'otevřené');
+  huumData = { ...huumData, steamerError: 1 };
+  renderHuum();
+  check('došlá voda ve vyvíječi', huumSteamer.textContent, 'došla voda');
+  huumData = { enabled: true, statusCode: 232, fetchedAt: new Date(T - 30 * MIN).toISOString() };
+  renderHuum();
+  check('stará data = nedostupná', huumState.textContent, 'nedostupná');
+  huumData = { enabled: true, error: 'HUUM: neplatné jméno nebo heslo.' };
+  renderHuum();
+  check('chyba se ukáže', /neplatné jméno/.test(huumHint.textContent), 'true');
+
+  OUT.push('\\n9) Měřák 3EM zůstal nedotčený');
+  saunaData = { powerW: 6200, fetchedAt: new Date().toISOString(), topi: true,
+    since: T - 10 * MIN, blockUntil: T + 30 * MIN, limitW: 500 };
+  renderSauna();
+  check('semafor sauny pořád podle odběru', saunaLight.className, 'traffic-light on');
+  check('  a ukazuje kW', saunaPower.textContent, '6,2 kW');
+
  } catch (e) { OUT.push('CHYBA výjimka: ' + e.message); }
 
   const bad = OUT.filter(l => l.startsWith('CHYBA')).length;

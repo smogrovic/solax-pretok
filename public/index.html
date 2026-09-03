@@ -1101,6 +1101,11 @@
     justify-content:center;
     gap:4px;
   }
+  /* Dvojice teplot uvnitř karty HUUM. `boilers-card` počítá s tím, že je zároveň
+     `card` (odtud display:flex) — tady je vevnitř, takže si flex řekne sama a rámeček
+     ani pozadí nepotřebuje. */
+  .huum-temps{display:flex;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
+  .huum-temps .boiler-name{white-space:nowrap;}
   .boiler-sep{
     width:1px;
     background:rgba(44,62,80,0.1);
@@ -2050,6 +2055,46 @@
           <div class="sauna-power" id="saunaPower">– kW</div>
           <div class="manual-hold" id="saunaHint"></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="huumLight"></div>
+            <div class="shelly-label">Kamna HUUM <span class="state" id="huumState">–</span></div>
+          </div>
+          <div class="boilers-card huum-temps">
+            <div class="boiler-cell">
+              <div class="boiler-name">Teplota</div>
+              <div class="boiler-temp" id="huumTemp">– °C</div>
+            </div>
+            <div class="boiler-sep"></div>
+            <div class="boiler-cell">
+              <div class="boiler-name">Cíl</div>
+              <div class="boiler-temp" id="huumTarget">– °C</div>
+            </div>
+          </div>
+          <div class="manual-hold" id="huumHint"></div>
+        </div>
+      </div>
+
+      <div class="card stats-card" id="huumStatusCard">
+        <div class="graph-title">Stav jednotky</div>
+        <div class="stat-row" data-huum="door"><span>Dveře</span><span class="stat-val" id="huumDoor">–</span></div>
+        <div class="stat-row" data-huum="end"><span>Topí do</span><span class="stat-val" id="huumEnd">–</span></div>
+        <div class="stat-row" data-huum="left"><span>Zbývá</span><span class="stat-val" id="huumLeft">–</span></div>
+        <div class="stat-row" data-huum="humidity"><span>Vlhkost</span><span class="stat-val" id="huumHumidity">–</span></div>
+        <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
+        <div class="stat-row" data-huum="steamer"><span>Parní vyvíječ</span><span class="stat-val" id="huumSteamer">–</span></div>
+        <div class="stat-row" data-huum="name"><span>Název sauny</span><span class="stat-val" id="huumName">–</span></div>
+      </div>
+
+      <div class="card stats-card" id="huumLimitsCard">
+        <div class="graph-title">Meze jednotky</div>
+        <div class="stat-row" data-huum="lTemp"><span>Teplota</span><span class="stat-val" id="huumLimTemp">–</span></div>
+        <div class="stat-row" data-huum="lHeat"><span>Doba topení</span><span class="stat-val" id="huumLimHeat">–</span></div>
+        <div class="stat-row" data-huum="lTimer"><span>Časovač</span><span class="stat-val" id="huumLimTimer">–</span></div>
+        <div class="stat-row" data-huum="lLock"><span>Dětský zámek</span><span class="stat-val" id="huumLimLock">–</span></div>
       </div>
 
       <div class="card stats-card">
@@ -5808,6 +5853,77 @@ const WB_MODE_LEGEND = [
 // Sauna nemá vypínač v appce — jen se měří. Podstatné je, že když topí, jde bazén
 // i solinátor dolů (visí na stejném jističi) a ještě půl hodiny po dotopení se
 // nevracejí. Tady se to jen ukazuje.
+// ---------- Kamna HUUM (UKU WiFi) ----------
+// Dokud nejsou na serveru přihlašovací údaje, karty zůstávají s pomlčkami — ať je
+// vidět, co přijde. Po připojení se řádky naplní a prázdné se schovají.
+const huumEls = {};
+for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumTarget', 'huumHint',
+  'huumStatusCard', 'huumLimitsCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
+  'huumLightState', 'huumSteamer', 'huumName', 'huumLimTemp', 'huumLimHeat',
+  'huumLimTimer', 'huumLimLock']) {
+  huumEls[id] = document.getElementById(id);
+}
+let huumData = null;
+
+const huumRadek = klic => document.querySelector(`[data-huum="${klic}"]`);
+// Prázdný řádek se po připojení schová, ať karta nezůstane plná pomlček. Dokud
+// připojeno není, ukazují se všechny — je to náhled toho, co tam bude.
+function huumSet(id, klic, hodnota, pripojeno) {
+  const el = huumEls[id];
+  if (el) el.textContent = hodnota === null || hodnota === undefined ? '–' : hodnota;
+  const radek = huumRadek(klic);
+  if (radek) radek.hidden = pripojeno && (hodnota === null || hodnota === undefined);
+}
+
+function huumTeplota(v) {
+  return typeof v === 'number' ? Math.round(v) + ' °C' : null;
+}
+
+function renderHuum() {
+  if (!huumEls.huumLight) return;
+  const d = huumData || {};
+  const zname = !!d.enabled && typeof d.statusCode === 'number' && d.fetchedAt
+    && Date.now() - new Date(d.fetchedAt).getTime() <= DEVICE_STALE_MS;
+
+  huumEls.huumLight.className = 'traffic-light'
+    + (!zname ? '' : (d.heating ? ' on' : (d.statusCode === 230 ? '' : ' off')));
+  huumEls.huumState.textContent = !d.enabled ? 'zatím nepřipojená'
+    : (zname ? (d.statusText || '–') : 'nedostupná');
+
+  huumEls.huumTemp.textContent = zname ? (huumTeplota(d.temperature) || '– °C') : '– °C';
+  // Cílovou teplotu API nevrací, dokud sauna netopí — pomlčka je tu správná odpověď
+  huumEls.huumTarget.textContent = zname ? (huumTeplota(d.targetTemperature) || '– °C') : '– °C';
+
+  const p = zname;   // připojeno a čerstvé → prázdné řádky se schovají
+  huumSet('huumDoor', 'door',
+    p && typeof d.doorClosed === 'boolean' ? (d.doorClosed ? 'zavřené' : 'otevřené') : null, p);
+  huumSet('huumEnd', 'end', p && d.endDate ? fmtSolTime(d.endDate * 1000) : null, p);
+  huumSet('huumLeft', 'left',
+    p && d.endDate && d.endDate * 1000 > Date.now() ? fmtSolDur(d.endDate * 1000 - Date.now()) : null, p);
+  huumSet('huumHumidity', 'humidity', p && typeof d.humidity === 'number'
+    ? d.humidity + ' %' + (typeof d.targetHumidity === 'number' ? ` (cíl ${d.targetHumidity} %)` : '')
+    : null, p);
+  huumSet('huumLightState', 'light',
+    p && typeof d.light === 'number' ? (d.light ? 'zapnuto' : 'vypnuto') : null, p);
+  huumSet('huumSteamer', 'steamer', p && typeof d.steamerError === 'number'
+    ? (d.steamerError ? 'došla voda' : 'v pořádku') : null, p);
+  huumSet('huumName', 'name', p ? d.saunaName : null, p);
+
+  const l = (p && d.limits) || {};
+  const rozsah = (a, b, jed) => (typeof a === 'number' && typeof b === 'number' ? `${a}–${b} ${jed}` : null);
+  huumSet('huumLimTemp', 'lTemp', rozsah(l.minTemp, l.maxTemp, '°C'), p);
+  huumSet('huumLimHeat', 'lHeat', rozsah(l.minHeatingTime, l.maxHeatingTime, 'h'), p);
+  huumSet('huumLimTimer', 'lTimer', rozsah(l.minTimer, l.maxTimer, 'h'), p);
+  huumSet('huumLimLock', 'lLock',
+    p && l.childLock !== null && l.childLock !== undefined
+      ? (l.childLock && l.childLock !== 'OFF' ? 'zapnutý' : 'vypnutý') : null, p);
+
+  huumEls.huumHint.textContent = !d.enabled
+    ? 'Zatím jen náhled. Doplň na serveru HUUM_USER a HUUM_PASS (účet z appky HUUM) a začne se to plnit.'
+    : (d.error || (zname ? (d.configText ? `Osazeno: ${d.configText}` : '') : 'Z HUUM nechodí data.'));
+}
+setInterval(renderHuum, 30000);   // „zbývá 1:20" musí odtikávat i bez zprávy ze serveru
+
 const saunaLightEl = document.getElementById('saunaLight');
 const saunaStateEl = document.getElementById('saunaState');
 const saunaPowerEl = document.getElementById('saunaPower');
@@ -6877,6 +6993,8 @@ function applySnapshot(snap) {
   maybeRestoreWbHistoryToServer(serverWb, localWb);
   saunaEnabledFlag = snap.saunaEnabled !== false;
   saunaData = snap.sauna || null;
+  huumData = snap.huum || null;
+  bezpecne(renderHuum);
   bezpecne(renderSaunaSet);
   saveSaunaSetLocal();
   maybeRestoreSaunaSet(snap.sauna);
@@ -7255,6 +7373,10 @@ function connectStream() {
     else if (d.point) wallboxHistory = mergeWbHistories(wallboxHistory, [d.point]);
     renderWallboxChart();
     saveWallboxHistoryLocal();
+  });
+  es.addEventListener('huum', e => {
+    huumData = JSON.parse(e.data).huum || null;
+    renderHuum();
   });
   es.addEventListener('sauna', e => {
     saunaData = JSON.parse(e.data).sauna || null;

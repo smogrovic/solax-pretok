@@ -11,6 +11,7 @@ node test/months.js                   # spotřeba po měsících (sauna, bazén,
 node test/staticka.js                 # inline skript: nic se nepoužívá bez deklarace
 node test/usage.js                    # odkud šla spotřeba (dělení FVE/síť) a odběr okruhů
 node test/rele.js                     # „běží to relé?" podle časovače v relé
+node test/huum.js                     # překlad odpovědi z kamen HUUM (UKU WiFi)
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky

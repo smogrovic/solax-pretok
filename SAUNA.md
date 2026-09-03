@@ -33,6 +33,40 @@ ID najdeš stejně jako u bazénových měřáků. Dokud proměnná chybí, appk
 jako dosud — stránka Sauna je vidět, ale místo odběru na ní stojí, že měřák ještě
 není nastavený.
 
+## 1b. Kamna HUUM (UKU WiFi) — teplota a stav
+
+Kamna HUUM mají vlastní cloudové API a **HUUM ho pro cizí aplikace sám povoluje**
+(stojí na něm i integrace v Home Assistantu). Appka z něj zatím jen **čte**.
+
+| Proměnná | Význam | Výchozí |
+|---|---|---|
+| `HUUM_USER` | Přihlašovací jméno do appky HUUM | – |
+| `HUUM_PASS` | Heslo do appky HUUM | – |
+| `HUUM_URL` | Adresa API, měnit jen kdyby ji HUUM přestěhoval | `https://sauna.huum.eu/action/home` |
+
+Dokud obě proměnné nedoplníš, jsou karty na stránce Sauna vidět, ale prázdné —
+je to náhled toho, co tam bude. Ptáme se jednou za 2 minuty.
+
+**Co API vrací:** aktuální a cílovou teplotu, stav (`230` offline · `231` topí ·
+`232` připravená · `233` ovládá ji někdo jiný · `400` nouzové zastavení), dveře
+(zavřené/otevřené — s otevřenými nejde spustit), vlhkost, světlo, chybu parního
+vyvíječe, název sauny a meze jednotky (teplota, doba topení, časovač, dětský zámek).
+
+Dvě věci, které se od HUUM čekat nedají:
+
+- **Cílovou teplotu nevrátí, dokud sauna netopí** — výrobce nechce, aby se jednotka
+  pořád doptávala. Do té doby je na kartě pomlčka, je to správně.
+- **Jednotka je cloud-only.** Lokální API nemá; kdo chce lokální ovládání, musí si
+  přesměrovat `api.huum.eu` na vlastní server. Do appky to netahám.
+
+**Zapínání a vypínání sauny z appky schválně není zapojené.** API to umí
+(`POST /start` s `targetTemperature` 40–110 °C, `POST /stop`, `GET /light`), ale
+dálkové spouštění kamen je věc, kterou si musíš říct sám.
+
+**Hlídání jističe zůstává na měřáku 3EM**, ne na HUUM. Měřák je fyzická pravda
+a skript v Shelly na něj reaguje do vteřiny; „HUUM říká, že topí" jen opisuje
+termostat a chodí z cloudu jednou za dvě minuty.
+
 ## 2. Skript do Shelly (rychlá vrstva)
 
 Soubor: [`shelly/sauna.js`](shelly/sauna.js)
