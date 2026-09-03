@@ -57,7 +57,10 @@ function stav(d) {
 
   OUT.push('\\n3) Ruční volba, zima, pevné FAST');
   t = stav({ wbDayTypeManual: true, wbDayTypeUntil: Date.now() + 5 * 3600000 });
-  check('ruční volba má platnost', /Ručně do \\d\\d?:\\d\\d, pak zase podle kalendáře/.test(t), 'true');
+  // fmtSolTime schválně přidá i datum, když čas padne na jiný den — pozdě večer
+  // (teď + 5 h přeteče přes půlnoc) by jinak sada padala jen kvůli hodině spuštění
+  check('ruční volba má platnost',
+    /Ručně do (\\d+\\.\\s?\\d+\\.\\s)?\\d\\d?:\\d\\d, pak zase podle kalendáře/.test(t), 'true');
   t = stav({ wbDayTypeManual: false });
   check('jinak podle dne v týdnu', /Podle dne v týdnu/.test(t), 'true');
   t = stav({ wbWinter: true });

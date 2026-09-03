@@ -26,7 +26,9 @@ setTimeout(() => {
   let t = ukaz(odpojene(T + 9 * MIN));
   check('nedostupné se pozná', /Nedostupné/.test(t), true);
   check('  s posledním stavem', /naposledy zapnuto/.test(t), true);
-  check('  a časem samovypnutí', /samo se vypne v \\d\\d?:\\d\\d/.test(t), true);
+  // I tady může fmtSolTime přidat datum, když čas přeteče přes půlnoc
+  check('  a časem samovypnutí',
+    /samo se vypne v (\\d+\\.\\s?\\d+\\.\\s)?\\d\\d?:\\d\\d/.test(t), true);
 
   t = ukaz(odpojene(T - 2 * MIN));
   check('po uplynutí časovače to řekne', /už se vypnulo samo/.test(t), true);

@@ -26,6 +26,7 @@ node test/runtime-rele.js             # ostrý server: relé zmizí, účtován�
 ./test/browser-run.sh test/browser-wallbox.js  # přepínač, nápověda a ruční režimy wallboxu
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
 ./test/browser-run.sh test/browser-zaloha.js   # řádek o záloze na stránce Log
+./test/browser-run.sh test/browser-mezery.js   # žádné dvě karty se na sebe nelepí
 ./test/browser-run.sh test/browser-smoke.js    # celá appka se načte a vykreslí bez chyby
 ```
 

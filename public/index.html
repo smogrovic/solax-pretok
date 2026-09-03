@@ -95,6 +95,15 @@
     align-items:center;
     box-shadow:0 1px 3px rgba(44,62,80,0.06);
   }
+  /* Mezera mezi kartami patří ROZLOŽENÍ, ne jednotlivým kartám. Dřív si ji musel
+     nést každý modifikátor sám (.stats-card, .pool-card, .timer-card…) a karta bez
+     modifikátoru se tiše nalepila na sousedku — tak vznikl #nukiCard i dvě slepené
+     karty na saune. První karta okraj nedostane, o odsazení odshora se stará .page. */
+  /* `:not(.lock-panel)` je schválně: zámkový panel je při odemčeném domě
+     `display:none`, ale sousedem v DOMu zůstává. Karta hned za ním si tak drží
+     to, co měla dosud (na Bazénu 12 px z vlastní třídy, na Ovládání nic) a tahle
+     oprava nikam jinam nesahá. */
+  .page > .card:not(.lock-panel) + .card{margin-top:12px;}
   .nodes{
     width:100%;
     display:grid;
@@ -272,6 +281,9 @@
   .pool-card{
     margin-top:12px;
   }
+  /* Pravidlo pro mezeru výš je kvůli `:not()` specifičtější (0,4,0), takže by grafům
+     přebilo jejich 10 px. Tenhle pin má stejnou váhu a je později — 10 px zůstává. */
+  .page > .card:not(.lock-panel) + .card.graph-card{margin-top:10px;}
   .graph-card{
     margin-top:10px;
     padding:12px 12px 8px;
