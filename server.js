@@ -348,11 +348,23 @@ const AUTO_MODES = ['off', 'on', 'winter'];
 function autoRunning() { return state.autoMode !== 'off'; }
 function isWinter() { return state.autoMode === 'winter'; }
 
+// Stav relé pro appku i s tím, dokdy ho ještě drží časovač v relé. Bez `offBy` by
+// u nedostupného relé nebylo poznat, jestli ještě běží, nebo už dávno zhaslo.
+function devicePayload(key) {
+  const d = state.devices[key];
+  if (!d) return d;
+  const offBy = releDobehDo(key);
+  return offBy ? { ...d, offBy } : d;
+}
+function devicesPayload() {
+  return Object.fromEntries(Object.keys(state.devices).map(k => [k, devicePayload(k)]));
+}
+
 function snapshot() {
   pruneHistory();
   return {
     solax: state.solax,
-    devices: state.devices,
+    devices: devicesPayload(),
     poolPowerW: state.poolPowerW,
     poolPowerAt: state.poolPowerAt,
     poolForce: state.poolForce,
@@ -658,7 +670,7 @@ async function pollDevice(key) {
     }
   }
   noteRelayPoll(key);   // jen poller smí rozhodnout, jestli relé žije (viz checkSources)
-  broadcast('device', { key, status: state.devices[key] });
+  broadcast('device', { key, status: devicePayload(key) });
 }
 
 // Teplotní čidlo. Na rozdíl od relé se neukládá stav zapnutí — jen naměřené hodnoty.
@@ -944,8 +956,9 @@ function updateRuntimes() {
     state.runtime.wh = emptyWh();
   }
   for (const k of Object.keys(state.runtime.ms)) {
-    // Zamrzlý stav (mrtvý poller) by dobu běhu i pruh na časové ose natahoval donekonečna
-    if (state.devices[k] && state.devices[k].isOn === true && cerstve(state.devices[k].fetchedAt)) {
+    // Bez čerstvé pravdy z cloudu rozhoduje časovač v relé — viz releBezi. Zamrzlý
+    // stav by dobu běhu i pruh na časové ose natahoval donekonečna.
+    if (releBezi(k)) {
       state.runtime.ms[k] += dt;
       // Časová osa: prodloužíme běžící segment, nebo začneme nový
       const segs = state.timeline[k];
@@ -999,8 +1012,11 @@ function updateRuntimes() {
     const autoZeSite = Math.min(Math.max(0, wbW), importW);
     recordUsageDay(loadKw * 1000, importW - autoZeSite, dtH);
   }
-  const boiler = state.devices.shelly;
-  const b1W = (boiler && typeof boiler.powerW === 'number' && cerstve(boiler.fetchedAt)) ? boiler.powerW : 0;
+  // Čas dopočítat umíme (relé má napájení), příkon ne — kilowatthodiny se proto
+  // přičítají JEN ze živého měření. Bez `online` tady zmrzlý příkon z odpojeného
+  // relé přičítal watthodiny i po hodinách ticha.
+  const boiler = releZname('shelly') ? state.devices.shelly : null;
+  const b1W = (boiler && typeof boiler.powerW === 'number') ? boiler.powerW : 0;
   wh.b1 += Math.max(0, b1W) * dtH;
   const inf = state.infigy || {};
   const b2Kw = (typeof inf.hwPower === 'number' && cerstve(inf.fetchedAt)) ? inf.hwPower : 0;
@@ -1009,7 +1025,7 @@ function updateRuntimes() {
   // ale do grafu ne: rovná čára v nule by lhala, že okruh měřeně nic nebral)
   recordUsagePoint(
     (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) ? Math.max(0, state.poolPowerW) : null,
-    (boiler && typeof boiler.powerW === 'number' && cerstve(boiler.fetchedAt)) ? Math.max(0, boiler.powerW) : null,
+    (boiler && typeof boiler.powerW === 'number') ? Math.max(0, boiler.powerW) : null,
     (typeof inf.hwPower === 'number' && cerstve(inf.fetchedAt)) ? Math.max(0, inf.hwPower * 1000) : null
   );
 
@@ -1122,7 +1138,7 @@ function registerSetEndpoint(key) {
       const prev = state.devices[key] || {};
       state.devices[key] = { ...prev, online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       noteCmd(key, turn);
-      broadcast('device', { key, status: state.devices[key] });
+      broadcast('device', { key, status: devicePayload(key) });
       setManualHold(key);   // automatika to půl hodiny nepřebije
       // Vypnout bazén ručně a nechat ho +24 h za dvě minuty zase rozsvítit by bylo horší
       // než kdyby tlačítko nefungovalo vůbec — OFF je novější rozhodnutí, tak override padá
@@ -2159,6 +2175,30 @@ const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme
 const lastCmd = {};
 function noteCmd(key, turn) { lastCmd[key] = { turn, at: Date.now() }; }
 
+// ---------- Běží to relé teď? ----------
+// Odpojené relé cloud pořád obslouží: vrátí `online:false` a k tomu POSLEDNÍ ZNÁMÝ
+// stav, a razítko `fetchedAt` je přitom čerstvé (ptali jsme se právě teď). Brát to
+// jako pravdu znamenalo, že relé, které naposledy svítilo, si navěky připisovalo dobu
+// běhu a pruh na časové ose — solinátor si tak uměl propálit celý denní rozpočet
+// hodin, aniž by chloroval. Opačný extrém (spadlý dotaz → hned nula) je taky lež:
+// relé má napájení dál a doopravdy běží, dokud mu nedoběhne vlastní časovač.
+// Rozhoduje proto tvrdý časovač v relé: nejpozději RELAY_AUTO_OFF_MS po posledním
+// ÚSPĚŠNĚ odeslaném ON zhasne samo. `noteCmd` se volá až po úspěšném setShellyState,
+// takže `lastCmd` je přesně to „naposledy odesláno".
+function releZname(key) {
+  const d = state.devices[key];
+  return !!d && d.online === true && (d.isOn === true || d.isOn === false) && cerstve(d.fetchedAt);
+}
+// Dokdy nejpozději může relé běžet bez dalšího ON. 0 = nevíme o žádném ON.
+function releDobehDo(key) {
+  const cmd = lastCmd[key];
+  return cmd && cmd.turn === 'on' ? cmd.at + RELAY_AUTO_OFF_MS : 0;
+}
+function releBezi(key, at = Date.now()) {
+  if (releZname(key)) return state.devices[key].isOn === true;
+  return at < releDobehDo(key);
+}
+
 async function sendKeepalive() {
   for (const key of KEEPALIVE_KEYS) {
     const dev = DEVICES[key];
@@ -2617,7 +2657,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
       await setShellyState(dev.serverUri, dev.deviceId, turn);
       state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       noteCmd(key, turn);
-      broadcast('device', { key, status: state.devices[key] });
+      broadcast('device', { key, status: devicePayload(key) });
       logAutoSet(key, turn, reason);
       return true;
     } catch (err) {
@@ -3576,7 +3616,7 @@ async function actuateRelay(key, stateOn, reason) {
   const prev = state.devices[key] || {};
   state.devices[key] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
   noteCmd(key, stateOn ? 'on' : 'off');
-  broadcast('device', { key, status: state.devices[key] });
+  broadcast('device', { key, status: devicePayload(key) });
   setManualHold(key);   // časovač i asistent jsou tvoje rozhodnutí, ne automatika
   addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
   setTimeout(() => pollDevice(key), 1500);
@@ -5688,6 +5728,9 @@ function storeSnapshot() {
     wbAuto: state.wbAuto,
     tempAuto: state.tempAuto,
     manualHold: state.manualHold,
+    // Kdy naposledy které relé dostalo povel — po nasazení podle toho poznáme,
+    // jestli ho ještě drží jeho vlastní časovač (viz releBezi)
+    lastCmd,
     assistantLog: state.assistantLog,
     push: Array.from(pushSubscriptions.values())
   };
@@ -5708,6 +5751,15 @@ function storeApplyPrimo(p) {
       // Ruční zásah drží pár hodin; cokoli dál v budoucnu je poškozená záloha
       if (typeof k === 'string' && k.length <= 32 && Number.isFinite(v)
           && v > now && v <= now + 24 * 3600000) state.manualHold[k] = v;
+    }
+  }
+  if (p.lastCmd && typeof p.lastCmd === 'object') {
+    for (const [k, v] of Object.entries(p.lastCmd)) {
+      // Starší povel než časovač v relé už nic nedrží, budoucí je poškozená záloha
+      if (!DEVICES[k] || lastCmd[k]) continue;
+      if (!v || (v.turn !== 'on' && v.turn !== 'off')) continue;
+      if (!Number.isFinite(v.at) || v.at > now || v.at < now - RELAY_AUTO_OFF_MS) continue;
+      lastCmd[k] = { turn: v.turn, at: v.at };
     }
   }
   if (Array.isArray(p.assistantLog) && !state.assistantLog.length) {

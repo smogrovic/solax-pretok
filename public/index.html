@@ -2472,7 +2472,13 @@ function renderManualHold() {
     if (d && !deviceZname(d)) {
       // Nedostupnost má přednost: dokud nevíme, co relé dělá, je odklad podružný
       const naposled = d.isOn === true ? 'zapnuto' : (d.isOn === false ? 'vypnuto' : 'neznámý stav');
-      device.holdEl.textContent = `Nedostupné — naposledy ${naposled}`;
+      // Relé má vlastní časovač: nejpozději 15 min po posledním povelu ZAPNI zhasne
+      // samo. Server podle toho účtuje dobu běhu, ať je vidět, na čem to stojí.
+      const offBy = Number(d.offBy) || 0;
+      const casovac = offBy
+        ? (offBy > now ? `, samo se vypne v ${fmtSolTime(offBy)}` : ', už se vypnulo samo')
+        : '';
+      device.holdEl.textContent = `Nedostupné — naposledy ${naposled}${casovac}`;
     } else if ((key === 'pool' || key === 'solinator') && saunaBlokujeUi()) {
       // Sauna přebíjí i ruční zapnutí — jistič je přednější
       device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;

@@ -10,12 +10,15 @@ node test/wallbox.js                  # režim wallboxu (typ dne, hodiny, hyster
 node test/months.js                   # spotřeba po měsících (sauna, bazén, wallbox)
 node test/staticka.js                 # inline skript: nic se nepoužívá bez deklarace
 node test/usage.js                    # odkud šla spotřeba (dělení FVE/síť) a odběr okruhů
+node test/rele.js                     # „běží to relé?" podle časovače v relé
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
+node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí
 ./test/browser-run.sh test/browser-snapshot.js # ostrá applySnapshot: všechny série dojedou
 ./test/browser-run.sh test/browser-sauna.js    # stránka Sauna v headless Chromiu
 ./test/browser-run.sh test/browser-klima.js    # Klima bez dočasné karty čidel
+./test/browser-run.sh test/browser-rele.js     # hláška o samovypnutí u nedostupného relé
 ./test/browser-run.sh test/browser-fve.js      # panely grafu, odběr okruhů, karta spotřeby
 ./test/browser-run.sh test/browser-prehled.js  # odhad vs. skutečnost podle ranního odhadu
 ./test/browser-run.sh test/browser-logika.js   # Logika automatiky + nastavení mezí sauny

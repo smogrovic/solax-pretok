@@ -17,6 +17,9 @@ function build({ env = {}, state: st, kv = {} } = {}) {
   const volani = [];                 // co odešlo na „Upstash"
   const posty = [];                  // co se poslalo do vlastních /restore endpointů
   const timery = [];
+  const lastCmd = (st && st.__lastCmd) || {};
+  const DEVICES = { pool: {}, solinator: {}, shelly: {} };
+  const RELAY_AUTO_OFF_MS = 15 * 60 * 1000;
 
   const fakeFetch = async (url, init = {}) => {
     if (String(url).includes('127.0.0.1')) {
@@ -32,12 +35,14 @@ function build({ env = {}, state: st, kv = {} } = {}) {
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
-      nactenoFlag: () => storeLoaded };`
+      nactenoFlag: () => storeLoaded, lastCmd };`
   )(state, zlib, fakeFetch, pushSubscriptions, [], [], [],
     () => '12:00', () => {}, { log() {}, error() {} },
-    (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController);
+    (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
+    lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
 
   process.env = puvodni;
   return { api, state, kv, volani, posty, pushSubscriptions, timery };
@@ -103,6 +108,7 @@ nadpis('2) Balení');
   check('meze sauny taky', snap.posts['/api/sauna/limits/restore'].holdMin, 45);
   check('časovače mají razítko', typeof snap.posts['/api/timers/restore'].savedAt, 'number');
   check('přepínač wallboxu jde mimo endpointy', snap.primo.wbAuto, false);
+  check('poslední povely relé taky', typeof snap.primo.lastCmd, 'object');
 }
 {
   const h = build({ env: UPSTASH });
@@ -192,6 +198,31 @@ nadpis('4) Obnova');
 }
 
 nadpis('5) Přímé hodnoty');
+{
+  // Po nasazení server neví, kdy naposledy poslal ON — bez toho by odpojené relé
+  // hned počítal jako vypnuté, i když ho ještě drží jeho vlastní časovač
+  const h = build({ env: UPSTASH, state: prazdnyStav() });
+  const now = Date.now();
+  h.api.storeApplyPrimo({ lastCmd: {
+    pool: { turn: 'on', at: now - 60000 },
+    solinator: { turn: 'off', at: now - 60000 },
+    shelly: { turn: 'on', at: now - 60 * 60000 },     // starší než časovač
+    cizi: { turn: 'on', at: now - 1000 },
+    budouci: { turn: 'on', at: now + 60000 }
+  } });
+  check('čerstvý ON se vrátí', h.api.lastCmd.pool.turn, 'on');
+  check('  i s časem', h.api.lastCmd.pool.at, now - 60000);
+  check('OFF se vrátí taky', h.api.lastCmd.solinator.turn, 'off');
+  check('povel starší než časovač se zahodí', 'shelly' in h.api.lastCmd, false);
+  check('neznámé relé se zahodí', 'cizi' in h.api.lastCmd, false);
+  check('povel z budoucnosti taky', 'budouci' in h.api.lastCmd, false);
+}
+{
+  const h = build({ env: UPSTASH, state: prazdnyStav() });
+  h.api.lastCmd.pool = { turn: 'off', at: Date.now() };
+  h.api.storeApplyPrimo({ lastCmd: { pool: { turn: 'on', at: Date.now() - 1000 } } });
+  check('živý povel záloha nepřebije', h.api.lastCmd.pool.turn, 'off');
+}
 {
   const h = build({ env: UPSTASH, state: prazdnyStav() });
   const now = Date.now();
