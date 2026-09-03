@@ -26,10 +26,14 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   const slides = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
 
+  // Pořadí panelů v grafu FVE hlídá test/browser-fve.js (má tam blíž k ostatním
+  // kontrolám grafu), tady zůstává jen to, že wallbox v tom grafu vůbec je
   OUT.push('\\n2) Wallbox v grafu na FVE');
-  check('panelů je pět', FVE_PANELS.length, 5);
-  check('  a wallbox je pod baterií', FVE_PANELS.map(p => p.label).join(' · '),
-    'Výkon FVE (kW) · Baterie (%) · Wallbox (kW) · Přetok (kW) · Bojlery (°C)');
+  check('wallbox má v grafu svůj panel',
+    FVE_PANELS.some(p => p.label === 'Wallbox (kW)' && p.draw === panelWbPower), true);
+  check('  a je hned pod baterií',
+    FVE_PANELS.findIndex(p => p.label === 'Wallbox (kW)')
+    - FVE_PANELS.findIndex(p => p.label === 'Baterie (%)'), 1);
 
   OUT.push('\\n3) Měsíce: jen uzavřené');
   const d = new Date();

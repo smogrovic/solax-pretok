@@ -9,12 +9,15 @@ node test/sauna.js                    # logika sauny (blokace, notifikace, denn�
 node test/wallbox.js                  # režim wallboxu (typ dne, hodiny, hystereze)
 node test/months.js                   # spotřeba po měsících (sauna, bazén, wallbox)
 node test/staticka.js                 # inline skript: nic se nepoužívá bez deklarace
+node test/usage.js                    # odkud šla spotřeba (dělení FVE/síť) a odběr okruhů
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
 ./test/browser-run.sh test/browser-snapshot.js # ostrá applySnapshot: všechny série dojedou
 ./test/browser-run.sh test/browser-sauna.js    # stránka Sauna v headless Chromiu
 ./test/browser-run.sh test/browser-klima.js    # Klima bez dočasné karty čidel
+./test/browser-run.sh test/browser-fve.js      # panely grafu, odběr okruhů, karta spotřeby
+./test/browser-run.sh test/browser-prehled.js  # odhad vs. skutečnost podle ranního odhadu
 ./test/browser-run.sh test/browser-logika.js   # Logika automatiky + nastavení mezí sauny
 ./test/browser-run.sh test/browser-wallbox.js  # přepínač, nápověda a ruční režimy wallboxu
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
@@ -36,3 +39,8 @@ odřízl deklaraci `wbManualBtnsEl`, ale její použití v `renderWallbox()` zů
 `applySnapshot()` na tom padala uprostřed, takže se tiše nenačetla polovina dat
 (historie wallboxu, bojlerů, režimů). Statická sada tenhle druh chyby najde bez
 prohlížeče, prohlížečová ověří, že celý snapshot doopravdy dojede.
+
+Kreslení do canvasu se nedá zkontrolovat přes DOM, takže `browser-fve.js` si
+podstrčí `CanvasRenderingContext2D.prototype.stroke` a sbírá barvy tahů. Každá
+čára v grafu má vlastní barvu, takže je podle ní poznat, že se doopravdy kreslí —
+jinak by zmizení celé řady žádná sada nezachytila.

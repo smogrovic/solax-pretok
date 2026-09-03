@@ -306,18 +306,6 @@
     height:150px;
     display:block;
   }
-  .pv-tabs{display:flex;gap:6px;margin-top:8px;width:100%;}
-  .pv-tab{
-    flex:1;
-    border:none;
-    border-radius:10px;
-    padding:8px 4px;
-    font-size:12px;
-    font-weight:700;
-    color:var(--grey-text);
-    background:rgba(44,62,80,0.06);
-  }
-  .pv-tab.active{background:rgba(245,147,61,0.16);color:var(--orange-dark);}
   .pv-avg{
     font-size:12.5px;
     color:var(--grey-text);
@@ -1679,6 +1667,12 @@
         <div class="timeline-legend" id="boilerLegend"></div>
       </div>
 
+      <div class="card stats-card">
+        <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
+        <div class="wbsrc-list" id="usageSrcList"></div>
+        <div class="wbsrc-note">Celý barák kromě auta: dům, oba bojlery, bazén i sauna. Ze sítě se nejdřív započítá auto (karta na Wallboxu), na spotřebu jde zbytek — obojí dohromady dá celý odběr ze sítě.</div>
+      </div>
+
       <div class="meta">
         <div class="updated" id="updatedAt">Načítám…</div>
         <div class="updated" id="weatherInfo"></div>
@@ -2126,10 +2120,6 @@
 
       <div class="card stats-card">
         <div class="graph-title">Odhad vs. skutečnost (10 dní)</div>
-        <div class="pv-tabs" id="pvTabs">
-          <button class="pv-tab active" data-fc="fcAm">Ranní odhad</button>
-          <button class="pv-tab" data-fc="fcPm">Večerní odhad</button>
-        </div>
         <div class="pv-avg" id="pvAvg"></div>
         <canvas id="pvChart"></canvas>
         <div class="timeline-legend" id="pvLegend"></div>
@@ -2896,6 +2886,7 @@ const FVE_PANELS = [
   { h: 60, label: 'Baterie (%)', draw: panelSoc },
   { h: 60, label: 'Wallbox (kW)', draw: panelWbPower },
   { h: 72, label: 'Přetok (kW)', draw: panelFeedin },
+  { h: 60, label: 'Bazén a bojlery (kW)', draw: panelUsage },
   { h: 86, label: 'Bojlery (°C)', draw: panelBoilers }
 ];
 
@@ -2956,6 +2947,38 @@ function panelFeedin(ctx, g) {
   g.clip(() => drawSmoothArea(ctx, pts, p => p.kw, g.x, y, {
     half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
   }));
+}
+
+// Odběr tří okruhů v jednom panelu — stejně jako panel teplot kreslí dva bojlery.
+// Osa se přizpůsobí špičce (bojler 2 kW, bazén stovky W), ať je vidět i ten menší.
+function panelUsage(ctx, g) {
+  const pts = panPts(usageHistory, g);
+  const je = k => pts.some(p => typeof p[k] === 'number');
+  if (!['pool', 'b1', 'b2'].some(je)) return panPrazdny(ctx, g);
+  let max = 0.5;
+  for (const p of pts) {
+    for (const k of ['pool', 'b1', 'b2']) {
+      if (typeof p[k] === 'number' && p[k] / 1000 > max) max = p[k] / 1000;
+    }
+  }
+  const y = panY(g, 0, max);
+  panNula(ctx, g, y(0));
+  panOsaY(ctx, g, [[max, panCis(max)], [0, '0']], y);
+  // Vzorkuje se po 2 min, díra nad 10 min znamená, že data chybí — nepřemosťuje se
+  g.clip(() => {
+    for (const k of ['pool', 'b1', 'b2']) {
+      const raw = pts.filter(p => typeof p[k] === 'number').map(p => ({ t: p.t, v: p[k] / 1000 }));
+      for (const seg of splitGaps(raw, 10 * 60 * 1000)) {
+        if (seg.length < 2) continue;
+        ctx.strokeStyle = BOILER_COLORS[k];
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        drawSmoothPath(ctx, smoothSeries(seg, 1).map(q => ({ x: g.x(q.t), y: y(q.v) })));
+        ctx.stroke();
+      }
+    }
+  });
 }
 
 function panelBoilers(ctx, g) {
@@ -5471,8 +5494,10 @@ function integrateWbKwh(pts) {
 // Data počítá server ve stejném cyklu jako denní kWh; tady je jen zobrazujeme.
 // Lokální záloha přežije deploy stejně jako u odhadu výroby.
 const wbSrcListEl = document.getElementById('wbSrcList');
+const usageSrcListEl = document.getElementById('usageSrcList');
 const WB_SRC_DNU = 7;
 let wbDaysData = [];
+let usageDaysData = [];
 
 function saveWbDaysLocal() {
   try { localStorage.setItem('wbDays', JSON.stringify(wbDaysData)); } catch {}
@@ -5493,6 +5518,29 @@ function mergeWbDays(a, b) {
     map.set(r.d, cur);
   }
   return [...map.values()].sort((x, y) => x.d.localeCompare(y.d)).slice(-14);
+}
+
+function saveUsageDaysLocal() {
+  try { localStorage.setItem('usageDays', JSON.stringify(usageDaysData)); } catch {}
+}
+function loadUsageDaysLocal() {
+  try { return JSON.parse(localStorage.getItem('usageDays') || '[]') || []; } catch { return []; }
+}
+
+async function maybeRestoreUsageDays(serverDays, localDays) {
+  if (!localDays || !localDays.length) return;
+  const srv = new Map((serverDays || []).map(r => [r.d, r]));
+  const need = localDays.some(r => {
+    const s = srv.get(r.d);
+    return !s || (r.grid || 0) > (s.grid || 0) || (r.pv || 0) > (s.pv || 0);
+  });
+  if (!need) return;
+  try {
+    await fetch('/api/usage-days/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageDays: localDays })
+    });
+  } catch {}
 }
 
 async function maybeRestoreWbDays(serverDays, localDays) {
@@ -5517,17 +5565,19 @@ function wbSrcDenNadpis(dateStr) {
   return denNadpis(new Date(r, m - 1, d, 12).getTime());
 }
 
-function renderWbSrc() {
-  if (!wbSrcListEl) return;
+// Karta „odkud to šlo": den po dni pruh ze sítě / z FVE a součet pod tím.
+// Sdílí ji wallbox i spotřeba baráku — liší se jen data a dvě hlášky.
+function renderSrcKarta(el, dnyData, texty) {
+  if (!el) return;
   const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
-  // Posledních sedm dní včetně dneška — i ty, kdy se nenabíjelo
+  // Posledních sedm dní včetně dneška — i ty, kdy se nic nedělo
   const dny = [];
   for (let i = 0; i < WB_SRC_DNU; i++) {
     const d = new Date();
     d.setHours(12, 0, 0, 0);
     d.setDate(d.getDate() - i);
     const klic = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    dny.push(wbDaysData.find(r => r.d === klic) || { d: klic, grid: 0, pv: 0 });
+    dny.push((dnyData || []).find(r => r.d === klic) || { d: klic, grid: 0, pv: 0 });
   }
   const frag = document.createDocumentFragment();
   const radek = (popis, grid, pv, celkovy) => {
@@ -5570,7 +5620,7 @@ function renderWbSrc() {
     } else {
       const prazdno = document.createElement('div');
       prazdno.className = 'wbsrc-empty';
-      prazdno.textContent = celkovy ? 'zatím se nenabíjelo' : 'nenabíjelo se';
+      prazdno.textContent = celkovy ? texty.prazdnoCelkem : texty.prazdno;
       row.appendChild(prazdno);
     }
     frag.appendChild(row);
@@ -5581,8 +5631,18 @@ function renderWbSrc() {
     dny.reduce((a, r) => a + (r.grid || 0), 0),
     dny.reduce((a, r) => a + (r.pv || 0), 0), true);
 
-  wbSrcListEl.textContent = '';
-  wbSrcListEl.appendChild(frag);
+  el.textContent = '';
+  el.appendChild(frag);
+}
+
+function renderWbSrc() {
+  renderSrcKarta(wbSrcListEl, wbDaysData,
+    { prazdno: 'nenabíjelo se', prazdnoCelkem: 'zatím se nenabíjelo' });
+}
+
+function renderUsageSrc() {
+  renderSrcKarta(usageSrcListEl, usageDaysData,
+    { prazdno: 'bez dat', prazdnoCelkem: 'zatím bez dat' });
 }
 
 // "Wallbox celkem" na Přehledu = nabito dnes (od půlnoci) v kWh
@@ -6414,7 +6474,8 @@ function renderBoilerPower() {
 }
 
 // Barvy a legenda bojlerů (panel v grafu na stránce FVE)
-const BOILER_COLORS = { b1: '#f5933d', b2: '#3498db' };
+// Bojlery mají v obou panelech (kW i °C) tutéž barvu — jedna legenda pak platí pro oba
+const BOILER_COLORS = { pool: '#16a085', b1: '#f5933d', b2: '#3498db' };
 const boilerLegendEl = document.getElementById('boilerLegend');
 let boilerHistory = [];
 
@@ -6453,10 +6514,47 @@ async function maybeRestoreBoilerHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
+// ---------- Odběr okruhů (bazén, oba bojlery) — panel v grafu na FVE ----------
+let usageHistory = [];
+
+// Prořeďuje se podle SOUČTU okruhů, ať v kbelíku zůstane chvíle největšího odběru
+const usageSoucet = p => (p.pool || 0) + (p.b1 || 0) + (p.b2 || 0);
+const PICK_MAX_USAGE = (a, b) => (usageSoucet(b) > usageSoucet(a) ? b : a);
+function pruneUsage(arr) {
+  const cutoff = Date.now() - HIST_MAX_AGE_MS;
+  return thinPoints((arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff), PICK_MAX_USAGE);
+}
+function saveUsageHistoryLocal() {
+  try { localStorage.setItem('usageHistory', JSON.stringify(pruneUsage(usageHistory))); } catch {}
+}
+function loadUsageHistoryLocal() {
+  try { return pruneUsage(JSON.parse(localStorage.getItem('usageHistory') || '[]')); } catch { return []; }
+}
+function mergeUsage(a, b) {
+  const all = pruneUsage((a || []).concat(b || []).sort((x, y) => x.t - y.t));
+  const out = [];
+  for (const p of all) {
+    if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
+  }
+  return out;
+}
+async function maybeRestoreUsageHistoryToServer(serverHist, localHist) {
+  if (!localHist.length) return;
+  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
+  const older = localHist.filter(p => p.t < serverOldest - 60000);
+  if (older.length < 2) return;
+  try {
+    await fetch('/api/usage-history/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: older })
+    });
+  } catch {}
+}
+
 function renderBoilerLegend() {
   if (!boilerLegendEl) return;
   boilerLegendEl.textContent = '';
-  for (const [key, label] of [['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
+  for (const [key, label] of [['pool', 'Bazén'], ['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
     const span = document.createElement('span');
     const dot = document.createElement('i');
     dot.style.background = BOILER_COLORS[key];
@@ -6550,9 +6648,11 @@ const PV_DAYS_SHOWN = 10;
 const pvChartCanvas = document.getElementById('pvChart');
 const pvLegendEl = document.getElementById('pvLegend');
 const pvAvgEl = document.getElementById('pvAvg');
-const pvTabsEl = document.getElementById('pvTabs');
 let pvDaysData = [];
-let pvForecastKey = 'fcAm'; // 'fcAm' = ranní odhad, 'fcPm' = večerní
+// Porovnává se RANNÍ odhad (první hodnota po 7:00). Večerní se na serveru dál sbírá,
+// ale do grafu nepatří: do večera se stáhne k tomu, co se opravdu vyrobilo, takže by
+// „odhad vs. skutečnost" vždycky vypadalo skvěle a neřeklo nic. Podle ranního navíc
+// celý den jede automatika (silný/slabý den).
 
 function savePvDaysLocal() {
   try { localStorage.setItem('pvDays', JSON.stringify(pvDaysData)); } catch {}
@@ -6611,10 +6711,6 @@ function pvBar(ctx, x, yTop, w, yBase, color) {
 }
 
 function renderPvChart() {
-  if (pvTabsEl) {
-    pvTabsEl.querySelectorAll('.pv-tab').forEach(t =>
-      t.classList.toggle('active', t.dataset.fc === pvForecastKey));
-  }
   if (!pvChartCanvas) return;
   const ctx = pvChartCanvas.getContext('2d');
   const w = pvChartCanvas.clientWidth || 320;
@@ -6631,7 +6727,7 @@ function renderPvChart() {
   // Legenda (u dvou sérií povinná)
   if (pvLegendEl) {
     pvLegendEl.textContent = '';
-    for (const [color, label] of [[PV_COLORS.fc, 'Odhad (Infigy)'], [PV_COLORS.act, 'Skutečnost (Solax)']]) {
+    for (const [color, label] of [[PV_COLORS.fc, 'Ranní odhad (Infigy)'], [PV_COLORS.act, 'Skutečnost (Solax)']]) {
       const span = document.createElement('span');
       const dot = document.createElement('i');
       dot.style.background = color;
@@ -6643,7 +6739,7 @@ function renderPvChart() {
 
   // Jen dny, kde máme obě čísla — ať graf nemá díry
   const days = (pvDaysData || [])
-    .filter(r => typeof r[pvForecastKey] === 'number' && r[pvForecastKey] > 0 && typeof r.actual === 'number')
+    .filter(r => typeof r.fcAm === 'number' && r.fcAm > 0 && typeof r.actual === 'number')
     .slice(-PV_DAYS_SHOWN);
 
   if (!days.length) {
@@ -6656,7 +6752,7 @@ function renderPvChart() {
   }
 
   // Průměr: kolik % odhadu se skutečně vyrobilo
-  const pcts = days.map(r => (r.actual / r[pvForecastKey]) * 100);
+  const pcts = days.map(r => (r.actual / r.fcAm) * 100);
   const avg = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
   if (pvAvgEl) {
     pvAvgEl.innerHTML = `Průměrně vyrobeno <b>${avg} %</b> odhadu`
@@ -6665,7 +6761,7 @@ function renderPvChart() {
 
   const padL = 28, padR = 6, padT = 8, padB = 30;
   const baseY = h - padB;
-  const max = Math.max(...days.map(r => Math.max(r[pvForecastKey], r.actual))) * 1.1 || 1;
+  const max = Math.max(...days.map(r => Math.max(r.fcAm, r.actual))) * 1.1 || 1;
   const y = v => baseY - (v / max) * (baseY - padT);
 
   // Recesivní mřížka + popisky osy y (kWh) — jedna osa pro obě série
@@ -6682,7 +6778,7 @@ function renderPvChart() {
   const barW = Math.min(11, Math.max(5, (slotW - 6) / 2));
   days.forEach((r, i) => {
     const cx = padL + slotW * i + slotW / 2;
-    const fcV = r[pvForecastKey];
+    const fcV = r.fcAm;
     // 2px mezera mezi dvojicí sloupců
     pvBar(ctx, cx - barW - 1, y(fcV), barW, baseY, PV_COLORS.fc);
     pvBar(ctx, cx + 1, y(r.actual), barW, baseY, PV_COLORS.act);
@@ -6701,11 +6797,6 @@ function renderPvChart() {
   });
 }
 
-if (pvTabsEl) {
-  for (const tab of pvTabsEl.querySelectorAll('.pv-tab')) {
-    tab.addEventListener('click', () => { pvForecastKey = tab.dataset.fc; renderPvChart(); });
-  }
-}
 window.addEventListener('resize', renderPvChart);
 
 // ---------- SSE stream — živé aktualizace ze serveru ----------
@@ -6890,15 +6981,28 @@ function applySnapshot(snap) {
   bezpecne(renderWbSrc);
   saveWbDaysLocal();
   maybeRestoreWbDays(serverWbDays, localWbDays);
+  // Odkud šla spotřeba baráku (kromě auta) — stejné slučování jako u wallboxu
+  const serverUsageDays = snap.usageDays || [];
+  const localUsageDays = loadUsageDaysLocal();
+  usageDaysData = mergeWbDays(serverUsageDays, localUsageDays);
+  bezpecne(renderUsageSrc);
+  saveUsageDaysLocal();
+  maybeRestoreUsageDays(serverUsageDays, localUsageDays);
   bezpecne(() => applyHomeFlags(snap));
   bezpecne(() => applyInfigyFlags(snap));
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
   const serverBoiler = snap.boilerHistory || [];
   const localBoiler = loadBoilerHistoryLocal();
   boilerHistory = mergeByTime(serverBoiler, localBoiler);
+  // Odběr okruhů do stejného panelu grafu — kreslí se až po obojím
+  const serverUsage = snap.usageHistory || [];
+  const localUsage = loadUsageHistoryLocal();
+  usageHistory = mergeUsage(serverUsage, localUsage);
   bezpecne(renderFveChart);
   saveBoilerHistoryLocal();
+  saveUsageHistoryLocal();
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
+  maybeRestoreUsageHistoryToServer(serverUsage, localUsage);
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
   relayTimersData = snap.relayTimers || [];
@@ -7126,6 +7230,18 @@ function connectStream() {
     else if (d.point) boilerHistory = mergeByTime(boilerHistory, [d.point]);
     renderFveChart();
     saveBoilerHistoryLocal();
+  });
+  es.addEventListener('usageHistory', e => {
+    const d = JSON.parse(e.data);
+    if (Array.isArray(d.history)) usageHistory = mergeUsage(d.history, usageHistory);
+    else if (d.point) usageHistory = mergeUsage(usageHistory, [d.point]);
+    renderFveChart();
+    saveUsageHistoryLocal();
+  });
+  es.addEventListener('usageDays', e => {
+    usageDaysData = mergeWbDays(JSON.parse(e.data).usageDays || [], usageDaysData);
+    renderUsageSrc();
+    saveUsageDaysLocal();
   });
   es.addEventListener('wallboxHistory', e => {
     const d = JSON.parse(e.data);

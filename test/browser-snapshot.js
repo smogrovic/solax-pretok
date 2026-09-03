@@ -52,6 +52,8 @@ const SNAP = {
   months: [{ m: '2026-07', sauna: 40000, pool: 12000, wb: 300000 }],
   pvDays: [{ d: '2026-08-30', fcAm: 20, fcPm: 22, actual: 21 }],
   wbDays: [{ d: '2026-08-30', grid: 100, pv: 900 }],
+  usageDays: [{ d: new Date().toISOString().slice(0, 10), grid: 4000, pv: 9000 }],
+  usageHistory: rada(26 * 3600000, 2 * MIN, t => ({ t, pool: 420, b1: 2000, b2: null })),
   solinator: { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   solinatorPlan: null, assistantLog: [{ t: T - MIN, text: 'zapnul jsem bazén' }],
   blindTimers: [], relayTimers: [], airconTimers: [],
@@ -75,12 +77,16 @@ setTimeout(() => {
   check('dny sauny se načetly', saunaDaysData.length, 1);
   check('odhad výroby se načetl', pvDaysData.length, 1);
   check('odkud auto bralo se načetlo', wbDaysData.length, 1);
+  check('odběr okruhů se načetl', usageHistory.length > 100, true);
+  check('odkud šla spotřeba se načetla', usageDaysData.length, 1);
   check('doba běhu se načetla', runtimeData && runtimeData.date === SNAP.runtime.date, true);
 
   // A že se to i vykreslilo
   check('graf FVE má výšku', fveChartCanvas.style.height !== '', true);
   check('graf wallboxu má výšku', wbChartCanvas.style.height !== '', true);
   check('součty pod grafem FVE jsou vyplněné', /kWh/.test(document.getElementById('feedinTotal').textContent), true);
+  check('karta spotřeby má 7 dní + součet',
+    document.querySelectorAll('#usageSrcList .wbsrc-row').length, 8);
 
   // bezpecne() smí spolknout jen jeden render, zbytek musí doběhnout
   RENDER_CHYBY.length = 0;
