@@ -39,6 +39,57 @@ setTimeout(() => {
   for (let t = T - 6 * 3600000; t <= T; t += 10 * 60000) airconHistory.push({ t, temps: { g1: 24 }, sens: { obyvak: 23 } });
   renderAirconChart();
   check('graf teplot pořád kreslí', document.getElementById('airconChart').height > 0, true);
+
+  // ---- nástěnná čidla ve všech čtyřech pokojích ----
+  const POKOJE = [['obyvak', 'Obývák', 22.5], ['loznice', 'Ložnice', 21.2],
+                  ['elenka', 'Elenka', 23.1], ['miky', 'Miky', 23.8]];
+  sensorsData = {};
+  for (const [k, , t] of POKOJE) {
+    sensorsData[k] = { tempC: t, humidity: 45, battery: 90, online: true, reportedAt: T };
+  }
+  airconData = { devices: POKOJE.map(([k, label], i) =>
+    ({ guid: 'g' + i, name: 'Klima ' + label, on: true, mode: 'cool', insideTemp: 25 + i, targetC: 23 })),
+    error: null };
+  tempAutoData = { obyvak: true, loznice: true, elenka: true, miky: true };
+  renderTempAuto();
+
+  const radky = Array.from(document.querySelectorAll('#tempAutoListOwn .tempauto-row, #tempAutoList .tempauto-row'));
+  check('v seznamu jsou všechny čtyři pokoje', radky.length, 4);
+  // Tučně je to, podle čeho se rozhoduje (čidlo), vedle toho hodnota z klimatizace
+  const tucne = Array.from(document.querySelectorAll('.tempauto-name b.tempauto-temp')).map(b => b.textContent);
+  check('každý pokoj ukazuje tučně teplotu z čidla', tucne.length, 4);
+  check('  a jsou to hodnoty z čidel', tucne.join(' '), '22,5 °C 21,2 °C 23,1 °C 23,8 °C');
+  const vedle = Array.from(document.querySelectorAll('.tempauto-temp-alt')).map(b => b.textContent);
+  check('vedle nich je hodnota z klimatizace', vedle.join(' '), '25,0 °C 26,0 °C 27,0 °C 28,0 °C');
+
+  // Jezdce: obývák vlastní, tři ložnice pořád jeden společný
+  check('obývák má svůj jezdec', !!document.getElementById('tempAutoOnSliderObyvak'), true);
+  check('  a zbytek jeden společný', !!document.getElementById('tempAutoOnSlider'), true);
+  check('  víc jezdců nepřibylo', document.querySelectorAll('.tempauto-card input[type=range]').length, 2);
+  check('u vlastního jezdce je jen obývák',
+    document.querySelectorAll('#tempAutoListOwn .tempauto-row').length, 1);
+  check('  u společného tři pokoje',
+    document.querySelectorAll('#tempAutoList .tempauto-row').length, 3);
+
+  // Graf: ke každé jednotce plná (klima) i čárkovaná (čidlo) řada
+  airconHistory = [];
+  for (let t = T - 6 * 3600000; t <= T; t += 10 * 60000) {
+    airconHistory.push({ t,
+      temps: { g0: 25, g1: 26, g2: 27, g3: 28 },
+      sens: { obyvak: 22.5, loznice: 21.2, elenka: 23.1, miky: 23.8 } });
+  }
+  const rady = airconChartSeries(pruneAirconHistory(airconHistory));
+  check('graf má osm řad', rady.length, 8);
+  check('  čtyři z nich jsou čidla', rady.filter(r => r.dashed).length, 4);
+  check('  a jsou popsané', rady.filter(r => r.dashed).map(r => r.label).join(', '),
+    'Obývák (čidlo), Ložnice (čidlo), Elenka (čidlo), Miky (čidlo)');
+  check('  klimatizační řady jsou označené taky',
+    rady.filter(r => !r.dashed).every(r => / \\(klima\\)$/.test(r.label)), true);
+  check('  a čidlo má barvu své jednotky',
+    rady[0].color === rady[1].color && rady[2].color === rady[3].color, true);
+  renderAirconChart();
+  const legenda = document.querySelectorAll('#airconChartLegend span');
+  check('legenda vypíše všech osm', legenda.length, 8);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

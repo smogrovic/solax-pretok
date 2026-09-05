@@ -57,8 +57,13 @@ const LIGHT_NOCNI_ID          = 'dcda0cea454c';
 
 // Teplotní čidla (Shelly H&T) — jen ke čtení, proto stranou od DEVICES: nemají ON/OFF
 // endpointy ani stav relé. Klíč pokoje je stejný jako v TEMP_AUTO_RULES.
+// Všechny čtyři pokoje mají nástěnné Shelly H&T G3. Nástěnné čidlo je jediný zdroj,
+// podle kterého se pokoj řídí — čidlo v klimatizaci visí u stropu a ukazuje o ~2 °C víc.
 const TEMP_SENSORS = {
-  obyvak: { deviceId: process.env.SHELLY_TEMP_OBYVAK_ID || '08927250b96c', serverUri: SHELLY_SERVER_URI }
+  obyvak:  { deviceId: process.env.SHELLY_TEMP_OBYVAK_ID  || '08927250b96c', serverUri: SHELLY_SERVER_URI },
+  loznice: { deviceId: process.env.SHELLY_TEMP_LOZNICE_ID || '70af09e40198', serverUri: SHELLY_SERVER_URI },
+  elenka:  { deviceId: process.env.SHELLY_TEMP_ELENKA_ID  || '9070694e6010', serverUri: SHELLY_SERVER_URI },
+  miky:    { deviceId: process.env.SHELLY_TEMP_MIKY_ID    || '9070695ad278', serverUri: SHELLY_SERVER_URI }
 };
 // Jak dlouhé ticho čidla stojí za zmínku v logu. NEurčuje platnost dat — podle čidla se
 // jede dál i po delším tichu, protože ticho znamená stabilní teplotu.
