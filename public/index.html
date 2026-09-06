@@ -910,8 +910,8 @@
     line-height:1.4;
     margin-bottom:12px;
   }
-  /* width:100% je nutné — .card má align-items:center, takže bez toho je seznam široký
-     jen podle obsahu a řádek s dvěma teplotami (obývák) odsune svůj přepínač doprava */
+  /* width:100% je nutné — .card má align-items:center, takže bez toho by byl seznam
+     široký jen podle obsahu a delší název pokoje by odsunul svůj přepínač doprava */
   .tempauto-list{
     width:100%;
     display:flex;
@@ -1003,7 +1003,6 @@
   }
   /* Hodnota z čidla (tučně) je ta rozhodující; z klimatizace je vedle jen na porovnání */
   b.tempauto-temp{color:var(--navy);font-weight:800;}
-  .tempauto-temp-alt{opacity:0.65;}
 
   /* DOČASNÉ: karta s daty čidel na porovnání */
   .toggle-switch{
@@ -4562,28 +4561,15 @@ async function maybeRestoreAirconHistoryToServer(serverHist, localHist) {
 
 // Řady do grafu: jedna na klimatizaci + navíc Shelly čidlo tam, kde je.
 // Čidlo má stejnou barvu jako pokoj, ale čárkovaně — je to tentýž pokoj, jen jiný zdroj.
+// Jedna čára na pokoj, a jen z nástěnného čidla — podle něj se pokoj řídí. Hodnota
+// z jednotky se nekreslí: visela u stropu a osm křivek přes sebe stejně nešlo číst.
 function airconChartSeries(pts) {
-  const devs = (airconData && airconData.devices) || [];
-  const out = [];
-  devs.forEach((d, i) => {
-    const color = TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length];
-    const short = (d.name || '').replace(/klimatizace|klima/ig, '').replace(/\s+/g, ' ').trim() || d.name;
-    const room = TEMP_AUTO_ROOMS.find(r => (d.name || '').toLowerCase().includes(r.label.toLowerCase()));
-    const hasSensor = room && pts.some(p => p.sens && typeof p.sens[room.key] === 'number');
-    out.push({
-      label: hasSensor ? short + ' (klima)' : short,
-      color, dashed: false,
-      data: pts.filter(p => p.temps && typeof p.temps[d.guid] === 'number').map(p => ({ t: p.t, v: p.temps[d.guid] }))
-    });
-    if (hasSensor) {
-      out.push({
-        label: short + ' (čidlo)',
-        color, dashed: true,
-        data: pts.filter(p => typeof p.sens[room.key] === 'number').map(p => ({ t: p.t, v: p.sens[room.key] }))
-      });
-    }
-  });
-  return out.filter(s => s.data.length);
+  return TEMP_AUTO_ROOMS.map(room => ({
+    label: room.label,
+    color: ROOM_COLORS[room.key],
+    data: pts.filter(p => p.sens && typeof p.sens[room.key] === 'number')
+      .map(p => ({ t: p.t, v: p.sens[room.key] }))
+  })).filter(s => s.data.length);
 }
 
 function renderAirconChart() {
@@ -4610,8 +4596,6 @@ function renderAirconChart() {
       const span = document.createElement('span');
       const dot = document.createElement('i');
       dot.style.background = s.color;
-      // Čárkovaná řada má i v legendě „prázdný" puntík, ať se pozná bez barvy
-      if (s.dashed) { dot.style.background = 'transparent'; dot.style.border = '2px solid ' + s.color; }
       span.appendChild(dot);
       span.appendChild(document.createTextNode(s.label));
       airconChartLegendEl.appendChild(span);
@@ -4659,13 +4643,11 @@ function renderAirconChart() {
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.setLineDash(s.dashed ? [5, 4] : []);
     for (const seg of splitGaps(s.data, 25 * 60 * 1000)) {
       if (seg.length < 2) continue;
       drawSmoothPath(ctx, smoothSeries(seg, 2).map(p => ({ x: x(p.t), y: y(p.v) })));
       ctx.stroke();
     }
-    ctx.setLineDash([]);
   }
 
   // Poslední hodnota u konce křivky — nahrazuje bublinu při najetí a zároveň dává
@@ -4690,7 +4672,7 @@ function renderAirconChart() {
 
 window.addEventListener('resize', renderAirconChart);
 
-// ---------- DOČASNÉ: porovnání čidla s klimatizací (celý blok půjde smazat) ----------
+// ---------- Klimatizace: karty jednotek a jejich ovládání ----------
 let airconEnabled = null;
 
 const AIRCON_MODE_LABELS = { auto: 'Auto', dry: 'Vysoušení', cool: 'Chlazení', heat: 'Topení', fan: 'Ventilátor' };
@@ -4881,14 +4863,14 @@ function renderAircon() {
     if (d.power === null || d.power === undefined) {
       pos.textContent = 'stav neznámý';
     } else {
-      // Teplota z Shelly čidla je tučně hned vedle té z klimatizace, ať jdou porovnat
+      // Jediná teplota, kterou má smysl ukazovat, je ta z nástěnného čidla — podle ní
+      // se pokoj řídí. Hodnota z jednotky visí u stropu a jen mátla, proto je pryč.
       const sens = sensorForDevice(d.name);
       const nodes = [];
       const txt = t => nodes.push(document.createTextNode(t));
-      if (typeof d.insideTemp === 'number') txt('uvnitř ' + formatTempC(d.insideTemp));
       if (sens && typeof sens.tempC === 'number') {
         const b = document.createElement('b');
-        b.textContent = 'čidlo ' + formatTempC(sens.tempC);
+        b.textContent = formatTempC(sens.tempC);
         nodes.push(b);
         if (typeof sens.humidity === 'number') txt(Math.round(sens.humidity) + ' %');
       }
@@ -6299,6 +6281,16 @@ if (asstSend) {
 // ---------- Teplotní automatika klimatizace ----------
 
 // `own: true` = pokoj má vlastní jezdec teploty a vykreslí se nad něj
+// Barva pokoje v grafu teplot. Ověřeno simulací barvosleposti (deuteranopie,
+// protanopie, tritanopie) přes všechny dvojice — nejtěsnější vyšla ΔE 22,5
+// (modrá vs fialová při deuteranopii). Dřív si tu růžová s tyrkysovou byly pro
+// deuteranopii prakticky rovné (ΔE 1,4) a čtyři křivky přes sebe se nedaly rozeznat.
+const ROOM_COLORS = {
+  loznice: '#27ae60',   // zelená
+  miky:    '#2f80ed',   // modrá
+  elenka:  '#e0559f',   // růžová
+  obyvak:  '#6a2f9e'    // fialová
+};
 const TEMP_AUTO_ROOMS = [
   { key: 'obyvak', label: 'Obývák', own: true },
   { key: 'loznice', label: 'Ložnice' },
@@ -6466,11 +6458,6 @@ function roomAircon(label) {
   const n = label.toLowerCase();
   return devs.find(d => (d.name || '').toLowerCase().includes(n)) || null;
 }
-function roomInsideTemp(label) {
-  const dev = roomAircon(label);
-  return dev && typeof dev.insideTemp === 'number' ? dev.insideTemp : null;
-}
-
 function renderTempAuto() {
   if (!tempAutoListEl || !tempAutoListOwnEl) return;
   tempAutoListEl.textContent = '';
@@ -6481,19 +6468,12 @@ function renderTempAuto() {
     const name = document.createElement('div');
     name.className = 'tempauto-name';
     name.textContent = room.label;
-    // Tučně to, podle čeho se automatika rozhoduje (čidlo), za tím hodnota z klimatizace
+    // Jen teplota z čidla — podle té se automatika rozhoduje
     const sensT = roomSensorTemp(room.label);
-    const t = roomInsideTemp(room.label);
     if (sensT !== null) {
       const temp = document.createElement('b');
       temp.className = 'tempauto-temp';
       temp.textContent = sensT.toFixed(1).replace('.', ',') + ' °C';
-      name.appendChild(temp);
-    }
-    if (t !== null) {
-      const temp = document.createElement('span');
-      temp.className = 'tempauto-temp' + (sensT !== null ? ' tempauto-temp-alt' : '');
-      temp.textContent = t.toFixed(1).replace('.', ',') + ' °C';
       name.appendChild(temp);
     }
     const sw = document.createElement('button');
