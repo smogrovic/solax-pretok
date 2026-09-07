@@ -19,7 +19,7 @@ o svůj denní rozpočet nepřijde — nedoběhnutý čas se přenáší na dal�
 
 | Proměnná | Význam | Výchozí |
 |---|---|---|
-| `SAUNA_DEVICE_ID` | ID toho 3EM v Shelly Cloud (např. `54320470d17c`). Bez ní stránka Sauna zůstává, jen hlásí, že měřák chybí. | – |
+| `SAUNA_DEVICE_ID` | ID toho 3EM v Shelly Cloud. Je zapojený a v kódu je jako výchozí `d885ac0cfb80` (Shelly 3EM-63 Gen3). | `d885ac0cfb80` |
 | `SAUNA_SERVER_URI` | Server Shelly Cloud, když je jiný než u ostatních zařízení | `SHELLY_SERVER_URI` |
 | `SAUNA_ON_W` | Od kolika wattů se bere, že sauna topí (dá se přenastavit v appce) | `500` |
 | `SAUNA_HOLD_MIN` | Kolik minut po posledním nátopu držet relé dole (taky v appce) | `30` |
@@ -29,9 +29,12 @@ o svůj denní rozpočet nepřijde — nedoběhnutý čas se přenáší na dal�
 > *Settings → Device information → Device ID*). Lokální IP se použije jen ve skriptu
 > níž, který běží uvnitř tvojí sítě.
 
-ID najdeš stejně jako u bazénových měřáků. Dokud proměnná chybí, appka jede přesně
-jako dosud — stránka Sauna je vidět, ale místo odběru na ní stojí, že měřák ještě
-není nastavený.
+ID najdeš stejně jako u bazénových měřáků.
+
+Na stránce Sauna je pod odběrem drobný řádek, kde je vidět **kdy naposledy dorazilo
+měření**, **jestli se ozval skript v Shelly** (rychlá vrstva, viz níž) a **dokdy drží
+blokace bazénu**. Když u skriptu stojí „zatím se neozval", jistič hlídá jen appka
+a reakce trvá až dvě minuty místo vteřiny.
 
 ## 1b. Kamna HUUM (UKU WiFi) — teplota a stav
 

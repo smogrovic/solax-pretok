@@ -13,6 +13,7 @@ node test/usage.js                    # odkud šla spotřeba (dělení FVE/síť
 node test/rele.js                     # „běží to relé?" podle časovače v relé
 node test/huum.js                     # překlad odpovědi z kamen HUUM (UKU WiFi)
 node test/cidla.js                    # nástěnná čidla řídí klimatizaci ve svém pokoji
+node test/log.js                      # co do logu patří a co ne, výpadky s úrovní error
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
@@ -27,6 +28,7 @@ node test/runtime-rele.js             # ostrý server: relé zmizí, účtován�
 ./test/browser-run.sh test/browser-wallbox.js  # přepínač, nápověda a ruční režimy wallboxu
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
 ./test/browser-run.sh test/browser-zaloha.js   # řádek o záloze na stránce Log
+./test/browser-run.sh test/browser-log.js      # log a karta výpadků („10:00–nyní")
 ./test/browser-run.sh test/browser-mezery.js   # žádné dvě karty se na sebe nelepí
 ./test/browser-run.sh test/browser-smoke.js    # celá appka se načte a vykreslí bez chyby
 ```

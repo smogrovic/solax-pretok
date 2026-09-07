@@ -61,9 +61,14 @@ setTimeout(() => {
   // ---- seznam automatiky: jen teplota z čidla ----
   const radky = Array.from(document.querySelectorAll('#tempAutoListOwn .tempauto-row, #tempAutoList .tempauto-row'));
   check('v seznamu jsou všechny čtyři pokoje', radky.length, 4);
-  const teploty = Array.from(document.querySelectorAll('.tempauto-name .tempauto-temp'));
+  const teploty = Array.from(document.querySelectorAll('.tempauto-row .tempauto-temp'));
   check('u každého pokoje je JEDNA teplota', teploty.length, 4);
   check('  a je tučná (z čidla)', teploty.every(el => el.tagName === 'B'), true);
+  // Vlastní sloupec uprostřed řádku, ne přívěsek názvu — jinak by teploty skákaly
+  check('  a stojí ve vlastním sloupci',
+    teploty.every(el => el.parentElement.classList.contains('tempauto-row')), true);
+  check('  řádek má tři sloupce',
+    getComputedStyle(teploty[0].parentElement).gridTemplateColumns.split(' ').length, 3);
   check('  s hodnotami z čidel', teploty.map(el => el.textContent).join(' '),
     '22,5 °C 21,2 °C 23,1 °C 23,8 °C');
   // Jednotky hlásí 25–28 °C; nikde se to nesmí objevit

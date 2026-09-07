@@ -86,6 +86,30 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  záložka Sauna je v liště', Array.from(document.querySelectorAll('#pageTabs .page-tab')).some(t => t.textContent === 'Sauna'), 'true');
   saunaEnabledFlag = true;
 
+  OUT.push('\\n5b) Řádek o měření a skriptu');
+  const M = Date.now();
+  saunaData = { powerW: 6200, fetchedAt: new Date(M - 60000).toISOString(), topi: true,
+    since: M - 10 * MIN, blockUntil: M + 25 * MIN, limitW: 500, holdMin: 30,
+    scriptAt: M - 3 * MIN };
+  renderSauna();
+  const meta = document.getElementById('saunaMeta');
+  check('řádek s podrobnostmi existuje', !!meta, 'true');
+  check('ukáže čas posledního měření', /Měření z Shelly: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+  check('ukáže, že se ozval skript', /Skript v Shelly hlásil: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+  check('  a nehlásí, že se neozval', /neozval/.test(meta.textContent), 'false');
+  check('ukáže, dokdy drží blokace', /Bazén a solinátor blokované do: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+
+  saunaData = { ...saunaData, scriptAt: 0 };
+  renderSauna();
+  check('bez skriptu to řekne', /Skript v Shelly hlásil: zatím se neozval/.test(meta.textContent), 'true');
+  saunaData = { ...saunaData, blockUntil: 0, topi: false, since: 0 };
+  renderSauna();
+  check('bez blokace se řádek neukazuje', /blokované do/.test(meta.textContent), 'false');
+  saunaEnabledFlag = false;
+  renderSauna();
+  check('bez měřáku je řádek prázdný', meta.textContent, '');
+  saunaEnabledFlag = true;
+
   OUT.push('\\n6) Kamna HUUM — náhled bez připojení');
   const radek = k => document.querySelector('[data-huum="' + k + '"]');
   const vidi = k => { const r = radek(k); return !!r && !r.hidden; };

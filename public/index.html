@@ -503,6 +503,11 @@
   .wbsrc-total .wbsrc-head{font-size:14px;color:var(--navy);font-weight:700;}
   .wbsrc-note{font-size:11px;color:var(--grey-text);margin-top:10px;line-height:1.35;}
   .sauna-power{font-size:34px;font-weight:800;color:var(--orange);text-align:center;margin:10px 0 2px;}
+  /* Drobným písmem pod odběrem: kdy naposledy dorazilo měření, jestli se ozval skript
+     v Shelly (ten shazuje relé do vteřiny) a dokud drží blokace bazénu */
+  .sauna-meta{font-size:11px;color:var(--grey-text);text-align:center;line-height:1.5;margin-top:6px;}
+  .sauna-meta b{font-weight:700;color:var(--navy);}
+  .sauna-meta .skript-ne{color:var(--grey-text);}
   .mesic-total{font-size:28px;font-weight:800;color:var(--navy);text-align:center;margin:6px 0 2px;}
   .sauna-set{margin-top:10px;padding-top:10px;border-top:1px solid rgba(44,62,80,0.10);}
   .sauna-set-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;color:var(--grey-text);}
@@ -920,9 +925,9 @@
   }
   /* Semafor + přepínač jako jedna skupina vpravo, ať přepínače drží linku */
   .tempauto-ctl{
-    flex:0 0 auto;
     display:flex;
     align-items:center;
+    justify-content:flex-end;
     gap:10px;
   }
   /* Spínací teplota */
@@ -982,27 +987,29 @@
     line-height:1.5;
     text-align:center;
   }
+  /* Tři sloupce místo pružného řádku: název vlevo, teplota uprostřed, ovládání vpravo.
+     Krajní sloupce mají stejnou váhu, takže teploty stojí přesně na středu karty
+     a pod sebou — s různě dlouhými názvy pokojů by jinak skákaly. */
   .tempauto-row{
-    display:flex;
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
     align-items:center;
-    justify-content:space-between;
     gap:10px;
   }
   .tempauto-name{
-    flex:1;
     min-width:0;
     font-size:14px;
     font-weight:600;
     color:var(--navy);
   }
   .tempauto-temp{
-    font-size:12px;
-    color:var(--grey-text);
-    margin-left:6px;
-    font-weight:400;
+    font-size:13px;
+    font-weight:800;
+    color:var(--navy);
+    text-align:center;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
   }
-  /* Hodnota z čidla (tučně) je ta rozhodující; z klimatizace je vedle jen na porovnání */
-  b.tempauto-temp{color:var(--navy);font-weight:800;}
 
   /* DOČASNÉ: karta s daty čidel na porovnání */
   .toggle-switch{
@@ -2065,6 +2072,7 @@
           </div>
           <div class="sauna-power" id="saunaPower">– kW</div>
           <div class="manual-hold" id="saunaHint"></div>
+          <div class="sauna-meta" id="saunaMeta"></div>
         </div>
       </div>
 
@@ -2190,6 +2198,13 @@
       <div class="card log-card">
         <div class="log-list" id="logList">
           <div class="log-empty">Zatím žádné záznamy</div>
+        </div>
+      </div>
+
+      <div class="card log-card">
+        <div class="graph-title">Výpadky</div>
+        <div class="log-list" id="outageList">
+          <div class="log-empty">Zatím žádné výpadky</div>
         </div>
       </div>
 
@@ -3086,8 +3101,9 @@ const logListEl = document.getElementById('logList');
 let logEntries = [];
 
 // Lokální kopie logu — přežije deploy/restart serveru, appka ji serveru vrátí.
-// Drží týden stejně jako server (grafy si dál nechávají jen 24 h).
-const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Dva dny stejně jako server; delší log stejně nikdo nečetl a co kdy běželo ukazuje
+// časová osa na Přehledu.
+const LOG_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 function pruneOldLog(arr) {
   const cutoff = Date.now() - LOG_MAX_AGE_MS;
   return arr.filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string' && e.t >= cutoff);
@@ -3101,7 +3117,10 @@ function saveLogLocal() {
 
 function loadLogLocal() {
   try {
-    return pruneOldLog(JSON.parse(localStorage.getItem('appLog') || '[]'));
+    // `open` se ze zálohy zahazuje: „trvá to pořád" ví jen server. Bez toho by starý
+    // výpadek z telefonu ukazoval „10:00–nyní" i za tři dny.
+    return pruneOldLog(JSON.parse(localStorage.getItem('appLog') || '[]'))
+      .map(({ open, ...e }) => e);
   } catch {
     return [];
   }
@@ -3148,22 +3167,32 @@ function denNadpis(ms) {
   return new Date(ms).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' });
 }
 
-function renderLog() {
-  logListEl.textContent = '';
-  if (!logEntries.length) {
+// Výpadky mají vlastní kartu pod logem: hlavní log tak zůstane o tom, co dům udělal,
+// a co se nepovedlo, je pohromadě na jednom místě.
+const outageListEl = document.getElementById('outageList');
+const logCas = ms => new Date(ms).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+
+// Čas u řádku. Trvající výpadek má rozsah „10:00–nyní", uzavřený „10:00–10:20";
+// jednorázová událost (a výpadek kratší než minuta) jen jeden čas.
+function logCasText(e) {
+  if (e.open) return `${logCas(e.t)}–nyní`;
+  return e.tEnd && e.tEnd - e.t >= 60000 ? `${logCas(e.t)}–${logCas(e.tEnd)}` : logCas(e.t);
+}
+
+function vypisLog(el, zaznamy, prazdno) {
+  el.textContent = '';
+  if (!zaznamy.length) {
     const empty = document.createElement('div');
     empty.className = 'log-empty';
-    empty.textContent = 'Zatím žádné záznamy';
-    logListEl.appendChild(empty);
+    empty.textContent = prazdno;
+    el.appendChild(empty);
     return;
   }
-  const cas = ms => new Date(ms).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
-  // Týdenní log má stovky řádků — skládáme je bokem a do stránky dáme naráz
   const frag = document.createDocumentFragment();
   let den = null;
   // Nejnovější nahoře
-  for (let i = logEntries.length - 1; i >= 0; i--) {
-    const e = logEntries[i];
+  for (let i = zaznamy.length - 1; i >= 0; i--) {
+    const e = zaznamy[i];
     const klic = logDenKlic(e.t);
     if (klic !== den) {
       den = klic;
@@ -3176,19 +3205,24 @@ function renderLog() {
     row.className = 'log-entry' + (e.level === 'error' ? ' log-error' : (e.level === 'notif' ? ' log-notif' : ''));
     const time = document.createElement('span');
     time.className = 'log-time';
-    // U trvajícího výpadku je místo jednoho času rozsah. Do minuty ho neukazujeme —
-    // „11:15–11:15" nikomu nic neřekne.
-    time.textContent = e.tEnd && e.tEnd - e.t >= 60000
-      ? `${cas(e.t)}–${cas(e.tEnd)}`
-      : cas(e.t);
+    time.textContent = logCasText(e);
     const msg = document.createElement('span');
     msg.textContent = e.msg;
     row.appendChild(time);
     row.appendChild(msg);
     frag.appendChild(row);
   }
-  logListEl.appendChild(frag);
+  el.appendChild(frag);
 }
+
+function renderLog() {
+  vypisLog(logListEl, logEntries.filter(e => e.level !== 'error'), 'Zatím žádné záznamy');
+  if (outageListEl) {
+    vypisLog(outageListEl, logEntries.filter(e => e.level === 'error'), 'Zatím žádné výpadky');
+  }
+}
+// Trvající výpadek má v čase „nyní" — bez překreslování by u něj zůstal starý rozsah
+setInterval(() => { if (logEntries.some(e => e.open)) renderLog(); }, 60000);
 
 // ---------- Počasí, denní přehled a vypínač automatiky ----------
 
@@ -3704,10 +3738,13 @@ const TIMELINE_BASE_KEYS = ['shelly', 'pool', 'solinator', 'wallbox', 'sauna'];
 const TIMELINE_BASE = {
   shelly: { label: 'Bojler', color: '#e5534b' },
   pool: { label: 'Bazén', color: '#3b82c4' },
-  solinator: { label: 'Solinátor', color: '#3fb950' },
+  solinator: { label: 'Solinátor', color: '#7a9e2f' },
   wallbox: { label: 'Wallbox', color: '#f5933d' },
-  sauna: { label: 'Sauna', color: '#8e44ad' }
+  sauna: { label: 'Sauna', color: '#8c6239' }
 };
+// Solinátor byl zeleně a sauna fialově — jenže od sjednocení barev má na téže ose
+// zelenou Ložnice a fialovou Obývák a v legendě to byly prakticky stejné puntíky
+// (ΔE 13,6 a 11,7). S olivovou a hnědou je nejtěsnější dvojice ΔE 25,6.
 // Ověřeno validátorem na barvosleposti přes všechny dvojice. Původní růžová a tyrkysová
 // byly pro deuteranopii prakticky totožné (ΔE 1,4) — ve čtyřech křivkách přes sebe
 // v grafu teplot to bylo nečitelné. Pořadí je pevné, barvy se necyklují.
@@ -3747,7 +3784,10 @@ function airconTimelineLanes() {
     // V legendě vynecháme slovo "Klima"/"Klimatizace" (v nadpisu grafu zůstává)
     let label = dev ? dev.name : 'Klima';
     if (dev) label = dev.name.replace(/klimatizace|klima/ig, '').replace(/\s+/g, ' ').trim() || dev.name;
-    return { key: k, label, color: TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length] };
+    // Barva pokoje je stejná jako v grafu teplot na Klimatu — jeden pokoj, jedna barva
+    const room = dev && TEMP_AUTO_ROOMS.find(r => (dev.name || '').toLowerCase().includes(r.label.toLowerCase()));
+    const color = (room && ROOM_COLORS[room.key]) || TIMELINE_AC_COLORS[i % TIMELINE_AC_COLORS.length];
+    return { key: k, label, color };
   });
 }
 
@@ -5923,6 +5963,7 @@ const saunaLightEl = document.getElementById('saunaLight');
 const saunaStateEl = document.getElementById('saunaState');
 const saunaPowerEl = document.getElementById('saunaPower');
 const saunaHintEl = document.getElementById('saunaHint');
+const saunaMetaEl = document.getElementById('saunaMeta');
 const saunaTotalEl = document.getElementById('saunaTotal');
 const SAUNA_DNU = 7;
 let saunaData = null;
@@ -5948,6 +5989,7 @@ function renderSauna() {
     saunaPowerEl.textContent = '–';
     saunaHintEl.textContent = 'Chybí ID měřáku sauny (SAUNA_DEVICE_ID na serveru). Až ho doplníš,'
       + ' začne se měřit a bazén se solinátorem půjdou při topení dolů.';
+    renderSaunaMeta();
     return;
   }
   const d = saunaData || {};
@@ -5958,6 +6000,7 @@ function renderSauna() {
     saunaStateEl.textContent = 'nedostupná';
     saunaPowerEl.textContent = '–';
     saunaHintEl.textContent = d.error || 'Z měřáku sauny nechodí data.';
+    renderSaunaMeta();
     return;
   }
   const topi = !!d.topi;
@@ -5971,6 +6014,33 @@ function renderSauna() {
   if (blok) kusy.push(`bazén a solinátor drží vypnuté do ${fmtSolTime(d.blockUntil)}`);
   if (!kusy.length && typeof d.limitW === 'number') kusy.push(`Zapnuto se počítá od ${d.limitW} W`);
   saunaHintEl.textContent = kusy.join(' · ');
+  renderSaunaMeta();
+}
+
+// Drobný řádek pod odběrem. Skript v Shelly je RYCHLÁ vrstva — shodí bazén a solinátor
+// do vteřiny a teprve pak dá vědět appce, která se sama ptá jednou za dvě minuty.
+// Když se skript nikdy neozval, je dobré to vidět: znamená to, že jistič hlídá jen appka.
+function renderSaunaMeta() {
+  if (!saunaMetaEl) return;
+  const d = saunaData || {};
+  saunaMetaEl.textContent = '';
+  if (saunaEnabledFlag === false) return;
+  const radek = (popis, hodnota, trida) => {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(popis + ' '));
+    const b = document.createElement('b');
+    if (trida) b.className = trida;
+    b.textContent = hodnota;
+    div.appendChild(b);
+    saunaMetaEl.appendChild(div);
+  };
+  radek('Měření z Shelly:', d.fetchedAt ? fmtSolTime(new Date(d.fetchedAt).getTime()) : 'zatím nic');
+  radek('Skript v Shelly hlásil:',
+    d.scriptAt ? fmtSolTime(d.scriptAt) : 'zatím se neozval',
+    d.scriptAt ? '' : 'skript-ne');
+  if (d.blockUntil > Date.now()) {
+    radek('Bazén a solinátor blokované do:', fmtSolTime(d.blockUntil));
+  }
 }
 setInterval(renderSauna, 30000);   // „topí 1:20" musí běžet i bez zprávy ze serveru
 
@@ -6468,14 +6538,12 @@ function renderTempAuto() {
     const name = document.createElement('div');
     name.className = 'tempauto-name';
     name.textContent = room.label;
-    // Jen teplota z čidla — podle té se automatika rozhoduje
+    // Jen teplota z čidla — podle té se automatika rozhoduje. Je to vlastní sloupec
+    // uprostřed řádku, aby teploty stály pod sebou bez ohledu na délku názvu.
     const sensT = roomSensorTemp(room.label);
-    if (sensT !== null) {
-      const temp = document.createElement('b');
-      temp.className = 'tempauto-temp';
-      temp.textContent = sensT.toFixed(1).replace('.', ',') + ' °C';
-      name.appendChild(temp);
-    }
+    const temp = document.createElement('b');
+    temp.className = 'tempauto-temp';
+    temp.textContent = sensT !== null ? sensT.toFixed(1).replace('.', ',') + ' °C' : '';
     const sw = document.createElement('button');
     sw.className = 'toggle-switch' + (tempAutoData[room.key] ? ' on' : '');
     sw.setAttribute('aria-label', room.label);
@@ -6514,6 +6582,7 @@ function renderTempAuto() {
     ctl.appendChild(sw);
 
     row.appendChild(name);
+    row.appendChild(temp);
     row.appendChild(ctl);
     // Pokoje s vlastní mezí jdou nad svůj jezdec, ostatní nad ten společný
     (room.own ? tempAutoListOwnEl : tempAutoListEl).appendChild(row);

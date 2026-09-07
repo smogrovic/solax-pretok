@@ -68,26 +68,25 @@ nadpis('2) Podle čeho se pokoj řídí');
   const h = build({ loznice: cidlo(21.2, { reportedAt: Date.now() - 20 * H }) });
   const r = h.api.roomTemp('loznice', { insideTemp: 25 });
   check('po dlouhém tichu platí poslední hodnota z čidla', r.temp, 21.2);
-  check('  a do logu se to jednou napíše',
-    h.logy.some(l => /Čidlo Ložnice: nehlásí přes 6 h/.test(l)), true);
-  h.api.roomTemp('loznice', { insideTemp: 25 });
-  check('  ale jen jednou', h.logy.filter(l => /nehlásí přes 6 h/.test(l)).length, 1);
+  // Ticho čidla se do logu schválně nepíše — hlásí jen při změně teploty, takže by
+  // to byl šum. Že pokoj nemá podle čeho jet, je vidět na Klimatu (chybí tam teplota).
+  check('  a do logu se to nepíše', h.logy.length, 0);
 }
 {
   const h = build({ elenka: { online: false } });   // čidlo ještě nikdy nehlásilo
   const r = h.api.roomTemp('elenka', { insideTemp: 24 });
   check('bez dat se pokoj přeskočí', r.temp, null);
   check('  a NEsáhne se po klimatizaci', r.temp === 24, false);
-  check('  log to řekne', h.logy.some(l => /Čidlo Elenka: zatím nehlásí/.test(l)), true);
+  check('  a do logu se to taky nepíše', h.logy.length, 0);
 }
 {
   const h = build({ miky: cidlo(23) });
   h.api.roomTemp('miky', null);
   h.state.sensors.miky = { online: false };
-  h.api.roomTemp('miky', null);
+  check('bez teploty se pokoj přeskočí', h.api.roomTemp('miky', null).temp, null);
   h.state.sensors.miky = cidlo(23.5);
-  h.api.roomTemp('miky', null);
-  check('návrat čidla se hlásí', h.logy.some(l => /Čidlo Miky: zase hlásí/.test(l)), true);
+  check('a po návratu čidla jede zase podle něj', h.api.roomTemp('miky', null).temp, 23.5);
+  check('  a log zůstal čistý', h.logy.length, 0);
 }
 
 nadpis('3) Do grafu');

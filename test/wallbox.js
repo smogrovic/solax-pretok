@@ -122,7 +122,8 @@ nadpis('4) Hystereze dolů (FAST → ECO)');
   check('po 8 min pod prahem ještě FAST', h.api.ecWallboxTarget(), 'fast');
   jed(h, 4);
   check('po 12 min už ECO', h.api.ecWallboxTarget(), 'eco');
-  check('  a je o tom řádek v logu', /přes 10 min → ECO/.test(h.logs.join('|')), 'true');
+  // Do logu se to nepíše — kdy jaký režim jel, ukazuje graf na stránce Wallbox
+  check('  a do logu se to nepíše', h.logs.length, 0);
 }
 {
   const h = build({ nowAt: vsedni('12:00'), prebytek: 2.0 });
@@ -142,7 +143,7 @@ nadpis('5) Hystereze nahoru (ECO → FAST)');
   check('po 8 min nad prahem ještě ECO', h.api.ecWallboxTarget(), 'eco');
   jed(h, 4);
   check('po 12 min FAST', h.api.ecWallboxTarget(), 'fast');
-  check('  a je o tom řádek v logu', /přes 10 min → FAST/.test(h.logs.join('|')), 'true');
+  check('  a do logu se to nepíše', h.logs.length, 0);
 }
 
 nadpis('6) Přebytek se počítá PŘED autem');

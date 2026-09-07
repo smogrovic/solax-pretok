@@ -30,7 +30,7 @@ const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
 // Sauna: Shelly 3EM za jističem sauny. Měří jen spotřebu, nespíná nic — vypínání
 // bazénu a solinátoru dělá tahle appka (a pro rychlost i skript přímo v tom Shelly,
 // viz SAUNA.md). Bez SAUNA_DEVICE_ID se stránka sauny v appce ani neukáže.
-const SAUNA_DEVICE_ID = process.env.SAUNA_DEVICE_ID || process.env.SAUNA_PM_ID || '';
+const SAUNA_DEVICE_ID = process.env.SAUNA_DEVICE_ID || process.env.SAUNA_PM_ID || 'd885ac0cfb80';
 const SAUNA_SERVER_URI = process.env.SAUNA_SERVER_URI || SHELLY_SERVER_URI;
 const saunaEnabled = !!(SAUNA_DEVICE_ID && SHELLY_AUTH_KEY);
 // Kamna HUUM s jednotkou UKU WiFi. Vlastní cloudové API (lokální jednotka nemá),
@@ -142,8 +142,10 @@ const usageSoucet = p => (p.pool || 0) + (p.b1 || 0) + (p.b2 || 0);
 const PICK_MAX_USAGE = (a, b) => (usageSoucet(b) > usageSoucet(a) ? b : a);
 // Log si na rozdíl od grafů pamatuje týden. Strop na počet záznamů je pojistka,
 // ať se pár tisíc řádků nemůže vymknout (den dělá řádově desítky).
-const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const LOG_MAX_ENTRIES = 3000;
+// Log si pamatuje dva dny. Delší historie stejně nikdo nečetl a v záloze i v telefonu
+// to byly stovky řádků. Co kdy běželo, ukazuje časová osa na Přehledu.
+const LOG_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const LOG_MAX_ENTRIES = 500;
 
 // Centrální stav — jediný zdroj pravdy pro všechny připojené klienty
 const DEVICE_LABELS = {
@@ -215,7 +217,9 @@ const state = {
   usageDays: [],     // { d, grid, pv } — Wh po dnech
   usageHistory: [],  // { t, pool, b1, b2 } ve W — odběr okruhů za 4 dny (panel v grafu FVE)
   // Sauna: aktuální odběr, kdy začalo topení a dokdy kvůli ní drží bazén a solinátor vypnuté
-  sauna: { powerW: null, fetchedAt: null, since: 0, alertAt: 0, error: null },
+  // scriptAt = kdy naposledy ozval skript ze Shelly (ten shazuje relé do vteřiny);
+  // fetchedAt = kdy naposledy dorazilo měření z cloudu (poller po 2 min)
+  sauna: { powerW: null, fetchedAt: null, since: 0, alertAt: 0, scriptAt: 0, error: null },
   saunaLimitW: SAUNA_ON_W,     // od kolika W se bere, že sauna topí
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
@@ -878,6 +882,7 @@ function saunaPayload() {
     blockUntil: state.saunaBlockUntil || 0,
     limitW: state.saunaLimitW,
     holdMin: state.saunaHoldMin,
+    scriptAt: state.sauna.scriptAt || 0,
     error: state.sauna.error
   };
 }
@@ -1161,9 +1166,11 @@ function registerSetEndpoint(key) {
       // než kdyby tlačítko nefungovalo vůbec — OFF je novější rozhodnutí, tak override padá
       const zrusenoForce = key === 'pool' && turn === 'off' && poolForceActive();
       if (zrusenoForce) clearPoolForce();
-      addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} ručně`
-        + (AUTOMATED_KEYS.includes(key) ? ` (automatika převezme v ${fmtPragueTime(state.manualHold[key])})` : '')
-        + (zrusenoForce ? ' · zrušeno +24 h' : ''));
+      if (!jeSvetlo(key)) {
+        addLog(`${DEVICE_LABELS[key]}: ${turn === 'on' ? 'zapnuto' : 'vypnuto'} ručně`
+          + (AUTOMATED_KEYS.includes(key) ? ` (automatika převezme v ${fmtPragueTime(state.manualHold[key])})` : '')
+          + (zrusenoForce ? ' · zrušeno +24 h' : ''));
+      }
 
       res.json({ success: true, turn });
 
@@ -1565,6 +1572,7 @@ app.post('/api/sauna/active', (req, res) => {
     state.sauna.since = now;
     addLog('Sauna: topí (hlásí to samo Shelly) — bazén a solinátor jdou dolů');
   }
+  state.sauna.scriptAt = now;   // appka tím ukáže, že rychlá vrstva doopravdy jede
   state.saunaBlockUntil = now + saunaHoldMs();
   broadcast('sauna', { sauna: saunaPayload() });
   enforceSaunaOff().catch(() => {});   // ať se nečeká na další kolo automatiky
@@ -2142,6 +2150,7 @@ function checkSources() {
       if (outageLog[s.key]) {
         // Výpadek pokračuje — jen posuneme konec rozsahu, nový řádek nepřibývá
         outageLog[s.key].tEnd = now;
+        outageLog[s.key].open = true;
         broadcast('logUpdate', { entry: outageLog[s.key] });
       } else {
         // Řádek začíná časem, kdy výpadek začal — ne kdy jsme si ho všimli. Jinak by
@@ -2149,14 +2158,19 @@ function checkSources() {
         outageLog[s.key] = addLog(
           s.rele ? `${s.label}: neodpovídá${s.note ? ` (${s.note})` : ''}` : `${s.label}: nedorazila data`,
           'error', s.badSince);
-        // Rozsah rovnou ukazuje, jak dlouho už to trvá (řádek vznikl 15 min po začátku)
+        // Rozsah rovnou ukazuje, jak dlouho už to trvá (řádek vznikl 15 min po začátku).
+        // `open` = pořád to trvá → appka místo konce napíše „nyní".
         outageLog[s.key].tEnd = now;
+        outageLog[s.key].open = true;
         broadcast('logUpdate', { entry: outageLog[s.key] });
         nove.push(s.note ? `${s.label} — ${s.note}` : s.label);
       }
     } else if (outageLog[s.key]) {
+      // Konec výpadku jen uzavře rozsah — druhý řádek „zase odpovídá" k tomu netřeba
+      outageLog[s.key].open = false;
+      outageLog[s.key].tEnd = now;
+      broadcast('logUpdate', { entry: outageLog[s.key] });
       outageLog[s.key] = null;
-      addLog(s.rele ? `${s.label}: zase odpovídá` : `${s.label}: data znovu naskočila`);
     }
   }
   // Návrat zdroje push neposílá — v appce je vidět hned a nemá cenu z toho dělat spam
@@ -2189,6 +2203,11 @@ const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme
 // relé, kterému jsme řekli „vypni" a ono drží (ztracený povel, zaseknutý cloud), nesmí
 // dostávat udržovací ON: natahoval by mu ten časovač a appka by tak držela naživu
 // zrovna to, co chce vypnout.
+// Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
+// Jejich stav je vidět na Ovládání, běh na časové ose.
+const LIGHT_KEYS = ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'];
+const jeSvetlo = key => LIGHT_KEYS.includes(key);
+
 const lastCmd = {};
 function noteCmd(key, turn) { lastCmd[key] = { turn, at: Date.now() }; }
 
@@ -2401,16 +2420,7 @@ function solinatorRollDay(today) {
     const carry = solinatorCarryFor(unmet, disabled);
     state.solinator.boostMs = carry;
     state.solinator.carryMs = carry;   // kolik z boostMs je přenos (jen pro rozpis)
-    // Psát skutečně přenesenou hodnotu, ne tu před ořezem
-    if (carry > 0) {
-      addLog(`Solinátor: ${fmtDur(carry)} nevyužitého boostu se přenáší na dnešek`
-        + (unmet > carry ? ` (${fmtDur(unmet - carry)} propadá)` : ''));
-    } else if (carry < 0) {
-      addLog(`Solinátor: dnešek zkrácen o ${fmtDur(-carry)} (namačkáno včera)`);
-    } else if (unmet > 0 && !disabled) {
-      // Ať je v logu vidět, proč se nic nepřenáší — bez boostu se dluh nedělá
-      addLog(`Solinátor: včerejšek nedoběhl o ${fmtDur(unmet)}, nepřenáší se (nebyl boost)`);
-    }
+    // Přenos ani dluh se do logu nepíšou — celý rozpis je vidět na stránce Asistent
   }
   state.solinator.date = today;
   state.solinator.bonusMs = 0;
@@ -2682,7 +2692,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
         await delay(2500);
         continue;
       }
-      addLog(`${DEVICE_LABELS[key]}: příkaz automatiky selhal (${err.message})`);
+      addLog(`${DEVICE_LABELS[key]}: příkaz automatiky selhal (${err.message})`, 'error');
       return false;
     }
   }
@@ -2940,7 +2950,7 @@ function applyTempBonus(weather) {
   const zdroj = zPredpovedi
     ? `dnes až ${Math.round(fcTemp)} °C (předpověď)`
     : `venku ${Math.round(nowTemp)} °C`;
-  addLog(`Solinátor: ${zdroj} → dnešní cíl ${fmtDur(solinatorTargetMs())}`);
+  // Cíl ani jeho rozpis do logu nepatří — celý výpočet je vidět na stránce Asistent
 }
 
 // POZOR na zapojení: solinátorové relé spíná i bazénové čerpadlo (nezávisle na relé
@@ -3000,7 +3010,7 @@ async function runSolinatorAutomation(now, prague, weather) {
     if (!runtimeKnown()) {
       if (!catchupLogged) {
         catchupLogged = true;
-        addLog('Solinátor: po restartu čekám na dopočet doby běhu z telefonu');
+      
       }
       return;
     }
@@ -3611,7 +3621,7 @@ setInterval(async () => {
         await blindCommand(url, cmd, t.orientation);
         ok++;
       } catch (err) {
-        addLog(`Časovač ${t.name}: roleta selhala (${err.message.slice(0, 100)})`);
+        addLog(`Časovač ${t.name}: roleta selhala (${err.message.slice(0, 100)})`, 'error');
       }
       await delay(500);
     }
@@ -3635,7 +3645,9 @@ async function actuateRelay(key, stateOn, reason) {
   noteCmd(key, stateOn ? 'on' : 'off');
   broadcast('device', { key, status: devicePayload(key) });
   setManualHold(key);   // časovač i asistent jsou tvoje rozhodnutí, ne automatika
-  addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
+  if (!jeSvetlo(key)) {
+    addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
+  }
   setTimeout(() => pollDevice(key), 1500);
 }
 
@@ -4227,7 +4239,7 @@ async function tempAutoTurnOff(rule) {
     addLog(`${dev.name}: vypnuto (teplotní automatika vypnuta)`);
     broadcast('aircon', { aircon: state.aircon });
   } catch (err) {
-    addLog(`Teplotní automatika ${rule.room}: vypnutí klimatizace selhalo (${err.message.slice(0, 100)})`);
+    addLog(`Teplotní automatika ${rule.room}: vypnutí klimatizace selhalo (${err.message.slice(0, 100)})`, 'error');
   }
 }
 
@@ -4246,9 +4258,9 @@ function noteSensorState(roomKey) {
   sensorStateLogged[roomKey] = st;
   if (first && st === 'ok') return;   // běžný start, není co hlásit
   const label = (TEMP_AUTO_RULES.find(r => r.key === roomKey) || {}).room || roomKey;
-  if (st === 'ticho') addLog(`Čidlo ${label}: nehlásí přes 6 h — jede se dál podle poslední hodnoty`);
-  else if (st === 'bez dat') addLog(`Čidlo ${label}: zatím nehlásí, automatika pokoj přeskakuje`);
-  else addLog(`Čidlo ${label}: zase hlásí`);
+  // Ticho čidla není chyba (hlásí jen při změně teploty), takže do logu nepatří.
+  // Že pokoj zrovna nemá podle čeho jet, je vidět na Klimatu — chybí tam teplota.
+  void label;
 }
 
 // Pokoj s čidlem se řídí VÝHRADNĚ podle něj — žádný náhradní zdroj. Pokoje bez čidla
@@ -4345,10 +4357,10 @@ async function evaluateTempAuto(devices) {
       if (parameters.temperatureSet !== undefined) dev.targetTemp = parameters.temperatureSet;
       if (parameters.operationMode !== undefined) dev.mode = isWinter() ? 'auto' : 'cool';
       if (parameters.ecoMode !== undefined) dev.eco = parameters.ecoMode;
-      addLog(`Teplotní automatika — ${msg}`);
+      // Spínání klimatizace automatikou se do logu nepíše — je vidět na časové ose
       broadcast('aircon', { aircon: state.aircon });
     } catch (err) {
-      addLog(`Teplotní automatika ${rule.room}: příkaz selhal (${err.message.slice(0, 100)})`);
+      addLog(`Teplotní automatika ${rule.room}: příkaz selhal (${err.message.slice(0, 100)})`, 'error');
     }
   }
 }
@@ -4409,7 +4421,7 @@ async function pollAircon() {
       error: err.message, fetchedAt: state.aircon.fetchedAt };
     if (!airconStatusLogged) {
       airconStatusLogged = true;
-      addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140));
+      addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140), 'error');
     }
     broadcast('aircon', { aircon: state.aircon });
   } finally {
@@ -4866,10 +4878,10 @@ function wbUpdateHyst(at = Date.now()) {
   wbHyst.underSince = pod ? (wbHyst.underSince || at) : 0;
   if (wbHyst.mode !== 'fast' && wbHyst.overSince && at - wbHyst.overSince >= WB_HYST_MS) {
     wbHyst = { mode: 'fast', overSince: 0, underSince: 0 };
-    addLog(`Wallbox: přebytek ${formatKwLog(w)} přes 10 min → FAST`);
+    // Do logu se to nepíše — automatické přepínání režimu je vidět v grafu na Wallboxu
   } else if (wbHyst.mode !== 'eco' && wbHyst.underSince && at - wbHyst.underSince >= WB_HYST_MS) {
     wbHyst = { mode: 'eco', overSince: 0, underSince: 0 };
-    addLog(`Wallbox: přebytek ${formatKwLog(w)} přes 10 min → ECO`);
+
   }
 }
 
@@ -4950,10 +4962,10 @@ async function runEnergyControl() {
       state.wallbox = { ...state.wallbox, mode: target };
       recordWbMode(target);
       broadcast('wallbox', { wallbox: state.wallbox });
-      addLog(`Wallbox: režim ${WB_MODE_LABELS[target]} (${state.wbAuto ? 'automatika' : 'FAST'})`);
+      // Do logu se to nepíše — kdy jaký režim jel, ukazuje graf na stránce Wallbox
     }
   } catch (err) {
-    addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`);
+    addLog(`Wallbox automatika: ${err.message.slice(0, 120)}`, 'error');
   } finally {
     wbControlRunning = false;
   }
