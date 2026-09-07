@@ -61,18 +61,23 @@ Přehled všech je v souboru `.env.example` a v tabulce na konci tohohle návodu
 1. V mobilní appce Shelly: **Settings → Authorization cloud key** → **Get key**.
    Ukáže se ti klíč (`SHELLY_AUTH_KEY`) i adresa serveru ve tvaru `shelly-XX-eu.shelly.cloud`
    (`SHELLY_SERVER_URI` — piš ji **bez** `https://`).
-2. Pro každé relé potřebuješ jeho **Device ID**: v appce otevři zařízení →
-   **Settings → Device information → Device ID**. Je to řetězec typu `34b7dacb1234`.
-   - bojler → `SHELLY_DEVICE_ID`
-   - bazén → `POOL_DEVICE_ID`
-   - solinátor → `SOLINATOR_DEVICE_ID`
+2. **Device ID zařízení vyplňovat nemusíš.** Všech patnáct (tři relé, čtyři světla,
+   tři měřáky bazénu, měřák sauny, čtyři čidla H&T) je natvrdo v `server.js`
+   a patří téhle instalaci. Auth key je heslo a do gitu nepatří; Device ID heslo
+   není a bez klíče je k ničemu — proto ten rozdíl.
+   Vyplň proměnnou, jen když **zařízení vyměníš** nebo si appku forkneš pro svoje:
+   `SHELLY_DEVICE_ID` (bojler), `POOL_DEVICE_ID` (bazén), `SOLINATOR_DEVICE_ID`,
+   `LIGHT_ZAHRADA_DOLE_ID`, `LIGHT_ZAHRADA_NAHORE_ID`, `LIGHT_BAZEN_ID`,
+   `LIGHT_NOCNI_ID`, `POOL_PM_IDS` (seznam oddělený čárkami), `SAUNA_DEVICE_ID`.
+   ID vyčteš v appce: zařízení → **Settings → Device information → Device Id**,
+   je to řetězec typu `34b7dacb1234`.
 3. Kdyby některé relé bylo na jiném serveru, dá se přebít přes `POOL_SERVER_URI` /
    `SOLINATOR_SERVER_URI`.
 4. Každý pokoj s klimatizací má nástěnný **Shelly H&T** (teploměr) a řídí se
    **výhradně podle něj** — čidlo uvnitř klimatizace visí u stropu a ukazuje asi
-   o 2 °C víc. Device ID patří do `SHELLY_TEMP_OBYVAK_ID`, `SHELLY_TEMP_LOZNICE_ID`,
-   `SHELLY_TEMP_ELENKA_ID` a `SHELLY_TEMP_MIKY_ID`. **Vyplň je**, jinak se čtou
-   čidla původního majitele. Pokoj bez vyplněného čidla jede podle klimatizace.
+   o 2 °C víc. Device ID jsou v kódu (čidla téhle instalace), přebít je jde přes
+   `SHELLY_TEMP_OBYVAK_ID`, `SHELLY_TEMP_LOZNICE_ID`, `SHELLY_TEMP_ELENKA_ID`
+   a `SHELLY_TEMP_MIKY_ID`. Pokoj bez čidla jede podle klimatizace.
 
 ### Panasonic — klimatizace a tepelné čerpadlo
 Stačí e-mail a heslo od účtu **Panasonic Comfort Cloud** (stejné jako v mobilní appce):
@@ -198,11 +203,11 @@ Kompletní popis toho, co a kdy se spíná, je přímo v appce na stránce **Log
 |---|---|---|
 | `SOLAX_TOKEN_ID`, `SOLAX_SN` | **ano** | appka nemá data o výrobě, automatika neběží |
 | `SHELLY_AUTH_KEY`, `SHELLY_SERVER_URI` | pro relé | nejde ovládat bojler, bazén, solinátor ani světla |
-| `SHELLY_DEVICE_ID` | pro bojler | bojler chybí |
-| `POOL_DEVICE_ID` | pro bazén | bazén chybí |
-| `SOLINATOR_DEVICE_ID` | pro solinátor | solinátor chybí |
+| `SHELLY_DEVICE_ID`, `POOL_DEVICE_ID`, `SOLINATOR_DEVICE_ID` | ne | použije se ID relé téhle instalace z `server.js` |
+| `LIGHT_ZAHRADA_DOLE_ID`, `LIGHT_ZAHRADA_NAHORE_ID`, `LIGHT_BAZEN_ID`, `LIGHT_NOCNI_ID` | ne | totéž pro světla |
+| `POOL_PM_IDS`, `SAUNA_DEVICE_ID` | ne | totéž pro měřáky bazénu a sauny |
 | `POOL_SERVER_URI`, `SOLINATOR_SERVER_URI` | ne | použije se `SHELLY_SERVER_URI` |
-| `SHELLY_TEMP_OBYVAK_ID`, `SHELLY_TEMP_LOZNICE_ID`, `SHELLY_TEMP_ELENKA_ID`, `SHELLY_TEMP_MIKY_ID` | **ano, když máš H&T** | čtou se **cizí čidla** původního majitele; teplotní automatika pokoje pak jede podle nich |
+| `SHELLY_TEMP_OBYVAK_ID`, `SHELLY_TEMP_LOZNICE_ID`, `SHELLY_TEMP_ELENKA_ID`, `SHELLY_TEMP_MIKY_ID` | ne | totéž pro nástěnná čidla H&T |
 | `PANASONIC_EMAIL`, `PANASONIC_PASSWORD` | pro klimatizace | stránka Klima hlásí nenastaveno, teplotní automatika neběží |
 | `TAHOMA_EMAIL`, `TAHOMA_PASSWORD` | pro žaluzie | stránky Žaluzie zůstanou prázdné |
 | `WALLBOX_SN` | pro wallbox | stránka Wallbox nefunguje |

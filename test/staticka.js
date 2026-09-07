@@ -9,7 +9,7 @@
 // se takový zásah nejčastěji dotkne.
 const fs = require('fs');
 const path = require('path');
-const { suite } = require('./zdroj');
+const { suite, between } = require('./zdroj');
 const { check, nadpis, konec } = suite('statická kontrola');
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -111,5 +111,53 @@ const podvrh = "let RELE = [\n  { jmeno: 'BAZEN', ip: '192.168.188.72' }\n];\nle
 check('stará IP se pozná', ipRele(podvrh).BAZEN, '192.168.188.72');
 check('čistý úryvek mJS projde', mimoMJS(podvrh).join(',') || 'ano', 'ano');
 check('šipka a backtick se najdou', mimoMJS('let a = () => `x`;').join(','), 'šipka,backtick');
+
+nadpis('6) Identita Shelly zařízení');
+// Patnáct zařízení bylo dřív zapsané třemi různými způsoby a bazénové relé bylo
+// z nich jediné, jehož ID neexistovalo nikde v repozitáři — po jeho výměně nebylo
+// co přepsat. Teď platí jeden tvar: `process.env.X || '<ID>'`. Tenhle oddíl hlídá,
+// že to tak zůstane, a k tomu chytá překlep v ID, který by se jinak poznal až tím,
+// že zařízení přestane odpovídat.
+const KONFIG = between('const SHELLY_AUTH_KEY', 'const DEVICES = {');
+
+// Literál vypadající jako Device ID: samé písmeno/číslice, aspoň šest znaků, případně
+// víc oddělených čárkami (tak drží pohromadě tři měřáky bazénu). Oddělovač ',' ani
+// adresa HUUM se do toho netrefí. Krátkou verzi bere schválně, ať se pozná i překlep.
+function idLiteraly(src) {
+  const idcka = [];
+  const bezPromenne = [];
+  for (const m of src.matchAll(/'([0-9a-zA-Z]{6,}(?:,[0-9a-zA-Z]{6,})*)'/g)) {
+    const pred = src.slice(0, m.index);
+    if (!/process\.env\.[A-Z0-9_]+\s*\|\|\s*$/.test(pred)) bezPromenne.push(m[1]);
+    for (const id of m[1].split(',')) idcka.push(id);
+  }
+  return { idcka, bezPromenne };
+}
+
+const { idcka, bezPromenne } = idLiteraly(KONFIG);
+// Tohle je vlastní pointa změny: přibude-li zařízení natvrdo, sada spadne
+check('každé ID má svou proměnnou', bezPromenne.join(', ') || 'ano', 'ano');
+check('je jich patnáct', idcka.length, 15);
+check('všechna mají dvanáct hex znaků',
+  idcka.filter(id => !/^[0-9a-f]{12}$/.test(id)).join(', ') || 'ano', 'ano');
+// Solinátor 'dcda0ce01f40' a noční světlo 'dcda0cea454c' se liší až osmým znakem —
+// zaměnit dvě ID není teoretická obava
+const dvakrat = idcka.filter((id, i) => idcka.indexOf(id) !== i);
+check('žádné ID dvakrát', dvakrat.join(', ') || 'ano', 'ano');
+
+const podle = jm => (KONFIG.match(new RegExp('process\\.env\\.' + jm + "\\s*\\|\\|\\s*'([0-9a-f]{12})'")) || [])[1];
+check('bojler', podle('SHELLY_DEVICE_ID'), '5432045837c8');
+check('bazén', podle('POOL_DEVICE_ID'), 'dcb4d9cb7b44');
+check('solinátor', podle('SOLINATOR_DEVICE_ID'), 'dcda0ce01f40');
+
+nadpis('7) Kontrola kontroly identit');
+const cisty = "const A = process.env.A || 'aabbccddeeff';\nconst B = process.env.B || '112233445566';";
+check('čistý úryvek projde', idLiteraly(cisty).bezPromenne.join(',') || 'ano', 'ano');
+check('  a najde obě ID', idLiteraly(cisty).idcka.join(','), 'aabbccddeeff,112233445566');
+const natvrdo = "const A = 'aabbccddeeff';";
+check('ID bez proměnné se najde', idLiteraly(natvrdo).bezPromenne.join(','), 'aabbccddeeff');
+const seznam = "const A = process.env.A || 'aabbccddeeff,112233445566';";
+check('seznam se rozpadne na kusy', idLiteraly(seznam).idcka.length, 2);
+check('oddělovač se za ID nepovažuje', idLiteraly("','").idcka.length, 0);
 
 konec();

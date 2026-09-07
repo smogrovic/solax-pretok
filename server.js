@@ -17,15 +17,25 @@ const SOLAX_URL = 'https://global.solaxcloud.com/proxyApp/proxy/api/getRealtimeI
 
 const SHELLY_AUTH_KEY = process.env.SHELLY_AUTH_KEY;
 const SHELLY_SERVER_URI = process.env.SHELLY_SERVER_URI; // e.g. shelly-133-eu.shelly.cloud
-const SHELLY_DEVICE_ID = process.env.SHELLY_DEVICE_ID; // bojler
+
+// KONVENCE PRO VŠECHNA SHELLY ZAŘÍZENÍ: Device ID téhle instalace je v kódu,
+// proměnná ho může přebít. Klíč a adresa serveru zůstávají naopak JEN v prostředí —
+// auth key je heslo a do gitu nepatří; Device ID heslo není, bez klíče je k ničemu.
+// Důvod: ID drženo jen v prostředí nejde dohledat v gitu, historie neřekne, kdy se
+// změnilo, a při ztrátě proměnné zařízení z appky tiše zmizí (fetchShellyStatus hodí
+// „Server není nakonfigurován pro toto zařízení"). Přesně to se stalo při výměně
+// bazénového relé — přišlo nové ID a v repozitáři nebylo co přepsat.
+// Hlídá to test/staticka.js: každé ID musí mít proměnnou, dvanáct hex znaků a být jedinečné.
+const SHELLY_DEVICE_ID    = process.env.SHELLY_DEVICE_ID    || '5432045837c8'; // bojler
+const POOL_DEVICE_ID      = process.env.POOL_DEVICE_ID      || 'dcb4d9cb7b44'; // bazén
+const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID || 'dcda0ce01f40';
 
 const POOL_SERVER_URI = process.env.POOL_SERVER_URI || SHELLY_SERVER_URI;
-const POOL_DEVICE_ID = process.env.POOL_DEVICE_ID;
-
 const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_URI;
-const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID;
 
-const POOL_PM_IDS = ['54320470d17c', '5432046cb538', '543204702434'];
+// Tři samostatné měřáky spotřeby bazénu (ne relé). Proměnná je seznam oddělený čárkami.
+const POOL_PM_IDS = (process.env.POOL_PM_IDS || '54320470d17c,5432046cb538,543204702434')
+  .split(',').map(s => s.trim()).filter(Boolean);
 
 // Sauna: Shelly 3EM za jističem sauny. Měří jen spotřebu, nespíná nic — vypínání
 // bazénu a solinátoru dělá tahle appka (a pro rychlost i skript přímo v tom Shelly,
@@ -50,10 +60,10 @@ const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení no
 const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
 const SAUNA_DAYS_MAX = 7;
 
-const LIGHT_ZAHRADA_DOLE_ID   = '34b7dacb5f6c';
-const LIGHT_ZAHRADA_NAHORE_ID = '34b7daca6dc8';
-const LIGHT_BAZEN_ID          = '34b7daca4150';
-const LIGHT_NOCNI_ID          = 'dcda0cea454c';
+const LIGHT_ZAHRADA_DOLE_ID   = process.env.LIGHT_ZAHRADA_DOLE_ID   || '34b7dacb5f6c';
+const LIGHT_ZAHRADA_NAHORE_ID = process.env.LIGHT_ZAHRADA_NAHORE_ID || '34b7daca6dc8';
+const LIGHT_BAZEN_ID          = process.env.LIGHT_BAZEN_ID          || '34b7daca4150';
+const LIGHT_NOCNI_ID          = process.env.LIGHT_NOCNI_ID          || 'dcda0cea454c';
 
 // Teplotní čidla (Shelly H&T) — jen ke čtení, proto stranou od DEVICES: nemají ON/OFF
 // endpointy ani stav relé. Klíč pokoje je stejný jako v TEMP_AUTO_RULES.
