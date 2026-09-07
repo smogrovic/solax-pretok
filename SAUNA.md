@@ -78,17 +78,24 @@ Soubor: [`shelly/sauna.js`](shelly/sauna.js)
 
 1. Otevři webové rozhraní toho 3EM (`http://<ip-sauny>`) nebo appku Shelly.
 2. **Scripts → Add script** (u Gen3 je to v levém menu, sekce *Scripts*).
-3. Vlož obsah `shelly/sauna.js`, nahoře uprav:
-   - `RELE` — IP adresy relé **bazénu** a **solinátoru** a jejich generaci
-     (Plus/Pro/Gen3 → `gen: 2`, staré Shelly 1/1PM → `gen: 1`),
+3. Vlož obsah `shelly/sauna.js`. Nastavení nahoře už je vyplněné pro tuhle
+   instalaci (bazén `192.168.188.72`, solinátor `192.168.188.171`, appka na
+   Renderu). Měnit se dá:
    - `PRAH_W` — stejné číslo jako `SAUNA_ON_W` na Renderu,
-   - `APPKA` — **doporučeno vyplnit**: adresa appky. Blokace na serveru pak naskočí
-     ve stejnou vteřinu a appka relé nezapne dřív, než si sama sáhne na měřák
-     (jinak se čeká na poller, tedy až 2 minuty).
+   - `BLOKACE_MIN` — jak dlouho po nátopu držet relé dole (appka má vlastní,
+     stejně dlouhou blokaci),
+   - `RELE` — kdyby se změnily IP adresy relé. Jsou to Gen3, takže poslouchají
+     na `/rpc/Switch.Set`; staré Gen1 by potřebovaly `/relay/0?turn=off`.
 4. **Save** → **Start** a zaškrtni **Run on startup**, ať se skript pustí i po výpadku
    proudu.
-5. V logu skriptu (tlačítko *Console*) uvidíš při topení řádky
-   `sauna topí (6200 W) → vypínám bazén a solinátor`.
+5. V logu skriptu (tlačítko *Console*) uvidíš při topení `SAUNA AKTIVNÍ — 6200 W`,
+   pak `OFF → BAZEN` / `OFF → SOLINATOR` a nakonec `RENDER INFORMOVÁN O SAUNĚ`.
+
+**Proč se zpráva pro appku posílá jen z časovače.** 3EM hlásí změnu výkonu klidně
+několikrát za vteřinu. Kdyby se POST na Render zkoušel při každém hlášení, stačilo
+by, aby byl Render chvíli nedostupný, a skript by na něj pálil dotaz co chvíli.
+Proto se zkusí jednou na začátku topení a pak nejvýš jednou za `KONTROLA_S`.
+Na rychlost vypnutí to nemá vliv — to je lokální a na appce nezávisí.
 
 **Práh je ve skriptu vlastní.** Když ho přenastavíš v appce, `PRAH_W` ve skriptu se
 tím **nezmění** — skript o appce neví. Měň ho na obou místech, ať se nerozejdou.
