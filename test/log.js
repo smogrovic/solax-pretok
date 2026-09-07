@@ -73,4 +73,57 @@ nadpis('6) Výpadek nese, že pořád trvá');
     /addLog\(s\.rele \? `\$\{s\.label\}: zase odpovídá`/.test(SRC), false);
 }
 
+nadpis('7) Staré řádky se vymetou');
+{
+  // Filtr se vytáhne přímo ze server.js, ať sada testuje ten skutečný seznam
+  const { between } = require('./zdroj');
+  const KOD = between('// Hlášky, které se do logu už nezapisují', 'function pruneHistory()');
+  const api = new Function('LIGHT_KEYS', 'DEVICE_LABELS',
+    KOD + '\n; return { logZastaraly };')(
+    ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'],
+    { lightDole: 'Zahrada dole', lightNahore: 'Zahrada nahoře',
+      lightBazen: 'Světlo bazén', lightNocni: 'Noční světla' });
+
+  const ven = [
+    'Wallbox: režim FAST (automatika)',
+    'Wallbox: režim ECO (FAST)',
+    'Wallbox: přebytek 3,6 kW přes 10 min → FAST',
+    'Solinátor: předpověď 28 °C → dnešní cíl 2:00',
+    'Solinátor: 40 min nevyužitého boostu se přenáší na dnešek',
+    'Solinátor: dnešek zkrácen o 20 min (namačkáno včera)',
+    'Solinátor: po restartu čekám na dopočet doby běhu z telefonu',
+    'Teplotní automatika — Ložnice: zapnuto (23,4 °C nad 22 °C)',
+    'Čidlo Miky: nehlásí přes 6 h — jede se dál podle poslední hodnoty',
+    'Čidlo Elenka: zase hlásí',
+    'Bazén (relé): zase odpovídá',
+    'Měřák sauny: data znovu naskočila',
+    'Zahrada dole: zapnuto ručně',
+    'Noční světla: vypnuto (časovač 22:00)'
+  ];
+  for (const m of ven) check('pryč: ' + m.slice(0, 46), api.logZastaraly(m), true);
+
+  const zustat = [
+    'Wallbox: režim FAST ručně (automatika převezme v 14:20)',
+    'Wallbox: režim GREEN (asistent)',
+    'Wallbox: přepnuto na AUTO',
+    'Wallbox: ručně pracovní den (do 12:00)',
+    'Wallbox automatika: Solax API neodpovědělo včas.',
+    'Bazén: zapnuto (přebytek 2,1 kW)',
+    'Bojler: zapnuto ručně (automatika převezme v 10:45)',
+    'Solinátor: vypnut do 20:00 (vysoký chlor)',
+    'Sauna: topí (6 200 W) — bazén a solinátor jdou dolů',
+    'Automatika: zimní režim',
+    'Bazén: neodpovídá',
+    'Teplotní automatika Ložnice: vypnuta (ruční zásah)',
+    'Bazén: +24 h natvrdo (do 14:00)'
+  ];
+  for (const m of zustat) check('zůstává: ' + m.slice(0, 44), api.logZastaraly(m), false);
+}
+
+nadpis('8) Kde se filtr používá');
+{
+  check('při úklidu logu', /state\.log\.filter\(e => !logZastaraly\(e\.msg\)\)/.test(SRC), true);
+  check('i při obnově z telefonu', /&& !logZastaraly\(e\.msg\)/.test(SRC), true);
+}
+
 konec();

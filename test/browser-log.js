@@ -65,6 +65,26 @@ setTimeout(() => {
   check('záloha nenese „pořád to trvá"', zalohaLoc.some(e => e.open), false);
   check('  ale výpadek zůstane', zalohaLoc.length, 1);
 
+  // Staré řádky, které se do logu už nezapisují, se nesmí kreslit ani vracet serveru
+  logEntries = [
+    { t: t0, msg: 'Bazén: zapnuto (přebytek 2,1 kW)' },
+    { t: t0 + MIN, msg: 'Wallbox: režim FAST (automatika)' },
+    { t: t0 + 2 * MIN, msg: 'Zahrada dole: zapnuto ručně' },
+    { t: t0 + 3 * MIN, msg: 'Teplotní automatika — Ložnice: zapnuto (23,4 °C nad 22 °C)' },
+    { t: t0 + 4 * MIN, msg: 'Bazén (relé): zase odpovídá' },
+    { t: t0 + 5 * MIN, msg: 'Wallbox: režim FAST ručně (automatika převezme v 14:20)' }
+  ];
+  logEntries = mergeLogs(logEntries, []);
+  renderLog();
+  check('starý wallboxový řádek se nekreslí', /\\(automatika\\)/.test(logList.textContent), false);
+  check('  ani cvakání světel', /Zahrada dole/.test(logList.textContent), false);
+  check('  ani spínání klimatizace', /Teplotní automatika —/.test(logList.textContent), false);
+  check('  ani „zase odpovídá"',
+    /zase odpovídá/.test(logList.textContent + outageList.textContent), false);
+  check('ruční přepnutí wallboxu zůstane', /režim FAST ručně/.test(logList.textContent), true);
+  check('  a běžná událost taky', /přebytek 2,1 kW/.test(logList.textContent), true);
+  check('  takže zbyly dva řádky', document.querySelectorAll('#logList .log-entry').length, 2);
+
   check('log si pamatuje 48 h', LOG_MAX_AGE_MS, 48 * 3600000);
   check('  a starší se zahodí',
     pruneOldLog([{ t: Date.now() - 50 * 3600000, msg: 'staré' },

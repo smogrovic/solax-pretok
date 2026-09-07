@@ -158,6 +158,11 @@ const DEVICE_LABELS = {
   lightNocni: 'Noční světla'
 };
 
+// Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
+// Jejich stav je vidět na Ovládání, běh na časové ose.
+const LIGHT_KEYS = ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'];
+const jeSvetlo = key => LIGHT_KEYS.includes(key);
+
 const state = {
   solax: null,       // poslední úspěšná data ze střídače
   devices: {},       // key -> { online, isOn, powerW, fetchedAt }
@@ -328,11 +333,32 @@ function broadcast(event, data) {
   }
 }
 
+// Hlášky, které se do logu už nezapisují (automatické přepínání wallboxu, cíl
+// solinátoru, spínání klimatizací, ticho čidel, cvakání světel, návrat zdroje po
+// výpadku). Zápis jsme odstranili, jenže staré kusy pořád leží v paměti, v telefonu
+// i v záloze — a telefon je serveru vrací. Tenhle filtr je při každém úklidu vyhodí,
+// takže z appky zmizí hned a nečeká se, až po dvou dnech vypadnou samy.
+const LOG_ZASTARALE = [
+  /^Wallbox: režim .+ \((automatika|FAST)\)$/,   // „ručně" a „(asistent)" zůstávají
+  /^Wallbox: přebytek /,
+  /^Solinátor: .+→ dnešní cíl /,
+  /^Solinátor: .+(boostu se přenáší|zkrácen o|nedoběhl o|čekám na dopočet)/,
+  /^Teplotní automatika — /,
+  /^Čidlo .+: (nehlásí|zatím nehlásí|zase hlásí)/,
+  /: (zase odpovídá|data znovu naskočila)$/,
+  // Světla podle jejich vlastních názvů, ať se seznam nepíše dvakrát
+  new RegExp('^(' + LIGHT_KEYS.map(k => DEVICE_LABELS[k]).join('|') + '): ')
+];
+function logZastaraly(msg) {
+  return typeof msg === 'string' && LOG_ZASTARALE.some(re => re.test(msg));
+}
+
 function pruneHistory() {
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   const logCutoff = Date.now() - LOG_MAX_AGE_MS;
   while (state.history.length && state.history[0].t < cutoff) state.history.shift();
   while (state.log.length && state.log[0].t < logCutoff) state.log.shift();
+  if (state.log.some(e => logZastaraly(e.msg))) state.log = state.log.filter(e => !logZastaraly(e.msg));
   if (state.log.length > LOG_MAX_ENTRIES) state.log = state.log.slice(-LOG_MAX_ENTRIES);
   while (state.wallboxHistory.length && state.wallboxHistory[0].t < cutoff) state.wallboxHistory.shift();
   state.history = thinPoints(state.history, PICK_MAX_KW);
@@ -1372,7 +1398,8 @@ app.post('/api/log/restore', (req, res) => {
   const cutoff = now - LOG_MAX_AGE_MS;
   const clean = entries
     .filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string'
-      && e.msg.length > 0 && e.msg.length <= 300 && e.t >= cutoff && e.t <= now)
+      && e.msg.length > 0 && e.msg.length <= 300 && e.t >= cutoff && e.t <= now
+      && !logZastaraly(e.msg))   // telefon si je pamatuje dýl než server, sem nepatří
     .slice(-LOG_MAX_ENTRIES);
   if (!clean.length) return res.json({ added: 0 });
 
@@ -2203,11 +2230,6 @@ const KEEPALIVE_QUIET_MS = 60 * 1000;   // po čerstvém povelu chvíli mlčíme
 // relé, kterému jsme řekli „vypni" a ono drží (ztracený povel, zaseknutý cloud), nesmí
 // dostávat udržovací ON: natahoval by mu ten časovač a appka by tak držela naživu
 // zrovna to, co chce vypnout.
-// Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
-// Jejich stav je vidět na Ovládání, běh na časové ose.
-const LIGHT_KEYS = ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'];
-const jeSvetlo = key => LIGHT_KEYS.includes(key);
-
 const lastCmd = {};
 function noteCmd(key, turn) { lastCmd[key] = { turn, at: Date.now() }; }
 

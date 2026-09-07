@@ -3104,9 +3104,26 @@ let logEntries = [];
 // Dva dny stejně jako server; delší log stejně nikdo nečetl a co kdy běželo ukazuje
 // časová osa na Přehledu.
 const LOG_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+// Hlášky, které se do logu už nezapisují (automatické přepínání wallboxu, cíl
+// solinátoru, spínání klimatizací, ticho čidel, cvakání světel, návrat zdroje po
+// výpadku). Server má tentýž seznam — tady je proto, aby zmizely i ze zálohy
+// v telefonu a nevracely se serveru zpátky. Až staré řádky odejdou, může jít pryč.
+const LOG_ZASTARALE = [
+  /^Wallbox: režim .+ \((automatika|FAST)\)$/,   // „ručně" a „(asistent)" zůstávají
+  /^Wallbox: přebytek /,
+  /^Solinátor: .+→ dnešní cíl /,
+  /^Solinátor: .+(boostu se přenáší|zkrácen o|nedoběhl o|čekám na dopočet)/,
+  /^Teplotní automatika — /,
+  /^Čidlo .+: (nehlásí|zatím nehlásí|zase hlásí)/,
+  /: (zase odpovídá|data znovu naskočila)$/,
+  /^(Zahrada dole|Zahrada nahoře|Světlo bazén|Noční světla): /
+];
+const logZastaraly = msg => typeof msg === 'string' && LOG_ZASTARALE.some(re => re.test(msg));
+
 function pruneOldLog(arr) {
   const cutoff = Date.now() - LOG_MAX_AGE_MS;
-  return arr.filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string' && e.t >= cutoff);
+  return arr.filter(e => e && typeof e.t === 'number' && typeof e.msg === 'string'
+    && e.t >= cutoff && !logZastaraly(e.msg));
 }
 
 function saveLogLocal() {
