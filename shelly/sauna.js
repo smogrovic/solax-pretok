@@ -31,7 +31,7 @@ let APP_ENDPOINT = '/api/sauna/active';
 // Relé k vypnutí. Gen3 (i Gen2/Plus/Pro) poslouchá na /rpc/Switch.Set.
 // V routeru jim dej pevnou adresu, ať se IP nezmění.
 let RELE = [
-  { jmeno: 'BAZEN', ip: '192.168.188.72' },
+  { jmeno: 'BAZEN', ip: '192.168.188.131' },
   { jmeno: 'SOLINATOR', ip: '192.168.188.171' }
 ];
 

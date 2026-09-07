@@ -72,4 +72,44 @@ check('a funkci, která povel pošle', /fetch\('\/api\/wallbox\/set'/.test(js), 
 const rezimy = [...HTML.matchAll(/class="wb-mode-btn" data-mode="(\w+)"/g)].map(m => m[1]);
 check('v appce jsou čtyři režimy', rezimy.join(','), 'stop,eco,green,fast');
 
+nadpis('4) Skript do Shelly');
+// `shelly/sauna.js` neběží na Renderu, ale v měřáku sauny — žádná jiná sada se ho
+// nedotkne. Přitom je to poslední pojistka jističe a jeho chyba se pozná až tím,
+// že při zátopu bazén nezhasne. Hlídají se dvě věci, které se v něm reálně kazí:
+// IP relé (naposledy po výměně bazénového relé) a meze mJS, které Shelly umí.
+const SKRIPT = fs.readFileSync(path.join(__dirname, '..', 'shelly', 'sauna.js'), 'utf8');
+const NAVOD = fs.readFileSync(path.join(__dirname, '..', 'SAUNA.md'), 'utf8');
+
+function ipRele(src) {
+  const out = {};
+  for (const m of src.matchAll(/jmeno:\s*'(\w+)',\s*ip:\s*'([\d.]+)'/g)) out[m[1]] = m[2];
+  return out;
+}
+const ip = ipRele(SKRIPT);
+check('bazén má správnou IP', ip.BAZEN, '192.168.188.131');
+check('solinátor má správnou IP', ip.SOLINATOR, '192.168.188.171');
+// Návod tytéž adresy opisuje slovy. Rozejdou-li se, jedna z nich je stará a někdo
+// podle ní bude relé hledat — proto to musí sedět doslova.
+check('SAUNA.md píše tutéž IP bazénu', NAVOD.includes('bazén `' + ip.BAZEN + '`'), true);
+check('  a tutéž IP solinátoru', NAVOD.includes('solinátor `' + ip.SOLINATOR + '`'), true);
+
+// mJS v Shelly není JavaScript prohlížeče: šipky, backticky, `const` ani metody polí
+// neumí a skript se po vložení rovnou zastaví.
+function mimoMJS(src) {
+  const kod = src.replace(/^\s*\/\/.*$/gm, '');
+  const spatne = [];
+  if (/=>/.test(kod)) spatne.push('šipka');
+  if (/`/.test(kod)) spatne.push('backtick');
+  if (/\bconst\s/.test(kod)) spatne.push('const');
+  if (/\.(forEach|map|filter|reduce|includes)\s*\(/.test(kod)) spatne.push('metoda pole');
+  return spatne;
+}
+check('drží se mezí mJS', mimoMJS(SKRIPT).join(', ') || 'ano', 'ano');
+
+nadpis('5) Kontrola kontroly skriptu');
+const podvrh = "let RELE = [\n  { jmeno: 'BAZEN', ip: '192.168.188.72' }\n];\nlet f = function (x) { return x; };";
+check('stará IP se pozná', ipRele(podvrh).BAZEN, '192.168.188.72');
+check('čistý úryvek mJS projde', mimoMJS(podvrh).join(',') || 'ano', 'ano');
+check('šipka a backtick se najdou', mimoMJS('let a = () => `x`;').join(','), 'šipka,backtick');
+
 konec();

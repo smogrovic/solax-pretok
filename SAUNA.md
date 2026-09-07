@@ -79,7 +79,7 @@ Soubor: [`shelly/sauna.js`](shelly/sauna.js)
 1. Otevři webové rozhraní toho 3EM (`http://<ip-sauny>`) nebo appku Shelly.
 2. **Scripts → Add script** (u Gen3 je to v levém menu, sekce *Scripts*).
 3. Vlož obsah `shelly/sauna.js`. Nastavení nahoře už je vyplněné pro tuhle
-   instalaci (bazén `192.168.188.72`, solinátor `192.168.188.171`, appka na
+   instalaci (bazén `192.168.188.131`, solinátor `192.168.188.171`, appka na
    Renderu). Měnit se dá:
    - `PRAH_W` — stejné číslo jako `SAUNA_ON_W` na Renderu,
    - `BLOKACE_MIN` — jak dlouho po nátopu držet relé dole (appka má vlastní,
