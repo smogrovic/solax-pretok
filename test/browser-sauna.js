@@ -28,7 +28,9 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  stav to říká slovy', saunaState.textContent, 'topí');
   check('  a ukazuje kolik bere', saunaPower.textContent, '6,2 kW');
   check("  s dobou topení", /Topí 40 min/.test(saunaHint.textContent), "true");
-  check('  i dokdy drží bazén', /do \\d\\d?:\\d\\d/.test(saunaHint.textContent), 'true');
+  // Dokdy drží blokace, nese nově řádek pod odběrem — v hlášce by to bylo dvakrát
+  check('  a blokaci nechává řádku níž',
+    /do \\d\\d?:\\d\\d/.test(document.getElementById('saunaMeta').textContent), 'true');
 
   saunaData = { powerW: 120, fetchedAt: ted(), topi: false, since: T - 40 * MIN, blockUntil: T + 20 * MIN, limitW: 500 };
   renderSauna();
@@ -86,25 +88,37 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  záložka Sauna je v liště', Array.from(document.querySelectorAll('#pageTabs .page-tab')).some(t => t.textContent === 'Sauna'), 'true');
   saunaEnabledFlag = true;
 
-  OUT.push('\\n5b) Řádek o měření a skriptu');
+  OUT.push('\\n5b) Věta o skriptu a blokaci');
   const M = Date.now();
   saunaData = { powerW: 6200, fetchedAt: new Date(M - 60000).toISOString(), topi: true,
     since: M - 10 * MIN, blockUntil: M + 25 * MIN, limitW: 500, holdMin: 30,
     scriptAt: M - 3 * MIN };
   renderSauna();
   const meta = document.getElementById('saunaMeta');
+  const hint = document.getElementById('saunaHint');
   check('řádek s podrobnostmi existuje', !!meta, 'true');
-  check('ukáže čas posledního měření', /Měření z Shelly: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
-  check('ukáže, že se ozval skript', /Skript v Shelly hlásil: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+  // Měřák se ptá každé dvě minuty, takže „poslední měření" je pořád „před chvílí"
+  check('čas posledního měření se nepíše', /Měření z Shelly/.test(meta.textContent), 'false');
+  check('ukáže, kdy skript hlásil saunu', /Skript hlásil saunu \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
   check('  a nehlásí, že se neozval', /neozval/.test(meta.textContent), 'false');
-  check('ukáže, dokdy drží blokace', /Bazén a solinátor blokované do: \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+  check('ukáže, dokdy drží blokace', /bazén a solinátor blokované do \\d\\d?:\\d\\d/.test(meta.textContent), 'true');
+  check('obojí je na jednom řádku', meta.children.length, 1);
+  check('  oddělené tečkou', / · /.test(meta.textContent), 'true');
+  // Hláška nad řádkem nesla tentýž čas — prvky jsou přímo pod sebou, tak to bilo do očí
+  check('hláška výš už blokaci neopakuje', /blokované|drží vypnuté/.test(hint.textContent), 'false');
+  check('  ale dobu topení pořád ukáže', /Topí/.test(hint.textContent), 'true');
 
   saunaData = { ...saunaData, scriptAt: 0 };
   renderSauna();
-  check('bez skriptu to řekne', /Skript v Shelly hlásil: zatím se neozval/.test(meta.textContent), 'true');
+  check('bez skriptu to řekne', /Skript v Shelly se zatím neozval/.test(meta.textContent), 'true');
+  check('  a je to šedě', !!meta.querySelector('.skript-ne'), 'true');
+  check('  blokace zůstává vedle', /blokované do/.test(meta.textContent), 'true');
   saunaData = { ...saunaData, blockUntil: 0, topi: false, since: 0 };
   renderSauna();
-  check('bez blokace se řádek neukazuje', /blokované do/.test(meta.textContent), 'false');
+  check('bez blokace se ta část neukazuje', /blokované do/.test(meta.textContent), 'false');
+  saunaData = { ...saunaData, scriptAt: M - 3 * MIN };
+  renderSauna();
+  check('  a zůstane samotný skript', meta.textContent.trim(), 'Skript hlásil saunu ' + fmtSolTime(M - 3 * MIN));
   saunaEnabledFlag = false;
   renderSauna();
   check('bez měřáku je řádek prázdný', meta.textContent, '');

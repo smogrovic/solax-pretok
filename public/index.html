@@ -6028,36 +6028,35 @@ function renderSauna() {
   saunaPowerEl.textContent = (d.powerW / 1000).toFixed(1).replace('.', ',') + ' kW';
   const kusy = [];
   if (d.since) kusy.push(`Topí ${fmtSolDur(Date.now() - d.since)}`);
-  if (blok) kusy.push(`bazén a solinátor drží vypnuté do ${fmtSolTime(d.blockUntil)}`);
   if (!kusy.length && typeof d.limitW === 'number') kusy.push(`Zapnuto se počítá od ${d.limitW} W`);
   saunaHintEl.textContent = kusy.join(' · ');
   renderSaunaMeta();
 }
 
-// Drobný řádek pod odběrem. Skript v Shelly je RYCHLÁ vrstva — shodí bazén a solinátor
+// Drobná věta pod odběrem. Skript v Shelly je RYCHLÁ vrstva — shodí bazén a solinátor
 // do vteřiny a teprve pak dá vědět appce, která se sama ptá jednou za dvě minuty.
 // Když se skript nikdy neozval, je dobré to vidět: znamená to, že jistič hlídá jen appka.
+// Čas posledního MĚŘENÍ se tu schválně nepíše — měřák se ptá každé dvě minuty, takže je
+// pořád „před chvílí" a neneslo by to žádnou informaci. Zajímavé jsou jen dvě věci:
+// kdy skript naposledy hlásil zapnutou saunu a dokdy kvůli tomu appka drží relé dole.
 function renderSaunaMeta() {
   if (!saunaMetaEl) return;
   const d = saunaData || {};
   saunaMetaEl.textContent = '';
   if (saunaEnabledFlag === false) return;
-  const radek = (popis, hodnota, trida) => {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(popis + ' '));
+  const veta = document.createElement('div');
+  const kus = (popis, hodnota, trida) => {
+    if (veta.childNodes.length) veta.appendChild(document.createTextNode(' · '));
+    veta.appendChild(document.createTextNode(popis));
     const b = document.createElement('b');
     if (trida) b.className = trida;
     b.textContent = hodnota;
-    div.appendChild(b);
-    saunaMetaEl.appendChild(div);
+    veta.appendChild(b);
   };
-  radek('Měření z Shelly:', d.fetchedAt ? fmtSolTime(new Date(d.fetchedAt).getTime()) : 'zatím nic');
-  radek('Skript v Shelly hlásil:',
-    d.scriptAt ? fmtSolTime(d.scriptAt) : 'zatím se neozval',
-    d.scriptAt ? '' : 'skript-ne');
-  if (d.blockUntil > Date.now()) {
-    radek('Bazén a solinátor blokované do:', fmtSolTime(d.blockUntil));
-  }
+  if (d.scriptAt) kus('Skript hlásil saunu ', fmtSolTime(d.scriptAt));
+  else kus('Skript v Shelly ', 'se zatím neozval', 'skript-ne');
+  if (d.blockUntil > Date.now()) kus('bazén a solinátor blokované do ', fmtSolTime(d.blockUntil));
+  saunaMetaEl.appendChild(veta);
 }
 setInterval(renderSauna, 30000);   // „topí 1:20" musí běžet i bez zprávy ze serveru
 
