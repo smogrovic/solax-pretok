@@ -11,6 +11,8 @@ node test/months.js                   # spotřeba po měsících (sauna, bazén,
 node test/staticka.js                 # inline skript: nic se nepoužívá bez deklarace
 node test/usage.js                    # odkud šla spotřeba (dělení FVE/síť) a odběr okruhů
 node test/rele.js                     # „běží to relé?" podle časovače v relé
+node test/bazen.js                    # zaručené 2 h denně (okno 13–15, past po restartu)
+node test/solinator.js                # solinátor startuje s bazénem, nejpozději ve 13:00
 node test/huum.js                     # překlad odpovědi z kamen HUUM (UKU WiFi)
 node test/cidla.js                    # nástěnná čidla řídí klimatizaci ve svém pokoji
 node test/log.js                      # co do logu patří a co ne, výpadky s úrovní error

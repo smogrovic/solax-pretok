@@ -72,6 +72,7 @@ function vzorovyStav() {
     solinator: { date: '2026-08-31', bonusMs: 3600000, boostMs: 0, carryMs: 0, disabledUntil: 0 },
     runtime: { date: '2026-08-31', ms: { shelly: 1, pool: 2, solinator: 3 }, wh: { feed: 4 }, yesterday: null },
     wbDayType: { manual: 'weekend', until: Date.now() + 3600000 },
+    wbLowSoc: { until: Date.now() + 12 * 3600000 },
     wbAuto: false,
     tempAuto: { obyvak: true, loznice: false, elenka: false, miky: false },
     manualHold: {},
@@ -109,6 +110,7 @@ nadpis('2) Balení');
   check('časovače mají razítko', typeof snap.posts['/api/timers/restore'].savedAt, 'number');
   check('přepínač wallboxu jde mimo endpointy', snap.primo.wbAuto, false);
   check('poslední povely relé taky', typeof snap.primo.lastCmd, 'object');
+  check('a FAST západka po vybité baterce', snap.primo.wbLowSocUntil > Date.now(), true);
 }
 {
   const h = build({ env: UPSTASH });
@@ -246,6 +248,20 @@ nadpis('5) Přímé hodnoty');
   check('  a je to ten správný', h.pushSubscriptions.has('https://push.example/1'), true);
 }
 {
+  // Bez západky by nasazení večer poslalo auto zpátky na GREEN, i když se odpoledne
+  // rozhodlo jinak. Horní mez brání poškozené záloze držet FAST donekonečna.
+  const now = Date.now();
+  const h = build({ env: UPSTASH, state: prazdnyStav() });
+  h.api.storeApplyPrimo({ wbLowSocUntil: now + 12 * 3600000 });
+  check('FAST západka se vrátí', h.state.wbLowSoc.until, now + 12 * 3600000);
+  const p = build({ env: UPSTASH, state: prazdnyStav() });
+  p.api.storeApplyPrimo({ wbLowSocUntil: now - 1000 });
+  check('  prošlá ne', p.state.wbLowSoc.until, 0);
+  const d = build({ env: UPSTASH, state: prazdnyStav() });
+  d.api.storeApplyPrimo({ wbLowSocUntil: now + 90 * 3600000 });
+  check('  a nesmyslně daleká taky ne', d.state.wbLowSoc.until, 0);
+}
+{
   const h = build({ env: UPSTASH, state: prazdnyStav() });
   h.state.assistantLog = [{ t: Date.now(), text: 'živé' }];
   h.api.storeApplyPrimo({ assistantLog: [{ t: Date.now() - 1000, text: 'ze zálohy' }] });
@@ -273,7 +289,7 @@ function prazdnyStav() {
     wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], saunaDays: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
     usageDays: [], usageHistory: [],
-    wbDayType: { manual: null, until: 0 }, wbAuto: true,
+    wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,
     tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false },
     manualHold: {}, assistantLog: []
   };

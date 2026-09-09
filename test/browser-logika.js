@@ -33,7 +33,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
                    'Ruční zásah vs. automatika', 'Priorita auta', 'Korekce podle předpovědi',
                    'Data, notifikace, časovače'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
-  check('odrážek je nejvýš 65', li.length <= 65, 'true');
+  check('odrážek je nejvýš 56', li.length <= 56, 'true');   // po zeštíhlení jich je 54
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);
@@ -42,11 +42,24 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const txt = li.map(e => e.textContent).join(' ');
   check('sauna má pravidlo o jističi', /stejném jističi/.test(txt), 'true');
   check('wallbox má plán pracovního dne', /GREEN 0:00–4:00 · FAST 4:00–7:00/.test(txt), 'true');
-  check('  i víkendu', /GREEN 0:00–8:00 · FAST 8:00–10:00/.test(txt), 'true');
-  check('  a hysterezi s prahy', /10 min v kuse nad 3,5 kW/.test(txt) && /10 min pod 2,5 kW/.test(txt), 'true');
+  check('  i víkend', /Víkend o 4 h později/.test(txt), 'true');
+  check('  a hysterezi s prahy', /10 min nad 3,5 kW/.test(txt) && /10 min pod 2,5 kW/.test(txt), 'true');
   check('  a že přebytek je před autem', /před autem/.test(txt), 'true');
 
-  OUT.push('\\n2) Nastavení sauny');
+  OUT.push('\\n2) Nová pravidla');
+  check('bazén má denní minimum', /Aspoň 2 h denně/.test(txt), 'true');
+  check('  s oknem 13–15', /13:00 a 15:00/.test(txt), 'true');
+  check('solinátor jede s bazénem', /Jede s bazénem/.test(txt), 'true');
+  check('  nejpozději ve 13:00', /nejpozději ve 13:00/.test(txt), 'true');
+  check('wallbox má západku na vybitou baterku', /Baterie pod 20 % po 12:00/.test(txt), 'true');
+  check('  a je znát dokdy drží', /do ranního FAST okna/.test(txt), 'true');
+
+  // Wallbox byl nejdelší sekce v appce — po zeštíhlení nesmí zase nabobtnat
+  const wbIdx = sekce.findIndex(x => x.startsWith('Wallbox'));
+  const wbSekce = [...page.querySelectorAll('.logic-sec')][wbIdx];
+  check('wallbox má nejvýš pět odrážek', wbSekce.querySelectorAll('li').length <= 5, 'true');
+
+  OUT.push('\\n3) Nastavení sauny');
   saunaData = { powerW: 0, fetchedAt: new Date().toISOString(), topi: false, since: 0,
                 blockUntil: 0, limitW: 500, holdMin: 30 };
   renderSaunaSet();

@@ -34,15 +34,16 @@ const vikend = hhmm => denVTydnu('Sat', hhmm);
 
 // prebytek = přetok + baterie (kW), wb = odběr wallboxu (W)
 function build({ nowAt = vsedni('12:00'), prebytek = 0, wb = 0, auto = true, mode = 'on',
-                 stari = 0, rucne = null } = {}) {
+                 stari = 0, rucne = null, soc = 80 } = {}) {
   let now = nowAt;
   const logs = [];
   const state = {
     wbAuto: auto, autoMode: mode, wbManualUntil: 0,
     wbDayType: rucne || { manual: null, until: 0 },
+    wbLowSoc: { until: 0 },
     wallbox: { status: 2, power: wb, fetchedAt: new Date(now).toISOString() },
     infigy: {},
-    solax: { feedinKw: prebytek, batPowerKw: 0, fetchedAt: new Date(now - stari).toISOString() }
+    solax: { feedinKw: prebytek, batPowerKw: 0, batterySoc: soc, fetchedAt: new Date(now - stari).toISOString() }
   };
   const RealDate = Date;
   class FakeDate extends RealDate {
@@ -51,10 +52,11 @@ function build({ nowAt = vsedni('12:00'), prebytek = 0, wb = 0, auto = true, mod
   }
   const api = new Function(
     'state', 'weatherCache', 'pragueTime', 'pragueDateString', 'addLog', 'formatKwLog',
-    'broadcast', 'isWinter', 'wbSwitchPayload', 'cerstve', 'wallboxWatts', 'Date',
+    'broadcast', 'isWinter', 'wbSwitchPayload', 'cerstve', 'wallboxWatts', 'fmtPragueTime', 'Date',
     CODE + '\n; return { ecWallboxTarget, wbFaze, wbDayType, wbDayTypeManual, wbDayTypeUntil,'
          + ' wbUpdateHyst, wbHystReset, wbPrebytekW, wbCarReady, wbManualHeld, setWbManualHold,'
-         + ' clearWbManualHold, get hyst() { return wbHyst; },'
+         + ' clearWbManualHold, wbUpdateLowSoc, wbLowSocHeld, wbLowSocNextFastMs,'
+         + ' get hyst() { return wbHyst; },'
          + ' WB_PLAN, WB_HYST_UP_KW, WB_HYST_DOWN_KW, WB_HYST_MS, WB_MANUAL_HOLD_MS };'
   )(
     state, { data: null },
@@ -67,6 +69,7 @@ function build({ nowAt = vsedni('12:00'), prebytek = 0, wb = 0, auto = true, mod
     () => ({}),
     ts => !!ts && now - new Date(ts).getTime() <= 10 * MIN,
     () => (state.wallbox && typeof state.wallbox.power === 'number' ? state.wallbox.power : null),
+    ts => new Date(ts).toISOString(),
     FakeDate
   );
   return {
@@ -74,6 +77,7 @@ function build({ nowAt = vsedni('12:00'), prebytek = 0, wb = 0, auto = true, mod
     setNow: t => { now = t; },
     posun: min => { now += min * MIN; state.solax = { ...state.solax, fetchedAt: new Date(now).toISOString() }; },
     setPrebytek: kw => { state.solax = { ...state.solax, feedinKw: kw, fetchedAt: new Date(now).toISOString() }; },
+    setSoc: pct => { state.solax = { ...state.solax, batterySoc: pct, fetchedAt: new Date(now).toISOString() }; },
     setWb: w => { state.wallbox = { ...state.wallbox, power: w }; },
     get now() { return now; }
   };
@@ -193,6 +197,74 @@ nadpis('8) Zima, pevné FAST, ruční režim');
   check('  a je aktivní', h.api.wbManualHeld(), 'true');
   h.setNow(vsedni('12:00') + 3 * H + MIN);
   check('  po třech hodinách padá', h.api.wbManualHeld(), 'false');
+}
+nadpis('9) Vybitá baterka odpoledne → FAST do rána');
+{
+  // Pod 20 % odpoledne znamená, že FVE dnes nevyrobí. Auto by stejně bralo ze sítě,
+  // tak ať jede naplno rovnou.
+  const h = build({ nowAt: vsedni('12:30'), soc: 15 });
+  h.api.wbUpdateLowSoc();
+  check('pod 20 % ve 12:30 se západka zavře', h.api.wbLowSocHeld(), 'true');
+  check('  a režim jde na FAST', h.api.ecWallboxTarget(), 'fast');
+  h.setNow(vsedni('12:30') + 5 * H);            // 17:30, kdy by jinak rozhodoval přebytek
+  check('  drží odpoledne', h.api.ecWallboxTarget(), 'fast');
+  h.setNow(vsedni('12:30') + 13 * H);           // 1:30 v noci, jinak GREEN fáze
+  check('  drží i přes noc místo GREEN', h.api.ecWallboxTarget(), 'fast');
+  h.setNow(vsedni('12:30') + 16 * H);           // 4:30, ranní FAST okno
+  check('  ráno ve FAST okně pouští', h.api.wbLowSocHeld(), 'false');
+  // Že je západka pryč, se pozná až v GREEN fázi: tu předtím přebíjela
+  h.setNow(vsedni('12:30') + 37 * H);           // 1:30 o dva dny dál
+  check('  a plán dne zase platí (GREEN v noci)', h.api.ecWallboxTarget(), 'green');
+}
+{
+  const h = build({ nowAt: vsedni('11:30'), soc: 5 });
+  h.api.wbUpdateLowSoc();
+  check('dopoledne se nespouští', h.api.wbLowSocHeld(), 'false');
+}
+{
+  const h = build({ nowAt: vsedni('12:30'), soc: 25 });
+  h.api.wbUpdateLowSoc();
+  check('nabitá baterka ji nespustí', h.api.wbLowSocHeld(), 'false');
+  const p = build({ nowAt: vsedni('12:30'), soc: 20 });
+  p.api.wbUpdateLowSoc();
+  check('  ani přesně na dvaceti', p.api.wbLowSocHeld(), 'false');
+}
+{
+  // Zmrzlá data ze střídače nesmí rozhodovat — SOC by mohl být hodiny starý
+  const h = build({ nowAt: vsedni('12:30'), soc: 5, stari: 30 * MIN });
+  h.api.wbUpdateLowSoc();
+  check('ze zmrzlých dat se nerozhoduje', h.api.wbLowSocHeld(), 'false');
+}
+{
+  // Jednou za odpoledne rozhodnuto: dobitá baterka ji schválně nepouští
+  const h = build({ nowAt: vsedni('12:30'), soc: 10 });
+  h.api.wbUpdateLowSoc();
+  h.setNow(vsedni('12:30') + 3 * H);
+  h.setSoc(90);
+  h.api.wbUpdateLowSoc();
+  check('dobitá baterka západku nepustí', h.api.wbLowSocHeld(), 'true');
+}
+{
+  // Ruční přepnutí má přednost před vším — testuje se dřív než cíl
+  const h = build({ nowAt: vsedni('12:30'), soc: 10 });
+  h.api.wbUpdateLowSoc();
+  h.api.setWbManualHold();
+  check('ruční režim západku přebije', h.api.wbManualHeld(), 'true');
+}
+
+nadpis('10) Kam až západka sahá');
+{
+  // V pracovní den končí GREEN ve 4:00, o víkendu v 8:00 — bere se ZÍTŘEJŠÍ typ dne
+  const h = build({ nowAt: vsedni('13:00'), soc: 10 });
+  const konec = h.api.wbLowSocNextFastMs();
+  check('pracovní den → zítra ve 4:00', pClock(konec).hour, 4);
+  check('  a je to opravdu zítřek', pDate(konec) !== pDate(h.now), 'true');
+  // Pátek odpoledne: zítřek je sobota, tedy 8:00
+  const pa = build({ nowAt: denVTydnu('Fri', '13:00'), soc: 10 });
+  check('pátek → sobotních 8:00', pClock(pa.api.wbLowSocNextFastMs()).hour, 8);
+  // Neděle odpoledne: zítřek je pondělí, tedy zpátky 4:00
+  const ne = build({ nowAt: denVTydnu('Sun', '13:00'), soc: 10 });
+  check('neděle → pondělních 4:00', pClock(ne.api.wbLowSocNextFastMs()).hour, 4);
 }
 
 konec();

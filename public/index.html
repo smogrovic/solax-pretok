@@ -2237,10 +2237,10 @@
         <div class="logic-sec">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
-            <li>Okno <b>8:00</b> → hodina před západem (bez počasí 20:00).</li>
-            <li><b>Zapne</b> 2× po sobě přebytek nad <b>1850 W</b>, <b>vypne</b> 3× pod <b>−200 W</b> (nejdřív po 30 min běhu).</li>
-            <li>Minimální SOC: 12h <b>50 %</b> · 13h <b>60 %</b> · 14h <b>70 %</b> · 15h <b>80 %</b> · 16h <b>85 %</b> · 17h+ <b>90 %</b>.</li>
-            <li><b>+24 h</b> jede natvrdo bez ohledu na cokoli (sčítá se do 72 h); ruší to <b>Zrušit</b> nebo ruční OFF.</li>
+            <li>Okno <b>8:00</b> → hodina před západem. <b>Zapne</b> 2× přebytek nad <b>1850 W</b>, <b>vypne</b> 3× pod <b>−200 W</b> (po 30 min běhu).</li>
+            <li>Minimální SOC roste odpoledne: 12h <b>50 %</b> → 17h+ <b>90 %</b>.</li>
+            <li><b>Aspoň 2 h denně.</b> Co do 13:00 nevyjde z přebytku, dožene se natvrdo mezi <b>13:00 a 15:00</b> — bez ohledu na přebytek i SOC.</li>
+            <li><b>+24 h</b> jede natvrdo bez ohledu na cokoli (do 72 h); ruší to <b>Zrušit</b> nebo ruční OFF.</li>
           </ul>
         </div>
 
@@ -2283,29 +2283,21 @@
           <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
             <li><b>Cíl</b> = 1 h + 1 h nad 20 °C + 1 h nad 25 °C, nejvýš <b>3 h</b>. Rozhoduje nejvyšší předpovídaná teplota dne.</li>
-            <li>Cíl smí přes den klesnout, ale ne pod už odběhnutý čas.</li>
             <li>Okno <b>11:00</b> → hodina před západem; mimo něj je vypnutý.</li>
-            <li><b>+1 h / −1 h</b> se sčítají (strop 8 h); na další den přejde <b>jen nevyužitý boost</b>, nejvýš 3 h.</li>
-            <li><b>−1 den</b>: ten den se neběží, sčítá se do 3 dnů.</li>
-            <li>Po restartu serveru čeká na odběhnutý čas z telefonu (max 15 min). Relé spíná i čerpadlo.</li>
+            <li><b>Jede s bazénem</b> — zapne se, jakmile bazén běží, nejpozději ve <b>13:00</b>. Když by se zbytek cíle jinak do okna nevešel, jede dřív.</li>
+            <li><b>+1 h / −1 h</b> se sčítají (strop 8 h); na další den přejde jen nevyužitý boost, nejvýš 3 h. <b>−1 den</b> se sčítá do 3 dnů.</li>
+            <li>Po restartu čeká na odběhnutý čas z telefonu (max 15 min). Relé spíná i čerpadlo.</li>
           </ul>
         </div>
 
         <div class="logic-sec">
           <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
-            <li><b>FAST</b> = pořád naplno. <b>Zima</b> = taky pořád FAST.</li>
-            <li>Ruční přepnutí (STOP/ECO/FAST) drží <b>3 h</b>, automatika do toho nemluví.</li>
-            <li><b>AUTO</b> jede podle typu dne — přepínač se řídí kalendářem, ručně platí do zítřejších <b>12:00</b>.</li>
-            <li>&nbsp;&nbsp;<b>Pracovní den</b>: GREEN 0:00–4:00 · FAST 4:00–7:00 · pak podle přebytku.</li>
-            <li>&nbsp;&nbsp;<b>Víkend</b>: GREEN 0:00–8:00 · FAST 8:00–10:00 · pak podle přebytku.</li>
-            <li><b>Podle přebytku:</b> z ECO na FAST, když je přebytek <b>10 min v kuse nad 3,5 kW</b>.</li>
-            <li>&nbsp;&nbsp;Z FASTu na ECO, když je <b>10 min pod 2,5 kW</b>. Mezi tím se nechává, co jede.</li>
-            <li>Přebytek se počítá <b>před autem</b> (přetok + nabíjení baterie + odběr wallboxu).</li>
-            <li>Bez čerstvých dat ze střídače se režim nemění.</li>
+            <li><b>Pracovní den</b>: GREEN 0:00–4:00 · FAST 4:00–7:00 · pak podle přebytku. <b>Víkend</b> o 4 h později.</li>
+            <li><b>Podle přebytku:</b> 10 min nad <b>3,5 kW</b> → FAST, 10 min pod <b>2,5 kW</b> → ECO. Počítá se před autem.</li>
+            <li><b>Baterie pod 20 % po 12:00</b> → FAST až do ranního FAST okna. FVE už dnes nevyrobí, auto by stejně bralo ze sítě.</li>
+            <li><b>Zima</b> = pořád FAST. Ruční přepnutí drží <b>3 h</b>, automatika do toho nemluví.</li>
             <li>Ve střídači nastav: ECO i GREEN <b>6 A</b>, „Battery charge EVC" Enable, Min SOC ~10 %.</li>
-            <li><b>Odkud auto bralo (7 dní):</b> ze sítě to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE.</li>
-            <li>Spotřeba sauny, bazénu a wallboxu se sčítá i <b>po měsících</b> (uzavřené měsíce, 13 zpět).</li>
           </ul>
         </div>
 
@@ -5311,7 +5303,7 @@ let wbAutoData = true;
 // waiting = noc už skončila, ale čeká se, až FVE dá pvNeeded kW (jinak by ECO bralo ze sítě)
 let wbMorningData = { dayType: 'weekday', manual: false, until: 0, plan: { green: 4, fast: 7 },
   faze: null, hystMode: 'fast', hystUp: 3.5, hystDown: 2.5, prebytekW: null,
-  winter: false, manualUntil: 0, target: null };
+  winter: false, manualUntil: 0, lowSocUntil: 0, target: null };
 
 const WB_MODE_LABELS_UI = { stop: 'STOP', fast: 'FAST', eco: 'ECO', green: 'GREEN' };
 const WB_STATUS_LABELS_UI = { 0: 'Nepřipojeno', 1: 'Připraveno', 2: 'Nabíjí', 3: 'Dokončeno', 4: 'Porucha', 5: 'Nedostupné' };
@@ -5389,6 +5381,7 @@ function applyWbSwitches(d) {
       prebytekW: typeof d.wbPrebytekW === 'number' ? d.wbPrebytekW : null,
       winter: !!d.wbWinter,
       manualUntil: Number(d.wbManualUntil) || 0,
+      lowSocUntil: Number(d.wbLowSocUntil) || 0,
       target: d.wbTarget || null
     };
     saveWbMorningLocal();
@@ -5437,7 +5430,7 @@ function renderWbAuto() {
 function renderWbMorning() {
   if (!wbMorningSwitchEl) return;
   const { dayType, manual, until, plan, faze, hystMode, hystUp, hystDown, prebytekW,
-          winter, manualUntil } = wbMorningData;
+          winter, manualUntil, lowSocUntil } = wbMorningData;
   const pracovni = dayType === 'weekday';
   wbMorningSwitchEl.classList.toggle('on', pracovni);
   const bezVyznamu = !wbAutoData || winter;
@@ -5453,6 +5446,13 @@ function renderWbMorning() {
   }
   if (!wbAutoData) {
     wbMorningHintEl.textContent = 'Uplatní se až v režimu AUTO — teď je wallbox pevně na FAST.' + rucne;
+    return;
+  }
+  // Vybitá baterka odpoledne přebíjí fáze dne, tak ať nápověda nemluví o GREEN okně,
+  // které se stejně neuplatní
+  if (lowSocUntil > Date.now()) {
+    wbMorningHintEl.textContent = `Odpoledne byla baterie skoro prázdná — jede se FAST do ${fmtSolTime(lowSocUntil)},`
+      + ' pak zase podle plánu dne.' + rucne;
     return;
   }
   const cis = v => v.toFixed(1).replace('.', ',');

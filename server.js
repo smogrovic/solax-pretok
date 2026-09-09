@@ -206,6 +206,7 @@ const state = {
   wbAuto: true,       // režim wallboxu: true = automatika (green/fast), false = pevně FAST
   // Typ dne pro wallbox: null = podle kalendáře, jinak ruční volba s platností
   wbDayType: { manual: null, until: 0 },  // ruční „pracovní den / víkend" do zítřejších 12:00
+  wbLowSoc: { until: 0 },  // odpolední vybitá baterka drží FAST do zítřejšího ranního okna
   wbModeHistory: [],  // { t, mode } — kdy byl jaký režim (4 dny, jako graf)
   wbLastTarget: null, // poslední režim nastavený automatikou (aby zbytečně necvakal dokola)
   infigy: { error: null }, // data z Infigy (teplota bojleru atd.)
@@ -2310,6 +2311,15 @@ const POOL_ON_THRESHOLD_W = 1850;
 const POOL_OFF_THRESHOLD_W = -200;
 const POOL_MIN_RUN_MS = 30 * 60 * 1000;
 
+// Filtrace musí odběhnout svoje bez ohledu na počasí. Když do 13:00 nevyjde z přebytku
+// aspoň POOL_MIN_DAILY_MS, appka bazén ve 13:00 pustí natvrdo a nechá ho běžet, dokud
+// deficit nedožene — nejdéle do 15:00 (okno je přesně tak dlouhé jako celý denní cíl).
+// Přebíjí to přebytkovou logiku i SOC prahy. NEpřebíjí ruční OFF (ten drží svých 30 min)
+// a už vůbec ne saunu — jistič má přednost před vším.
+const POOL_MIN_DAILY_MS = 2 * 3600000;
+const POOL_GUARANTEE_FROM_HOUR = 13;
+const POOL_GUARANTEE_TO_HOUR = 15;
+
 // Auto má přednost, ale rezervujeme mu headroom (do 3,4 kW) JEN když se reálně rozjíždí
 // (přidává výkon oproti minule). Když jede ustáleně, klesá nebo stojí, rezerva = 0 —
 // takže bazén/bojler dostanou přebytek NAD tím, co si auto reálně bere, a neblokujeme je
@@ -2737,6 +2747,9 @@ async function runPoolAutomation(now, prague, weather, totalW, soc, reserveW) {
   if (isWinter()) return;                 // v zimě bazén spí (vypíná ho enforceWinterOff)
   if (saunaBlokuje()) return;             // sauna topí → drží se vypnuto (enforceSaunaOff)
   if (poolForceActive()) return;          // +24 h jede bez ohledu na přebytek, okno i SOC
+  // Zaručené 2 h denně drží enforcePoolMinRun — během jeho okna se sem nesmí sáhnout,
+  // jinak by první tři cykly pod prahem bazén zase vypnuly.
+  if (poolGuaranteeActive(now, prague, weather)) return;
   const pool = state.devices.pool;
   if (!pool || pool.isOn === null || pool.isOn === undefined) return; // stav neznámý → beze změny
   const isOn = pool.isOn;
@@ -2887,6 +2900,32 @@ function afterSunsetCutoff(now, prague, weather) {
   return prague.hour >= HARD_OFF_HOUR;
 }
 
+// Konec dnešního okna: hodina před západem, bez počasí záložní HARD_OFF_HOUR.
+// Stejný zdroj jako afterSunsetCutoff, ať se ta dvě místa nerozejdou.
+function solinatorCutoffMs(now, prague, weather) {
+  if (weather && weather.sys && typeof weather.sys.sunset === 'number') {
+    return weather.sys.sunset * 1000 - 3600000;
+  }
+  return now - (prague.hour * 3600000 + prague.minute * 60000) + HARD_OFF_HOUR * 3600000;
+}
+
+// Automatika běží po pěti minutách, takže „poslední šance" musí mít rezervu — jinak
+// by se okamžik, kdy se zbytek cíle přestane vejít, dal přeskočit.
+const SOLINATOR_LAST_CHANCE_MS = 10 * 60 * 1000;
+
+// Solinátor má jezdit SPOLU s bazénem. Relé sice spíná čerpadlo samo (viz poznámka
+// u runSolinatorAutomation), ale chceme, aby oboje běželo v jednom okně.
+// Zapnout smí, když (a) jede bazén, (b) je 13:00 a víc — tedy nejpozději od chvíle,
+// kdy se otevírá zaručené okno bazénu, nebo (c) by se zbytek cíle jinak do dnešního
+// okna už nevešel. Bod (c) je pojistka pro velké cíle: boost na 8 h by se od 13:00
+// v žádném ročním období nestihl, a rozpočet hodin musí platit dál.
+// Vypínání tímhle netknuté — rozhoduje o něm dál jen naplněný rozpočet a okno.
+function solinatorMuzeStartovat(now, prague, weather, zbyva) {
+  if (releBezi('pool')) return true;
+  if (prague.hour >= POOL_GUARANTEE_FROM_HOUR) return true;
+  return solinatorCutoffMs(now, prague, weather) - now <= zbyva + SOLINATOR_LAST_CHANCE_MS;
+}
+
 function outsideSolinatorWindow(now, prague, weather) {
   return prague.hour < SOLINATOR_START_HOUR || afterSunsetCutoff(now, prague, weather);
 }
@@ -2940,6 +2979,46 @@ async function enforcePoolForce() {
   if (saunaBlokuje()) return;   // jistič je přednější než „+24 h"; vrátí se po dotopení
   const pool = state.devices.pool;
   if (pool && pool.isOn !== true) await autoSet('pool', 'on', 'ruční +24 h', { force: true });
+}
+
+// ---------- Bazén: zaručené 2 h denně ----------
+// Kolik bazénu do denního minima ještě chybí. Počítadlo vede updateRuntimes a nuluje
+// se o pražské půlnoci, takže deficit je vždycky za dnešek.
+function poolDeficitMs() {
+  const ran = (state.runtime && state.runtime.ms && state.runtime.ms.pool) || 0;
+  return Math.max(0, POOL_MIN_DAILY_MS - ran);
+}
+
+// Běží zrovna zaručené okno? Platí i pro runPoolAutomation, která se v něm nesmí
+// pokoušet bazén vypnout podle přebytku.
+function poolGuaranteeActive(now, prague, weather) {
+  if (isWinter()) return false;              // v zimě filtrace spí, dno neplatí
+  if (saunaBlokuje()) return false;          // jistič má přednost před vším
+  if (afterSunsetCutoff(now, prague, weather)) return false;
+  if (prague.hour < POOL_GUARANTEE_FROM_HOUR || prague.hour >= POOL_GUARANTEE_TO_HOUR) return false;
+  // Po restartu je počítadlo na nule a pravdu má telefon. Bez téhle podmínky by
+  // nasazení ve 13:30 pustilo bazén na další dvě hodiny, i když už dávno odběhl.
+  // Stejnou past řeší i solinátor — je to týž helper schválně.
+  if (!runtimeKnown()) return false;
+  return poolDeficitMs() > 0;
+}
+
+// Dotahuje denní minimum. Patří do časové části runAutomation ze stejného důvodu jako
+// enforcePoolForce: rozhoduje se podle hodin a odběhnutého času, ne podle střídače.
+// Bez `force` — ruční OFF má pořád svých 30 min přednost; „natvrdo" se tu vztahuje
+// na přebytek a SOC prahy, ne na tvůj vlastní zásah.
+async function enforcePoolMinRun(now, prague, weather) {
+  if (poolForceActive()) return;             // +24 h už bazén drží, není co dotahovat
+  if (!poolGuaranteeActive(now, prague, weather)) return;
+  const pool = state.devices.pool;
+  if (pool && pool.isOn === true) return;
+  if (await autoSet('pool', 'on', `zaručené 2 h denně — zbývá ${fmtDur(poolDeficitMs())}`)) {
+    // Ať přebytková logika po 15:00 nezačne rovnou počítat třetí `underCount` od nuly:
+    // z jejího pohledu bazén právě naskočil.
+    poolAuto.lastOnTime = now;
+    poolAuto.overCount = 0;
+    poolAuto.underCount = 0;
+  }
 }
 
 // Přirážka za teplo se bere z NEJVYŠŠÍ dnešní teploty podle předpovědi, takže dnešní čas
@@ -3046,6 +3125,9 @@ async function runSolinatorAutomation(now, prague, weather) {
       }
       return;
     }
+    // Přednostně se jede s bazénem; mimo to nejpozději od 13:00 (a vždy, když by se
+    // zbytek cíle jinak do okna nevešel)
+    if (!solinatorMuzeStartovat(now, prague, weather, target - ran)) return;
     await autoSet('solinator', 'on', `zbývá ${fmtDur(target - ran)} z ${fmtDur(target)}`);
   }
 }
@@ -3248,6 +3330,7 @@ async function runAutomation() {
     await enforceSaunaOff();
     await enforceWinterOff();
     await enforcePoolForce();
+    await enforcePoolMinRun(now, prague, weather);
     await runSolinatorAutomation(now, prague, weather);
     await enforcePoolOffWindow(now, prague, weather);
 
@@ -4854,6 +4937,13 @@ const WB_PLAN = {
   weekday: { green: 4, fast: 7 },   // GREEN do 4:00, FAST do 7:00, pak hystereze
   weekend: { green: 8, fast: 10 }
 };
+// Vybitá baterka odpoledne = FVE dnes nevyrábí a auto se stejně dobije ze sítě.
+// Nemá tedy cenu čekat na přebytek — jede se FAST rovnou, a to až do zítřejšího
+// ranního FAST okna. Schválně se to nepouští, když se baterka mezitím dobije:
+// jednou za odpoledne rozhodnuto, ať režim v podvečer necvaká sem a tam.
+const WB_LOW_SOC_PCT = 20;
+const WB_LOW_SOC_FROM_HOUR = 12;
+
 const WB_HYST_UP_KW = 3.5;             // z ECO na FAST
 const WB_HYST_DOWN_KW = 2.5;           // z FASTu na ECO
 const WB_HYST_MS = 10 * 60 * 1000;     // jak dlouho musí práh vydržet
@@ -4917,6 +5007,27 @@ function wbUpdateHyst(at = Date.now()) {
   }
 }
 
+// Začátek zítřejšího FAST okna = hodina, kdy zítra končí GREEN. Typ dne se bere
+// pro ZÍTŘEK, ať pátek → sobota (4:00 → 8:00) i neděle → pondělí sedí.
+function wbLowSocNextFastMs(at = Date.now()) {
+  const zitra = at + 24 * 3600000;
+  return wbHourOnDayOf(zitra, WB_PLAN[wbDayType(zitra)].green);
+}
+
+function wbLowSocHeld(at = Date.now()) { return at < ((state.wbLowSoc && state.wbLowSoc.until) || 0); }
+
+// Posouvá se jednou za cyklus z runEnergyControl, vedle hystereze.
+function wbUpdateLowSoc(at = Date.now()) {
+  if (wbLowSocHeld(at)) return;                       // už drží, znovu se nerozhoduje
+  if (pragueTime(at).hour < WB_LOW_SOC_FROM_HOUR) return;
+  const s = state.solax;
+  if (!s || !cerstve(s.fetchedAt)) return;            // ze zmrzlého SOC se nerozhoduje
+  if (typeof s.batterySoc !== 'number' || s.batterySoc >= WB_LOW_SOC_PCT) return;
+  state.wbLowSoc.until = wbLowSocNextFastMs(at);
+  addLog(`Wallbox: baterie ${Math.round(s.batterySoc)} % — FAST do ${fmtPragueTime(state.wbLowSoc.until)}`);
+  broadcast('wbAuto', wbSwitchPayload());
+}
+
 // Do hysterezního okna se vstupuje z FASTu (fáze těsně před ním)
 function wbHystReset() {
   wbHyst = { mode: 'fast', overSince: 0, underSince: 0 };
@@ -4935,6 +5046,7 @@ function wbFaze(at = Date.now()) {
 function ecWallboxTarget(at = Date.now()) {
   if (!state.wbAuto) return 'fast';
   if (isWinter()) return 'fast';        // v zimě se na slunce nečeká
+  if (wbLowSocHeld(at)) return 'fast';  // odpoledne došla baterka — na slunce se nečeká taky
   const faze = wbFaze(at);
   if (faze === 'green') return 'green';
   if (faze === 'fast') return 'fast';
@@ -4979,6 +5091,7 @@ async function runEnergyControl() {
     // Hystereze se posouvá jen tady, jednou za cyklus. V pevných fázích (GREEN/FAST
     // podle hodin) se drží na FASTu — do okna se pak vstupuje z něj.
     if (wbFaze() === 'hyst') wbUpdateHyst(); else wbHystReset();
+    wbUpdateLowSoc();
 
     const morningState = `${wbDayType()}|${wbFaze()}|${ecWallboxTarget()}`;
     if (wbPrevMorningState !== morningState) {
@@ -5023,6 +5136,8 @@ function wbSwitchPayload() {
     // Zima jede pořád FAST; ruční režim drží 3 h — appka z obojího skládá nápovědu
     wbWinter: isWinter(),
     wbManualUntil: wbManualHeld() ? state.wbManualUntil : 0,
+    // Dokud drží, appka umí říct, PROČ jede FAST místo čekání na přebytek
+    wbLowSocUntil: wbLowSocHeld() ? state.wbLowSoc.until : 0,
     // Kam automatika míří teď — appka tím rozsvítí tlačítko režimu, dokud
     // nabíječka nenahlásí, co doopravdy jede
     wbTarget: ecWallboxTarget()
@@ -5890,6 +6005,9 @@ function storeSnapshot() {
     // Kdy naposledy které relé dostalo povel — po nasazení podle toho poznáme,
     // jestli ho ještě drží jeho vlastní časovač (viz releBezi)
     lastCmd,
+    // Držená FAST západka po vybité baterce — bez ní by nasazení večer poslalo auto
+    // zpátky na GREEN, i když se ráno rozhodlo jinak
+    wbLowSocUntil: state.wbLowSoc.until,
     assistantLog: state.assistantLog,
     push: Array.from(pushSubscriptions.values())
   };
@@ -5920,6 +6038,12 @@ function storeApplyPrimo(p) {
       if (!Number.isFinite(v.at) || v.at > now || v.at < now - RELAY_AUTO_OFF_MS) continue;
       lastCmd[k] = { turn: v.turn, at: v.at };
     }
+  }
+  // Nejdál do zítřejšího rána; cokoli dál v budoucnu je poškozená záloha a držela by
+  // FAST donekonečna
+  if (Number.isFinite(p.wbLowSocUntil) && p.wbLowSocUntil > now
+      && p.wbLowSocUntil <= now + 48 * 3600000) {
+    state.wbLowSoc.until = p.wbLowSocUntil;
   }
   if (Array.isArray(p.assistantLog) && !state.assistantLog.length) {
     state.assistantLog = p.assistantLog
