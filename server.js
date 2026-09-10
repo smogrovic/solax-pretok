@@ -5956,14 +5956,19 @@ const HP_KODY = {
   // tempC = voda na VSTUPU, tedy skutečná teplota bazénu (Fairland ji ukazuje se šipkou
   // dovnitř). Výstup je zvlášť: během topení je o pár stupňů vyšší a jako „teplota
   // bazénu" by lhal.
-  tempC:    ['temp_current', 'temp_current_f', 'water_temp', 'temp_in', 'inlet_temp',
-             'inlet_water_temp', 'in_water_temp', 'water_in_temp', 'cur_temp'],
+  // `WInTemp` je vlastní číslovaný bod (dp 102) — ten je ten správný a sedí s Fairland
+  // appkou. `temp_current` ze standardní sady hlásí u tohohle kusu −22 a je na nic,
+  // proto je až za ním: kdyby WInTemp jednou zmizel, ať se nesáhne po nesmyslu.
+  tempC:    ['WInTemp', 'WaterInTemp', 'temp_current', 'temp_current_f', 'water_temp',
+             'temp_in', 'inlet_temp', 'inlet_water_temp', 'in_water_temp', 'cur_temp'],
   // Fairland má žádanou teplotu často zvlášť pro topení a pro chlazení — topná první
   targetC:  ['temp_set_heat', 'heat_temp_set', 'temp_set', 'temp_set_f', 'set_temp', 'target_temp'],
-  outC:     ['temp_out', 'outlet_temp', 'water_out_temp', 'outlet_water_temp', 'out_water_temp'],
-  // Výkon kompresoru v procentech (Fairland appka to ukazuje jako „61 %" u ikonky M)
-  vykonPct: ['compressor_percentage', 'compressor_capacity', 'power_percent', 'capacity_set',
-             'run_percent', 'speed_percent', 'frequency_percent', 'compressor_state'],
+  outC:     ['WOutTemp', 'WaterOutTemp', 'temp_out', 'outlet_temp', 'water_out_temp',
+             'outlet_water_temp', 'out_water_temp'],
+  // Výkon kompresoru v procentech (Fairland appka to ukazuje jako „61 %" u ikonky M).
+  // `SpeedPercentage` je dp 104, taky mimo standardní sadu.
+  vykonPct: ['SpeedPercentage', 'compressor_percentage', 'compressor_capacity', 'power_percent',
+             'capacity_set', 'run_percent', 'speed_percent', 'frequency_percent'],
   powerW:   ['cur_power', 'power', 'active_power'],
   on:       ['switch', 'switch_1', 'Power', 'power_switch'],
   mode:     ['mode', 'work_mode', 'run_mode'],
@@ -6002,9 +6007,15 @@ function hpTeplota(v) {
 
 let hpKodyZalogovane = false;
 
-function heatpumpMap(dev) {
+// `shadow` = odpověď z /v2.0/cloud/thing/{id}/shadow/properties. Standardní status vrací
+// jen čtyři pojmenované body, kdežto tenhle i vlastní číslované — a mezi nimi je teplota
+// vody (WInTemp) a výkon kompresoru (SpeedPercentage). Slučuje se do jednoho seznamu,
+// shadow má přednost: je bohatší a čerstvější.
+function heatpumpMap(dev, shadow) {
   const status = Array.isArray(dev && dev.status) ? dev.status : [];
-  const mapa = new Map(status.map(d => [d.code, d.value]));
+  const props = Array.isArray(shadow && shadow.properties) ? shadow.properties : [];
+  const vse = status.concat(props.map(p => ({ code: p.code, value: p.value })));
+  const mapa = new Map(vse.map(d => [d.code, d.value]));
   const prvni = klice => {
     for (const k of klice) if (mapa.has(k)) return mapa.get(k);
     return null;
@@ -6013,9 +6024,9 @@ function heatpumpMap(dev) {
 
   // Jednou po nasazení vypíšeme, co zařízení opravdu posílá — bez toho se mapování
   // nedá dotáhnout. Podruhé už ne, ať se tím nezaplní log.
-  if (!hpKodyZalogovane && status.length) {
+  if (!hpKodyZalogovane && vse.length) {
     hpKodyZalogovane = true;
-    addLog('Tepelné čerpadlo: ' + status.map(d => `${d.code}=${d.value}`).join(', '));
+    addLog('Tepelné čerpadlo: ' + vse.map(d => `${d.code}=${d.value}`).join(', '));
   }
 
   return {
@@ -6031,14 +6042,23 @@ function heatpumpMap(dev) {
     fault: cislo(prvni(HP_KODY.fault)),
     // Co čerpadlo doopravdy hlásí. Když se teplota nenajde, appka to vypíše přímo na
     // kartě — jinak se kódy musí lovit přes /api/heatpump/raw nebo v logu.
-    dp: status.map(d => ({ code: d.code, value: d.value }))
+    dp: vse.map(d => ({ code: d.code, value: d.value }))
   };
 }
 
-// Jeden dotaz za cyklus: /v1.0/devices/{id} vrací online i celé pole status naráz
+// Dva dotazy za cyklus. /v1.0/devices/{id} je jediný zdroj příznaku `online`;
+// shadow properties zase jediný zdroj teploty vody a výkonu kompresoru. Když selže
+// shadow, karta pořád ví, jestli čerpadlo žije, a ukáže aspoň cíl — proto se jeho
+// chyba polyká a nešíří se dál.
 async function fetchHeatpump() {
   const token = await tuyaAccessToken();
-  return heatpumpMap(await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token }));
+  const id = encodeURIComponent(TUYA_HEATPUMP_ID);
+  const dev = await tuyaFetch(`/v1.0/devices/${id}`, { token });
+  let shadow = null;
+  try {
+    shadow = await tuyaFetch(`/v2.0/cloud/thing/${id}/shadow/properties`, { token });
+  } catch { /* teplota vody chybí, zbytek karty funguje dál */ }
+  return heatpumpMap(dev, shadow);
 }
 
 // Běžný status endpoint vrací u tohohle čerpadla jen čtyři pojmenované body, kdežto
@@ -6076,7 +6096,13 @@ async function logHeatpumpDiag() {
   try {
     const diag = await fetchHeatpumpDiag();
     for (const [jmeno, data] of Object.entries(diag)) {
-      addLog(`Čerpadlo (${jmeno}): ${JSON.stringify(data).slice(0, 400)}`);
+      // Seznam datových bodů se vypíše jako kód=hodnota; zabalený do JSONu se do řádku
+      // nevešel a přesně to, co bylo za oříznutím, jsme minule potřebovali nejvíc.
+      const body = Array.isArray(data && data.properties) ? data.properties
+        : Array.isArray(data) ? data : null;
+      addLog(`Čerpadlo (${jmeno}): ` + (body
+        ? body.map(d => `${d.code}=${d.value}`).join(', ')
+        : JSON.stringify(data).slice(0, 700)));
     }
   } catch (err) {
     addLog(`Čerpadlo: diagnostiku se nepodařilo stáhnout (${err.message})`, 'error');

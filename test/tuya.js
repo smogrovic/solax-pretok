@@ -53,6 +53,9 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
 
 const okToken = { body: { success: true, result: { access_token: 'tok123', expire_time: 7200 } } };
 const dev = st => ({ body: { success: true, result: { online: true, name: 'AFD', status: st } } });
+// Shadow properties: vlastní číslované body, které standardní status nevrací
+const stin = props => ({ body: { success: true, result: { properties: props } } });
+const bezStinu = { throw: 'shadow nedostupný' };
 
 nadpis('1) Podpis');
 {
@@ -123,7 +126,7 @@ nadpis('2) Token');
       { code: 'temp_set', value: 28 },
       { code: 'switch', value: true },
       { code: 'mode', value: 'heat' }
-    ])] });
+    ]), bezStinu] });
     const d = await h.api.fetchHeatpump();
     check('desetiny stupně se přepočtou', d.tempC, 24.5);
     check('celé stupně zůstanou', d.targetC, 28);
@@ -135,14 +138,14 @@ nadpis('2) Token');
     check('kódy se jednou zapíšou do logu', /temp_current=245/.test(h.logy.join(' ')), true);
   }
   {
-    const h = build({ odpovedi: [okToken, dev([{ code: 'water_temp', value: 22.5 }, { code: 'work_mode', value: 'zvlastni' }])] });
+    const h = build({ odpovedi: [okToken, dev([{ code: 'water_temp', value: 22.5 }, { code: 'work_mode', value: 'zvlastni' }]), bezStinu] });
     const d = await h.api.fetchHeatpump();
     check('bere se i náhradní název kódu', d.tempC, 22.5);
     check('neznámý režim projde jako text', d.mode, 'zvlastni');
     check('nehlášené zapnutí je null', d.on, null);
   }
   {
-    const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [] } } }] });
+    const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [] } } }, bezStinu] });
     const d = await h.api.fetchHeatpump();
     check('offline se přenese', d.online, false);
     check('  a z prázdného stavu se nic nevymyslí', d.tempC, null);
@@ -168,7 +171,7 @@ nadpis('2) Token');
     const h = build({ odpovedi: [okToken, dev([
       { code: 'temp_current', value: -220 },
       { code: 'inlet_temp', value: 29 }
-    ])] });
+    ]), bezStinu] });
     const d = await h.api.fetchHeatpump();
     // Nesmyslná hodnota z prvního kódu nesmí přebít rozumnou z dalšího… ale nepřebije jen
     // proto, že se první kód najde. Ať je vidět, co se doopravdy stane:
@@ -184,7 +187,7 @@ nadpis('2) Token');
       { code: 'compressor_percentage', value: 61 },
       { code: 'temp_set_heat', value: 31 },
       { code: 'outlet_temp', value: 33 }
-    ])] });
+    ]), bezStinu] });
     const d = await h.api.fetchHeatpump();
     check('vstupní voda je teplota bazénu', d.tempC, 29);
     check('výstup je zvlášť', d.outC, 33);
@@ -193,7 +196,7 @@ nadpis('2) Token');
     check('výkon kompresoru v procentech', d.vykonPct, 61);
   }
   {
-    const h = build({ odpovedi: [okToken, dev([{ code: 'inlet_temp', value: 29 }])] });
+    const h = build({ odpovedi: [okToken, dev([{ code: 'inlet_temp', value: 29 }]), bezStinu] });
     const d = await h.api.fetchHeatpump();
     check('nehlášený výkon je null, ne nula', d.vykonPct, null);
   }
@@ -201,26 +204,26 @@ nadpis('2) Token');
     // Topná žádaná má přednost před obecnou — jinak by se u dvou setpointů brala chladicí
     const h = build({ odpovedi: [okToken, dev([
       { code: 'temp_set', value: 24 }, { code: 'temp_set_heat', value: 31 }
-    ])] });
+    ]), bezStinu] });
     check('topná žádaná přebije obecnou', (await h.api.fetchHeatpump()).targetC, 31);
   }
 
   nadpis('4) Teplota do grafu');
   {
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }])] });
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]), bezStinu] });
     await h.api.pollHeatpump();
     check('čerstvá a online → kreslí se', h.api.heatpumpTempC(), 26);
     h.posun(20 * 60000);
     check('zestárlá → díra v grafu', h.api.heatpumpTempC(), null);
   }
   {
-    const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [{ code: 'temp_current', value: 26 }] } } }] });
+    const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [{ code: 'temp_current', value: 26 }] } } }, bezStinu] });
     await h.api.pollHeatpump();
     check('offline se do grafu nedostane', h.api.heatpumpTempC(), null);
   }
   {
     // Do grafu nesmí nesmyslná teplota ani při online a čerstvých datech
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: -220 }])] });
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: -220 }]), bezStinu] });
     await h.api.pollHeatpump();
     check('nesmyslná teplota se do grafu nedostane', h.api.heatpumpTempC(), null);
   }
@@ -231,6 +234,63 @@ nadpis('2) Token');
     await h.api.pollHeatpump();
     check('chyba se uloží do stavu', h.state.heatpump.error, 'síť');
     check('  a token se zahodí', h.api.token.value, null);
+  }
+
+  nadpis('3d) Vlastní číslované body ze shadow properties');
+  // Tohle je jádro celé integrace. Standardní status vrací u tohohle čerpadla čtyři
+  // pojmenované body a teplota vody mezi nimi NENÍ — `temp_current` hlásí −22, zatímco
+  // Fairland ukazuje 29. Ta správná hodnota chodí jako vlastní číslovaný bod WInTemp
+  // (dp 102), výkon kompresoru jako SpeedPercentage (dp 104).
+  {
+    const h = build({ odpovedi: [okToken,
+      dev([{ code: 'switch', value: true }, { code: 'temp_unit_convert', value: 'f' },
+           { code: 'temp_set', value: 31 }, { code: 'temp_current', value: -22 }]),
+      stin([{ code: 'Power', dp_id: 1, value: true },
+            { code: 'WInTemp', dp_id: 102, value: 29 },
+            { code: 'change_tem', dp_id: 103, value: true },
+            { code: 'SpeedPercentage', dp_id: 104, value: 61 }])
+    ] });
+    const d = await h.api.fetchHeatpump();
+    check('teplota vody je z WInTemp, ne z temp_current', d.tempC, 29);
+    check('výkon kompresoru ze SpeedPercentage', d.vykonPct, 61);
+    check('cíl zůstává ze standardní sady', d.targetC, 31);
+    check('zapnuto se pozná', d.on, true);
+    check('online z /devices se přenese', d.online, true);
+    check('do výpisu jdou body z obou zdrojů',
+      d.dp.map(x => x.code).join(','),
+      'switch,temp_unit_convert,temp_set,temp_current,Power,WInTemp,change_tem,SpeedPercentage');
+  }
+  {
+    // Když týž kód přijde z obou zdrojů, platí shadow — je čerstvější a bohatší
+    const h = build({ odpovedi: [okToken, dev([{ code: 'switch', value: false }]),
+      stin([{ code: 'switch', value: true }, { code: 'WInTemp', value: 29 }])] });
+    check('při shodném kódu vyhraje shadow', (await h.api.fetchHeatpump()).on, true);
+  }
+  {
+    // Kdyby WInTemp jednou zmizel, ať se nesáhne po temp_current s jeho −22
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: -22 }]),
+      stin([{ code: 'SpeedPercentage', value: 61 }])] });
+    const d = await h.api.fetchHeatpump();
+    check('bez WInTemp radši nic než −22', d.tempC, null);
+    check('  ale výkon zůstane', d.vykonPct, 61);
+  }
+  {
+    // Shadow je jediný zdroj teploty vody, ale ne toho, jestli čerpadlo žije.
+    // Když spadne, karta musí pořád vědět stav a cíl.
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }, { code: 'switch', value: true }]),
+      { throw: 'shadow nedostupný' }] });
+    const d = await h.api.fetchHeatpump();
+    check('rozbitý shadow čtení stavu neshodí', d.online, true);
+    check('  cíl zůstane', d.targetC, 31);
+    check('  zapnuto taky', d.on, true);
+    check('  jen teplota vody chybí', d.tempC, null);
+  }
+  {
+    // Naopak: /devices je jediný zdroj příznaku online, ten padat nesmí
+    const h = build({ odpovedi: [okToken, { throw: 'cloud' }] });
+    let chyba = '';
+    try { await h.api.fetchHeatpump(); } catch (e) { chyba = e.message; }
+    check('rozbitý /devices se propíše jako chyba', chyba, 'cloud');
   }
 
   nadpis('4b) Diagnostika mimo standardní sadu');
@@ -264,7 +324,7 @@ nadpis('2) Token');
     check('  poslední zdroj přesto projde', Array.isArray(d['shadow properties'].properties), true);
   }
   {
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]),
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]), bezStinu,
       { body: { success: true, result: {} } }, { body: { success: true, result: {} } },
       { body: { success: true, result: {} } }] });
     await h.api.pollHeatpump();
@@ -278,7 +338,7 @@ nadpis('2) Token');
   }
   {
     // Diagnostika padá, stav se přesto musí uložit — na něm stojí zapnuto/vypnuto i cíl
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]),
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]), bezStinu,
       { throw: 'a' }, { throw: 'b' }, { throw: 'c' }] });
     await h.api.pollHeatpump();
     await new Promise(r => setTimeout(r, 20));
@@ -288,7 +348,7 @@ nadpis('2) Token');
   {
     // Vlastní důvod, proč se na diagnostiku nečeká: jsou to tři dotazy navíc a poller
     // by na nich visel celý cyklus. Stav i vysílání do appky musí být hotové hned.
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]),
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]), bezStinu,
       { delay: 800, body: { success: true, result: {} } },
       { delay: 800, body: { success: true, result: {} } },
       { delay: 800, body: { success: true, result: {} } }] });
