@@ -4,18 +4,23 @@
 const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('spotřeba');
 
-const CODE_DNY = between('// ---------- Odkud šla spotřeba', '// ---------- Sauna ----------');
+const CODE_DNY = between('// ---------- Odkud co bralo', '// ---------- Sauna ----------');
 const CODE_PICK = between('// Špička kbelíku', 'const LOG_MAX_AGE_MS');
 const CODE_THIN = between('const THIN_AFTER_MS', '// Špička kbelíku');
 
 function build(den = '2026-08-31') {
-  const state = { usageDays: [], usageHistory: [] };
+  const state = { wbDays: [], poolDays: [], usageDays: [], usageHistory: [] };
   let dnes = den;
   const api = new Function('state', 'pragueDateString', 'pruneHistory',
-    CODE_DNY + '\n; return { recordUsageDay, recordUsagePoint, USAGE_DAYS_MAX };'
+    CODE_DNY + '\n; return { recordGridSplit, recordWbDay, recordPoolDay, recordUsageDay,'
+             + ' recordUsagePoint, USAGE_DAYS_MAX, DEN_MAX };'
   )(state, () => dnes, () => {});
   return { api, state, setDen: d => { dnes = d; } };
 }
+
+// Součet Wh v jedné denní řadě
+const soucet = pole => pole.reduce((a, r) => a + r.grid + r.pv, 0);
+const zeSite = pole => pole.reduce((a, r) => a + r.grid, 0);
 
 const pick = new Function(CODE_THIN + '\n' + CODE_PICK
   + '\n; return { thinPoints, PICK_MAX_USAGE, PICK_LAST, usageSoucet };')();
@@ -51,6 +56,56 @@ nadpis('1) Dělení spotřeby');
   check('nulový čas taky ne', h.state.usageDays.length, 0);
   h.api.recordUsageDay(-500, 0, 1);
   check('záporná spotřeba taky ne', h.state.usageDays.length, 0);
+}
+
+nadpis('1b) Řetěz auto → bazén → dům');
+// Pořadí je pravidlo, ne náhoda: auto i bazén se pouštějí schválně, takže když teče
+// proud ze sítě, je to kvůli nim. Zásada, na které to stojí: součet tří podílů se
+// vždycky rovná odběru ze sítě, aby se karty daly sečíst a nic nepočítalo dvakrát.
+{
+  const h = build();
+  // import 5 kW, auto 3 kW, bazén 1,5 kW, celá spotřeba kromě auta 4 kW
+  h.api.recordGridSplit({ wbW: 3000, poolW: 1500, loadW: 4000, importW: 5000, dtH: 1 });
+  check('auto si vezme svoje', Math.round(zeSite(h.state.wbDays)), 3000);
+  check('bazén dostane, co zbylo po autě', Math.round(zeSite(h.state.poolDays)), 1500);
+  check('dům zbytek', Math.round(zeSite(h.state.usageDays)), 500);
+  check('součet podílů sedne na import',
+    Math.round(zeSite(h.state.wbDays) + zeSite(h.state.poolDays) + zeSite(h.state.usageDays)), 5000);
+  // Dům je spotřeba KROMĚ auta a KROMĚ bazénu — jinak by se bazén počítal dvakrát
+  check('dům je bez bazénu', Math.round(soucet(h.state.usageDays)), 2500);
+  check('  a bazén má svoje celé', Math.round(soucet(h.state.poolDays)), 1500);
+}
+{
+  // Málo importu: na dům nezbyde nic, ale jeho spotřeba se pořád zapíše jako z FVE
+  const h = build();
+  h.api.recordGridSplit({ wbW: 3000, poolW: 1500, loadW: 4000, importW: 3200, dtH: 1 });
+  check('auto vezme skoro celý import', Math.round(zeSite(h.state.wbDays)), 3000);
+  check('bazén jen zbytek', Math.round(zeSite(h.state.poolDays)), 200);
+  check('na dům nezbylo nic', Math.round(zeSite(h.state.usageDays)), 0);
+  check('  ale spotřeba domu se zapíše jako z FVE', Math.round(h.state.usageDays[0].pv), 2500);
+  check('součet podílů sedne na import',
+    Math.round(zeSite(h.state.wbDays) + zeSite(h.state.poolDays) + zeSite(h.state.usageDays)), 3200);
+}
+{
+  // Přetok: ze sítě nejde nic, všechno je z FVE
+  const h = build();
+  h.api.recordGridSplit({ wbW: 2000, poolW: 1000, loadW: 3000, importW: 0, dtH: 1 });
+  check('bez importu nikdo nebere ze sítě',
+    zeSite(h.state.wbDays) + zeSite(h.state.poolDays) + zeSite(h.state.usageDays), 0);
+  check('  a všechno je z FVE', Math.round(soucet(h.state.wbDays) + soucet(h.state.poolDays)), 3000);
+}
+{
+  // Bazén měří Shelly, spotřebu hlásí střídač — dvě různá měření se můžou rozejít
+  const h = build();
+  h.api.recordGridSplit({ wbW: 0, poolW: 3000, loadW: 2000, importW: 1000, dtH: 1 });
+  check('dům nikdy nejde do minusu', h.state.usageDays.length, 0);
+  check('  a bazén se zapíše celý', Math.round(soucet(h.state.poolDays)), 3000);
+}
+{
+  const h = build();
+  h.api.recordGridSplit({ wbW: 0, poolW: 0, loadW: 2000, importW: 500, dtH: 1 });
+  check('bez auta i bazénu bere dům celý zbytek', Math.round(zeSite(h.state.usageDays)), 500);
+  check('  a jejich dny se nezaloží', h.state.wbDays.length + h.state.poolDays.length, 0);
 }
 
 nadpis('2) Auto má na síti přednost');

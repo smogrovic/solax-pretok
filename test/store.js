@@ -65,10 +65,12 @@ function vzorovyStav() {
     timeline: { shelly: [], pool: [{ from: t, to: t + 1000 }], solinator: [], wallbox: [], wbPlugged: [], sauna: [] },
     pvDays: [{ d: '2026-08-30', fcAm: 20, fcPm: 22, actual: 21 }],
     wbDays: [{ d: '2026-08-30', grid: 100, pv: 900 }],
+    poolDays: [{ d: '2026-08-30', grid: 50, pv: 450 }],
     usageDays: [{ d: '2026-08-30', grid: 4000, pv: 9000 }],
     usageHistory: [{ t, pool: 400, b1: 2000, b2: null }],
     saunaDays: [{ d: '2026-08-30', wh: 8000, ms: 7200000 }],
-    months: [{ m: '2026-08', sauna: 40000, pool: 12000, wb: 300000 }],
+    months: [{ m: '2026-08', sauna: 40000, pool: 12000, wb: 300000, dum: 500000,
+               poolGrid: 4000, poolPv: 8000 }],
     solinator: { date: '2026-08-31', bonusMs: 3600000, boostMs: 0, carryMs: 0, disabledUntil: 0 },
     runtime: { date: '2026-08-31', ms: { shelly: 1, pool: 2, solinator: 3 }, wh: { feed: 4 }, yesterday: null },
     wbDayType: { manual: 'weekend', until: Date.now() + 3600000 },
@@ -103,8 +105,10 @@ nadpis('2) Balení');
   check('historie jde jako points', snap.posts['/api/history/restore'].points.length, 1);
   check('log jako entries', snap.posts['/api/log/restore'].entries.length, 1);
   check('odběr okruhů se ukládá', snap.posts['/api/usage-history/restore'].points.length, 1);
+  check('odkud bral bazén taky', snap.posts['/api/pool-days/restore'].poolDays[0].grid, 50);
   check('odkud šla spotřeba taky', snap.posts['/api/usage-days/restore'].usageDays[0].pv, 9000);
   check('runtime nese datum', snap.posts['/api/runtime/restore'].date, '2026-08-31');
+  check('měsíční rozpad na síť se ukládá', snap.posts['/api/months/restore'].months[0].poolGrid, 4000);
   check('zimní režim se ukládá', snap.posts['/api/automation/restore'].mode, 'winter');
   check('meze sauny taky', snap.posts['/api/sauna/limits/restore'].holdMin, 45);
   check('časovače mají razítko', typeof snap.posts['/api/timers/restore'].savedAt, 'number');
@@ -286,7 +290,7 @@ function prazdnyStav() {
     tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 21 },
     saunaLimitW: 500, saunaHoldMin: 30, poolForce: { until: 0 },
     history: [], wallboxHistory: [], boilerHistory: [], airconHistory: [],
-    wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], saunaDays: [],
+    wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], poolDays: [], saunaDays: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
     usageDays: [], usageHistory: [],
     wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,

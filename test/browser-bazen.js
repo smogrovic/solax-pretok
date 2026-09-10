@@ -101,7 +101,54 @@ setTimeout(() => {
   check('když teplota sedí, výpis kódů se neukazuje', /hlásí:/.test(hpMeta.textContent), 'false');
   check('  ani hláška o nehlášené teplotě', /nehlásí/.test(hpMeta.textContent), 'false');
 
-  R.push('\\n5) Graf teplot bere bazén jako třetí čáru');
+  R.push('\\n5) Pořadí a rozdělení karet');
+  const karty = [...document.querySelector('.slide[data-title="Bazén"] .page')
+    .querySelectorAll(':scope > .card')].filter(c => !c.classList.contains('lock-panel'));
+  check('teplota je úplně první karta', karty[0].id, 'heatpumpCard');
+  // Spotřeba visela pod solinátorem a vypadala jako jeho — přitom je to celý okruh
+  const solBlok = document.getElementById('solinatorHold').closest('.device-block');
+  check('spotřeba už není v bloku solinátoru', solBlok.contains(document.getElementById('poolTotalPower')), 'false');
+  const spotrebaKarta = document.getElementById('poolTotalPower').closest('.card');
+  check('má vlastní kartu', spotrebaKarta.querySelector('.graph-title').textContent, 'Spotřeba okruhu bazénu');
+  check('  a je v ní řečeno, že to není jen solinátor', /není to spotřeba samotného solinátoru/.test(spotrebaKarta.textContent), 'true');
+  check('  karta je až pod světlem',
+    karty.indexOf(spotrebaKarta) > karty.findIndex(c => c.contains(document.getElementById('lightBazenLight2'))), 'true');
+
+  R.push('\\n6) Odkud bazén bral');
+  poolDaysData = [{ d: new Date(T).toISOString().slice(0, 10), grid: 3000, pv: 9000 }];
+  renderPoolSrc();
+  const src = document.getElementById('poolSrcList');
+  check('karta se vykreslí', /kWh/.test(src.textContent), 'true');
+  check('  ukáže celkem', /12,0 kWh/.test(src.textContent), 'true');
+  check('  ze sítě', /ze sítě 3,0 kWh/.test(src.textContent), 'true');
+  check('  i podíl z FVE', /9,0 kWh z FVE \\(75 %\\)/.test(src.textContent), 'true');
+
+  R.push('\\n7) Měsíční rozpad');
+  monthsData = [
+    { m: '2026-06', pool: 10000, poolGrid: 2000, poolPv: 8000 },
+    { m: '2026-07', pool: 20000 }
+  ];
+  renderMonths();
+  const mes = document.getElementById('poolMonths');
+  check('měsíc s rozpadem ho ukáže', /ze sítě 2,0 kWh/.test(mes.textContent), 'true');
+  // Starší měsíce rozpad nemají a nesmí se dokreslit jako nula — „nevíme" není „nic ze sítě"
+  const radky = [...mes.querySelectorAll('.wbsrc-row')];
+  // Pozor: „červenec" začíná na „červen", takže se musí porovnávat celý popisek
+  const podleMesice = jm => radky.find(x => {
+    const d = x.querySelector('.wbsrc-day');
+    return d && d.textContent.trim().startsWith(jm + ' ');
+  });
+  const cerven = podleMesice('červen');
+  const cervenec = podleMesice('červenec');
+  check('  a je u správného měsíce', !!cerven.querySelector('.wbsrc-bar'), 'true');
+  check('měsíc bez rozpadu zůstane bez pruhu', !!cervenec.querySelector('.wbsrc-bar'), 'false');
+  check('  ale celkové kWh ukáže', /20,0 kWh/.test(cervenec.textContent), 'true');
+  // Součtový pruh smí sčítat jen měsíce, které rozpad mají
+  const soucet = radky.find(x => x.classList.contains('wbsrc-total'));
+  check('součet bere jen měsíce s rozpadem', /ze sítě 2,0 kWh/.test(soucet.textContent), 'true');
+  check('  a celkem je za všechny', /30,0 kWh/.test(soucet.textContent), 'true');
+
+  R.push('\\n8) Graf teplot bere bazén jako třetí čáru');
   // Barvu i legendu sdílí s odběrem bazénu ve vedlejším panelu — v obou je to totéž místo
   check('bazén má v legendě svou barvu', BOILER_COLORS.pool, '#16a085');
   check('  a liší se od obou bojlerů',

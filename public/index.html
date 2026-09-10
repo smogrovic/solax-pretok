@@ -1697,7 +1697,12 @@
       <div class="card stats-card">
         <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
         <div class="wbsrc-list" id="usageSrcList"></div>
-        <div class="wbsrc-note">Celý barák kromě auta: dům, oba bojlery, bazén i sauna. Ze sítě se nejdřív započítá auto (karta na Wallboxu), na spotřebu jde zbytek — obojí dohromady dá celý odběr ze sítě.</div>
+        <div class="wbsrc-note">Barák kromě auta a bazénu: dům, oba bojlery a sauna. Ze sítě se nejdřív započítá auto (karta na Wallboxu), pak bazén (karta na Bazénu) a sem jde zbytek — všechny tři dohromady dají celý odběr ze sítě.</div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Spotřeba domu po měsících</div>
+        <div class="wbsrc-list" id="dumMonths"></div>
       </div>
 
       <div class="meta">
@@ -1994,6 +1999,17 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
+      <div class="card pool-card" id="heatpumpCard" hidden>
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="hpLight"></div>
+            <div class="shelly-label">Tepelné čerpadlo <span class="state" id="hpState">–</span></div>
+          </div>
+          <div class="hp-temp" id="hpTemp">– °C</div>
+          <div class="hp-meta" id="hpMeta"></div>
+        </div>
+      </div>
+
       <div class="card pool-card lockable">
         <div class="device-block">
           <div class="shelly-row">
@@ -2024,7 +2040,6 @@
             <button class="power-btn off-btn" id="solinatorOffBtn">OFF</button>
           </div>
           <div class="manual-hold" id="solinatorHold"></div>
-          <div class="device-power" id="poolTotalPower"></div>
           <div class="solinator-chlor">
             <div class="solinator-chlor-label">Podle chloru v bazénu</div>
             <div class="solinator-btns">
@@ -2035,17 +2050,6 @@
             <div class="solinator-status" id="solinatorStatus"></div>
             <div class="solinator-plan" id="solinatorPlan"></div>
           </div>
-        </div>
-      </div>
-
-      <div class="card pool-card" id="heatpumpCard" hidden>
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="hpLight"></div>
-            <div class="shelly-label">Tepelné čerpadlo <span class="state" id="hpState">–</span></div>
-          </div>
-          <div class="hp-temp" id="hpTemp">– °C</div>
-          <div class="hp-meta" id="hpMeta"></div>
         </div>
       </div>
 
@@ -2064,6 +2068,18 @@
         </div>
       </div>
       <div class="card stats-card">
+        <div class="graph-title">Spotřeba okruhu bazénu</div>
+        <div class="device-power" id="poolTotalPower"></div>
+        <div class="wbsrc-note">Celý okruh dohromady — čerpadlo i solinátor. Měřeno třemi Shelly měřáky, není to spotřeba samotného solinátoru.</div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Odkud bazén bral (7 dní)</div>
+        <div class="wbsrc-list" id="poolSrcList"></div>
+        <div class="wbsrc-note">Ze sítě se nejdřív započítá auto, pak bazén a nakonec zbytek domu — všechny tři karty dohromady dají celý odběr ze sítě.</div>
+      </div>
+
+      <div class="card stats-card">
         <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
         <div id="solinatorCalc"></div>
       </div>
@@ -2071,7 +2087,6 @@
       <div class="card stats-card">
         <div class="graph-title">Spotřeba bazénu po měsících</div>
         <div class="wbsrc-list" id="poolMonths"></div>
-        <div class="wbsrc-note">Měřeno třemi Shelly měřáky na okruhu bazénu (čerpadlo a solinátor).</div>
       </div>
     </div>
   </div>
@@ -5614,17 +5629,22 @@ function integrateWbKwh(pts) {
 // Data počítá server ve stejném cyklu jako denní kWh; tady je jen zobrazujeme.
 // Lokální záloha přežije deploy stejně jako u odhadu výroby.
 const wbSrcListEl = document.getElementById('wbSrcList');
+const poolSrcListEl = document.getElementById('poolSrcList');
 const usageSrcListEl = document.getElementById('usageSrcList');
 const WB_SRC_DNU = 7;
 let wbDaysData = [];
+let poolDaysData = [];
 let usageDaysData = [];
 
-function saveWbDaysLocal() {
-  try { localStorage.setItem('wbDays', JSON.stringify(wbDaysData)); } catch {}
-}
-function loadWbDaysLocal() {
-  try { return JSON.parse(localStorage.getItem('wbDays') || '[]') || []; } catch { return []; }
-}
+// Tři řady (auto, bazén, dům) se zálohují i obnovují úplně stejně
+const dnySave = (klic, data) => { try { localStorage.setItem(klic, JSON.stringify(data)); } catch {} };
+const dnyLoad = klic => {
+  try { return JSON.parse(localStorage.getItem(klic) || '[]') || []; } catch { return []; }
+};
+function saveWbDaysLocal() { dnySave('wbDays', wbDaysData); }
+function loadWbDaysLocal() { return dnyLoad('wbDays'); }
+function savePoolDaysLocal() { dnySave('poolDays', poolDaysData); }
+function loadPoolDaysLocal() { return dnyLoad('poolDays'); }
 
 // Sloučení serveru s lokální zálohou: u obou hodnot vyhrává vyšší (server po deployi
 // začíná den od nuly, telefon má nastřádaný celý)
@@ -5640,14 +5660,12 @@ function mergeWbDays(a, b) {
   return [...map.values()].sort((x, y) => x.d.localeCompare(y.d)).slice(-14);
 }
 
-function saveUsageDaysLocal() {
-  try { localStorage.setItem('usageDays', JSON.stringify(usageDaysData)); } catch {}
-}
-function loadUsageDaysLocal() {
-  try { return JSON.parse(localStorage.getItem('usageDays') || '[]') || []; } catch { return []; }
-}
+function saveUsageDaysLocal() { dnySave('usageDays', usageDaysData); }
+function loadUsageDaysLocal() { return dnyLoad('usageDays'); }
 
-async function maybeRestoreUsageDays(serverDays, localDays) {
+// Server po nasazení začíná den od nuly, telefon má nastřádaný celý — když je v něm
+// něco navíc, pošle se to zpátky. Platí pro všechny tři řady stejně.
+async function maybeRestoreDny(cesta, klic, serverDays, localDays) {
   if (!localDays || !localDays.length) return;
   const srv = new Map((serverDays || []).map(r => [r.d, r]));
   const need = localDays.some(r => {
@@ -5656,25 +5674,9 @@ async function maybeRestoreUsageDays(serverDays, localDays) {
   });
   if (!need) return;
   try {
-    await fetch('/api/usage-days/restore', {
+    await fetch(cesta, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usageDays: localDays })
-    });
-  } catch {}
-}
-
-async function maybeRestoreWbDays(serverDays, localDays) {
-  if (!localDays || !localDays.length) return;
-  const srv = new Map((serverDays || []).map(r => [r.d, r]));
-  const need = localDays.some(r => {
-    const s = srv.get(r.d);
-    return !s || (r.grid || 0) > (s.grid || 0) || (r.pv || 0) > (s.pv || 0);
-  });
-  if (!need) return;
-  try {
-    await fetch('/api/wbdays/restore', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wbDays: localDays })
+      body: JSON.stringify({ [klic]: localDays })
     });
   } catch {}
 }
@@ -5758,6 +5760,11 @@ function renderSrcKarta(el, dnyData, texty) {
 function renderWbSrc() {
   renderSrcKarta(wbSrcListEl, wbDaysData,
     { prazdno: 'nenabíjelo se', prazdnoCelkem: 'zatím se nenabíjelo' });
+}
+
+function renderPoolSrc() {
+  renderSrcKarta(poolSrcListEl, poolDaysData,
+    { prazdno: 'nic nejelo', prazdnoCelkem: 'zatím nic nejelo' });
 }
 
 function renderUsageSrc() {
@@ -6273,10 +6280,13 @@ async function maybeRestoreSaunaDays(server, local) {
 // ---------- Spotřeba po měsících (sauna, bazén, wallbox) ----------
 // Server sčítá Wh do měsíčních přihrádek; tady se ukazují jen UZAVŘENÉ měsíce,
 // nejnovější nahoře. Běžící měsíc by jen mátl — čísla by rostla před očima.
+// `split` = má měsíc i rozpad na síť a FVE. Sauna ho nemá: sedí uvnitř „domu"
+// a vlastní místo v řetězu dělení odběru ze sítě nedostala.
 const MESIC_KARTY = [
-  { el: document.getElementById('saunaMonths'), kus: 'sauna' },
-  { el: document.getElementById('poolMonths'), kus: 'pool' },
-  { el: document.getElementById('wbMonths'), kus: 'wb' }
+  { el: document.getElementById('saunaMonths'), kus: 'sauna', split: false },
+  { el: document.getElementById('poolMonths'), kus: 'pool', split: true },
+  { el: document.getElementById('wbMonths'), kus: 'wb', split: true },
+  { el: document.getElementById('dumMonths'), kus: 'dum', split: true }
 ];
 const MESICE_CZ = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen',
   'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
@@ -6291,12 +6301,43 @@ function tentoMesic() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Pruh „ze sítě / z FVE" pod měsícem. Stejná grafika jako u sedmidenní karty,
+// ať se to nikde neučí dvakrát.
+function pruhSitFve(grid, pv) {
+  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  const box = document.createDocumentFragment();
+  const total = grid + pv;
+  const bar = document.createElement('div');
+  bar.className = 'wbsrc-bar';
+  const g = document.createElement('i');
+  g.className = 'wbsrc-grid';
+  g.style.width = (total > 0 ? grid / total * 100 : 0) + '%';
+  const p = document.createElement('i');
+  p.className = 'wbsrc-pv';
+  p.style.width = (total > 0 ? pv / total * 100 : 0) + '%';
+  bar.appendChild(g);
+  bar.appendChild(p);
+  const leg = document.createElement('div');
+  leg.className = 'wbsrc-legend';
+  const ls = document.createElement('span');
+  ls.className = 'g';
+  ls.innerHTML = `ze sítě <b>${kwh(grid)}</b>`;
+  const lp = document.createElement('span');
+  lp.className = 'p';
+  lp.innerHTML = `<b>${kwh(pv)}</b> z FVE (${total > 0 ? Math.round(pv / total * 100) : 0} %)`;
+  leg.appendChild(ls);
+  leg.appendChild(lp);
+  box.appendChild(bar);
+  box.appendChild(leg);
+  return box;
+}
+
 function renderMonths() {
   const bezici = tentoMesic();
   const hotove = (monthsData || [])
     .filter(r => r && typeof r.m === 'string' && r.m < bezici)
     .sort((a, b) => b.m.localeCompare(a.m));
-  for (const { el, kus } of MESIC_KARTY) {
+  for (const { el, kus, split } of MESIC_KARTY) {
     if (!el) continue;
     el.textContent = '';
     if (!hotove.length) {
@@ -6307,7 +6348,7 @@ function renderMonths() {
       continue;
     }
     const frag = document.createDocumentFragment();
-    let celkem = 0;
+    let celkem = 0, celkemGrid = 0, celkemPv = 0, seRozpadem = 0;
     for (const r of hotove) {
       celkem += r[kus] || 0;
       const row = document.createElement('div');
@@ -6322,6 +6363,15 @@ function renderMonths() {
       head.appendChild(den);
       head.appendChild(val);
       row.appendChild(head);
+      // Rozpad na síť a FVE. Měsíce z doby, kdy se ještě nepočítal, ho NEMAJÍ a nesmí
+      // se dokreslit jako nula — „nevíme" a „nic ze sítě" jsou dvě různé věci.
+      const grid = r[kus + 'Grid'], pv = r[kus + 'Pv'];
+      if (split && (r[kus] || 0) > 0 && typeof grid === 'number' && typeof pv === 'number') {
+        row.appendChild(pruhSitFve(grid, pv));
+        celkemGrid += grid;
+        celkemPv += pv;
+        seRozpadem += r[kus] || 0;
+      }
       frag.appendChild(row);
     }
     if (hotove.length > 1) {
@@ -6337,6 +6387,9 @@ function renderMonths() {
       head.appendChild(den);
       head.appendChild(val);
       row.appendChild(head);
+      // Součtový pruh jen z měsíců, které rozpad mají — jinak by vyšel podíl z FVE
+      // vyšší, než ve skutečnosti byl (starší měsíce by se tvářily jako samé slunce)
+      if (split && seRozpadem > 0) row.appendChild(pruhSitFve(celkemGrid, celkemPv));
       frag.appendChild(row);
     }
     el.appendChild(frag);
@@ -7280,14 +7333,21 @@ function applySnapshot(snap) {
   wbDaysData = mergeWbDays(serverWbDays, localWbDays);
   bezpecne(renderWbSrc);
   saveWbDaysLocal();
-  maybeRestoreWbDays(serverWbDays, localWbDays);
-  // Odkud šla spotřeba baráku (kromě auta) — stejné slučování jako u wallboxu
+  maybeRestoreDny('/api/wbdays/restore', 'wbDays', serverWbDays, localWbDays);
+  // Odkud bral okruh bazénu — stejné slučování jako u wallboxu
+  const serverPoolDays = snap.poolDays || [];
+  const localPoolDays = loadPoolDaysLocal();
+  poolDaysData = mergeWbDays(serverPoolDays, localPoolDays);
+  bezpecne(renderPoolSrc);
+  savePoolDaysLocal();
+  maybeRestoreDny('/api/pool-days/restore', 'poolDays', serverPoolDays, localPoolDays);
+  // Odkud šla spotřeba baráku (kromě auta a bazénu)
   const serverUsageDays = snap.usageDays || [];
   const localUsageDays = loadUsageDaysLocal();
   usageDaysData = mergeWbDays(serverUsageDays, localUsageDays);
   bezpecne(renderUsageSrc);
   saveUsageDaysLocal();
-  maybeRestoreUsageDays(serverUsageDays, localUsageDays);
+  maybeRestoreDny('/api/usage-days/restore', 'usageDays', serverUsageDays, localUsageDays);
   bezpecne(() => applyHomeFlags(snap));
   bezpecne(() => applyInfigyFlags(snap));
   // Historie teplot bojlerů: server + lokální záloha (přežije deploy)
@@ -7538,6 +7598,11 @@ function connectStream() {
     renderFveChart();
     saveUsageHistoryLocal();
   });
+  es.addEventListener('poolDays', e => {
+    poolDaysData = mergeWbDays(JSON.parse(e.data).poolDays || [], poolDaysData);
+    renderPoolSrc();
+    savePoolDaysLocal();
+  });
   es.addEventListener('usageDays', e => {
     usageDaysData = mergeWbDays(JSON.parse(e.data).usageDays || [], usageDaysData);
     renderUsageSrc();
@@ -7608,6 +7673,8 @@ function connectStream() {
 // Než dorazí snapshot, ukážeme aspoň to, co má telefon uložené z minula
 wbDaysData = loadWbDaysLocal();
 renderWbSrc();
+poolDaysData = loadPoolDaysLocal();
+renderPoolSrc();
 
 connectStream();
 

@@ -238,9 +238,12 @@ const state = {
   // ať appka nepíše k číslu teplotu dopočítanou o hodiny později
   solinator: { date: '', bonusMs: 0, bonusTempC: null, bonusSrc: null, bonusFloored: false, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   pvDays: [],        // { d, fcAm, fcPm, actual } — denní odhad vs. skutečná výroba (graf za 10 dní)
-  wbDays: [],        // { d, grid, pv } — kolik si auto vzalo ze sítě a kolik z FVE (Wh, po dnech)
-  // Totéž pro spotřebu KROMĚ auta (dům + oba bojlery + bazén + sauna)
-  usageDays: [],     // { d, grid, pv } — Wh po dnech
+  // Odkud si co vzalo ze sítě a kolik z FVE (Wh, po dnech). Pořadí, ve kterém si
+  // spotřebiče „berou" z importu, je auto → bazén → zbytek domu; tři pole se pak dají
+  // sečíst na celý odběr ze sítě, viz recordGridSplit.
+  wbDays: [],        // { d, grid, pv } — auto
+  poolDays: [],      // { d, grid, pv } — celý okruh bazénu (čerpadlo i solinátor)
+  usageDays: [],     // { d, grid, pv } — zbytek domu: oba bojlery, sauna a barák
   usageHistory: [],  // { t, pool, b1, b2 } ve W — odběr okruhů za 4 dny (panel v grafu FVE)
   // Sauna: aktuální odběr, kdy začalo topení a dokdy kvůli ní drží bazén a solinátor vypnuté
   // scriptAt = kdy naposledy ozval skript ze Shelly (ten shazuje relé do vteřiny);
@@ -445,6 +448,7 @@ function snapshot() {
     runtime: runtimePayload(),
     pvDays: state.pvDays,
     wbDays: state.wbDays,
+    poolDays: state.poolDays,
     usageDays: state.usageDays,
     usageHistory: state.usageHistory,
     saunaEnabled,
@@ -853,47 +857,60 @@ function recordPvDay() {
   }
 }
 
-// ---------- Odkud si auto bralo: ze sítě vs. z FVE ----------
+// ---------- Odkud co bralo: ze sítě vs. z FVE ----------
 // Ze sítě je kvůli autu jen to MENŠÍ z odběru ze sítě a výkonu wallboxu: když auto bere
 // 1,4 kW a barák zrovna tahá 3 kW, kvůli autu je jen těch 1,4 kW; když auto bere 7 kW
 // a ze sítě jde 2 kW, ze sítě jsou 2 kW a zbytek jede z FVE. Co nešlo ze sítě, počítáme
 // jako FVE — i když to zrovna teklo z baterky, protože ta se nabíjí ze slunce.
 // Počítá se ze vzorků, které už poller stahuje (po 2 min), žádné dotazy navíc.
-const WB_DAYS_MAX = 14;
+const DEN_MAX = 14;
+const WB_DAYS_MAX = DEN_MAX;
+const USAGE_DAYS_MAX = DEN_MAX;
 
-function recordWbDay(wbW, importW, dtH) {
-  if (!(wbW > 0) || !(dtH > 0)) return;          // nenabíjí se → den se ani nezakládá
-  const zeSite = Math.min(wbW, Math.max(0, importW));
+// Společné tělo pro auto, bazén i dům. Každý dostane, kolik importu na něj ještě
+// zbylo, a vezme si z toho nejvýš tolik, kolik sám bere.
+function recordDen(pole, w, zbylyImportW, dtH) {
+  if (!(w > 0) || !(dtH > 0)) return;            // nic nebere → den se ani nezakládá
+  // Kdyby se ze sítě zrovna dobíjela baterie, nesmí „ze sítě" přerůst spotřebu —
+  // ten zbytek do daného okruhu nešel a jako jeho spotřeba se nezapočítá.
+  const zeSite = Math.min(w, Math.max(0, zbylyImportW));
   const d = pragueDateString();
-  let rec = state.wbDays.find(r => r.d === d);
-  if (!rec) { rec = { d, grid: 0, pv: 0 }; state.wbDays.push(rec); }
+  let rec = state[pole].find(r => r.d === d);
+  if (!rec) { rec = { d, grid: 0, pv: 0 }; state[pole].push(rec); }
   rec.grid += zeSite * dtH;
-  rec.pv += (wbW - zeSite) * dtH;                // grid + pv vždy sedne na denní wh.wb
-  if (state.wbDays.length > WB_DAYS_MAX) {
-    state.wbDays.sort((a, b) => a.d.localeCompare(b.d));
-    state.wbDays = state.wbDays.slice(-WB_DAYS_MAX);
+  rec.pv += (w - zeSite) * dtH;                  // grid + pv vždy sedne na denní kWh
+  if (state[pole].length > DEN_MAX) {
+    state[pole].sort((a, b) => a.d.localeCompare(b.d));
+    state[pole] = state[pole].slice(-DEN_MAX);
   }
 }
 
-// ---------- Odkud šla spotřeba (všechno kromě auta): ze sítě vs. z FVE ----------
-// Ze sítě si první bere auto (viz recordWbDay) a co z importu zbyde, jde na spotřebu.
-// Obě karty tak dohromady dají celý odběr ze sítě a nic se nepočítá dvakrát.
-const USAGE_DAYS_MAX = 14;
+function recordWbDay(wbW, importW, dtH) { recordDen('wbDays', wbW, importW, dtH); }
+function recordPoolDay(poolW, zbylyImportW, dtH) { recordDen('poolDays', poolW, zbylyImportW, dtH); }
+function recordUsageDay(loadW, zbylyImportW, dtH) { recordDen('usageDays', loadW, zbylyImportW, dtH); }
 
-function recordUsageDay(loadW, zbylyImportW, dtH) {
-  if (!(loadW > 0) || !(dtH > 0)) return;
-  // Kdyby se ze sítě zrovna dobíjela baterie, nesmí „ze sítě" přerůst spotřebu —
-  // ten zbytek do baráku nešel a jako spotřeba se nezapočítá.
-  const zeSite = Math.min(loadW, Math.max(0, zbylyImportW));
-  const d = pragueDateString();
-  let rec = state.usageDays.find(r => r.d === d);
-  if (!rec) { rec = { d, grid: 0, pv: 0 }; state.usageDays.push(rec); }
-  rec.grid += zeSite * dtH;
-  rec.pv += (loadW - zeSite) * dtH;
-  if (state.usageDays.length > USAGE_DAYS_MAX) {
-    state.usageDays.sort((a, b) => a.d.localeCompare(b.d));
-    state.usageDays = state.usageDays.slice(-USAGE_DAYS_MAX);
-  }
+// Pořadí, ve kterém si spotřebiče „berou" ze sítě, je pravidlo, ne náhoda:
+// AUTO → BAZÉN → ZBYTEK DOMU. Auto i bazén jsou velké spotřebiče, které se pouštějí
+// schválně, takže když zrovna teče proud ze sítě, je to kvůli nim; dům jede pořád.
+// Součet těch tří podílů se vždycky rovná celému odběru ze sítě, takže se karty dají
+// sečíst a nic se nepočítá dvakrát. Na téhle zásadě to stojí od začátku.
+//
+// `loadW` je spotřeba všeho kromě auta (ze střídače), `poolW` z měřáků bazénu —
+// dvě různá měření, proto se rozdíl ořezává na nulu.
+function recordGridSplit({ wbW, poolW, loadW, importW, dtH }) {
+  const imp = Math.max(0, importW);
+  const auto = Math.min(Math.max(0, wbW), imp);
+  recordWbDay(wbW, imp, dtH);
+
+  const poAutu = imp - auto;
+  const bazen = Math.min(Math.max(0, poolW), poAutu);
+  recordPoolDay(poolW, poAutu, dtH);
+
+  const dumW = Math.max(0, loadW - Math.max(0, poolW));
+  const poBazenu = poAutu - bazen;
+  recordUsageDay(dumW, poBazenu, dtH);
+
+  return { auto, bazen, dumW, dum: Math.min(dumW, poBazenu) };
 }
 
 // ---------- Odběr okruhů pro graf na FVE (bazén, oba bojlery) ----------
@@ -990,7 +1007,11 @@ function recordSaunaDay(w, dtH) {
 // vidět, co který okruh spotřeboval. Sčítá se ze stejných vzorků jako denní kWh
 // (jednou za cyklus pollu, s dt zastropovaným na 10 min).
 const MONTHS_MAX = 13;
-const MONTH_KEYS = ['sauna', 'pool', 'wb'];
+// Celkové součty i rozpad na síť a FVE. Sauna rozpad nemá — sedí uvnitř „domu"
+// a vlastní místo v řetězu dělení sítě nedostala.
+const MONTH_CELKEM = ['sauna', 'pool', 'wb', 'dum'];
+const MONTH_SPLIT = ['pool', 'wb', 'dum'];
+const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']));
 
 function pragueMonthString(at) {
   return pragueDateString(at).slice(0, 7);
@@ -1000,12 +1021,26 @@ function recordMonth(kus, w, dtH) {
   if (!MONTH_KEYS.includes(kus) || !(w > 0) || !(dtH > 0)) return;
   const m = pragueMonthString();
   let rec = state.months.find(r => r.m === m);
-  if (!rec) { rec = { m, sauna: 0, pool: 0, wb: 0 }; state.months.push(rec); }
-  rec[kus] += w * dtH;
+  if (!rec) { rec = { m, sauna: 0, pool: 0, wb: 0, dum: 0 }; state.months.push(rec); }
+  rec[kus] = (rec[kus] || 0) + w * dtH;
   if (state.months.length > MONTHS_MAX) {
     state.months.sort((a, b) => a.m.localeCompare(b.m));
     state.months = state.months.slice(-MONTHS_MAX);
   }
+}
+
+// Celkem + rozpad naráz. Klíče rozpadu se zakládají VŽDY, když má měsíc co počítat —
+// i když ze sítě zrovna nešlo nic. Jinak by dokonale solární měsíc neměl klíč `poolGrid`
+// vůbec a appka by ho musela ukázat jako „neznámo" místo poctivé nuly. Měsíce z doby
+// před touhle změnou klíče nemají a neznámé zůstat MAJÍ — to je ten rozdíl.
+function recordMonthSplit(kus, w, gridW, dtH) {
+  if (!MONTH_SPLIT.includes(kus) || !(w > 0) || !(dtH > 0)) return;
+  recordMonth(kus, w, dtH);
+  const rec = state.months.find(r => r.m === pragueMonthString());
+  if (!rec) return;
+  const zeSite = Math.min(Math.max(0, gridW), w);
+  rec[kus + 'Grid'] = (rec[kus + 'Grid'] || 0) + zeSite * dtH;
+  rec[kus + 'Pv'] = (rec[kus + 'Pv'] || 0) + (w - zeSite) * dtH;
 }
 
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
@@ -1076,12 +1111,17 @@ function updateRuntimes() {
   // nevíme, vzorek se přeskočí — tvrdit, že to bylo z FVE, by byla lež. Denní součet
   // v přehledu pak může být o ten kus nižší než wh.wb; to je poctivější než smyšlené číslo.
   const importW = feedKw !== null && feedKw < 0 ? -feedKw * 1000 : 0;
-  if (feedKw !== null) recordWbDay(Math.max(0, wbW), importW, dtH);
-  // Spotřeba kromě auta: ze střídače, a ze sítě jen to, co si nevzalo auto
+  // Dělení odběru ze sítě mezi auto, bazén a zbytek domu. Bazén se počítá jen
+  // z čerstvého měření — ze zmrzlé hodnoty by se vyráběly kilowatthodiny.
   const loadKw = solaxOk && typeof state.solax.loadKw === 'number' ? state.solax.loadKw : null;
+  const poolW = (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt))
+    ? Math.max(0, state.poolPowerW) : 0;
+  let podil = null;
   if (feedKw !== null && loadKw !== null) {
-    const autoZeSite = Math.min(Math.max(0, wbW), importW);
-    recordUsageDay(loadKw * 1000, importW - autoZeSite, dtH);
+    podil = recordGridSplit({ wbW: Math.max(0, wbW), poolW, loadW: loadKw * 1000, importW, dtH });
+  } else if (feedKw !== null) {
+    // Bez spotřeby ze střídače se aspoň auto zaúčtuje, jako to bylo dřív
+    recordWbDay(Math.max(0, wbW), importW, dtH);
   }
   // Čas dopočítat umíme (relé má napájení), příkon ne — kilowatthodiny se proto
   // přičítají JEN ze živého měření. Bez `online` tady zmrzlý příkon z odpojeného
@@ -1095,7 +1135,7 @@ function updateRuntimes() {
   // Řada pro panel v grafu — null tam, kde zdroj mlčí (výš se nula hodí do kWh,
   // ale do grafu ne: rovná čára v nule by lhala, že okruh měřeně nic nebral)
   recordUsagePoint(
-    (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) ? Math.max(0, state.poolPowerW) : null,
+    (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) ? poolW : null,
     (boiler && typeof boiler.powerW === 'number') ? Math.max(0, boiler.powerW) : null,
     (typeof inf.hwPower === 'number' && cerstve(inf.fetchedAt)) ? Math.max(0, inf.hwPower * 1000) : null
   );
@@ -1104,12 +1144,18 @@ function updateRuntimes() {
     ? state.sauna.powerW : null;
   if (saunaW !== null) recordSaunaDay(saunaW, dtH);
 
-  // Měsíční součty — každý okruh jen z čerstvého měření
+  // Měsíční součty — každý okruh jen z čerstvého měření. Rozpad na síť a FVE se bere
+  // z téhož řetězu jako denní karty, aby se ta dvě místa nikdy nerozešla.
   if (saunaW !== null) recordMonth('sauna', saunaW, dtH);
-  if (typeof state.poolPowerW === 'number' && cerstve(state.poolPowerAt)) {
-    recordMonth('pool', state.poolPowerW, dtH);
+  if (podil) {
+    recordMonthSplit('pool', poolW, podil.bazen, dtH);
+    recordMonthSplit('wb', Math.max(0, wbW), podil.auto, dtH);
+    recordMonthSplit('dum', podil.dumW, podil.dum, dtH);
+  } else {
+    // Bez dat ze střídače se rozpad spočítat nedá; celkové součty ale nesmí vypadnout
+    if (poolW > 0) recordMonth('pool', poolW, dtH);
+    recordMonth('wb', Math.max(0, wbW), dtH);
   }
-  recordMonth('wb', Math.max(0, wbW), dtH);
 
   state.runtime.lastTs = now;
   recordPvDay();
@@ -1119,6 +1165,7 @@ function updateRuntimes() {
   broadcast('timeline', { timeline: state.timeline });
   broadcast('pvDays', { pvDays: state.pvDays });
   broadcast('wbDays', { wbDays: state.wbDays });
+  broadcast('poolDays', { poolDays: state.poolDays });
   broadcast('usageDays', { usageDays: state.usageDays });
   broadcast('usageHistory', { history: state.usageHistory });
   if (saunaEnabled) broadcast('saunaDays', { saunaDays: state.saunaDays });
@@ -1526,57 +1573,40 @@ app.post('/api/pvdays/restore', (req, res) => {
 });
 
 // Obnova přehledu „odkud auto bralo" — po restartu má telefon novější součty
-app.post('/api/wbdays/restore', (req, res) => {
-  const days = req.body && Array.isArray(req.body.wbDays) ? req.body.wbDays : null;
-  if (!days) return res.status(400).json({ error: 'Chybí wbDays.' });
-  const dnes = pragueDateString();
-  // Víc než 300 kWh za den z jedné nabíječky nedává smysl — takový záznam je nesmysl
-  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 300000 ? v : null);
-  let changed = false;
-  for (const inc of days.slice(-WB_DAYS_MAX)) {
-    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
-    if (inc.d > dnes) continue;                       // z budoucnosti se nic nepřijímá
-    const grid = num(inc.grid), pv = num(inc.pv);
-    if (grid === null && pv === null) continue;       // prázdný den nezakládat
-    let rec = state.wbDays.find(r => r.d === inc.d);
-    if (!rec) { rec = { d: inc.d, grid: 0, pv: 0 }; state.wbDays.push(rec); changed = true; }
-    // Bere se vyšší hodnota: server po restartu začíná od nuly, telefon má celý den
-    if (grid !== null && grid > rec.grid) { rec.grid = grid; changed = true; }
-    if (pv !== null && pv > rec.pv) { rec.pv = pv; changed = true; }
-  }
-  if (changed) {
-    state.wbDays.sort((a, b) => a.d.localeCompare(b.d));
-    state.wbDays = state.wbDays.slice(-WB_DAYS_MAX);
-    broadcast('wbDays', { wbDays: state.wbDays });
-  }
-  res.json({ ok: true, days: state.wbDays.length });
-});
+// Tři denní řady (auto, bazén, dům) se obnovují úplně stejně, tak ať to je na jednom
+// místě. `strop` je horní mez Wh na den, nad kterou už to není měření, ale nesmysl.
+function denniRestore(pole, strop) {
+  return (req, res) => {
+    const days = req.body && Array.isArray(req.body[pole]) ? req.body[pole] : null;
+    if (!days) return res.status(400).json({ error: `Chybí ${pole}.` });
+    const dnes = pragueDateString();
+    const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= strop ? v : null);
+    let changed = false;
+    for (const inc of days.slice(-DEN_MAX)) {
+      if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
+      if (inc.d > dnes) continue;                       // z budoucnosti se nic nepřijímá
+      const grid = num(inc.grid), pv = num(inc.pv);
+      if (grid === null && pv === null) continue;       // prázdný den nezakládat
+      let rec = state[pole].find(r => r.d === inc.d);
+      if (!rec) { rec = { d: inc.d, grid: 0, pv: 0 }; state[pole].push(rec); changed = true; }
+      // Bere se vyšší hodnota: server po restartu začíná od nuly, telefon má celý den
+      if (grid !== null && grid > rec.grid) { rec.grid = grid; changed = true; }
+      if (pv !== null && pv > rec.pv) { rec.pv = pv; changed = true; }
+    }
+    if (changed) {
+      state[pole].sort((a, b) => a.d.localeCompare(b.d));
+      state[pole] = state[pole].slice(-DEN_MAX);
+      broadcast(pole, { [pole]: state[pole] });
+    }
+    res.json({ ok: true, days: state[pole].length });
+  };
+}
 
-// Obnova „odkud šla spotřeba" po deployi — stejný princip jako u wallboxu
-app.post('/api/usage-days/restore', (req, res) => {
-  const days = req.body && Array.isArray(req.body.usageDays) ? req.body.usageDays : null;
-  if (!days) return res.status(400).json({ error: 'Chybí usageDays.' });
-  const dnes = pragueDateString();
-  // Přes 500 kWh za den by znamenalo 20 kW nepřetržitě — takový záznam je nesmysl
-  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 500000 ? v : null);
-  let changed = false;
-  for (const inc of days.slice(-USAGE_DAYS_MAX)) {
-    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
-    if (inc.d > dnes) continue;
-    const grid = num(inc.grid), pv = num(inc.pv);
-    if (grid === null && pv === null) continue;
-    let rec = state.usageDays.find(r => r.d === inc.d);
-    if (!rec) { rec = { d: inc.d, grid: 0, pv: 0 }; state.usageDays.push(rec); changed = true; }
-    if (grid !== null && grid > rec.grid) { rec.grid = grid; changed = true; }
-    if (pv !== null && pv > rec.pv) { rec.pv = pv; changed = true; }
-  }
-  if (changed) {
-    state.usageDays.sort((a, b) => a.d.localeCompare(b.d));
-    state.usageDays = state.usageDays.slice(-USAGE_DAYS_MAX);
-    broadcast('usageDays', { usageDays: state.usageDays });
-  }
-  res.json({ ok: true, days: state.usageDays.length });
-});
+// Víc než 300 kWh za den z jedné nabíječky ani z okruhu bazénu nedává smysl;
+// u celého domu je mez vyšší, 500 kWh je 20 kW nepřetržitě.
+app.post('/api/wbdays/restore', denniRestore('wbDays', 300000));
+app.post('/api/pool-days/restore', denniRestore('poolDays', 300000));
+app.post('/api/usage-days/restore', denniRestore('usageDays', 500000));
 
 // Meze sauny se dají přenastavit z appky (stránka Logika automatiky). Práh ve
 // skriptu uvnitř Shelly je vlastní — ten se musí změnit ručně, viz SAUNA.md.
@@ -1645,10 +1675,12 @@ app.post('/api/months/restore', (req, res) => {
     if (!inc || typeof inc.m !== 'string' || !/^\d{4}-\d{2}$/.test(inc.m)) continue;
     if (inc.m > ted) continue;
     let rec = state.months.find(r => r.m === inc.m);
-    if (!rec) { rec = { m: inc.m, sauna: 0, pool: 0, wb: 0 }; state.months.push(rec); changed = true; }
+    if (!rec) { rec = { m: inc.m, sauna: 0, pool: 0, wb: 0, dum: 0 }; state.months.push(rec); changed = true; }
     for (const k of MONTH_KEYS) {
       const v = num(inc[k]);
-      if (v !== null && v > rec[k]) { rec[k] = v; changed = true; }
+      // rec[k] je u starých měsíců undefined a `v > undefined` je vždycky false —
+      // bez téhle nuly by se rozpad ze zálohy nikdy nepřevzal
+      if (v !== null && v > (rec[k] || 0)) { rec[k] = v; changed = true; }
     }
   }
   if (changed) {
@@ -6230,6 +6262,7 @@ const STORE_POSTS = [
   '/api/timeline/restore',
   '/api/pvdays/restore',
   '/api/wbdays/restore',
+  '/api/pool-days/restore',
   '/api/usage-days/restore',
   '/api/usage-history/restore',
   '/api/sauna-days/restore',
@@ -6263,6 +6296,7 @@ function storeSnapshot() {
     '/api/timeline/restore': { timeline: state.timeline },
     '/api/pvdays/restore': { pvDays: state.pvDays },
     '/api/wbdays/restore': { wbDays: state.wbDays },
+    '/api/pool-days/restore': { poolDays: state.poolDays },
     '/api/usage-days/restore': { usageDays: state.usageDays },
     '/api/usage-history/restore': { points: state.usageHistory },
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
