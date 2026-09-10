@@ -26,7 +26,7 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
     'POLL_INTERVAL_MS', 'TUYA_ACCESS_ID', 'TUYA_ACCESS_SECRET', 'TUYA_API_URL',
     'TUYA_HEATPUMP_ID', 'tuyaEnabled', 'Date',
     CODE + '\n; return { tuyaSign, tuyaStringToSign, tuyaHlavicky, tuyaAccessToken,'
-         + ' fetchHeatpump, pollHeatpump, heatpumpMap, heatpumpPayload, heatpumpTempC,'
+         + ' fetchHeatpump, pollHeatpump, heatpumpMap, heatpumpPayload,'
          + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, fetchHeatpumpDiag, logHeatpumpDiag,'
          + ' HP_DIAG_ZDROJE, get token() { return tuyaToken; } };'
   )(
@@ -208,24 +208,25 @@ nadpis('2) Token');
     check('topná žádaná přebije obecnou', (await h.api.fetchHeatpump()).targetC, 31);
   }
 
-  nadpis('4) Teplota do grafu');
+  nadpis('4) Co se uloží do stavu');
+  // Teplota vody se nikde nekreslí do grafu — je jen na kartě. Pravda o její
+  // důvěryhodnosti proto sedí ve stavu a kartu si pohlídá test/browser-bazen.js.
   {
     const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]), bezStinu] });
     await h.api.pollHeatpump();
-    check('čerstvá a online → kreslí se', h.api.heatpumpTempC(), 26);
-    h.posun(20 * 60000);
-    check('zestárlá → díra v grafu', h.api.heatpumpTempC(), null);
+    check('rozumná teplota se uloží', h.state.heatpump.tempC, 26);
+    check('  s razítkem, ať se pozná stáří', typeof h.state.heatpump.fetchedAt, 'string');
   }
   {
     const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [{ code: 'temp_current', value: 26 }] } } }, bezStinu] });
     await h.api.pollHeatpump();
-    check('offline se do grafu nedostane', h.api.heatpumpTempC(), null);
+    check('offline se do stavu přenese', h.state.heatpump.online, false);
   }
   {
-    // Do grafu nesmí nesmyslná teplota ani při online a čerstvých datech
+    // Přesně ta −22 °C, kvůli které se mapování předělávalo
     const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: -220 }]), bezStinu] });
     await h.api.pollHeatpump();
-    check('nesmyslná teplota se do grafu nedostane', h.api.heatpumpTempC(), null);
+    check('nesmyslná teplota se neuloží ani do stavu', h.state.heatpump.tempC, null);
   }
   {
     // Po chybě se zahodí token — vypršelý token je nejčastější příčina a bez tohohle

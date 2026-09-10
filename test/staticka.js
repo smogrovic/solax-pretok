@@ -9,7 +9,7 @@
 // se takový zásah nejčastěji dotkne.
 const fs = require('fs');
 const path = require('path');
-const { suite, between } = require('./zdroj');
+const { suite, between, fn } = require('./zdroj');
 const { check, nadpis, konec } = suite('statická kontrola');
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -111,6 +111,13 @@ const podvrh = "let RELE = [\n  { jmeno: 'BAZEN', ip: '192.168.188.72' }\n];\nle
 check('stará IP se pozná', ipRele(podvrh).BAZEN, '192.168.188.72');
 check('čistý úryvek mJS projde', mimoMJS(podvrh).join(',') || 'ano', 'ano');
 check('šipka a backtick se najdou', mimoMJS('let a = () => `x`;').join(','), 'šipka,backtick');
+
+nadpis('5b) Historie teplot nese jen bojlery');
+// Teplota bazénu se nikde nekreslí do grafu, takže do boilerHistory nepatří: putovala by
+// do zálohy na Upstash, do telefonu i do restore endpointu, a nikdo by ji nečetl.
+const REC = fn('function recordBoilerTemps()');
+check('bod má jen čas a oba bojlery', /const point = \{ t: Date\.now\(\), b1, b2 \};/.test(REC), true);
+check('  a teplota bazénu se do něj nepřimíchá', /pool|heatpumpTempC/.test(REC), false);
 
 nadpis('6) Identita Shelly zařízení');
 // Patnáct zařízení bylo dřív zapsané třemi různými způsoby a bazénové relé bylo

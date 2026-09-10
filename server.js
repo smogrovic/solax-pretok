@@ -1381,13 +1381,11 @@ app.post('/api/boiler-history/restore', (req, res) => {
   const cutoff = now - HISTORY_MAX_AGE_MS;
   const okTemp = v => v === null || (typeof v === 'number' && v > -60 && v < 150);
   const cislo = v => (typeof v === 'number' ? v : null);
-  // Teplota bazénu (`pool`) přibyla později — bod jen s ní je platný stejně jako bod jen
-  // s bojlerem, jinak by se po každém nasazení ztratila celá její historie
   const clean = points
     .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now
-      && okTemp(p.b1) && okTemp(p.b2) && okTemp(p.pool)
-      && (typeof p.b1 === 'number' || typeof p.b2 === 'number' || typeof p.pool === 'number'))
-    .map(p => ({ t: p.t, b1: cislo(p.b1), b2: cislo(p.b2), pool: cislo(p.pool) }))
+      && okTemp(p.b1) && okTemp(p.b2)
+      && (typeof p.b1 === 'number' || typeof p.b2 === 'number'))
+    .map(p => ({ t: p.t, b1: cislo(p.b1), b2: cislo(p.b2) }))
     .slice(0, 4000);
   if (!clean.length) return res.json({ added: 0 });
 
@@ -5811,19 +5809,17 @@ if (infigyEnabled) {
 }
 
 // ---------- Historie teplot bojlerů (graf na stránce FVE) ----------
-// Bojler 1 = nádrž tepelného čerpadla (Panasonic Aquarea), Bojler 2 = Infigy (HW_TEMP),
-// pool = teplota vody v bazénu (Fairland přes Tuyu). Klíč `pool` je schválně týž jako
-// v usageHistory: tam znamená ODBĚR bazénu, tady jeho TEPLOTU — stejně jako b1/b2 nesou
-// v každém poli jinou veličinu. Díky tomu platí jedna legenda i jedna barva pro oba grafy.
+// Bojler 1 = nádrž tepelného čerpadla (Panasonic Aquarea), Bojler 2 = Infigy (HW_TEMP).
+// Teplota bazénu se sem SCHVÁLNĚ neukládá: graf ji nikde nekreslí (je jen na kartě
+// tepelného čerpadla), takže by to byla mrtvá data putující do zálohy i do telefonu.
 function recordBoilerTemps() {
   const aq = (state.aircon && state.aircon.aquarea || [])[0];
   const b1 = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   const b2 = state.infigy && typeof state.infigy.hwTemp === 'number' ? state.infigy.hwTemp : null;
-  const pool = heatpumpTempC();
-  if (b1 === null && b2 === null && pool === null) return; // ještě nemáme co ukládat
+  if (b1 === null && b2 === null) return; // ještě nemáme co ukládat
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   state.boilerHistory = thinPoints(state.boilerHistory.filter(p => p.t >= cutoff), PICK_LAST);
-  const point = { t: Date.now(), b1, b2, pool };
+  const point = { t: Date.now(), b1, b2 };
   state.boilerHistory.push(point);
   broadcast('boilerHistory', { point });
 }
@@ -6163,13 +6159,6 @@ async function pollHeatpump() {
 
 function heatpumpPayload() {
   return { ...state.heatpump, enabled: tuyaEnabled };
-}
-
-// Teplota vody do grafu teplot na stránce FVE — jen když je čerstvá a zařízení je
-// online. Z offline čerpadla se kreslí díra.
-function heatpumpTempC() {
-  const h = state.heatpump;
-  return h && h.online === true && cerstve(h.fetchedAt) && typeof h.tempC === 'number' ? h.tempC : null;
 }
 
 // Syrová odpověď z Tuyi. Kódy datových bodů Fairland nedokumentuje a liší se model

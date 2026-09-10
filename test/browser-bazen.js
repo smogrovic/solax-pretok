@@ -148,20 +148,20 @@ setTimeout(() => {
   check('součet bere jen měsíce s rozpadem', /ze sítě 2,0 kWh/.test(soucet.textContent), 'true');
   check('  a celkem je za všechny', /30,0 kWh/.test(soucet.textContent), 'true');
 
-  R.push('\\n8) Graf teplot bere bazén jako třetí čáru');
-  // Barvu i legendu sdílí s odběrem bazénu ve vedlejším panelu — v obou je to totéž místo
-  check('bazén má v legendě svou barvu', BOILER_COLORS.pool, '#16a085');
-  check('  a liší se od obou bojlerů',
-    BOILER_COLORS.pool !== BOILER_COLORS.b1 && BOILER_COLORS.pool !== BOILER_COLORS.b2, 'true');
-  boilerHistory = [
-    { t: T - 30 * MIN, b1: 48, b2: 44, pool: 25.1 },
-    { t: T - 15 * MIN, b1: 49, b2: 44, pool: 25.4 },
-    { t: T, b1: 50, b2: 45, pool: 26.0 }
-  ];
-  check('teplota bazénu přežije úklid historie',
-    pruneBoiler(boilerHistory).filter(p => typeof p.pool === 'number').length, 3);
-  check('  i sloučení se zálohou z telefonu',
-    mergeByTime(boilerHistory, []).filter(p => typeof p.pool === 'number').length, 3);
+  R.push('\\n8) Teplota bazénu se v grafu nekreslí');
+  // Teplota vody patří na kartu, ne do panelu s bojlery. Kdyby se tam vrátila,
+  // tenhle oddíl to chytí — a s ní i mrtvá data putující do zálohy a do telefonu.
+  const panel = String(panelBoilers);
+  check('panel kreslí jen oba bojlery', /for \\(const key of \\['b1', 'b2'\\]\\)/.test(panel), 'true');
+  check('  a bazén v něm není', /'pool'/.test(panel), 'false');
+  check('popisek panelu mluví o bojlerech',
+    FVE_PANELS.some(x => x.draw === panelBoilers && x.label === 'Bojlery (°C)'), 'true');
+  // Barva bazénu ale zůstává — používá ji vedlejší panel s ODBĚREM okruhů
+  check('barva bazénu zůstala pro panel odběru', BOILER_COLORS.pool, '#16a085');
+  // Panel odběru si z téhle trojice bere meze osy, legendu i samotné čáry — proto tři
+  check('  a panel odběru bazén pořád kreslí',
+    (String(panelUsage).match(/\\['pool', 'b1', 'b2'\\]/g) || []).length, 3);
+
  } catch (e) { R.push('CHYBA výjimka: ' + e.message); }
 
   const bad = R.filter(l => l.startsWith('CHYBA')).length;

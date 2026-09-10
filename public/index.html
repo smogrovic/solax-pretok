@@ -3083,7 +3083,7 @@ function panelUsage(ctx, g) {
 
 function panelBoilers(ctx, g) {
   const pts = panPts(boilerHistory, g);
-  const dost = pts.filter(p => ['pool', 'b1', 'b2'].some(k => typeof p[k] === 'number')).length >= 2;
+  const dost = pts.filter(p => typeof p.b1 === 'number' || typeof p.b2 === 'number').length >= 2;
   if (!dost) return panPrazdny(ctx, g);
   const min = 15, max = 75;   // pevný rozsah osy Y
   const yr = panY(g, min, max);
@@ -3100,9 +3100,9 @@ function panelBoilers(ctx, g) {
   // Chybějící úseky se nepřemosťují přímkou — vzorkuje se po 5 min, takže díra
   // nad 25 min znamená, že data prostě chybí.
   g.clip(() => {
-    // `pool` = teplota vody v bazénu z tepelného čerpadla. Barvu i legendu sdílí
-    // s odběrem bazénu ve vedlejším panelu — v obou znamená totéž místo.
-    for (const key of ['pool', 'b1', 'b2']) {
+    // Jen oba bojlery. Teplota bazénu se v grafu schválně nekreslí — je na kartě
+    // tepelného čerpadla a do panelu s bojlery nepatří.
+    for (const key of ['b1', 'b2']) {
       const raw = pts.filter(q => typeof q[key] === 'number').map(q => ({ t: q.t, v: q[key] }));
       for (const seg of splitGaps(raw, 25 * 60 * 1000)) {
         if (seg.length < 2) continue;
