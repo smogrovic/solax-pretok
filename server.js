@@ -5953,14 +5953,32 @@ async function tuyaAccessToken() {
 // jednotně. Bereme první kód, který zařízení opravdu hlásí — co se nenajde, zůstane
 // null, NE nula: v grafu má být díra, ne ledová voda.
 const HP_KODY = {
-  tempC:    ['temp_current', 'temp_current_f', 'water_temp', 'temp_in', 'inlet_temp', 'cur_temp'],
-  targetC:  ['temp_set', 'temp_set_f', 'set_temp', 'target_temp'],
-  outC:     ['temp_out', 'outlet_temp', 'water_out_temp'],
+  // tempC = voda na VSTUPU, tedy skutečná teplota bazénu (Fairland ji ukazuje se šipkou
+  // dovnitř). Výstup je zvlášť: během topení je o pár stupňů vyšší a jako „teplota
+  // bazénu" by lhal.
+  tempC:    ['temp_current', 'temp_current_f', 'water_temp', 'temp_in', 'inlet_temp',
+             'inlet_water_temp', 'in_water_temp', 'water_in_temp', 'cur_temp'],
+  // Fairland má žádanou teplotu často zvlášť pro topení a pro chlazení — topná první
+  targetC:  ['temp_set_heat', 'heat_temp_set', 'temp_set', 'temp_set_f', 'set_temp', 'target_temp'],
+  outC:     ['temp_out', 'outlet_temp', 'water_out_temp', 'outlet_water_temp', 'out_water_temp'],
+  // Výkon kompresoru v procentech (Fairland appka to ukazuje jako „61 %" u ikonky M)
+  vykonPct: ['compressor_percentage', 'compressor_capacity', 'power_percent', 'capacity_set',
+             'run_percent', 'speed_percent', 'frequency_percent', 'compressor_state'],
   powerW:   ['cur_power', 'power', 'active_power'],
   on:       ['switch', 'switch_1', 'Power', 'power_switch'],
   mode:     ['mode', 'work_mode', 'run_mode'],
   fault:    ['fault', 'error', 'alarm']
 };
+
+// Bazén nemá −22 °C ani 200 °C. Hodnota mimo tohle rozmezí znamená, že jsme sáhli na
+// špatný datový bod — a to se má projevit jako „nevíme", ne jako sebevědomé číslo.
+// Přesně tohle appka poprvé neuměla a ukazovala −22 °C, když čerpadlo hlásilo 29.
+const HP_VODA_MIN = -5;
+const HP_VODA_MAX = 60;
+function hpVoda(v) {
+  const t = hpTeplota(v);
+  return t !== null && t >= HP_VODA_MIN && t <= HP_VODA_MAX ? t : null;
+}
 
 // Režim chodí jako text z pevného číselníku; české popisky jen pro ty obvyklé.
 const HP_REZIMY = { heat: 'topí', hot: 'topí', cool: 'chladí', cold: 'chladí', auto: 'auto', smart: 'auto' };
@@ -6003,14 +6021,17 @@ function heatpumpMap(dev) {
   return {
     online: dev && dev.online === true,
     name: (dev && dev.name) || null,
-    tempC: hpTeplota(prvni(HP_KODY.tempC)),
-    targetC: hpTeplota(prvni(HP_KODY.targetC)),
-    outC: hpTeplota(prvni(HP_KODY.outC)),
+    tempC: hpVoda(prvni(HP_KODY.tempC)),
+    targetC: hpVoda(prvni(HP_KODY.targetC)),
+    outC: hpVoda(prvni(HP_KODY.outC)),
+    vykonPct: cislo(prvni(HP_KODY.vykonPct)),
     powerW: cislo(prvni(HP_KODY.powerW)),
     on: (() => { const v = prvni(HP_KODY.on); return typeof v === 'boolean' ? v : null; })(),
     mode: hpRezimText(prvni(HP_KODY.mode)),
     fault: cislo(prvni(HP_KODY.fault)),
-    kody: status.map(d => d.code)
+    // Co čerpadlo doopravdy hlásí. Když se teplota nenajde, appka to vypíše přímo na
+    // kartě — jinak se kódy musí lovit přes /api/heatpump/raw nebo v logu.
+    dp: status.map(d => ({ code: d.code, value: d.value }))
   };
 }
 

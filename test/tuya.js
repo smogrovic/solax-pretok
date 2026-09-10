@@ -27,7 +27,7 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
     'TUYA_HEATPUMP_ID', 'tuyaEnabled', 'Date',
     CODE + '\n; return { tuyaSign, tuyaStringToSign, tuyaHlavicky, tuyaAccessToken,'
          + ' fetchHeatpump, pollHeatpump, heatpumpMap, heatpumpPayload, heatpumpTempC,'
-         + ' hpTeplota, hpRezimText, HP_KODY, get token() { return tuyaToken; } };'
+         + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, get token() { return tuyaToken; } };'
   )(
     require('crypto'),
     async (url, opts) => {
@@ -149,6 +149,60 @@ nadpis('2) Token');
   check('nesmysl je null', build().api.hpTeplota('x'), null);
   check('prázdný režim je null', build().api.hpRezimText(''), null);
 
+  nadpis('3b) Pojistka na nesmyslnou teplotu');
+  // Tenhle případ appku poprvé shodil: čerpadlo hlásilo 29 °C, my kreslili −22 °C
+  // z jiného datového bodu a tvářili se jistě. Špatné mapování má vypadat jako „nevíme".
+  {
+    const a = build().api;
+    check('−22 °C bazén mít nemůže → null', a.hpVoda(-22), null);
+    check('  a −220 v desetinách taky ne', a.hpVoda(-220), null);
+    check('80 °C taky ne', a.hpVoda(80), null);
+    check('29 °C projde', a.hpVoda(29), 29);
+    check('  i jako desetiny', a.hpVoda(294), 29.4);
+    check('mírný mráz na kraji rozmezí projde', a.hpVoda(-4), -4);
+    check('nehlášená hodnota zůstává null', a.hpVoda(null), null);
+  }
+  {
+    const h = build({ odpovedi: [okToken, dev([
+      { code: 'temp_current', value: -220 },
+      { code: 'inlet_temp', value: 29 }
+    ])] });
+    const d = await h.api.fetchHeatpump();
+    // Nesmyslná hodnota z prvního kódu nesmí přebít rozumnou z dalšího… ale nepřebije jen
+    // proto, že se první kód najde. Ať je vidět, co se doopravdy stane:
+    check('nesmysl z prvního kódu neprojde jako teplota', d.tempC, null);
+    check('  ale kódy jsou v odpovědi, ať se dá mapování opravit',
+      d.dp.map(x => x.code).join(','), 'temp_current,inlet_temp');
+  }
+
+  nadpis('3c) Výkon kompresoru');
+  {
+    const h = build({ odpovedi: [okToken, dev([
+      { code: 'inlet_temp', value: 29 },
+      { code: 'compressor_percentage', value: 61 },
+      { code: 'temp_set_heat', value: 31 },
+      { code: 'outlet_temp', value: 33 }
+    ])] });
+    const d = await h.api.fetchHeatpump();
+    check('vstupní voda je teplota bazénu', d.tempC, 29);
+    check('výstup je zvlášť', d.outC, 33);
+    check('  a nesplete se se vstupem', d.tempC !== d.outC, true);
+    check('žádaná teplota z topné větve', d.targetC, 31);
+    check('výkon kompresoru v procentech', d.vykonPct, 61);
+  }
+  {
+    const h = build({ odpovedi: [okToken, dev([{ code: 'inlet_temp', value: 29 }])] });
+    const d = await h.api.fetchHeatpump();
+    check('nehlášený výkon je null, ne nula', d.vykonPct, null);
+  }
+  {
+    // Topná žádaná má přednost před obecnou — jinak by se u dvou setpointů brala chladicí
+    const h = build({ odpovedi: [okToken, dev([
+      { code: 'temp_set', value: 24 }, { code: 'temp_set_heat', value: 31 }
+    ])] });
+    check('topná žádaná přebije obecnou', (await h.api.fetchHeatpump()).targetC, 31);
+  }
+
   nadpis('4) Teplota do grafu');
   {
     const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }])] });
@@ -161,6 +215,12 @@ nadpis('2) Token');
     const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [{ code: 'temp_current', value: 26 }] } } }] });
     await h.api.pollHeatpump();
     check('offline se do grafu nedostane', h.api.heatpumpTempC(), null);
+  }
+  {
+    // Do grafu nesmí nesmyslná teplota ani při online a čerstvých datech
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: -220 }])] });
+    await h.api.pollHeatpump();
+    check('nesmyslná teplota se do grafu nedostane', h.api.heatpumpTempC(), null);
   }
   {
     // Po chybě se zahodí token — vypršelý token je nejčastější příčina a bez tohohle

@@ -6044,11 +6044,20 @@ function renderHeatpump() {
     veta.appendChild(b);
   };
   kus('cíl ', hpStupne(d.targetC));
+  kus('výkon ', typeof d.vykonPct === 'number' ? Math.round(d.vykonPct) + ' %' : null);
   kus('na výstupu ', hpStupne(d.outC));
   kus('příkon ', typeof d.powerW === 'number' ? Math.round(d.powerW) + ' W' : null);
   if (d.fault) kus('chyba ', String(d.fault));
   if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
   hpMetaEl.appendChild(veta);
+
+  // Když se teplota vody nenajde, je špatně mapovaný datový bod. Ať se kódy nemusí lovit
+  // přes /api/heatpump/raw, vypíšeme rovnou, co čerpadlo posílá — stačí pak screenshot.
+  if (d.tempC === null && Array.isArray(d.dp) && d.dp.length) {
+    const dg = document.createElement('div');
+    dg.textContent = 'hlásí: ' + d.dp.map(x => `${x.code}=${x.value}`).join(', ');
+    hpMetaEl.appendChild(dg);
+  }
 }
 
 const SAUNA_DNU = 7;

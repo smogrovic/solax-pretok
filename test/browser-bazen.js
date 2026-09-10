@@ -22,7 +22,8 @@ setTimeout(() => {
   const karta = document.getElementById('heatpumpCard');
   const ukaz = d => { heatpumpData = d; renderHeatpump(); };
   const zaklad = (o = {}) => ({ enabled: true, online: true, fetchedAt: new Date(T).toISOString(),
-    tempC: 26.4, targetC: 28, outC: null, powerW: null, on: true, mode: 'topí', fault: 0, ...o });
+    tempC: 26.4, targetC: 28, outC: null, vykonPct: null, powerW: null, on: true,
+    mode: 'topí', fault: 0, dp: [], ...o });
 
   R.push('\\n1) Bez klíčů k Tuyi');
   ukaz({ enabled: false });
@@ -38,9 +39,11 @@ setTimeout(() => {
   check('cíl je v podrobnostech', /cíl 28,0 °C/.test(hpMeta.textContent), 'true');
   check('  a chybějící údaje se nevypisují', /příkon|výstupu/.test(hpMeta.textContent), 'false');
 
-  ukaz(zaklad({ outC: 30.2, powerW: 1480 }));
+  ukaz(zaklad({ outC: 30.2, powerW: 1480, vykonPct: 61 }));
   check('teplota na výstupu se ukáže', /na výstupu 30,2 °C/.test(hpMeta.textContent), 'true');
   check('příkon taky', /příkon 1480 W/.test(hpMeta.textContent), 'true');
+  check('výkon kompresoru v procentech', /výkon 61 %/.test(hpMeta.textContent), 'true');
+  check('  a je hned za cílem', /cíl 28,0 °C · výkon 61 %/.test(hpMeta.textContent), 'true');
   check('  oddělené tečkou', / · /.test(hpMeta.textContent), 'true');
 
   ukaz(zaklad({ on: false, mode: 'topí' }));
@@ -61,10 +64,18 @@ setTimeout(() => {
   ukaz(zaklad({ online: false, error: 'Tuya: sign invalid (1004)' }));
   check('chyba z Tuyi se ukáže', /sign invalid/.test(hpMeta.textContent), 'true');
 
-  R.push('\\n4) Nehlášené hodnoty');
+  R.push('\\n4) Nehlášené hodnoty a špatné mapování');
   ukaz(zaklad({ tempC: null, targetC: null }));
   check('bez teploty je pomlčka', hpTemp.textContent, '– °C');
   check('  a řekne se, že nic nechodí', /nehlásí/.test(hpMeta.textContent), 'true');
+  // Karta poprvé ukazovala −22 °C, protože jsme sáhli na špatný datový bod a tvářili se
+  // jistě. Teď má být místo čísla pomlčka a rovnou výpis toho, co čerpadlo posílá —
+  // ať stačí screenshot karty a nemusí se lovit /api/heatpump/raw.
+  ukaz(zaklad({ tempC: null, dp: [{ code: 'temp_current', value: -220 }, { code: 'inlet_temp', value: 29 }] }));
+  check('nesmyslná teplota se nekreslí jako číslo', hpTemp.textContent, '– °C');
+  check('  a karta vypíše, co čerpadlo hlásí', /hlásí: temp_current=-220, inlet_temp=29/.test(hpMeta.textContent), 'true');
+  ukaz(zaklad({ tempC: 26.4, dp: [{ code: 'inlet_temp', value: 26.4 }] }));
+  check('když teplota sedí, výpis kódů se neukazuje', /hlásí:/.test(hpMeta.textContent), 'false');
 
   R.push('\\n5) Graf teplot bere bazén jako třetí čáru');
   // Barvu i legendu sdílí s odběrem bazénu ve vedlejším panelu — v obou je to totéž místo
