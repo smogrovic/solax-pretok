@@ -6011,6 +6011,17 @@ const hpMetaEl = document.getElementById('hpMeta');
 
 const hpStupne = v => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' °C' : null);
 
+// Když se teplota vody nenajde, je špatně mapovaný datový bod — kódy Fairland
+// nedokumentuje a liší se model od modelu. Ať se nemusí lovit přes /api/heatpump/raw,
+// vypíšeme rovnou, co čerpadlo posílá; stačí pak screenshot karty. Platí i pro
+// nedostupné čerpadlo: poslední známé kódy jsou pořád k něčemu.
+function hpDiagnostika(d) {
+  if (typeof d.tempC === 'number' || !Array.isArray(d.dp) || !d.dp.length) return;
+  const dg = document.createElement('div');
+  dg.textContent = 'hlásí: ' + d.dp.map(x => `${x.code}=${x.value}`).join(', ');
+  hpMetaEl.appendChild(dg);
+}
+
 function renderHeatpump() {
   if (!heatpumpCardEl) return;
   const d = heatpumpData || {};
@@ -6025,7 +6036,13 @@ function renderHeatpump() {
     hpLightEl.className = 'traffic-light';
     hpStateEl.textContent = 'nedostupné';
     hpTempEl.textContent = '– °C';
-    hpMetaEl.textContent = d.error || 'Z čerpadla nechodí data.';
+    // „Nechodí data" znamenalo čtyři různé věci naráz a při ladění se pak jen hádalo.
+    // Každá z nich chce jinou reakci, tak ať je poznat, o kterou jde.
+    hpMetaEl.textContent = d.error ? d.error
+      : !d.fetchedAt ? 'Čeká se na první dotaz na Tuyu — po nasazení to trvá pár minut.'
+      : d.online === false ? `Tuya hlásí čerpadlo jako offline. Poslední data v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`
+      : `Data zestárla, poslední v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`;
+    hpDiagnostika(d);
     return;
   }
   const topi = d.on === true;
@@ -6051,13 +6068,7 @@ function renderHeatpump() {
   if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
   hpMetaEl.appendChild(veta);
 
-  // Když se teplota vody nenajde, je špatně mapovaný datový bod. Ať se kódy nemusí lovit
-  // přes /api/heatpump/raw, vypíšeme rovnou, co čerpadlo posílá — stačí pak screenshot.
-  if (d.tempC === null && Array.isArray(d.dp) && d.dp.length) {
-    const dg = document.createElement('div');
-    dg.textContent = 'hlásí: ' + d.dp.map(x => `${x.code}=${x.value}`).join(', ');
-    hpMetaEl.appendChild(dg);
-  }
+  hpDiagnostika(d);
 }
 
 const SAUNA_DNU = 7;

@@ -53,16 +53,34 @@ setTimeout(() => {
   ukaz(zaklad({ fault: 3 }));
   check('chyba jednotky se ukáže', /chyba 3/.test(hpMeta.textContent), 'true');
 
-  R.push('\\n3) Výpadky');
+  R.push('\\n3) Výpadky — každý druh se pozná zvlášť');
+  // „Z čerpadla nechodí data" znamenalo čtyři různé věci naráz a při ladění se pak
+  // jen hádalo, o kterou jde. Každá chce jinou reakci.
   ukaz(zaklad({ online: false }));
   check('offline = nedostupné', hpState.textContent, 'nedostupné');
   check('  semafor zhasne úplně', hpLight.className, 'traffic-light');
   check('  a teplota se nekreslí', hpTemp.textContent, '– °C');
+  check('  hláška řekne, že to hlásí Tuya', /Tuya hlásí čerpadlo jako offline/.test(hpMeta.textContent), 'true');
+  check('  i kdy naposledy dorazila data', /Poslední data v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
+
   ukaz(zaklad({ fetchedAt: new Date(T - 40 * MIN).toISOString() }));
   check('zestárlá data taky', hpState.textContent, 'nedostupné');
   check('  a nekreslí zmrzlou teplotu', hpTemp.textContent, '– °C');
+  check('  ale řeknou, že jen zestárla', /zestárla/.test(hpMeta.textContent), 'true');
+  check('  a neplete se s offline', /offline/.test(hpMeta.textContent), 'false');
+
+  // Hned po nasazení ještě žádný dotaz neproběhl — to není porucha
+  ukaz({ enabled: true, dp: [] });
+  check('před prvním dotazem se to řekne', /Čeká se na první dotaz/.test(hpMeta.textContent), 'true');
+  check('  a nehlásí se to jako výpadek', /offline|zestárla/.test(hpMeta.textContent), 'false');
+
   ukaz(zaklad({ online: false, error: 'Tuya: sign invalid (1004)' }));
-  check('chyba z Tuyi se ukáže', /sign invalid/.test(hpMeta.textContent), 'true');
+  check('chyba z Tuyi má přednost', /sign invalid/.test(hpMeta.textContent), 'true');
+  check('  a nepřekryje ji obecná hláška', /offline/.test(hpMeta.textContent), 'false');
+
+  // I u nedostupného čerpadla jsou poslední známé kódy k něčemu
+  ukaz(zaklad({ online: false, tempC: null, dp: [{ code: 'inlet_temp', value: 29 }] }));
+  check('výpis kódů funguje i u nedostupného', /hlásí: inlet_temp=29/.test(hpMeta.textContent), 'true');
 
   R.push('\\n4) Nehlášené hodnoty a špatné mapování');
   ukaz(zaklad({ tempC: null, targetC: null }));
