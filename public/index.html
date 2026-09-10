@@ -506,6 +506,10 @@
   /* Drobným písmem pod odběrem: kdy naposledy dorazilo měření, jestli se ozval skript
      v Shelly (ten shazuje relé do vteřiny) a dokud drží blokace bazénu */
   .sauna-meta{font-size:11px;color:var(--grey-text);text-align:center;line-height:1.5;margin-top:6px;}
+  /* Tepelné čerpadlo bazénu: velká teplota vody, pod ní drobně cíl, režim a příkon */
+  .hp-temp{font-size:34px;font-weight:800;color:var(--navy);text-align:center;margin:10px 0 2px;}
+  .hp-meta{font-size:11px;color:var(--grey-text);text-align:center;line-height:1.5;margin-top:6px;}
+  .hp-meta b{font-weight:700;color:var(--navy);}
   .sauna-meta b{font-weight:700;color:var(--navy);}
   .sauna-meta .skript-ne{color:var(--grey-text);}
   .mesic-total{font-size:28px;font-weight:800;color:var(--navy);text-align:center;margin:6px 0 2px;}
@@ -2034,6 +2038,17 @@
         </div>
       </div>
 
+      <div class="card pool-card" id="heatpumpCard" hidden>
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="hpLight"></div>
+            <div class="shelly-label">Tepelné čerpadlo <span class="state" id="hpState">–</span></div>
+          </div>
+          <div class="hp-temp" id="hpTemp">– °C</div>
+          <div class="hp-meta" id="hpMeta"></div>
+        </div>
+      </div>
+
       <div class="card pool-card lockable">
         <div class="lights-grid one">
           <div class="light-cell">
@@ -3053,7 +3068,7 @@ function panelUsage(ctx, g) {
 
 function panelBoilers(ctx, g) {
   const pts = panPts(boilerHistory, g);
-  const dost = pts.filter(p => typeof p.b1 === 'number' || typeof p.b2 === 'number').length >= 2;
+  const dost = pts.filter(p => ['pool', 'b1', 'b2'].some(k => typeof p[k] === 'number')).length >= 2;
   if (!dost) return panPrazdny(ctx, g);
   const min = 15, max = 75;   // pevný rozsah osy Y
   const yr = panY(g, min, max);
@@ -3070,7 +3085,9 @@ function panelBoilers(ctx, g) {
   // Chybějící úseky se nepřemosťují přímkou — vzorkuje se po 5 min, takže díra
   // nad 25 min znamená, že data prostě chybí.
   g.clip(() => {
-    for (const key of ['b1', 'b2']) {
+    // `pool` = teplota vody v bazénu z tepelného čerpadla. Barvu i legendu sdílí
+    // s odběrem bazénu ve vedlejším panelu — v obou znamená totéž místo.
+    for (const key of ['pool', 'b1', 'b2']) {
       const raw = pts.filter(q => typeof q[key] === 'number').map(q => ({ t: q.t, v: q[key] }));
       for (const seg of splitGaps(raw, 25 * 60 * 1000)) {
         if (seg.length < 2) continue;
@@ -5982,6 +5999,58 @@ const saunaPowerEl = document.getElementById('saunaPower');
 const saunaHintEl = document.getElementById('saunaHint');
 const saunaMetaEl = document.getElementById('saunaMeta');
 const saunaTotalEl = document.getElementById('saunaTotal');
+// ---------- Tepelné čerpadlo bazénu (Fairland přes Tuyu) ----------
+// Karta se ukáže, jen když má server klíče k Tuyi. Bez nich nemá co zobrazit
+// a prázdná karta na stránce Bazén by jen mátla.
+let heatpumpData = null;
+const heatpumpCardEl = document.getElementById('heatpumpCard');
+const hpLightEl = document.getElementById('hpLight');
+const hpStateEl = document.getElementById('hpState');
+const hpTempEl = document.getElementById('hpTemp');
+const hpMetaEl = document.getElementById('hpMeta');
+
+const hpStupne = v => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' °C' : null);
+
+function renderHeatpump() {
+  if (!heatpumpCardEl) return;
+  const d = heatpumpData || {};
+  heatpumpCardEl.hidden = !d.enabled;
+  if (!d.enabled) return;
+
+  // Čerpadlo visí na zahradní wifi se slabým signálem, takže výpadky budou. Offline
+  // i zestárlá data znamenají „nevíme" — zmrzlá teplota se kreslit nesmí.
+  const zname = d.online === true && d.fetchedAt
+    && Date.now() - new Date(d.fetchedAt).getTime() <= DEVICE_STALE_MS;
+  if (!zname) {
+    hpLightEl.className = 'traffic-light';
+    hpStateEl.textContent = 'nedostupné';
+    hpTempEl.textContent = '– °C';
+    hpMetaEl.textContent = d.error || 'Z čerpadla nechodí data.';
+    return;
+  }
+  const topi = d.on === true;
+  hpLightEl.className = 'traffic-light' + (topi ? ' on' : ' off');
+  hpStateEl.textContent = topi ? (d.mode || 'zapnuté') : 'vypnuté';
+  hpTempEl.textContent = hpStupne(d.tempC) || '– °C';
+
+  hpMetaEl.textContent = '';
+  const veta = document.createElement('div');
+  const kus = (popis, hodnota) => {
+    if (hodnota === null) return;
+    if (veta.childNodes.length) veta.appendChild(document.createTextNode(' · '));
+    veta.appendChild(document.createTextNode(popis));
+    const b = document.createElement('b');
+    b.textContent = hodnota;
+    veta.appendChild(b);
+  };
+  kus('cíl ', hpStupne(d.targetC));
+  kus('na výstupu ', hpStupne(d.outC));
+  kus('příkon ', typeof d.powerW === 'number' ? Math.round(d.powerW) + ' W' : null);
+  if (d.fault) kus('chyba ', String(d.fault));
+  if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
+  hpMetaEl.appendChild(veta);
+}
+
 const SAUNA_DNU = 7;
 let saunaData = null;
 let saunaDaysData = [];
@@ -7073,6 +7142,8 @@ function applySnapshot(snap) {
   saunaData = snap.sauna || null;
   huumData = snap.huum || null;
   bezpecne(renderHuum);
+  heatpumpData = snap.heatpump || null;
+  bezpecne(renderHeatpump);
   bezpecne(renderSaunaSet);
   saveSaunaSetLocal();
   maybeRestoreSaunaSet(snap.sauna);
@@ -7455,6 +7526,10 @@ function connectStream() {
   es.addEventListener('huum', e => {
     huumData = JSON.parse(e.data).huum || null;
     renderHuum();
+  });
+  es.addEventListener('heatpump', e => {
+    heatpumpData = JSON.parse(e.data).heatpump || null;
+    renderHeatpump();
   });
   es.addEventListener('sauna', e => {
     saunaData = JSON.parse(e.data).sauna || null;

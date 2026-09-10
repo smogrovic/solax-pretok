@@ -14,6 +14,7 @@ node test/rele.js                     # „běží to relé?" podle časovače v
 node test/bazen.js                    # zaručené 2 h denně (okno 13–15, past po restartu)
 node test/solinator.js                # solinátor startuje s bazénem, nejpozději ve 13:00
 node test/huum.js                     # překlad odpovědi z kamen HUUM (UKU WiFi)
+node test/tuya.js                     # podpis, token a mapování tepelného čerpadla bazénu
 node test/cidla.js                    # nástěnná čidla řídí klimatizaci ve svém pokoji
 node test/log.js                      # co do logu patří a co ne, výpadky s úrovní error
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
@@ -22,6 +23,7 @@ node test/runtime-store.js            # dva ostré servery: uložit, spadnout, n
 node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí
 ./test/browser-run.sh test/browser-snapshot.js # ostrá applySnapshot: všechny série dojedou
 ./test/browser-run.sh test/browser-sauna.js    # stránka Sauna v headless Chromiu
+./test/browser-run.sh test/browser-bazen.js    # karta tepelného čerpadla na stránce Bazén
 ./test/browser-run.sh test/browser-klima.js    # Klima bez dočasné karty čidel
 ./test/browser-run.sh test/browser-rele.js     # hláška o samovypnutí u nedostupného relé
 ./test/browser-run.sh test/browser-fve.js      # panely grafu, odběr okruhů, karta spotřeby

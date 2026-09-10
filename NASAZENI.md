@@ -98,6 +98,26 @@ Přihlašovací údaje do Infigy portálu: `INFIGY_EMAIL`, `INFIGY_PASSWORD`.
 > zařízení**. Vlastní hodnoty vyčteš z adresního řádku Infigy portálu, nebo Infigy
 > nepoužívej vůbec (nech `INFIGY_EMAIL` prázdné).
 
+### Fairland — tepelné čerpadlo bazénu (přes Tuya)
+Appka **FairlandSmartPool jede na Tuyi**, ne na vlastním Fairland API (druhá jejich appka,
+iGarden, má vlastní cloud, ale s SmartPoolem je nekompatibilní). Lokální cesty
+(LocalTuya, Modbus) jsou nepoužitelné — appka běží na Renderu, ne na domácí síti.
+
+1. Čerpadlo musí být v appce **Smart Life** (ne ve Fairland appce) — Tuya zařízení patří
+   vždy jen jednomu účtu. Účet zakládej **se zemí Česko**, ať sedí datacentrum.
+2. [eu.platform.tuya.com](https://eu.platform.tuya.com) → **Cloud → Development →
+   Create Cloud Project**, Data Center **Central Europe** (později už se nepřepne),
+   Industry i Development Method **Smart Home**.
+3. Autorizuj služby **IoT Core**, **Authorization** a **Smart Home Basic Service**.
+4. Záložka **Overview** → **Authorization Key**: `TUYA_ACCESS_ID` a `TUYA_ACCESS_SECRET`.
+5. Záložka **Devices → Link App Account → Add App Account → Tuya App Account
+   Authorization**. QR načti ve Smart Life (**Me** → skener vpravo nahoře), **hned** —
+   kód platí jen pár minut. Pak přibude účet a pod ním čerpadlo.
+
+> **Kódy datových bodů** Fairland nedokumentuje a liší se model od modelu. Appka při
+> prvním čtení zapíše do logu, co čerpadlo posílá, a `GET /api/heatpump/raw` vrátí celou
+> odpověď — podle toho se dá mapování v `HP_KODY` doladit.
+
 ### Úložiště — Upstash Redis (zdarma, důrazně doporučené)
 Bez něj se po každém nasazení ztratí historie grafů, doby běhu, měsíční spotřeby i log.
 
@@ -216,6 +236,8 @@ Kompletní popis toho, co a kdy se spíná, je přímo v appce na stránce **Log
 | `NUKI_SMARTLOCK_ID` | ne | vezme se první zámek na účtu |
 | `INFIGY_EMAIL`, `INFIGY_PASSWORD` | pro bojler 2 | chybí bojler 2, výkon wallboxu a odhad výroby |
 | `INFIGY_DEVICE_ID`, `INFIGY_SUPABASE_REF`, `INFIGY_SUPABASE_ANON` | **ano, když používáš Infigy** | čte se **cizí zařízení** původního majitele |
+| `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` | pro tepelné čerpadlo bazénu | karta čerpadla se neukáže, v grafu chybí teplota vody |
+| `TUYA_HEATPUMP_ID`, `TUYA_API_URL` | ne | použije se ID čerpadla téhle instalace a Central Europe |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | důrazně doporučeno | historie, doby běhu, měsíční spotřeby a log se ztratí při každém nasazení |
 | `STORE_PREFIX` | ne | klíč se jmenuje `solax:state` |
 | `OWM_API_KEY` | doporučeno | neběží korekce podle předpovědi; vypínání bazénu a solinátoru padá na náhradní mez 20:00 |

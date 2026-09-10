@@ -53,6 +53,16 @@ const HUUM_PASS = process.env.HUUM_PASS || '';
 const HUUM_URL = (process.env.HUUM_URL || 'https://sauna.huum.eu/action/home').replace(/\/+$/, '');
 const huumEnabled = !!(HUUM_USER && HUUM_PASS);
 
+// Tepelné čerpadlo bazénu (Fairland) přes Tuya cloud. Appka FairlandSmartPool jede
+// na Tuyi, ne na vlastním Fairland API — a lokální protokoly (LocalTuya, Modbus) jsou
+// odsud nepoužitelné, protože appka běží na Renderu, ne na domácí síti. Stejně jako HUUM.
+// Klíče JEN z prostředí (jsou to hesla), Device ID podle konvence výš natvrdo.
+const TUYA_ACCESS_ID = process.env.TUYA_ACCESS_ID || '';
+const TUYA_ACCESS_SECRET = process.env.TUYA_ACCESS_SECRET || '';
+const TUYA_API_URL = (process.env.TUYA_API_URL || 'https://openapi.tuyaeu.com').replace(/\/+$/, '');
+const TUYA_HEATPUMP_ID = process.env.TUYA_HEATPUMP_ID || '281020088caab5e8f028';
+const tuyaEnabled = !!(TUYA_ACCESS_ID && TUYA_ACCESS_SECRET && TUYA_HEATPUMP_ID);
+
 // Výchozí meze; obojí se dá přenastavit z appky (stránka Logika automatiky)
 const SAUNA_ON_W = Number(process.env.SAUNA_ON_W) || 500;      // nad tímhle sauna „topí"
 const SAUNA_HOLD_MIN = Number(process.env.SAUNA_HOLD_MIN) || 30; // držet vypnuté po posledním nátopu
@@ -241,6 +251,7 @@ const state = {
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
+  heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
@@ -439,6 +450,7 @@ function snapshot() {
     saunaEnabled,
     sauna: saunaPayload(),
     huum: huumPayload(),
+    heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
     months: state.months,
     timeline: state.timeline,
@@ -1321,10 +1333,14 @@ app.post('/api/boiler-history/restore', (req, res) => {
   const now = Date.now();
   const cutoff = now - HISTORY_MAX_AGE_MS;
   const okTemp = v => v === null || (typeof v === 'number' && v > -60 && v < 150);
+  const cislo = v => (typeof v === 'number' ? v : null);
+  // Teplota bazénu (`pool`) přibyla později — bod jen s ní je platný stejně jako bod jen
+  // s bojlerem, jinak by se po každém nasazení ztratila celá její historie
   const clean = points
-    .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now && okTemp(p.b1) && okTemp(p.b2)
-      && (typeof p.b1 === 'number' || typeof p.b2 === 'number'))
-    .map(p => ({ t: p.t, b1: typeof p.b1 === 'number' ? p.b1 : null, b2: typeof p.b2 === 'number' ? p.b2 : null }))
+    .filter(p => p && typeof p.t === 'number' && p.t >= cutoff && p.t <= now
+      && okTemp(p.b1) && okTemp(p.b2) && okTemp(p.pool)
+      && (typeof p.b1 === 'number' || typeof p.b2 === 'number' || typeof p.pool === 'number'))
+    .map(p => ({ t: p.t, b1: cislo(p.b1), b2: cislo(p.b2), pool: cislo(p.pool) }))
     .slice(0, 4000);
   if (!clean.length) return res.json({ added: 0 });
 
@@ -5763,15 +5779,19 @@ if (infigyEnabled) {
 }
 
 // ---------- Historie teplot bojlerů (graf na stránce FVE) ----------
-// Bojler 1 = nádrž tepelného čerpadla (Panasonic Aquarea), Bojler 2 = Infigy (HW_TEMP)
+// Bojler 1 = nádrž tepelného čerpadla (Panasonic Aquarea), Bojler 2 = Infigy (HW_TEMP),
+// pool = teplota vody v bazénu (Fairland přes Tuyu). Klíč `pool` je schválně týž jako
+// v usageHistory: tam znamená ODBĚR bazénu, tady jeho TEPLOTU — stejně jako b1/b2 nesou
+// v každém poli jinou veličinu. Díky tomu platí jedna legenda i jedna barva pro oba grafy.
 function recordBoilerTemps() {
   const aq = (state.aircon && state.aircon.aquarea || [])[0];
   const b1 = aq && typeof aq.tankTemp === 'number' ? aq.tankTemp : null;
   const b2 = state.infigy && typeof state.infigy.hwTemp === 'number' ? state.infigy.hwTemp : null;
-  if (b1 === null && b2 === null) return; // ještě nemáme co ukládat
+  const pool = heatpumpTempC();
+  if (b1 === null && b2 === null && pool === null) return; // ještě nemáme co ukládat
   const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
   state.boilerHistory = thinPoints(state.boilerHistory.filter(p => p.t >= cutoff), PICK_LAST);
-  const point = { t: Date.now(), b1, b2 };
+  const point = { t: Date.now(), b1, b2, pool };
   state.boilerHistory.push(point);
   broadcast('boilerHistory', { point });
 }
@@ -5876,6 +5896,174 @@ function huumPayload() {
 if (huumEnabled) {
   // Vlastní služba, se Shelly nemá nic společného. Offset 70 s je mezi ostatními volný.
   scheduleEvery(pollHuum, POLL_INTERVAL_MS, 70000);
+}
+
+// ---------- Tepelné čerpadlo bazénu (Fairland přes Tuya cloud) ----------
+// Tuya podepisuje každý dotaz HMAC-SHA256. Podpis je jediné místo, kde se dá tiše
+// minout — Tuya na chybu odpoví kódem 1004 („sign invalid") a nic víc neřekne, takže
+// se to musí trefit napoprvé a hlídat sadou.
+
+// Ekvivalent HUUM: čte se, neovládá. Zapínání čerpadla z appky by dávalo smysl až
+// s automatikou podle přebytku, a to je samostatné zadání.
+const TUYA_TOKEN_REZERVA_MS = 5 * 60 * 1000;   // token obnovíme s předstihem, ne na hraně
+let tuyaToken = { value: null, until: 0 };
+
+function tuyaSign(str) {
+  return crypto.createHmac('sha256', TUYA_ACCESS_SECRET).update(str, 'utf8').digest('hex').toUpperCase();
+}
+
+// stringToSign = METODA \n SHA256(tělo) \n hlavičky \n cesta. Hlavičky nepoužíváme,
+// takže ten řádek zůstává prázdný — ale zůstat MUSÍ, jinak podpis nesedí.
+function tuyaStringToSign(method, path, body = '') {
+  const hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  return `${method}\n${hash}\n\n${path}`;
+}
+
+// Token se do podpisu vkládá jen u business volání; u /v1.0/token tam nepatří.
+function tuyaHlavicky(method, path, { token = '', body = '' } = {}) {
+  const t = String(Date.now());
+  const nonce = crypto.randomUUID();
+  const sign = tuyaSign(TUYA_ACCESS_ID + token + t + nonce + tuyaStringToSign(method, path, body));
+  const h = { client_id: TUYA_ACCESS_ID, sign, t, nonce, sign_method: 'HMAC-SHA256' };
+  if (token) h.access_token = token;
+  return h;
+}
+
+async function tuyaFetch(path, { token = '' } = {}) {
+  const res = await fetch(TUYA_API_URL + path, {
+    headers: tuyaHlavicky('GET', path, { token }),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!res.ok) throw new Error(`Tuya HTTP ${res.status}`);
+  const data = await res.json();
+  // Tuya vrací HTTP 200 i na chybu; pravda je v poli success
+  if (!data.success) throw new Error(`Tuya: ${data.msg || 'neznámá chyba'} (${data.code})`);
+  return data.result;
+}
+
+async function tuyaAccessToken() {
+  if (tuyaToken.value && Date.now() < tuyaToken.until) return tuyaToken.value;
+  const r = await tuyaFetch('/v1.0/token?grant_type=1');
+  const platnost = (Number(r.expire_time) || 7200) * 1000;
+  tuyaToken = { value: r.access_token, until: Date.now() + Math.max(0, platnost - TUYA_TOKEN_REZERVA_MS) };
+  return tuyaToken.value;
+}
+
+// Kódy datových bodů se u Fairlandu liší model od modelu a Tuya je nedokumentuje
+// jednotně. Bereme první kód, který zařízení opravdu hlásí — co se nenajde, zůstane
+// null, NE nula: v grafu má být díra, ne ledová voda.
+const HP_KODY = {
+  tempC:    ['temp_current', 'temp_current_f', 'water_temp', 'temp_in', 'inlet_temp', 'cur_temp'],
+  targetC:  ['temp_set', 'temp_set_f', 'set_temp', 'target_temp'],
+  outC:     ['temp_out', 'outlet_temp', 'water_out_temp'],
+  powerW:   ['cur_power', 'power', 'active_power'],
+  on:       ['switch', 'switch_1', 'Power', 'power_switch'],
+  mode:     ['mode', 'work_mode', 'run_mode'],
+  fault:    ['fault', 'error', 'alarm']
+};
+
+// Režim chodí jako text z pevného číselníku; české popisky jen pro ty obvyklé.
+const HP_REZIMY = { heat: 'topí', hot: 'topí', cool: 'chladí', cold: 'chladí', auto: 'auto', smart: 'auto' };
+
+function hpRezimText(v) {
+  if (v === null || v === undefined || v === '') return null;
+  return HP_REZIMY[String(v).toLowerCase()] || String(v);
+}
+
+// Teploty chodí často jako desetiny stupně (245 = 24,5 °C). Poznáme to podle scale
+// z definice, tu ale ve status odpovědi nemáme — proto heuristika: nad 100 °C bazén
+// nebude, takže to jsou desetiny.
+function hpTeplota(v) {
+  // POZOR: Number(null) je nula a Number.isFinite(0) je true — bez téhle první řádky
+  // by z nehlášené teploty vyšlo 0 °C a graf by kreslil ledovou vodu místo díry.
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.abs(n) > 100 ? n / 10 : n;
+}
+
+let hpKodyZalogovane = false;
+
+function heatpumpMap(dev) {
+  const status = Array.isArray(dev && dev.status) ? dev.status : [];
+  const mapa = new Map(status.map(d => [d.code, d.value]));
+  const prvni = klice => {
+    for (const k of klice) if (mapa.has(k)) return mapa.get(k);
+    return null;
+  };
+  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+  // Jednou po nasazení vypíšeme, co zařízení opravdu posílá — bez toho se mapování
+  // nedá dotáhnout. Podruhé už ne, ať se tím nezaplní log.
+  if (!hpKodyZalogovane && status.length) {
+    hpKodyZalogovane = true;
+    addLog('Tepelné čerpadlo: ' + status.map(d => `${d.code}=${d.value}`).join(', '));
+  }
+
+  return {
+    online: dev && dev.online === true,
+    name: (dev && dev.name) || null,
+    tempC: hpTeplota(prvni(HP_KODY.tempC)),
+    targetC: hpTeplota(prvni(HP_KODY.targetC)),
+    outC: hpTeplota(prvni(HP_KODY.outC)),
+    powerW: cislo(prvni(HP_KODY.powerW)),
+    on: (() => { const v = prvni(HP_KODY.on); return typeof v === 'boolean' ? v : null; })(),
+    mode: hpRezimText(prvni(HP_KODY.mode)),
+    fault: cislo(prvni(HP_KODY.fault)),
+    kody: status.map(d => d.code)
+  };
+}
+
+// Jeden dotaz za cyklus: /v1.0/devices/{id} vrací online i celé pole status naráz
+async function fetchHeatpump() {
+  const token = await tuyaAccessToken();
+  return heatpumpMap(await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token }));
+}
+
+let hpPollRunning = false;
+async function pollHeatpump() {
+  if (!tuyaEnabled || hpPollRunning) return;
+  hpPollRunning = true;
+  try {
+    state.heatpump = { ...(await fetchHeatpump()), error: null, fetchedAt: new Date().toISOString() };
+  } catch (err) {
+    // Razítko se schválně NEobnovuje — znamená „kdy dorazila data", ne „kdy jsme se
+    // ptali". Čerpadlo visí na SMG_zahrada se slabým signálem, takže výpadky budou
+    // a zmrzlá teplota nesmí vypadat čerstvě.
+    tuyaToken = { value: null, until: 0 };   // po chybě si radši řekneme o nový token
+    state.heatpump = { ...state.heatpump, error: err.message };
+  } finally {
+    hpPollRunning = false;
+  }
+  broadcast('heatpump', { heatpump: heatpumpPayload() });
+}
+
+function heatpumpPayload() {
+  return { ...state.heatpump, enabled: tuyaEnabled };
+}
+
+// Teplota vody do grafu teplot na stránce FVE — jen když je čerstvá a zařízení je
+// online. Z offline čerpadla se kreslí díra.
+function heatpumpTempC() {
+  const h = state.heatpump;
+  return h && h.online === true && cerstve(h.fetchedAt) && typeof h.tempC === 'number' ? h.tempC : null;
+}
+
+// Syrová odpověď z Tuyi. Kódy datových bodů Fairland nedokumentuje a liší se model
+// od modelu — bez tohohle se mapování v HP_KODY nedá dotáhnout podle skutečnosti.
+app.get('/api/heatpump/raw', async (req, res) => {
+  if (!tuyaEnabled) return res.json({ enabled: false });
+  try {
+    const token = await tuyaAccessToken();
+    res.json({ enabled: true, device: await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token }) });
+  } catch (err) {
+    res.status(502).json({ enabled: true, error: err.message });
+  }
+});
+
+if (tuyaEnabled) {
+  // Vlastní služba, se Shelly ani HUUM (offset 70 s) nemá nic společného
+  scheduleEvery(pollHeatpump, POLL_INTERVAL_MS, 95000);
 }
 
 // ---------- Nuki zámek ----------

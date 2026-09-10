@@ -126,20 +126,31 @@ const KONFIG = between('const SHELLY_AUTH_KEY', 'const DEVICES = {');
 function idLiteraly(src) {
   const idcka = [];
   const bezPromenne = [];
+  const podle = {};
   for (const m of src.matchAll(/'([0-9a-zA-Z]{6,}(?:,[0-9a-zA-Z]{6,})*)'/g)) {
     const pred = src.slice(0, m.index);
-    if (!/process\.env\.[A-Z0-9_]+\s*\|\|\s*$/.test(pred)) bezPromenne.push(m[1]);
+    const promenna = (pred.match(/process\.env\.([A-Z0-9_]+)\s*\|\|\s*$/) || [])[1];
+    if (!promenna) bezPromenne.push(m[1]);
+    else podle[promenna] = m[1];
     for (const id of m[1].split(',')) idcka.push(id);
   }
-  return { idcka, bezPromenne };
+  return { idcka, bezPromenne, podle };
 }
 
-const { idcka, bezPromenne } = idLiteraly(KONFIG);
+const { idcka, bezPromenne, podle: podleJmena } = idLiteraly(KONFIG);
 // Tohle je vlastní pointa změny: přibude-li zařízení natvrdo, sada spadne
 check('každé ID má svou proměnnou', bezPromenne.join(', ') || 'ano', 'ano');
-check('je jich patnáct', idcka.length, 15);
-check('všechna mají dvanáct hex znaků',
-  idcka.filter(id => !/^[0-9a-f]{12}$/.test(id)).join(', ') || 'ano', 'ano');
+// Tuya má vlastní tvar ID (dvacet znaků, MAC až na konci), Shelly dvanáct hex.
+// Míchat je do jedné kontroly nejde, ale ani jedno nesmí propadnout bez kontroly.
+const tuyaId = podleJmena.TUYA_HEATPUMP_ID || '';
+const shellyIdcka = idcka.filter(id => id !== tuyaId);
+check('Shelly zařízení je patnáct', shellyIdcka.length, 15);
+check('  a všechna mají dvanáct hex znaků',
+  shellyIdcka.filter(id => !/^[0-9a-f]{12}$/.test(id)).join(', ') || 'ano', 'ano');
+check('Tuya čerpadlo má dvacet hex znaků', /^[0-9a-f]{20}$/.test(tuyaId), true);
+// Tuya ID končí MAC adresou zařízení — u tohohle čerpadla je to 8C:AA:B5:E8:F0:28,
+// které sedělo i ve výpisu wifi z routeru. Kdyby se ID přepsalo, tohle to chytí.
+check('  a končí MAC čerpadla', tuyaId.slice(-12), '8caab5e8f028');
 // Solinátor 'dcda0ce01f40' a noční světlo 'dcda0cea454c' se liší až osmým znakem —
 // zaměnit dvě ID není teoretická obava
 const dvakrat = idcka.filter((id, i) => idcka.indexOf(id) !== i);
@@ -154,6 +165,7 @@ nadpis('7) Kontrola kontroly identit');
 const cisty = "const A = process.env.A || 'aabbccddeeff';\nconst B = process.env.B || '112233445566';";
 check('čistý úryvek projde', idLiteraly(cisty).bezPromenne.join(',') || 'ano', 'ano');
 check('  a najde obě ID', idLiteraly(cisty).idcka.join(','), 'aabbccddeeff,112233445566');
+check('  a přiřadí je k proměnným', idLiteraly(cisty).podle.B, '112233445566');
 const natvrdo = "const A = 'aabbccddeeff';";
 check('ID bez proměnné se najde', idLiteraly(natvrdo).bezPromenne.join(','), 'aabbccddeeff');
 const seznam = "const A = process.env.A || 'aabbccddeeff,112233445566';";
