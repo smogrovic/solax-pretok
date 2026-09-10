@@ -27,7 +27,8 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
     'TUYA_HEATPUMP_ID', 'tuyaEnabled', 'Date',
     CODE + '\n; return { tuyaSign, tuyaStringToSign, tuyaHlavicky, tuyaAccessToken,'
          + ' fetchHeatpump, pollHeatpump, heatpumpMap, heatpumpPayload, heatpumpTempC,'
-         + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, get token() { return tuyaToken; } };'
+         + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, fetchHeatpumpDiag, logHeatpumpDiag,'
+         + ' HP_DIAG_ZDROJE, get token() { return tuyaToken; } };'
   )(
     require('crypto'),
     async (url, opts) => {
@@ -35,6 +36,7 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
       const o = fronta.shift();
       if (!o) throw new Error('došly podstrčené odpovědi');
       if (o.throw) throw new Error(o.throw);
+      if (o.delay) await new Promise(r => setTimeout(r, o.delay));
       return { ok: o.ok !== false, status: o.status || 200, json: async () => o.body };
     },
     state,
@@ -229,6 +231,73 @@ nadpis('2) Token');
     await h.api.pollHeatpump();
     check('chyba se uloží do stavu', h.state.heatpump.error, 'síť');
     check('  a token se zahodí', h.api.token.value, null);
+  }
+
+  nadpis('4b) Diagnostika mimo standardní sadu');
+  // Běžný status vrací u tohohle čerpadla jen čtyři pojmenované body, kdežto Fairland
+  // appka jich ukazuje víc. Tyhle tři zdroje mají najít i číslované DP.
+  {
+    const h = build({ odpovedi: [okToken,
+      { body: { success: true, result: { status: [{ code: 'temp_current', type: 'Integer' }] } } },
+      { body: { success: true, result: [{ code: 'va_temperature', value: 290 }] } },
+      { body: { success: true, result: { properties: [{ dp_id: 101, value: 29 }] } } }
+    ] });
+    const d = await h.api.fetchHeatpumpDiag();
+    check('zkusí se všechny tři zdroje', Object.keys(d).join(','),
+      'specifikace,iot-03 status,shadow properties');
+    check('  a jde se na správné cesty',
+      h.dotazy.slice(1).map(q => q.url.replace('https://openapi.tuyaeu.com', '')).join(' '),
+      '/v1.0/devices/abc/specifications /v1.0/iot-03/devices/abc/status /v2.0/cloud/thing/abc/shadow/properties');
+    check('výsledek nese i číslované DP', JSON.stringify(d['shadow properties'].properties), '[{"dp_id":101,"value":29}]');
+  }
+  {
+    // Vlastní riziko téhle změny: diagnostika nesmí rozbít to, co funguje
+    const h = build({ odpovedi: [okToken,
+      { body: { success: false, code: 1106, msg: 'permission deny' } },
+      { throw: 'síť' },
+      { body: { success: true, result: { properties: [] } } }
+    ] });
+    const d = await h.api.fetchHeatpumpDiag();
+    check('chyba jednoho zdroje ostatní nezastaví', Object.keys(d).length, 3);
+    check('  a zapíše se ke svému zdroji', /permission deny/.test(d.specifikace.chyba), true);
+    check('  i když spadne spojení', d['iot-03 status'].chyba, 'síť');
+    check('  poslední zdroj přesto projde', Array.isArray(d['shadow properties'].properties), true);
+  }
+  {
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]),
+      { body: { success: true, result: {} } }, { body: { success: true, result: {} } },
+      { body: { success: true, result: {} } }] });
+    await h.api.pollHeatpump();
+    await new Promise(r => setTimeout(r, 20));
+    check('poller stav uloží', h.state.heatpump.tempC, 26);
+    check('  a diagnostika se zapíše do logu', h.logy.filter(l => /^Čerpadlo \(/.test(l)).length, 3);
+    // Podruhé už ne — jinak by se logem nedalo projít
+    const kolik = h.logy.length;
+    await h.api.logHeatpumpDiag();
+    check('podruhé se nezapisuje', h.logy.length, kolik);
+  }
+  {
+    // Diagnostika padá, stav se přesto musí uložit — na něm stojí zapnuto/vypnuto i cíl
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]),
+      { throw: 'a' }, { throw: 'b' }, { throw: 'c' }] });
+    await h.api.pollHeatpump();
+    await new Promise(r => setTimeout(r, 20));
+    check('rozbitá diagnostika stav neshodí', h.state.heatpump.targetC, 31);
+    check('  a nezanechá chybu na kartě', h.state.heatpump.error, null);
+  }
+  {
+    // Vlastní důvod, proč se na diagnostiku nečeká: jsou to tři dotazy navíc a poller
+    // by na nich visel celý cyklus. Stav i vysílání do appky musí být hotové hned.
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]),
+      { delay: 800, body: { success: true, result: {} } },
+      { delay: 800, body: { success: true, result: {} } },
+      { delay: 800, body: { success: true, result: {} } }] });
+    const kdo = await Promise.race([
+      h.api.pollHeatpump().then(() => 'poller'),
+      new Promise(r => setTimeout(() => r('čekání'), 150))
+    ]);
+    check('poller na diagnostiku nečeká', kdo, 'poller');
+    check('  a stav je uložený hned', h.state.heatpump.targetC, 31);
   }
 
   nadpis('5) Bez klíčů');

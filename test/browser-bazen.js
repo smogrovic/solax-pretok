@@ -92,8 +92,14 @@ setTimeout(() => {
   ukaz(zaklad({ tempC: null, dp: [{ code: 'temp_current', value: -220 }, { code: 'inlet_temp', value: 29 }] }));
   check('nesmyslná teplota se nekreslí jako číslo', hpTemp.textContent, '– °C');
   check('  a karta vypíše, co čerpadlo hlásí', /hlásí: temp_current=-220, inlet_temp=29/.test(hpMeta.textContent), 'true');
+  // Pomlčka sama by vypadala jako výpadek, a to je něco úplně jiného: čerpadlo
+  // odpovídá, jen teplotu vody přes Tuyu neposílá
+  check('  a řekne se to slovy', /přes Tuyu teplotu vody nehlásí/.test(hpMeta.textContent), 'true');
+  check('  ne jako výpadek', /offline|zestárla|nechodí data/.test(hpMeta.textContent), 'false');
+  check('  cíl přitom zůstane', /cíl 28,0 °C/.test(hpMeta.textContent), 'true');
   ukaz(zaklad({ tempC: 26.4, dp: [{ code: 'inlet_temp', value: 26.4 }] }));
   check('když teplota sedí, výpis kódů se neukazuje', /hlásí:/.test(hpMeta.textContent), 'false');
+  check('  ani hláška o nehlášené teplotě', /nehlásí/.test(hpMeta.textContent), 'false');
 
   R.push('\\n5) Graf teplot bere bazén jako třetí čáru');
   // Barvu i legendu sdílí s odběrem bazénu ve vedlejším panelu — v obou je to totéž místo

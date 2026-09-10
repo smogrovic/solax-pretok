@@ -6041,12 +6041,56 @@ async function fetchHeatpump() {
   return heatpumpMap(await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token }));
 }
 
+// Běžný status endpoint vrací u tohohle čerpadla jen čtyři pojmenované body, kdežto
+// Fairland appka jich ukazuje víc — teplotu vody mezi nimi. Tuya má totiž vedle
+// standardní (pojmenované) sady i vlastní ČÍSLOVANÉ datové body, které se přes
+// /v1.0/devices/{id}/status vůbec neobjeví. Tyhle tři zdroje je mají odhalit.
+//
+// Je to JEN DIAGNOSTIKA: každý dotaz se zkouší zvlášť a jeho chyba se jen zapíše.
+// Nesmí shodit čtení stavu, na kterém stojí zapnuto/vypnuto i cíl — ty fungují.
+const HP_DIAG_ZDROJE = [
+  ['specifikace', id => `/v1.0/devices/${id}/specifications`],
+  ['iot-03 status', id => `/v1.0/iot-03/devices/${id}/status`],
+  ['shadow properties', id => `/v2.0/cloud/thing/${id}/shadow/properties`]
+];
+
+async function fetchHeatpumpDiag() {
+  const token = await tuyaAccessToken();
+  const id = encodeURIComponent(TUYA_HEATPUMP_ID);
+  const out = {};
+  for (const [jmeno, cesta] of HP_DIAG_ZDROJE) {
+    try {
+      out[jmeno] = await tuyaFetch(cesta(id), { token });
+    } catch (err) {
+      out[jmeno] = { chyba: err.message };
+    }
+  }
+  return out;
+}
+
+// Zapíše se jednou, ne při každém cyklu — jinak by se logem nedalo projít.
+let hpDiagZalogovana = false;
+async function logHeatpumpDiag() {
+  if (hpDiagZalogovana || !tuyaEnabled) return;
+  hpDiagZalogovana = true;   // i při chybě: opakovat to každé dvě minuty nemá smysl
+  try {
+    const diag = await fetchHeatpumpDiag();
+    for (const [jmeno, data] of Object.entries(diag)) {
+      addLog(`Čerpadlo (${jmeno}): ${JSON.stringify(data).slice(0, 400)}`);
+    }
+  } catch (err) {
+    addLog(`Čerpadlo: diagnostiku se nepodařilo stáhnout (${err.message})`, 'error');
+  }
+}
+
 let hpPollRunning = false;
 async function pollHeatpump() {
   if (!tuyaEnabled || hpPollRunning) return;
   hpPollRunning = true;
   try {
     state.heatpump = { ...(await fetchHeatpump()), error: null, fetchedAt: new Date().toISOString() };
+    // Až po uložení stavu a bez await do téhož try — diagnostika nesmí stav shodit
+    logHeatpumpDiag().catch(() => {});
   } catch (err) {
     // Razítko se schválně NEobnovuje — znamená „kdy dorazila data", ne „kdy jsme se
     // ptali". Čerpadlo visí na SMG_zahrada se slabým signálem, takže výpadky budou
@@ -6076,7 +6120,8 @@ app.get('/api/heatpump/raw', async (req, res) => {
   if (!tuyaEnabled) return res.json({ enabled: false });
   try {
     const token = await tuyaAccessToken();
-    res.json({ enabled: true, device: await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token }) });
+    const device = await tuyaFetch(`/v1.0/devices/${encodeURIComponent(TUYA_HEATPUMP_ID)}`, { token });
+    res.json({ enabled: true, device, diag: await fetchHeatpumpDiag() });
   } catch (err) {
     res.status(502).json({ enabled: true, error: err.message });
   }

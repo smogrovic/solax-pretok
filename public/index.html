@@ -6068,6 +6068,13 @@ function renderHeatpump() {
   if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
   hpMetaEl.appendChild(veta);
 
+  // Čerpadlo odpovídá, jen teplotu vody mezi hodnotami nemá. Pomlčka by vypadala jako
+  // výpadek, a to je něco úplně jiného — tady je vada v tom, co Tuya nabízí.
+  if (d.tempC === null) {
+    const p = document.createElement('div');
+    p.textContent = 'Čerpadlo přes Tuyu teplotu vody nehlásí.';
+    hpMetaEl.appendChild(p);
+  }
   hpDiagnostika(d);
 }
 
