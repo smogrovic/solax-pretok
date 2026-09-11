@@ -33,6 +33,12 @@ nadpis('2) Co se do logu NEPÍŠE');
   check('spínání klimatizace automatikou',
     /addLog\(`Teplotní automatika — /.test(SRC), false);
   check('ticho čidel', /addLog\(`Čidlo \$\{label\}/.test(SRC), false);
+  check('povedené připojení k Panasonicu', /addLog\(`Klima: připojeno/.test(SRC), false);
+  // Příznak hlídá jen zápis CHYBY. Kdyby ho zvedala i povedená větev, spolkla by
+  // pozdější selhání — a to je přesně ta past, kterou tahle změna skrývala.
+  check('  a jeho příznak zvedá jen chybová větev',
+    (SRC.match(/airconChybaZalogovana = true/g) || []).length, 1);
+  check('selhání Panasonicu se loguje dál', /addLog\('Klima: připojení k Panasonic selhalo/.test(SRC), true);
 }
 
 nadpis('3) Světla');
@@ -105,7 +111,9 @@ nadpis('7) Staré řádky se vymetou');
     'Čerpadlo (iot-03 status): switch=true, temp_unit_convert=f, temp_set=31, temp_current=-22',
     'Čerpadlo (specifikace): {"category":"rs","functions":[{"code":"switch","type":"Boolean"}]}',
     'Čerpadlo: diagnostiku se nepodařilo stáhnout (síť)',
-    'Tepelné čerpadlo: switch=true, temp_unit_convert=f, temp_set=31, temp_current=-22'
+    'Tepelné čerpadlo: switch=true, temp_unit_convert=f, temp_set=31, temp_current=-22',
+    // „Vše v pořádku" do logu hlavních událostí nepatří
+    'Klima: připojeno k Panasonic (5 zařízení)'
   ];
   for (const m of ven) check('pryč: ' + m.slice(0, 46), api.logZastaraly(m), true);
 
@@ -126,7 +134,10 @@ nadpis('7) Staré řádky se vymetou');
     // Vzor na čerpadlo je schválně úzký na `kód=hodnota` — větná hláška zůstat musí
     'Tepelné čerpadlo: chyba jednotky 3',
     'Tepelné čerpadlo: zapnuto (přebytek 2,4 kW)',
-    'Čerpadlo bazénu: neodpovídá'
+    'Čerpadlo bazénu: neodpovídá',
+    // Vlastní riziko toho vzoru: „připojenÍ … selhalo" je o písmeno vedle a je to chyba
+    'Klima: připojení k Panasonic selhalo — token vypršel',
+    'Klima: připojení k Panasonic selhalo — HTTP 503'
   ];
   for (const m of zustat) check('zůstává: ' + m.slice(0, 44), api.logZastaraly(m), false);
 }

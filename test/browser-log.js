@@ -76,7 +76,10 @@ setTimeout(() => {
     // Diagnostika čerpadla zavalila log čtyřmi obřími řádky. Odvedla svoje a jde pryč.
     { t: t0 + 6 * MIN, msg: 'Čerpadlo (shadow properties): Power=true, WInTemp=19, SpeedPercentage=0' },
     { t: t0 + 7 * MIN, msg: 'Čerpadlo: diagnostiku se nepodařilo stáhnout (síť)' },
-    { t: t0 + 8 * MIN, msg: 'Tepelné čerpadlo: switch=true, temp_set=31, temp_current=-22' }
+    { t: t0 + 8 * MIN, msg: 'Tepelné čerpadlo: switch=true, temp_set=31, temp_current=-22' },
+    { t: t0 + 9 * MIN, msg: 'Klima: připojeno k Panasonic (5 zařízení)' },
+    // Chybová varianta je o písmeno vedle a patří do výpadků — zůstat musí
+    { t: t0 + 10 * MIN, msg: 'Klima: připojení k Panasonic selhalo — token vypršel', level: 'error' }
   ];
   logEntries = mergeLogs(logEntries, []);
   renderLog();
@@ -89,6 +92,10 @@ setTimeout(() => {
     /WInTemp|shadow properties|temp_current/.test(logList.textContent + outageList.textContent), false);
   check('  ani její chybová varianta',
     /diagnostiku se nepodařilo/.test(logList.textContent + outageList.textContent), false);
+  check('  ani „připojeno k Panasonic"',
+    /připojeno k Panasonic/.test(logList.textContent + outageList.textContent), false);
+  check('selhání Panasonicu naopak ve výpadcích zůstane',
+    /připojení k Panasonic selhalo/.test(outageList.textContent), true);
   check('ruční přepnutí wallboxu zůstane', /režim FAST ručně/.test(logList.textContent), true);
   check('  a běžná událost taky', /přebytek 2,1 kW/.test(logList.textContent), true);
   check('  takže zbyly dva řádky', document.querySelectorAll('#logList .log-entry').length, 2);

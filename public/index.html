@@ -3144,6 +3144,8 @@ const LOG_ZASTARALE = [
   /^Čerpadlo \(/,
   /^Čerpadlo: diagnostiku /,
   /^Tepelné čerpadlo: \w+=/,
+  // Pozor: sousední „připojenÍ … selhalo" je chybové a zůstat musí
+  /^Klima: připojeno k Panasonic/,
   /^(Zahrada dole|Zahrada nahoře|Světlo bazén|Noční světla): /
 ];
 const logZastaraly = msg => typeof msg === 'string' && LOG_ZASTARALE.some(re => re.test(msg));

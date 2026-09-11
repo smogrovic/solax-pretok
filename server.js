@@ -377,6 +377,9 @@ const LOG_ZASTARALE = [
   /^Čerpadlo: diagnostiku /,
   // Schválně úzké na `kód=hodnota`: hláška o čerpadle nesoucí větu se vymetat nemá
   /^Tepelné čerpadlo: \w+=/,
+  // „Vše v pořádku" do logu nepatří. Pozor na sousední „připojenÍ … selhalo", které
+  // je chybové a zůstat musí — proto se vzor váže na celé „připojeno k Panasonic".
+  /^Klima: připojeno k Panasonic/,
   // Světla podle jejich vlastních názvů, ať se seznam nepíše dvakrát
   new RegExp('^(' + LIGHT_KEYS.map(k => DEVICE_LABELS[k]).join('|') + '): ')
 ];
@@ -4533,7 +4536,10 @@ async function evaluateTempAuto(devices) {
 }
 
 let airconPollRunning = false;
-let airconStatusLogged = false;
+// Selhání Panasonicu se do logu zapíše jednou. Povedené připojení se nezapisuje
+// vůbec — hláška „vše v pořádku" do logu hlavních událostí nepatří, a hlavně by
+// tenhle příznak zvedla a pozdější chybu by tím spolkla.
+let airconChybaZalogovana = false;
 
 async function pollAircon() {
   if (!panasonicEnabled || airconPollRunning) return;
@@ -4572,10 +4578,6 @@ async function pollAircon() {
     broadcast('timeline', { timeline: state.timeline });
 
     state.aircon = { devices: out, aquarea, error: null, fetchedAt: new Date().toISOString() };
-    if (!airconStatusLogged) {
-      airconStatusLogged = true;
-      addLog(`Klima: připojeno k Panasonic (${out.length + (aquarea ? aquarea.length : 0)} zařízení)`);
-    }
     broadcast('aircon', { aircon: state.aircon });
 
     // Teplotní automatika vyhodnotíme z čerstvých teplot
@@ -4586,8 +4588,8 @@ async function pollAircon() {
     // Panasonic (vypršelý token, zaseknutý cloud) by hlásil výpadek okamžitě.
     state.aircon = { devices: state.aircon.devices || [], aquarea: state.aircon.aquarea || [],
       error: err.message, fetchedAt: state.aircon.fetchedAt };
-    if (!airconStatusLogged) {
-      airconStatusLogged = true;
+    if (!airconChybaZalogovana) {
+      airconChybaZalogovana = true;
       addLog('Klima: připojení k Panasonic selhalo — ' + err.message.slice(0, 140), 'error');
     }
     broadcast('aircon', { aircon: state.aircon });
