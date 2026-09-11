@@ -371,6 +371,12 @@ const LOG_ZASTARALE = [
   /^Teplotní automatika — /,
   /^Čidlo .+: (nehlásí|zatím nehlásí|zase hlásí)/,
   /: (zase odpovídá|data znovu naskočila)$/,
+  // Diagnostika tepelného čerpadla: našla, co bylo potřeba (WInTemp, SpeedPercentage),
+  // a od té doby byly ty řádky jen šum. Zůstává na /api/heatpump/raw a na kartě.
+  /^Čerpadlo \(/,
+  /^Čerpadlo: diagnostiku /,
+  // Schválně úzké na `kód=hodnota`: hláška o čerpadle nesoucí větu se vymetat nemá
+  /^Tepelné čerpadlo: \w+=/,
   // Světla podle jejich vlastních názvů, ať se seznam nepíše dvakrát
   new RegExp('^(' + LIGHT_KEYS.map(k => DEVICE_LABELS[k]).join('|') + '): ')
 ];
@@ -6033,8 +6039,6 @@ function hpTeplota(v) {
   return Math.abs(n) > 100 ? n / 10 : n;
 }
 
-let hpKodyZalogovane = false;
-
 // `shadow` = odpověď z /v2.0/cloud/thing/{id}/shadow/properties. Standardní status vrací
 // jen čtyři pojmenované body, kdežto tenhle i vlastní číslované — a mezi nimi je teplota
 // vody (WInTemp) a výkon kompresoru (SpeedPercentage). Slučuje se do jednoho seznamu,
@@ -6049,13 +6053,6 @@ function heatpumpMap(dev, shadow) {
     return null;
   };
   const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-
-  // Jednou po nasazení vypíšeme, co zařízení opravdu posílá — bez toho se mapování
-  // nedá dotáhnout. Podruhé už ne, ať se tím nezaplní log.
-  if (!hpKodyZalogovane && vse.length) {
-    hpKodyZalogovane = true;
-    addLog('Tepelné čerpadlo: ' + vse.map(d => `${d.code}=${d.value}`).join(', '));
-  }
 
   return {
     online: dev && dev.online === true,
@@ -6094,8 +6091,10 @@ async function fetchHeatpump() {
 // standardní (pojmenované) sady i vlastní ČÍSLOVANÉ datové body, které se přes
 // /v1.0/devices/{id}/status vůbec neobjeví. Tyhle tři zdroje je mají odhalit.
 //
-// Je to JEN DIAGNOSTIKA: každý dotaz se zkouší zvlášť a jeho chyba se jen zapíše.
-// Nesmí shodit čtení stavu, na kterém stojí zapnuto/vypnuto i cíl — ty fungují.
+// Je to JEN DIAGNOSTIKA a do logu se nezapisuje: svoje si odvedla (našla WInTemp
+// a SpeedPercentage) a čtyři obří řádky navíc už log jen zavalovaly. Zůstává
+// dostupná na vyžádání přes /api/heatpump/raw. Každý dotaz se zkouší zvlášť a jeho
+// chyba se jen zaznamená — nesmí shodit čtení stavu, na kterém stojí cíl i stav.
 const HP_DIAG_ZDROJE = [
   ['specifikace', id => `/v1.0/devices/${id}/specifications`],
   ['iot-03 status', id => `/v1.0/iot-03/devices/${id}/status`],
@@ -6116,35 +6115,12 @@ async function fetchHeatpumpDiag() {
   return out;
 }
 
-// Zapíše se jednou, ne při každém cyklu — jinak by se logem nedalo projít.
-let hpDiagZalogovana = false;
-async function logHeatpumpDiag() {
-  if (hpDiagZalogovana || !tuyaEnabled) return;
-  hpDiagZalogovana = true;   // i při chybě: opakovat to každé dvě minuty nemá smysl
-  try {
-    const diag = await fetchHeatpumpDiag();
-    for (const [jmeno, data] of Object.entries(diag)) {
-      // Seznam datových bodů se vypíše jako kód=hodnota; zabalený do JSONu se do řádku
-      // nevešel a přesně to, co bylo za oříznutím, jsme minule potřebovali nejvíc.
-      const body = Array.isArray(data && data.properties) ? data.properties
-        : Array.isArray(data) ? data : null;
-      addLog(`Čerpadlo (${jmeno}): ` + (body
-        ? body.map(d => `${d.code}=${d.value}`).join(', ')
-        : JSON.stringify(data).slice(0, 700)));
-    }
-  } catch (err) {
-    addLog(`Čerpadlo: diagnostiku se nepodařilo stáhnout (${err.message})`, 'error');
-  }
-}
-
 let hpPollRunning = false;
 async function pollHeatpump() {
   if (!tuyaEnabled || hpPollRunning) return;
   hpPollRunning = true;
   try {
     state.heatpump = { ...(await fetchHeatpump()), error: null, fetchedAt: new Date().toISOString() };
-    // Až po uložení stavu a bez await do téhož try — diagnostika nesmí stav shodit
-    logHeatpumpDiag().catch(() => {});
   } catch (err) {
     // Razítko se schválně NEobnovuje — znamená „kdy dorazila data", ne „kdy jsme se
     // ptali". Čerpadlo visí na SMG_zahrada se slabým signálem, takže výpadky budou

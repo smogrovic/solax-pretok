@@ -3140,6 +3140,10 @@ const LOG_ZASTARALE = [
   /^Teplotní automatika — /,
   /^Čidlo .+: (nehlásí|zatím nehlásí|zase hlásí)/,
   /: (zase odpovídá|data znovu naskočila)$/,
+  // Diagnostika tepelného čerpadla — už se nezapisuje, staré řádky se vymetou
+  /^Čerpadlo \(/,
+  /^Čerpadlo: diagnostiku /,
+  /^Tepelné čerpadlo: \w+=/,
   /^(Zahrada dole|Zahrada nahoře|Světlo bazén|Noční světla): /
 ];
 const logZastaraly = msg => typeof msg === 'string' && LOG_ZASTARALE.some(re => re.test(msg));

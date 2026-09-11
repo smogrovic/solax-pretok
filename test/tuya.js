@@ -27,7 +27,7 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
     'TUYA_HEATPUMP_ID', 'tuyaEnabled', 'Date',
     CODE + '\n; return { tuyaSign, tuyaStringToSign, tuyaHlavicky, tuyaAccessToken,'
          + ' fetchHeatpump, pollHeatpump, heatpumpMap, heatpumpPayload,'
-         + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, fetchHeatpumpDiag, logHeatpumpDiag,'
+         + ' hpTeplota, hpVoda, hpRezimText, HP_KODY, fetchHeatpumpDiag,'
          + ' HP_DIAG_ZDROJE, get token() { return tuyaToken; } };'
   )(
     require('crypto'),
@@ -135,7 +135,9 @@ nadpis('2) Token');
     // Tohle je ta past: chybějící kód nesmí být nula, jinak graf kreslí ledovou vodu
     check('chybějící příkon je null, ne nula', d.powerW, null);
     check('chybějící teplota na výstupu taky', d.outC, null);
-    check('kódy se jednou zapíšou do logu', /temp_current=245/.test(h.logy.join(' ')), true);
+    // Do logu se nezapisuje nic: diagnostika svoje odvedla a čtyři obří řádky ho
+    // jen zavalovaly. Rozbité mapování se pozná na kartě a přes /api/heatpump/raw.
+    check('do logu se nezapisuje nic', h.logy.length, 0);
   }
   {
     const h = build({ odpovedi: [okToken, dev([{ code: 'water_temp', value: 22.5 }, { code: 'work_mode', value: 'zvlastni' }]), bezStinu] });
@@ -325,40 +327,22 @@ nadpis('2) Token');
     check('  poslední zdroj přesto projde', Array.isArray(d['shadow properties'].properties), true);
   }
   {
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]), bezStinu,
-      { body: { success: true, result: {} } }, { body: { success: true, result: {} } },
-      { body: { success: true, result: {} } }] });
+    // Poller diagnostiku vůbec nespouští — jde se na ni jen ručně přes /api/heatpump/raw.
+    // Kdyby ji spouštěl, byly by to tři dotazy navíc a čtyři obří řádky v logu.
+    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_current', value: 26 }]), bezStinu] });
     await h.api.pollHeatpump();
     await new Promise(r => setTimeout(r, 20));
     check('poller stav uloží', h.state.heatpump.tempC, 26);
-    check('  a diagnostika se zapíše do logu', h.logy.filter(l => /^Čerpadlo \(/.test(l)).length, 3);
-    // Podruhé už ne — jinak by se logem nedalo projít
-    const kolik = h.logy.length;
-    await h.api.logHeatpumpDiag();
-    check('podruhé se nezapisuje', h.logy.length, kolik);
+    check('  a do logu nenapíše nic', h.logy.length, 0);
+    check('  ani si nevyžádá diagnostické dotazy', h.dotazy.length, 3);
   }
   {
-    // Diagnostika padá, stav se přesto musí uložit — na něm stojí zapnuto/vypnuto i cíl
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]), bezStinu,
-      { throw: 'a' }, { throw: 'b' }, { throw: 'c' }] });
+    // Ani při chybě se do logu nic nesype — jen se zapamatuje ve stavu pro kartu
+    const h = build({ odpovedi: [okToken, { throw: 'síť' }] });
     await h.api.pollHeatpump();
     await new Promise(r => setTimeout(r, 20));
-    check('rozbitá diagnostika stav neshodí', h.state.heatpump.targetC, 31);
-    check('  a nezanechá chybu na kartě', h.state.heatpump.error, null);
-  }
-  {
-    // Vlastní důvod, proč se na diagnostiku nečeká: jsou to tři dotazy navíc a poller
-    // by na nich visel celý cyklus. Stav i vysílání do appky musí být hotové hned.
-    const h = build({ odpovedi: [okToken, dev([{ code: 'temp_set', value: 31 }]), bezStinu,
-      { delay: 800, body: { success: true, result: {} } },
-      { delay: 800, body: { success: true, result: {} } },
-      { delay: 800, body: { success: true, result: {} } }] });
-    const kdo = await Promise.race([
-      h.api.pollHeatpump().then(() => 'poller'),
-      new Promise(r => setTimeout(() => r('čekání'), 150))
-    ]);
-    check('poller na diagnostiku nečeká', kdo, 'poller');
-    check('  a stav je uložený hned', h.state.heatpump.targetC, 31);
+    check('chyba se do logu taky nepíše', h.logy.length, 0);
+    check('  ale ve stavu je', h.state.heatpump.error, 'síť');
   }
 
   nadpis('5) Bez klíčů');

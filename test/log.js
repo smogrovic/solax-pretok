@@ -98,7 +98,14 @@ nadpis('7) Staré řádky se vymetou');
     'Bazén (relé): zase odpovídá',
     'Měřák sauny: data znovu naskočila',
     'Zahrada dole: zapnuto ručně',
-    'Noční světla: vypnuto (časovač 22:00)'
+    'Noční světla: vypnuto (časovač 22:00)',
+    // Diagnostika čerpadla: našla WInTemp a SpeedPercentage a od té doby jen zavalovala
+    // log. Přesně tyhle řádky tam stály, i s tou obří délkou.
+    'Čerpadlo (shadow properties): Power=true, WInTemp=19, change_tem=true, SpeedPercentage=0, SetMode=warm',
+    'Čerpadlo (iot-03 status): switch=true, temp_unit_convert=f, temp_set=31, temp_current=-22',
+    'Čerpadlo (specifikace): {"category":"rs","functions":[{"code":"switch","type":"Boolean"}]}',
+    'Čerpadlo: diagnostiku se nepodařilo stáhnout (síť)',
+    'Tepelné čerpadlo: switch=true, temp_unit_convert=f, temp_set=31, temp_current=-22'
   ];
   for (const m of ven) check('pryč: ' + m.slice(0, 46), api.logZastaraly(m), true);
 
@@ -115,7 +122,11 @@ nadpis('7) Staré řádky se vymetou');
     'Automatika: zimní režim',
     'Bazén: neodpovídá',
     'Teplotní automatika Ložnice: vypnuta (ruční zásah)',
-    'Bazén: +24 h natvrdo (do 14:00)'
+    'Bazén: +24 h natvrdo (do 14:00)',
+    // Vzor na čerpadlo je schválně úzký na `kód=hodnota` — větná hláška zůstat musí
+    'Tepelné čerpadlo: chyba jednotky 3',
+    'Tepelné čerpadlo: zapnuto (přebytek 2,4 kW)',
+    'Čerpadlo bazénu: neodpovídá'
   ];
   for (const m of zustat) check('zůstává: ' + m.slice(0, 44), api.logZastaraly(m), false);
 }

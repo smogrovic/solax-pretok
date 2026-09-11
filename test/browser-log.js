@@ -72,7 +72,11 @@ setTimeout(() => {
     { t: t0 + 2 * MIN, msg: 'Zahrada dole: zapnuto ručně' },
     { t: t0 + 3 * MIN, msg: 'Teplotní automatika — Ložnice: zapnuto (23,4 °C nad 22 °C)' },
     { t: t0 + 4 * MIN, msg: 'Bazén (relé): zase odpovídá' },
-    { t: t0 + 5 * MIN, msg: 'Wallbox: režim FAST ručně (automatika převezme v 14:20)' }
+    { t: t0 + 5 * MIN, msg: 'Wallbox: režim FAST ručně (automatika převezme v 14:20)' },
+    // Diagnostika čerpadla zavalila log čtyřmi obřími řádky. Odvedla svoje a jde pryč.
+    { t: t0 + 6 * MIN, msg: 'Čerpadlo (shadow properties): Power=true, WInTemp=19, SpeedPercentage=0' },
+    { t: t0 + 7 * MIN, msg: 'Čerpadlo: diagnostiku se nepodařilo stáhnout (síť)' },
+    { t: t0 + 8 * MIN, msg: 'Tepelné čerpadlo: switch=true, temp_set=31, temp_current=-22' }
   ];
   logEntries = mergeLogs(logEntries, []);
   renderLog();
@@ -81,9 +85,17 @@ setTimeout(() => {
   check('  ani spínání klimatizace', /Teplotní automatika —/.test(logList.textContent), false);
   check('  ani „zase odpovídá"',
     /zase odpovídá/.test(logList.textContent + outageList.textContent), false);
+  check('  ani diagnostika čerpadla',
+    /WInTemp|shadow properties|temp_current/.test(logList.textContent + outageList.textContent), false);
+  check('  ani její chybová varianta',
+    /diagnostiku se nepodařilo/.test(logList.textContent + outageList.textContent), false);
   check('ruční přepnutí wallboxu zůstane', /režim FAST ručně/.test(logList.textContent), true);
   check('  a běžná událost taky', /přebytek 2,1 kW/.test(logList.textContent), true);
   check('  takže zbyly dva řádky', document.querySelectorAll('#logList .log-entry').length, 2);
+
+  check('  a ze zálohy v telefonu taky zmizí',
+    pruneOldLog([{ t: Date.now(), msg: 'Čerpadlo (iot-03 status): switch=true' },
+                 { t: Date.now(), msg: 'Bazén: zapnuto (přebytek 2,1 kW)' }]).length, 1);
 
   check('log si pamatuje 48 h', LOG_MAX_AGE_MS, 48 * 3600000);
   check('  a starší se zahodí',
