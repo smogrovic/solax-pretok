@@ -148,19 +148,21 @@ setTimeout(() => {
   check('součet bere jen měsíce s rozpadem', /ze sítě 2,0 kWh/.test(soucet.textContent), 'true');
   check('  a celkem je za všechny', /30,0 kWh/.test(soucet.textContent), 'true');
 
-  R.push('\\n8) Teplota bazénu se v grafu nekreslí');
-  // Teplota vody patří na kartu, ne do panelu s bojlery. Kdyby se tam vrátila,
-  // tenhle oddíl to chytí — a s ní i mrtvá data putující do zálohy a do telefonu.
+  R.push('\\n8) Bazén v grafu na FVE není vůbec');
+  // Teplota vody patří na kartu tepelného čerpadla a panel s ODBĚREM okruhů
+  // (bazén + oba bojlery) byl zrušený celý. Kdyby se cokoli z toho vrátilo, tekla by
+  // do zálohy i do telefonu data, na která se nikdo nedívá — a nikdo by si toho nevšiml.
   const panel = String(panelBoilers);
-  check('panel kreslí jen oba bojlery', /for \\(const key of \\['b1', 'b2'\\]\\)/.test(panel), 'true');
+  check('panel teplot kreslí jen oba bojlery', /for \\(const key of \\['b1', 'b2'\\]\\)/.test(panel), 'true');
   check('  a bazén v něm není', /'pool'/.test(panel), 'false');
   check('popisek panelu mluví o bojlerech',
     FVE_PANELS.some(x => x.draw === panelBoilers && x.label === 'Bojlery (°C)'), 'true');
-  // Barva bazénu ale zůstává — používá ji vedlejší panel s ODBĚREM okruhů
-  check('barva bazénu zůstala pro panel odběru', BOILER_COLORS.pool, '#16a085');
-  // Panel odběru si z téhle trojice bere meze osy, legendu i samotné čáry — proto tři
-  check('  a panel odběru bazén pořád kreslí',
-    (String(panelUsage).match(/\\['pool', 'b1', 'b2'\\]/g) || []).length, 3);
+  check('panel odběru okruhů je pryč', typeof panelUsage, 'undefined');
+  check('  a žádný jiný panel o bazénu nemluví',
+    FVE_PANELS.some(x => /Bazén/.test(x.label)), 'false');
+  check('barva bazénu se nikde nedrží', String(BOILER_COLORS.pool), 'undefined');
+  check('legenda pod grafem bazén neslibuje',
+    /'Bazén'/.test(String(renderBoilerLegend)), 'false');
 
  } catch (e) { R.push('CHYBA výjimka: ' + e.message); }
 

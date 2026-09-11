@@ -1,4 +1,4 @@
-// Graf a karty na stránce FVE: nový panel odběru okruhů a karta „odkud šla spotřeba".
+// Graf a karty na stránce FVE: panely grafu, legenda bojlerů a karta „odkud šla spotřeba".
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -13,7 +13,7 @@ const check = (jmeno, got, want) => {
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
 // Kreslení se nesmí zadrhnout na žádných datech — chyba se ohlásí jmenovitě
 // Na canvasu není co změřit přes DOM, takže si posloucháme, jakými barvami se táhne.
-// Barva bazénu je v celé appce jen jedna, takže je to spolehlivý podpis té čáry.
+// Každý bojler má vlastní barvu, takže je to spolehlivý podpis té které čáry.
 const tahy = [];
 const puvodniStroke = CanvasRenderingContext2D.prototype.stroke;
 CanvasRenderingContext2D.prototype.stroke = function (...a) {
@@ -31,49 +31,58 @@ setTimeout(() => {
   const T = Date.now(), MIN = 60000;
 
   OUT1: {
+    // Panel „Bazén a bojlery (kW)" je pryč — odběr okruhů se nikde nekreslí ani nesbírá.
+    // Kdyby se vrátil, tekla by do zálohy i do telefonu data, na která se nikdo nedívá.
     const labely = FVE_PANELS.map(p => p.label);
-    check('graf má šest panelů', labely.length, 6);
+    check('graf má pět panelů', labely.length, 5);
     check('  ve správném pořadí', labely.join(' | '),
-      'Výkon FVE (kW) | Baterie (%) | Wallbox (kW) | Přetok (kW) | Bazén a bojlery (kW) | Bojlery (°C)');
-    check('odběr okruhů je hned nad teplotami',
-      labely.indexOf('Bojlery (°C)') - labely.indexOf('Bazén a bojlery (kW)'), 1);
+      'Výkon FVE (kW) | Baterie (%) | Wallbox (kW) | Přetok (kW) | Bojlery (°C)');
+    check('teploty bojlerů jsou poslední', labely[labely.length - 1], 'Bojlery (°C)');
+    check('žádný panel nemluví o bazénu', labely.some(l => /Bazén/.test(l)), false);
+    check('panel odběru okruhů ve zdroji není', typeof panelUsage, 'undefined');
+    check('  a řada, kterou kreslil, taky ne', typeof usageHistory, 'undefined');
+    // Appka má jediný inline skript; ten druhý je tenhle ovladač
+    const zdrojApky = document.querySelectorAll('script')[0].textContent;
+    check('mrtvou zálohu v telefonu appka jednou smaže',
+      zdrojApky.includes("removeItem('usageHistory')"), true);
+    check('  a nikdo ji už neukládá', zdrojApky.includes("setItem('usageHistory'"), false);
   }
 
-  // 1) prázdno — panel nesmí spadnout
-  usageHistory = [];
-  bezVyjimky('prázdný panel se zvládne nakreslit', renderFveChart);
+  // 1) prázdno — graf nesmí spadnout
+  history = [];
+  boilerHistory = [];
+  bezVyjimky('prázdný graf se zvládne nakreslit', renderFveChart);
 
-  // 2) všechny tři okruhy
-  usageHistory = [];
-  for (let t = T - 26 * 3600000; t <= T; t += 2 * MIN) {
-    usageHistory.push({ t, pool: 420, b1: t > T - 3600000 ? 2000 : 0, b2: 1200 });
-  }
+  // 2) data ve všech zbylých panelech
   history = [];
   for (let t = T - 26 * 3600000; t <= T; t += 2 * MIN) history.push({ t, kw: 1, soc: 60, pv: 2 });
-  boilerHistory = [{ t: T - 3600000, b1: 48, b2: 52 }, { t: T, b1: 49, b2: 53 }];
+  wallboxHistory = [];
+  for (let t = T - 26 * 3600000; t <= T; t += 2 * MIN) wallboxHistory.push({ t, w: 3400 });
+  boilerHistory = [];
+  for (let t = T - 26 * 3600000; t <= T; t += 5 * MIN) boilerHistory.push({ t, b1: 48, b2: 52 });
   nakresli();
-  check('graf s daty má výšku', parseInt(fveChartCanvas.style.height, 10) > 400, true);
-  check('kreslí se čára bazénu', tahy.includes(BOILER_COLORS.pool), true);
-  check('  i oba bojlery', tahy.filter(c => c === BOILER_COLORS.b1 || c === BOILER_COLORS.b2).length >= 2, true);
+  check('graf s daty má výšku', parseInt(fveChartCanvas.style.height, 10) > 300, true);
+  check('kreslí se oba bojlery',
+    tahy.filter(c => c === BOILER_COLORS.b1 || c === BOILER_COLORS.b2).length >= 2, true);
 
-  // 3) jeden okruh mlčí (null) — ostatní se pořád kreslí
-  usageHistory = usageHistory.map(p => ({ ...p, pool: null }));
+  // 3) jeden bojler mlčí (null) — druhý se pořád kreslí
+  boilerHistory = boilerHistory.map(p => ({ t: p.t, b1: p.b1, b2: null }));
   nakresli();
-  check('bez dat bazénu se jeho čára nekreslí', tahy.includes(BOILER_COLORS.pool), false);
-  usageHistory = usageHistory.map(p => ({ ...p, pool: 420, b2: null }));
-  bezVyjimky('chybějící okruh graf nerozbije', renderFveChart);
-  usageHistory = usageHistory.map(p => ({ t: p.t, pool: null, b1: null, b2: null }));
-  bezVyjimky('samé nully taky ne', renderFveChart);
-  usageHistory = [{ t: T, pool: 100, b1: null, b2: null }];
+  check('bez dat bojleru 2 se jeho čára nekreslí', tahy.includes(BOILER_COLORS.b2), false);
+  check('  ale bojler 1 se kreslí dál', tahy.includes(BOILER_COLORS.b1), true);
+  boilerHistory = boilerHistory.map(p => ({ t: p.t, b1: null, b2: null }));
+  bezVyjimky('samé nully graf nerozbijí', renderFveChart);
+  boilerHistory = [{ t: T, b1: 50, b2: null }];
   bezVyjimky('jediný bod taky ne', renderFveChart);
 
   OUT2: {
     renderBoilerLegend();
     const polozky = Array.from(document.querySelectorAll('#boilerLegend span')).map(s => s.textContent);
-    check('legenda má tři položky', polozky.length, 3);
-    check('  včetně bazénu', polozky.join(','), 'Bazén,Bojler 1 (TČ),Bojler 2');
+    check('legenda má dvě položky', polozky.length, 2);
+    check('  jen oba bojlery', polozky.join(','), 'Bojler 1 (TČ),Bojler 2');
     const barvy = Array.from(document.querySelectorAll('#boilerLegend i')).map(i => i.style.background);
-    check('  a tři různé barvy', new Set(barvy).size, 3);
+    check('  a dvě různé barvy', new Set(barvy).size, 2);
+    check('barva bazénu už neexistuje', BOILER_COLORS.pool, undefined);
   }
 
   // 4) karta „odkud šla spotřeba"

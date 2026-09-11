@@ -53,6 +53,8 @@ const SNAP = {
   pvDays: [{ d: '2026-08-30', fcAm: 20, fcPm: 22, actual: 21 }],
   wbDays: [{ d: '2026-08-30', grid: 100, pv: 900 }],
   usageDays: [{ d: new Date().toISOString().slice(0, 10), grid: 4000, pv: 9000 }],
+  // Pole ze STARÉHO serveru: panel odběru okruhů je zrušený, appka takový klíč
+  // ve snapshotu musí beze slova přejít (viz RENDER_CHYBY níž)
   usageHistory: rada(26 * 3600000, 2 * MIN, t => ({ t, pool: 420, b1: 2000, b2: null })),
   solinator: { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   solinatorPlan: null, assistantLog: [{ t: T - MIN, text: 'zapnul jsem bazén' }],
@@ -77,7 +79,6 @@ setTimeout(() => {
   check('dny sauny se načetly', saunaDaysData.length, 1);
   check('odhad výroby se načetl', pvDaysData.length, 1);
   check('odkud auto bralo se načetlo', wbDaysData.length, 1);
-  check('odběr okruhů se načetl', usageHistory.length > 100, true);
   check('odkud šla spotřeba se načetla', usageDaysData.length, 1);
   check('doba běhu se načetla', runtimeData && runtimeData.date === SNAP.runtime.date, true);
 

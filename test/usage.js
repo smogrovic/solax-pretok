@@ -1,7 +1,7 @@
-// Ověření: odkud šla spotřeba (kromě auta) a řada odběru okruhů pro graf.
+// Ověření: odkud šla spotřeba (kromě auta) a prořeďování dlouhých časových řad.
 // Klíčové je, že se nic nepočítá dvakrát: ze sítě si první bere auto a co zbyde,
 // jde na barák — obě karty dohromady musí dát celý odběr ze sítě.
-const { between, suite } = require('./zdroj');
+const { LINES, between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('spotřeba');
 
 const CODE_DNY = between('// ---------- Odkud co bralo', '// ---------- Sauna ----------');
@@ -9,11 +9,11 @@ const CODE_PICK = between('// Špička kbelíku', 'const LOG_MAX_AGE_MS');
 const CODE_THIN = between('const THIN_AFTER_MS', '// Špička kbelíku');
 
 function build(den = '2026-08-31') {
-  const state = { wbDays: [], poolDays: [], usageDays: [], usageHistory: [] };
+  const state = { wbDays: [], poolDays: [], usageDays: [] };
   let dnes = den;
   const api = new Function('state', 'pragueDateString', 'pruneHistory',
     CODE_DNY + '\n; return { recordGridSplit, recordWbDay, recordPoolDay, recordUsageDay,'
-             + ' recordUsagePoint, USAGE_DAYS_MAX, DEN_MAX };'
+             + ' USAGE_DAYS_MAX, DEN_MAX };'
   )(state, () => dnes, () => {});
   return { api, state, setDen: d => { dnes = d; } };
 }
@@ -23,7 +23,7 @@ const soucet = pole => pole.reduce((a, r) => a + r.grid + r.pv, 0);
 const zeSite = pole => pole.reduce((a, r) => a + r.grid, 0);
 
 const pick = new Function(CODE_THIN + '\n' + CODE_PICK
-  + '\n; return { thinPoints, PICK_MAX_USAGE, PICK_LAST, usageSoucet };')();
+  + '\n; return { thinPoints, PICK_MAX_KW, PICK_LAST };')();
 
 nadpis('1) Dělení spotřeby');
 {
@@ -148,47 +148,51 @@ nadpis('3) Dny');
   check('  a to ty poslední', h.state.usageDays[h.state.usageDays.length - 1].d, '2026-08-20');
 }
 
-nadpis('4) Řada odběru okruhů');
+nadpis('4) Prořídění drží špičku');
 {
-  const h = build();
-  h.api.recordUsagePoint(400, 2000, 1500);
-  check('vzorek se uloží', h.state.usageHistory.length, 1);
-  check('  s bazénem', h.state.usageHistory[0].pool, 400);
-  h.api.recordUsagePoint(400, 2000, 1500);
-  check('do 30 s se druhý nepřidá', h.state.usageHistory.length, 1);
-}
-{
-  const h = build();
-  h.api.recordUsagePoint(null, null, null);
-  check('samé nully vzorek nezaloží', h.state.usageHistory.length, 0);
-  h.api.recordUsagePoint(null, 2000, null);
-  check('jeden zdroj stačí', h.state.usageHistory.length, 1);
-  check('  a mlčící zůstane null', h.state.usageHistory[0].pool, null);
-}
-
-nadpis('5) Prořídění drží špičku');
-{
+  // Kbelík si z každého úseku nechává JEDEN vzorek. U přetoku a odběru rozhoduje
+  // špička (PICK_MAX_KW) — jinak by z grafu zmizely krátké zlomy; u teplot, které
+  // se mění pomalu, stačí poslední hodnota (PICK_LAST). Na tuhle dvojici se váže
+  // celá historie FVE i bojlerů, takže ať to nikdo nepřehodí nedopatřením.
   const now = 4 * 24 * 3600000;   // „teď" daleko od nuly, ať jsou body starší než den
   const stare = t => now - 2 * 24 * 3600000 + t;
   const body = [
-    { t: stare(0), pool: 0, b1: 0, b2: 0 },
-    { t: stare(60000), pool: 400, b1: 3000, b2: 0 },   // špička
-    { t: stare(120000), pool: 0, b1: 0, b2: 0 }
+    { t: stare(0), kw: 0 },
+    { t: stare(60000), kw: 3.2 },        // špička
+    { t: stare(120000), kw: 0 }
   ];
-  const out = pick.thinPoints(body, pick.PICK_MAX_USAGE, now);
+  const out = pick.thinPoints(body, pick.PICK_MAX_KW, now);
   check('z kbelíku zůstane jeden vzorek', out.length, 1);
-  check('  a je to ten se špičkou', out[0].b1, 3000);
-  const posledni = pick.thinPoints(body, pick.PICK_LAST, now);
-  check('PICK_LAST by špičku zahodil', posledni[0].b1, 0);
-  check('součet bere všechny okruhy', pick.usageSoucet({ pool: 1, b1: 2, b2: 3 }), 6);
-  check('  a chybějící okruh nedělá NaN', pick.usageSoucet({ b1: 2 }), 2);
-  check('  ani null', pick.usageSoucet({ pool: null, b1: 2, b2: null }), 2);
+  check('  a je to ten se špičkou', out[0].kw, 3.2);
+  check('PICK_LAST by špičku zahodil', pick.thinPoints(body, pick.PICK_LAST, now)[0].kw, 0);
+  // Odběr ze sítě je záporný — rozhodovat musí velikost, ne znaménko
+  const import_ = [
+    { t: stare(0), kw: 0 },
+    { t: stare(60000), kw: -4.5 },
+    { t: stare(120000), kw: 0 }
+  ];
+  check('  a u odběru rozhoduje velikost, ne znaménko',
+    pick.thinPoints(import_, pick.PICK_MAX_KW, now)[0].kw, -4.5);
 }
 {
   const now = 4 * 24 * 3600000;
-  const cerstve = [{ t: now - 1000, pool: 1, b1: 1, b2: 1 }, { t: now, pool: 2, b1: 2, b2: 2 }];
+  const cerstve = [{ t: now - 1000, kw: 1 }, { t: now, kw: 2 }];
   check('mladší než den se neprořeďuje',
-    pick.thinPoints(cerstve, pick.PICK_MAX_USAGE, now).length, 2);
+    pick.thinPoints(cerstve, pick.PICK_MAX_KW, now).length, 2);
+}
+
+nadpis('5) Mrtvá řada odběru okruhů je pryč');
+{
+  // Panel „Bazén a bojlery (kW)" z grafu na FVE zmizel a s ním i řada, kterou
+  // kreslil. Kdyby se sběr vrátil, tekla by data do stavu, do zálohy na Upstashi
+  // i do telefonu, aniž by je kdokoli četl — a nikdo by si toho nevšiml.
+  const zdroj = LINES.join('\n');
+  check('server nesbírá vzorky odběru', /recordUsagePoint/.test(zdroj), false);
+  check('  ani je nedrží ve stavu', /state\.usageHistory/.test(zdroj), false);
+  check('  ani neposílá přes SSE', /broadcast\('usageHistory'/.test(zdroj), false);
+  check('  a endpoint pro obnovu nemá', /usage-history\/restore/.test(zdroj), false);
+  // Denní rozpad na síť a FVE je jiná řada a zůstat musí
+  check('denní rozpad spotřeby domu zůstal', /function recordUsageDay/.test(zdroj), true);
 }
 
 konec();

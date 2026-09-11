@@ -2986,7 +2986,6 @@ const FVE_PANELS = [
   { h: 60, label: 'Baterie (%)', draw: panelSoc },
   { h: 60, label: 'Wallbox (kW)', draw: panelWbPower },
   { h: 72, label: 'Přetok (kW)', draw: panelFeedin },
-  { h: 60, label: 'Bazén a bojlery (kW)', draw: panelUsage },
   { h: 86, label: 'Bojlery (°C)', draw: panelBoilers }
 ];
 
@@ -3047,38 +3046,6 @@ function panelFeedin(ctx, g) {
   g.clip(() => drawSmoothArea(ctx, pts, p => p.kw, g.x, y, {
     half: 5, baseV: 0, stroke: '#f5933d', fill: 'rgba(245,147,61,0.18)'
   }));
-}
-
-// Odběr tří okruhů v jednom panelu — stejně jako panel teplot kreslí dva bojlery.
-// Osa se přizpůsobí špičce (bojler 2 kW, bazén stovky W), ať je vidět i ten menší.
-function panelUsage(ctx, g) {
-  const pts = panPts(usageHistory, g);
-  const je = k => pts.some(p => typeof p[k] === 'number');
-  if (!['pool', 'b1', 'b2'].some(je)) return panPrazdny(ctx, g);
-  let max = 0.5;
-  for (const p of pts) {
-    for (const k of ['pool', 'b1', 'b2']) {
-      if (typeof p[k] === 'number' && p[k] / 1000 > max) max = p[k] / 1000;
-    }
-  }
-  const y = panY(g, 0, max);
-  panNula(ctx, g, y(0));
-  panOsaY(ctx, g, [[max, panCis(max)], [0, '0']], y);
-  // Vzorkuje se po 2 min, díra nad 10 min znamená, že data chybí — nepřemosťuje se
-  g.clip(() => {
-    for (const k of ['pool', 'b1', 'b2']) {
-      const raw = pts.filter(p => typeof p[k] === 'number').map(p => ({ t: p.t, v: p[k] / 1000 }));
-      for (const seg of splitGaps(raw, 10 * 60 * 1000)) {
-        if (seg.length < 2) continue;
-        ctx.strokeStyle = BOILER_COLORS[k];
-        ctx.lineWidth = 2;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        drawSmoothPath(ctx, smoothSeries(seg, 1).map(q => ({ x: g.x(q.t), y: y(q.v) })));
-        ctx.stroke();
-      }
-    }
-  });
 }
 
 function panelBoilers(ctx, g) {
@@ -6828,9 +6795,8 @@ function renderBoilerPower() {
   if (boiler2PowerEl) boiler2PowerEl.textContent = fmtKwVal(infigyData && typeof infigyData.hwPower === 'number' ? infigyData.hwPower : null);
 }
 
-// Barvy a legenda bojlerů (panel v grafu na stránce FVE)
-// Bojlery mají v obou panelech (kW i °C) tutéž barvu — jedna legenda pak platí pro oba
-const BOILER_COLORS = { pool: '#16a085', b1: '#f5933d', b2: '#3498db' };
+// Barvy a legenda bojlerů (panel teplot v grafu na stránce FVE)
+const BOILER_COLORS = { b1: '#f5933d', b2: '#3498db' };
 const boilerLegendEl = document.getElementById('boilerLegend');
 let boilerHistory = [];
 
@@ -6869,47 +6835,14 @@ async function maybeRestoreBoilerHistoryToServer(serverHist, localHist) {
   } catch {}
 }
 
-// ---------- Odběr okruhů (bazén, oba bojlery) — panel v grafu na FVE ----------
-let usageHistory = [];
-
-// Prořeďuje se podle SOUČTU okruhů, ať v kbelíku zůstane chvíle největšího odběru
-const usageSoucet = p => (p.pool || 0) + (p.b1 || 0) + (p.b2 || 0);
-const PICK_MAX_USAGE = (a, b) => (usageSoucet(b) > usageSoucet(a) ? b : a);
-function pruneUsage(arr) {
-  const cutoff = Date.now() - HIST_MAX_AGE_MS;
-  return thinPoints((arr || []).filter(p => p && typeof p.t === 'number' && p.t >= cutoff), PICK_MAX_USAGE);
-}
-function saveUsageHistoryLocal() {
-  try { localStorage.setItem('usageHistory', JSON.stringify(pruneUsage(usageHistory))); } catch {}
-}
-function loadUsageHistoryLocal() {
-  try { return pruneUsage(JSON.parse(localStorage.getItem('usageHistory') || '[]')); } catch { return []; }
-}
-function mergeUsage(a, b) {
-  const all = pruneUsage((a || []).concat(b || []).sort((x, y) => x.t - y.t));
-  const out = [];
-  for (const p of all) {
-    if (!out.length || p.t - out[out.length - 1].t > 30000) out.push(p);
-  }
-  return out;
-}
-async function maybeRestoreUsageHistoryToServer(serverHist, localHist) {
-  if (!localHist.length) return;
-  const serverOldest = serverHist.length ? serverHist[0].t : Infinity;
-  const older = localHist.filter(p => p.t < serverOldest - 60000);
-  if (older.length < 2) return;
-  try {
-    await fetch('/api/usage-history/restore', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points: older })
-    });
-  } catch {}
-}
+// Odběr okruhů (bazén, oba bojlery) se v grafu už nekreslí. Zálohu z dřívějška
+// telefonu jednou uklidíme, ať v úložišti neleží mrtvá data napořád.
+try { localStorage.removeItem('usageHistory'); } catch {}
 
 function renderBoilerLegend() {
   if (!boilerLegendEl) return;
   boilerLegendEl.textContent = '';
-  for (const [key, label] of [['pool', 'Bazén'], ['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
+  for (const [key, label] of [['b1', 'Bojler 1 (TČ)'], ['b2', 'Bojler 2']]) {
     const span = document.createElement('span');
     const dot = document.createElement('i');
     dot.style.background = BOILER_COLORS[key];
@@ -7360,15 +7293,9 @@ function applySnapshot(snap) {
   const serverBoiler = snap.boilerHistory || [];
   const localBoiler = loadBoilerHistoryLocal();
   boilerHistory = mergeByTime(serverBoiler, localBoiler);
-  // Odběr okruhů do stejného panelu grafu — kreslí se až po obojím
-  const serverUsage = snap.usageHistory || [];
-  const localUsage = loadUsageHistoryLocal();
-  usageHistory = mergeUsage(serverUsage, localUsage);
   bezpecne(renderFveChart);
   saveBoilerHistoryLocal();
-  saveUsageHistoryLocal();
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
-  maybeRestoreUsageHistoryToServer(serverUsage, localUsage);
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
   relayTimersData = snap.relayTimers || [];
@@ -7596,13 +7523,6 @@ function connectStream() {
     else if (d.point) boilerHistory = mergeByTime(boilerHistory, [d.point]);
     renderFveChart();
     saveBoilerHistoryLocal();
-  });
-  es.addEventListener('usageHistory', e => {
-    const d = JSON.parse(e.data);
-    if (Array.isArray(d.history)) usageHistory = mergeUsage(d.history, usageHistory);
-    else if (d.point) usageHistory = mergeUsage(usageHistory, [d.point]);
-    renderFveChart();
-    saveUsageHistoryLocal();
   });
   es.addEventListener('poolDays', e => {
     poolDaysData = mergeWbDays(JSON.parse(e.data).poolDays || [], poolDaysData);

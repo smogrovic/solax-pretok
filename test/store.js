@@ -67,7 +67,6 @@ function vzorovyStav() {
     wbDays: [{ d: '2026-08-30', grid: 100, pv: 900 }],
     poolDays: [{ d: '2026-08-30', grid: 50, pv: 450 }],
     usageDays: [{ d: '2026-08-30', grid: 4000, pv: 9000 }],
-    usageHistory: [{ t, pool: 400, b1: 2000, b2: null }],
     saunaDays: [{ d: '2026-08-30', wh: 8000, ms: 7200000 }],
     months: [{ m: '2026-08', sauna: 40000, pool: 12000, wb: 300000, dum: 500000,
                poolGrid: 4000, poolPv: 8000 }],
@@ -104,7 +103,6 @@ nadpis('2) Balení');
   check('a nic navíc se neukládá', navic.join(',') || 'nic', 'nic');
   check('historie jde jako points', snap.posts['/api/history/restore'].points.length, 1);
   check('log jako entries', snap.posts['/api/log/restore'].entries.length, 1);
-  check('odběr okruhů se ukládá', snap.posts['/api/usage-history/restore'].points.length, 1);
   check('odkud bral bazén taky', snap.posts['/api/pool-days/restore'].poolDays[0].grid, 50);
   check('odkud šla spotřeba taky', snap.posts['/api/usage-days/restore'].usageDays[0].pv, 9000);
   check('runtime nese datum', snap.posts['/api/runtime/restore'].date, '2026-08-31');
@@ -292,7 +290,7 @@ function prazdnyStav() {
     history: [], wallboxHistory: [], boilerHistory: [], airconHistory: [],
     wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], poolDays: [], saunaDays: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
-    usageDays: [], usageHistory: [],
+    usageDays: [],
     wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,
     tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false },
     manualHold: {}, assistantLog: []
