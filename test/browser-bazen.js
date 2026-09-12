@@ -21,9 +21,13 @@ setTimeout(() => {
   const T = Date.now(), MIN = 60000;
   const karta = document.getElementById('heatpumpCard');
   const ukaz = d => { heatpumpData = d; renderHeatpump(); };
+  // poolTemp je to, co se ukazuje velkým písmem: poslední teplota naměřená za
+  // proudící vody. tempC je syrové čidlo a slouží už jen k diagnostice mapování.
   const zaklad = (o = {}) => ({ enabled: true, online: true, fetchedAt: new Date(T).toISOString(),
     tempC: 26.4, targetC: 28, outC: null, vykonPct: null, powerW: null, on: true,
-    mode: 'topí', fault: 0, dp: [], ...o });
+    mode: 'topí', fault: 0, dp: [],
+    poolTemp: { c: 26.4, at: T, zive: true, duvod: null }, ...o });
+  const bezTeploty = { c: null, at: null, zive: false, duvod: 'zatim' };
 
   R.push('\\n1) Bez klíčů k Tuyi');
   ukaz({ enabled: false });
@@ -59,13 +63,17 @@ setTimeout(() => {
   ukaz(zaklad({ online: false }));
   check('offline = nedostupné', hpState.textContent, 'nedostupné');
   check('  semafor zhasne úplně', hpLight.className, 'traffic-light');
-  check('  a teplota se nekreslí', hpTemp.textContent, '– °C');
+  // Zapamatovaná voda na dostupnosti čerpadla nezávisí — ale musí být vidět, že je stará
+  check('  zapamatovaná teplota platí dál', hpTemp.textContent, '26,4 °C');
+  check('  a nese čas měření', /Naměřeno v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
   check('  hláška řekne, že to hlásí Tuya', /Tuya hlásí čerpadlo jako offline/.test(hpMeta.textContent), 'true');
   check('  i kdy naposledy dorazila data', /Poslední data v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
 
-  ukaz(zaklad({ fetchedAt: new Date(T - 40 * MIN).toISOString() }));
+  const stara = new Date(T - 40 * MIN).toISOString();
+  ukaz(zaklad({ fetchedAt: stara, poolTemp: bezTeploty }));
   check('zestárlá data taky', hpState.textContent, 'nedostupné');
-  check('  a nekreslí zmrzlou teplotu', hpTemp.textContent, '– °C');
+  check('  a bez naměřené vody je pomlčka', hpTemp.textContent, '– °C');
+  ukaz(zaklad({ fetchedAt: stara }));
   check('  ale řeknou, že jen zestárla', /zestárla/.test(hpMeta.textContent), 'true');
   check('  a neplete se s offline', /offline/.test(hpMeta.textContent), 'false');
 
@@ -79,17 +87,18 @@ setTimeout(() => {
   check('  a nepřekryje ji obecná hláška', /offline/.test(hpMeta.textContent), 'false');
 
   // I u nedostupného čerpadla jsou poslední známé kódy k něčemu
-  ukaz(zaklad({ online: false, tempC: null, dp: [{ code: 'inlet_temp', value: 29 }] }));
+  ukaz(zaklad({ online: false, tempC: null, poolTemp: bezTeploty, dp: [{ code: 'inlet_temp', value: 29 }] }));
   check('výpis kódů funguje i u nedostupného', /hlásí: inlet_temp=29/.test(hpMeta.textContent), 'true');
 
   R.push('\\n4) Nehlášené hodnoty a špatné mapování');
-  ukaz(zaklad({ tempC: null, targetC: null }));
+  ukaz(zaklad({ tempC: null, targetC: null, poolTemp: bezTeploty }));
   check('bez teploty je pomlčka', hpTemp.textContent, '– °C');
   check('  a řekne se, že nic nechodí', /nehlásí/.test(hpMeta.textContent), 'true');
   // Karta poprvé ukazovala −22 °C, protože jsme sáhli na špatný datový bod a tvářili se
   // jistě. Teď má být místo čísla pomlčka a rovnou výpis toho, co čerpadlo posílá —
   // ať stačí screenshot karty a nemusí se lovit /api/heatpump/raw.
-  ukaz(zaklad({ tempC: null, dp: [{ code: 'temp_current', value: -220 }, { code: 'inlet_temp', value: 29 }] }));
+  ukaz(zaklad({ tempC: null, poolTemp: bezTeploty,
+    dp: [{ code: 'temp_current', value: -220 }, { code: 'inlet_temp', value: 29 }] }));
   check('nesmyslná teplota se nekreslí jako číslo', hpTemp.textContent, '– °C');
   check('  a karta vypíše, co čerpadlo hlásí', /hlásí: temp_current=-220, inlet_temp=29/.test(hpMeta.textContent), 'true');
   // Pomlčka sama by vypadala jako výpadek, a to je něco úplně jiného: čerpadlo
@@ -163,6 +172,33 @@ setTimeout(() => {
   check('barva bazénu se nikde nedrží', String(BOILER_COLORS.pool), 'undefined');
   check('legenda pod grafem bazén neslibuje',
     /'Bazén'/.test(String(renderBoilerLegend)), 'false');
+
+  R.push('\\n9) Teplota platí, jen když voda proudí');
+  // Čidlo je v čerpadle, ne v bazénu. Když bazén ani solinátor neběží, voda v trubce
+  // stojí a vychladne — karta dřív ukazovala tu trubku. Teď drží poslední hodnotu
+  // naměřenou za chodu a musí být poznat, že je to zapamatované číslo.
+  ukaz(zaklad({ poolTemp: { c: 26.4, at: T, zive: true, duvod: null } }));
+  check('za chodu se ukazuje živá teplota', hpTemp.textContent, '26,4 °C');
+  check('  a nic se k ní nedopisuje', /Naměřeno|nekoluje/.test(hpMeta.textContent), 'false');
+
+  ukaz(zaklad({ on: false, poolTemp: { c: 26.4, at: T - 90 * MIN, zive: false, duvod: null } }));
+  check('po vypnutí drží zapamatovanou', hpTemp.textContent, '26,4 °C');
+  check('  a řekne, že voda nekoluje', /voda teď nekoluje/.test(hpMeta.textContent), 'true');
+  check('  i kdy se měřilo', /Naměřeno v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
+
+  ukaz(zaklad({ poolTemp: { c: null, at: null, zive: false, duvod: 'zima' } }));
+  check('v zimě je pomlčka', hpTemp.textContent, '– °C');
+  check('  a řekne se proč', /v zimě vypnutý/.test(hpMeta.textContent), 'true');
+  check('  ne jako porucha čerpadla', /nehlásí|offline|zestárla/.test(hpMeta.textContent), 'false');
+
+  ukaz(zaklad({ poolTemp: bezTeploty }));
+  check('bez jediného měření taky pomlčka', hpTemp.textContent, '– °C');
+  check('  a řekne se, na co se čeká', /až se bazén rozběhne/.test(hpMeta.textContent), 'true');
+
+  // Past: velké číslo se bere ze zapamatované teploty, ne ze syrového čidla. Kdyby se
+  // vrátilo tempC, byla by tu zase teplota trubky.
+  ukaz(zaklad({ tempC: 18.2, poolTemp: { c: 26.4, at: T - 90 * MIN, zive: false, duvod: null } }));
+  check('syrové čidlo velké číslo nepřebije', hpTemp.textContent, '26,4 °C');
 
  } catch (e) { R.push('CHYBA výjimka: ' + e.message); }
 

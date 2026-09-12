@@ -189,6 +189,9 @@ const state = {
   // Tlačítko „+24 h": bazén jede natvrdo do tohohle času, bez ohledu na přebytek,
   // okno, SOC i zimní režim. Sčítá se po 24 h do stropu 72 h.
   poolForce: { until: 0 },
+  // Poslední teplota bazénu naměřená za PROUDÍCÍ vody — viz blok „Teplota bazénu"
+  // u tepelného čerpadla. `bezOd` = odkdy voda koluje (kvůli proplachu trubky).
+  poolTemp: { c: null, at: 0, bezOd: 0 },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -5875,6 +5878,67 @@ if (huumEnabled) {
   scheduleEvery(pollHuum, POLL_INTERVAL_MS, 70000);
 }
 
+// ---------- Teplota bazénu: platí jen při proudící vodě ----------
+// Čidlo je v čerpadle, ne v bazénu. Když bazén ani solinátor neběží, voda v trubce
+// stojí a její teplota rychle padá k okolí — karta pak ukazovala teplotu trubky, ne
+// bazénu. Proto se drží poslední hodnota naměřená ZA CHODU a ta se ukazuje, dokud
+// voda znovu nezačne proudit.
+//
+// Stejná past platí i obráceně: první minuty po rozběhu teče kolem čidla pořád ta
+// vychladlá voda z trubky, takže se po startu chvíli ještě ukazuje zapamatovaná
+// hodnota a teprve pak se přebírá živá.
+const POOL_TEMP_GRACE_MS = 5 * 60 * 1000;    // než se trubka propláchne
+// Starší číslo už není informace, ale dohad — hlavně po zimě, kdy by se jinak
+// ukazovala loňská podzimní teplota, dokud se bazén poprvé nerozběhne.
+const POOL_TEMP_MAX_AGE_MS = 48 * 3600000;
+
+// HP_VODA_MIN/MAX jsou meze rozumné teploty vody ze sekce čerpadla pod tímhle blokem.
+// Používají se až v těle routy, takže na pořadí deklarací nezáleží.
+function vodaProudi(now = Date.now()) {
+  return releBezi('pool', now) || releBezi('solinator', now);
+}
+
+function recordPoolTemp(tempC, now = Date.now()) {
+  // V zimě je bazén vypuštěný a nic se neměří; `bezOd` se nuluje, ať se po přepnutí
+  // na léto nepřeskočí proplach trubky
+  if (isWinter() || !vodaProudi(now)) {
+    state.poolTemp.bezOd = 0;
+    return;
+  }
+  if (!state.poolTemp.bezOd) state.poolTemp.bezOd = now;
+  if (now - state.poolTemp.bezOd < POOL_TEMP_GRACE_MS) return;
+  if (typeof tempC !== 'number') return;
+  state.poolTemp = { c: tempC, at: now, bezOd: state.poolTemp.bezOd };
+}
+
+// `zive` říká, jestli číslo právě teď měří proudící voda. `duvod` je pro appku:
+// proč místo teploty stojí pomlčka.
+function poolTempPayload(now = Date.now()) {
+  if (isWinter()) return { c: null, at: null, zive: false, duvod: 'zima' };
+  const { c, at, bezOd } = state.poolTemp;
+  if (typeof c !== 'number' || !at || now - at > POOL_TEMP_MAX_AGE_MS) {
+    return { c: null, at: null, zive: false, duvod: 'zatim' };
+  }
+  const zive = vodaProudi(now) && bezOd > 0 && now - bezOd >= POOL_TEMP_GRACE_MS;
+  return { c, at, zive, duvod: null };
+}
+
+// Relé se přepne kdykoli, ale tenhle payload jde ven s dotazem na čerpadlo (2 min).
+// Vadit to nemůže: zapamatované ČÍSLO se tím nemění, jen poznámka „voda nekoluje"
+// doskočí o cyklus později.
+app.post('/api/pool/temp/restore', (req, res) => {
+  const c = Number(req.body && req.body.c);
+  const at = Number(req.body && req.body.at);
+  // Vyhrává novější měření. Zálohu píše server sám sobě po restartu, takže se sem
+  // nesmí dostat nic, co by neprošlo i při měření naostro.
+  if (Number.isFinite(c) && c >= HP_VODA_MIN && c <= HP_VODA_MAX
+      && Number.isFinite(at) && at > 0 && at <= Date.now() && at > state.poolTemp.at) {
+    state.poolTemp = { c, at, bezOd: 0 };
+    broadcast('heatpump', { heatpump: heatpumpPayload() });
+  }
+  res.json({ c: state.poolTemp.c, at: state.poolTemp.at });
+});
+
 // ---------- Tepelné čerpadlo bazénu (Fairland přes Tuya cloud) ----------
 // Tuya podepisuje každý dotaz HMAC-SHA256. Podpis je jediné místo, kde se dá tiše
 // minout — Tuya na chybu odpoví kódem 1004 („sign invalid") a nic víc neřekne, takže
@@ -6063,7 +6127,10 @@ async function pollHeatpump() {
   if (!tuyaEnabled || hpPollRunning) return;
   hpPollRunning = true;
   try {
-    state.heatpump = { ...(await fetchHeatpump()), error: null, fetchedAt: new Date().toISOString() };
+    const hp = await fetchHeatpump();
+    state.heatpump = { ...hp, error: null, fetchedAt: new Date().toISOString() };
+    // Zapamatovat se smí jen to, co měřila proudící voda — jinak by se uložila trubka
+    if (hp.online === true) recordPoolTemp(hp.tempC);
   } catch (err) {
     // Razítko se schválně NEobnovuje — znamená „kdy dorazila data", ne „kdy jsme se
     // ptali". Čerpadlo visí na SMG_zahrada se slabým signálem, takže výpadky budou
@@ -6077,7 +6144,7 @@ async function pollHeatpump() {
 }
 
 function heatpumpPayload() {
-  return { ...state.heatpump, enabled: tuyaEnabled };
+  return { ...state.heatpump, enabled: tuyaEnabled, poolTemp: poolTempPayload() };
 }
 
 // Syrová odpověď z Tuyi. Kódy datových bodů Fairland nedokumentuje a liší se model
@@ -6161,6 +6228,7 @@ const STORE_POSTS = [
   '/api/tempauto/restore',
   '/api/sauna/limits/restore',
   '/api/pool/force/restore',
+  '/api/pool/temp/restore',
   '/api/history/restore',
   '/api/wallbox-history/restore',
   '/api/boiler-history/restore',
@@ -6194,6 +6262,7 @@ function storeSnapshot() {
     },
     '/api/sauna/limits/restore': { limitW: state.saunaLimitW, holdMin: state.saunaHoldMin },
     '/api/pool/force/restore': { until: state.poolForce.until },
+    '/api/pool/temp/restore': { c: state.poolTemp.c, at: state.poolTemp.at },
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },
     '/api/boiler-history/restore': { points: state.boilerHistory },

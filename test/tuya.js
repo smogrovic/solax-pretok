@@ -17,12 +17,14 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
                  odpovedi = [], ted = Date.now() } = {}) {
   const dotazy = [];
   const logy = [];
+  const zapamatovano = [];   // co poller předal k zapamatování jako teplotu bazénu
   const state = { heatpump: { error: null } };
   let now = ted;
   const fronta = odpovedi.slice();
 
   const api = new Function(
     'crypto', 'fetch', 'state', 'addLog', 'broadcast', 'cerstve', 'scheduleEvery', 'app',
+    'recordPoolTemp', 'poolTempPayload',
     'POLL_INTERVAL_MS', 'TUYA_ACCESS_ID', 'TUYA_ACCESS_SECRET', 'TUYA_API_URL',
     'TUYA_HEATPUMP_ID', 'tuyaEnabled', 'Date',
     CODE + '\n; return { tuyaSign, tuyaStringToSign, tuyaHlavicky, tuyaAccessToken,'
@@ -45,10 +47,12 @@ function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
     ts => !!ts && now - new Date(ts).getTime() <= 10 * 60000,
     () => {},
     { get: () => {} },
+    t => zapamatovano.push(t),
+    () => ({ c: null, at: null, zive: false, duvod: 'zatim' }),
     120000, id, secret, 'https://openapi.tuyaeu.com', devId, zapnuto,
     class extends Date { static now() { return now; } }
   );
-  return { api, state, dotazy, logy, posun: ms => { now += ms; }, get now() { return now; } };
+  return { api, state, dotazy, logy, zapamatovano, posun: ms => { now += ms; }, get now() { return now; } };
 }
 
 const okToken = { body: { success: true, result: { access_token: 'tok123', expire_time: 7200 } } };
@@ -218,11 +222,16 @@ nadpis('2) Token');
     await h.api.pollHeatpump();
     check('rozumná teplota se uloží', h.state.heatpump.tempC, 26);
     check('  s razítkem, ať se pozná stáří', typeof h.state.heatpump.fetchedAt, 'string');
+    // O tom, jestli se má zapamatovat jako teplota bazénu, rozhoduje proudící voda —
+    // to řeší recordPoolTemp (test/teplota.js). Poller mu ji ale musí předat.
+    check('  a poller ji předá k zapamatování', h.zapamatovano.join(','), '26');
   }
   {
     const h = build({ odpovedi: [okToken, { body: { success: true, result: { online: false, status: [{ code: 'temp_current', value: 26 }] } } }, bezStinu] });
     await h.api.pollHeatpump();
     check('offline se do stavu přenese', h.state.heatpump.online, false);
+    // Z nedostupného čerpadla chodí zmrzlé číslo — to se zapamatovat nesmí
+    check('  a nic se z něj nezapamatuje', h.zapamatovano.length, 0);
   }
   {
     // Přesně ta −22 °C, kvůli které se mapování předělávalo

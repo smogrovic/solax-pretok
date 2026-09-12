@@ -5995,6 +5995,20 @@ const hpStupne = v => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') + 
 // nedokumentuje a liší se model od modelu. Ať se nemusí lovit přes /api/heatpump/raw,
 // vypíšeme rovnou, co čerpadlo posílá; stačí pak screenshot karty. Platí i pro
 // nedostupné čerpadlo: poslední známé kódy jsou pořád k něčemu.
+// Čidlo teploty je v čerpadle, ne v bazénu: bez proudící vody měří trubku, která
+// rychle vychladne. Server proto posílá poslední hodnotu naměřenou za chodu a k ní
+// `zive` (měří se právě teď) a `duvod` (proč místo čísla pomlčka).
+// `zivaMozna` je false, když je čerpadlo nedostupné: pak je každé číslo z minulosti,
+// ať už voda koluje nebo ne, a musí si nést čas měření.
+function hpPoznamkaTeploty(pt, zivaMozna = true) {
+  if (!pt) return null;
+  if (pt.duvod === 'zima') return 'Bazén je v zimě vypnutý.';
+  if (pt.duvod === 'zatim') return 'Teplota se změří, až se bazén rozběhne — bez proudící vody čidlo měří trubku.';
+  if (!zivaMozna) return `Naměřeno v ${fmtSolTime(pt.at)}.`;
+  if (!pt.zive) return `Naměřeno v ${fmtSolTime(pt.at)}, voda teď nekoluje.`;
+  return null;
+}
+
 function hpDiagnostika(d) {
   if (typeof d.tempC === 'number' || !Array.isArray(d.dp) || !d.dp.length) return;
   const dg = document.createElement('div');
@@ -6012,23 +6026,33 @@ function renderHeatpump() {
   // i zestárlá data znamenají „nevíme" — zmrzlá teplota se kreslit nesmí.
   const zname = d.online === true && d.fetchedAt
     && Date.now() - new Date(d.fetchedAt).getTime() <= DEVICE_STALE_MS;
+  const pt = d.poolTemp || null;
   if (!zname) {
     hpLightEl.className = 'traffic-light';
     hpStateEl.textContent = 'nedostupné';
-    hpTempEl.textContent = '– °C';
+    // Zapamatovaná teplota vody na výpadku čerpadla nezávisí — je to poslední
+    // změřená voda a nese si čas měření, takže se nevydává za čerstvou
+    hpTempEl.textContent = hpStupne(pt && pt.c) || '– °C';
     // „Nechodí data" znamenalo čtyři různé věci naráz a při ladění se pak jen hádalo.
     // Každá z nich chce jinou reakci, tak ať je poznat, o kterou jde.
     hpMetaEl.textContent = d.error ? d.error
       : !d.fetchedAt ? 'Čeká se na první dotaz na Tuyu — po nasazení to trvá pár minut.'
       : d.online === false ? `Tuya hlásí čerpadlo jako offline. Poslední data v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`
       : `Data zestárla, poslední v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`;
+    // Číslo nad tím je zapamatovaná voda — bez data měření by vypadalo jako čerstvé
+    const poznOff = hpPoznamkaTeploty(pt, false);
+    if (poznOff) {
+      const p = document.createElement('div');
+      p.textContent = poznOff;
+      hpMetaEl.appendChild(p);
+    }
     hpDiagnostika(d);
     return;
   }
   const topi = d.on === true;
   hpLightEl.className = 'traffic-light' + (topi ? ' on' : ' off');
   hpStateEl.textContent = topi ? (d.mode || 'zapnuté') : 'vypnuté';
-  hpTempEl.textContent = hpStupne(d.tempC) || '– °C';
+  hpTempEl.textContent = hpStupne(pt && pt.c) || '– °C';
 
   hpMetaEl.textContent = '';
   const veta = document.createElement('div');
@@ -6047,6 +6071,13 @@ function renderHeatpump() {
   if (d.fault) kus('chyba ', String(d.fault));
   if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
   hpMetaEl.appendChild(veta);
+
+  const pozn = hpPoznamkaTeploty(pt);
+  if (pozn) {
+    const p = document.createElement('div');
+    p.textContent = pozn;
+    hpMetaEl.appendChild(p);
+  }
 
   // Čerpadlo odpovídá, jen teplotu vody mezi hodnotami nemá. Pomlčka by vypadala jako
   // výpadek, a to je něco úplně jiného — tady je vada v tom, co Tuya nabízí.
