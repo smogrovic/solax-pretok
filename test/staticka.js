@@ -151,7 +151,7 @@ check('každé ID má svou proměnnou', bezPromenne.join(', ') || 'ano', 'ano');
 // Míchat je do jedné kontroly nejde, ale ani jedno nesmí propadnout bez kontroly.
 const tuyaId = podleJmena.TUYA_HEATPUMP_ID || '';
 const shellyIdcka = idcka.filter(id => id !== tuyaId);
-check('Shelly zařízení je patnáct', shellyIdcka.length, 15);
+check('Shelly zařízení je šestnáct', shellyIdcka.length, 16);
 check('  a všechna mají dvanáct hex znaků',
   shellyIdcka.filter(id => !/^[0-9a-f]{12}$/.test(id)).join(', ') || 'ano', 'ano');
 check('Tuya čerpadlo má dvacet hex znaků', /^[0-9a-f]{20}$/.test(tuyaId), true);
@@ -167,6 +167,7 @@ const podle = jm => (KONFIG.match(new RegExp('process\\.env\\.' + jm + "\\s*\\|\
 check('bojler', podle('SHELLY_DEVICE_ID'), '5432045837c8');
 check('bazén', podle('POOL_DEVICE_ID'), 'dcb4d9cb7b44');
 check('solinátor', podle('SOLINATOR_DEVICE_ID'), 'dcda0ce01f40');
+check('oběhové čerpadlo', podle('OBEH_DEVICE_ID'), '543204663bf4');
 
 nadpis('7) Kontrola kontroly identit');
 const cisty = "const A = process.env.A || 'aabbccddeeff';\nconst B = process.env.B || '112233445566';";

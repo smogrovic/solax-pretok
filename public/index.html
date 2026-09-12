@@ -662,6 +662,14 @@
     height:150px;
     display:block;
   }
+  /* Osa „kdy běželo" uvnitř karty oběhového čerpadla. Výšku si drawTimeline dopočítá
+     podle počtu drah (tady jedna), tohle je jen než se poprvé vykreslí. */
+  #obehTimeline{
+    width:100%;
+    height:70px;
+    display:block;
+    margin-top:14px;
+  }
   .timeline-legend{
     display:flex;
     flex-wrap:wrap;
@@ -1854,6 +1862,22 @@
         </div>
       </div>
 
+      <!-- Oběhové čerpadlo: jen ruční ON, konec si hlídá auto-off v relé (15 min).
+           OFF tlačítko tu schválně není. -->
+      <div class="card lockable" id="obehCard">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="obehLight"></div>
+            <div class="shelly-label">Oběhové čerpadlo</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="obehOnBtn">ON</button>
+          </div>
+          <div class="manual-hold" id="obehHold"></div>
+          <canvas id="obehTimeline"></canvas>
+        </div>
+      </div>
+
       <div class="card pool-card lockable">
         <div class="lights-grid">
           <div class="light-cell">
@@ -2544,6 +2568,18 @@ const devices = {
     offBtn: els('lightBazenOffBtn', 'lightBazenOffBtn2'),
     label: 'Světlo bazén'
   },
+  // Jediné relé bez OFF: vypíná ho vlastní časovač v Shelly po 15 minutách.
+  // `offBtn` musí zůstat prázdné pole — obsluha kliků i setDeviceState pracují s poli.
+  obeh: {
+    statusUrl: '/api/obeh',
+    setUrl: '/api/obeh/set',
+    light: els('obehLight'),
+    state: els('obehState'),
+    onBtn: els('obehOnBtn'),
+    offBtn: [],
+    holdEl: document.getElementById('obehHold'),
+    label: 'Oběhové čerpadlo'
+  },
   lightNocni: {
     statusUrl: '/api/light/nocni',
     setUrl: '/api/light/nocni/set',
@@ -2576,6 +2612,13 @@ function renderManualHold() {
     } else if ((key === 'pool' || key === 'solinator') && saunaBlokujeUi()) {
       // Sauna přebíjí i ruční zapnutí — jistič je přednější
       device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;
+    } else if (key === 'obeh') {
+      // Oběhové čerpadlo žádná automatika neřídí, takže věta „automatika převezme"
+      // by lhala. Zajímavé je tu něco jiného: kdy ho shodí časovač v samotném relé.
+      const offBy = Number((d || {}).offBy) || 0;
+      device.holdEl.textContent = (d && d.isOn === true && offBy > now)
+        ? `Běží — samo se vypne v ${fmtSolTime(offBy)}`
+        : '';
     } else {
       device.holdEl.textContent = until > now
         ? `Ručně — automatika převezme v ${fmtSolTime(until)}`
@@ -3769,7 +3812,7 @@ function pruneTimelineLocal(tl) {
   const now = Date.now();
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|ac_)/.test(k)) continue;
     // Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, tak se drží 4 dny
     const cutoff = now - (k === 'wbPlugged' ? HIST_MAX_AGE_MS : 48 * 60 * 60 * 1000);
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
@@ -3854,7 +3897,7 @@ async function maybeRestoreTimelineToServer(serverTl, localTl) {
 // Vykreslí jeden graf časové osy: dva dny (Dnes/Včera), okno od startHour
 // v délce spanHours (base = 8:00–24:00, klimatizace = 0:00–24:00).
 function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
-  if (!canvas || !legendEl) return;
+  if (!canvas) return;
 
   const padL = 44, padR = 8, padB = 16, padT = 4;
   const laneH = 6, laneGap = 5;
@@ -3875,16 +3918,19 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  // Legenda (oddělovač skupin do ní nepatří — nemá barvu ani název)
-  legendEl.textContent = '';
-  for (const lane of lanes) {
-    if (lane.separator) continue;
-    const span = document.createElement('span');
-    const dot = document.createElement('i');
-    dot.style.background = lane.color;
-    span.appendChild(dot);
-    span.appendChild(document.createTextNode(lane.label));
-    legendEl.appendChild(span);
+  // Legenda (oddělovač skupin do ní nepatří — nemá barvu ani název). U jediné dráhy
+  // se `legendEl` nepředává: puntík s názvem by jen opakoval nadpis karty.
+  if (legendEl) {
+    legendEl.textContent = '';
+    for (const lane of lanes) {
+      if (lane.separator) continue;
+      const span = document.createElement('span');
+      const dot = document.createElement('i');
+      dot.style.background = lane.color;
+      span.appendChild(dot);
+      span.appendChild(document.createTextNode(lane.label));
+      legendEl.appendChild(span);
+    }
   }
 
   ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -3962,6 +4008,16 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
   });
 }
 
+// Oběhové čerpadlo má vlastní malý graf přímo v kartě na Ovládání: jedna dráha,
+// stejná osa jako na Přehledu (0:00–24:00, Dnes a Včera). Kreslí se z týchž
+// `timelineData`, takže se nic nepočítá ani neukládá dvakrát.
+const obehCanvas = document.getElementById('obehTimeline');
+const OBEH_LANE = { key: 'obeh', label: 'Oběhové čerpadlo', color: '#18a999' };
+
+function renderObehTimeline() {
+  drawTimeline(obehCanvas, null, [OBEH_LANE], 0, 24);
+}
+
 function renderTimeline() {
   // Jeden graf pro všechno (0:00–24:00). Klimatizace jsou pod spotřebiči,
   // oddělené vodorovnou čarou — obě skupiny mají stejnou časovou osu.
@@ -3972,6 +4028,7 @@ function renderTimeline() {
 }
 
 window.addEventListener('resize', renderTimeline);
+window.addEventListener('resize', renderObehTimeline);
 
 // ---------- Rolety (TaHoma) — bloky podle místností na dvou stránkách ----------
 
@@ -5164,7 +5221,8 @@ const RELAY_TIMER_DEVICES = [
   { key: 'lightDole', label: 'Zahrada dole' },
   { key: 'lightNahore', label: 'Zahrada nahoře' },
   { key: 'lightBazen', label: 'Světlo bazén' },
-  { key: 'lightNocni', label: 'Noční světla' }
+  { key: 'lightNocni', label: 'Noční světla' },
+  { key: 'obeh', label: 'Oběhové čerpadlo' }
 ];
 
 const relayTimerDeviceEl = document.getElementById('relayTimerDevice');
@@ -7372,6 +7430,7 @@ function applySnapshot(snap) {
     timelineData[k] = mergeTimelineSegs(serverTl[k] || [], localTl[k] || []);
   }
   bezpecne(renderTimeline);
+  bezpecne(renderObehTimeline);
   bezpecne(renderWallboxChart);   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
@@ -7486,6 +7545,7 @@ function connectStream() {
     }
     timelineData = merged;
     renderTimeline();
+    renderObehTimeline();
     renderWallboxChart();   // dráha „připojeno"
     saveTimelineLocal();
   });

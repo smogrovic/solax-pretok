@@ -1,7 +1,7 @@
 // Ověření: „běží to relé teď?" Odpojené relé cloud pořád obslouží a vrátí poslední
 // známý stav s čerstvým razítkem — brát to vážně znamenalo účtovat dobu běhu navěky.
 // Rozhoduje proto tvrdý časovač v relé: nejpozději 15 min po posledním úspěšném ON.
-const { between, suite } = require('./zdroj');
+const { LINES, between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('relé');
 
 const CODE = between('// ---------- Běží to relé teď? ----------', 'async function sendKeepalive()');
@@ -108,6 +108,32 @@ nadpis('5) Každé relé zvlášť');
   check('bazén ještě běží', h.api.releBezi('pool', T + MIN), true);
   check('solinátor už ne', h.api.releBezi('solinator', T + MIN), false);
   check('bojler bez povelu taky ne', h.api.releBezi('shelly', T + MIN), false);
+}
+
+nadpis('6) Oběhové čerpadlo');
+{
+  // Čerpadlo se spouští ručně a vypíná ho výhradně auto-off v samotném relé.
+  // Udržovací ON ten časovač natahuje od začátku — kdyby se sem čerpadlo dostalo,
+  // běželo by dál a dál a jediná pojistka, která funguje i bez sítě, by přestala platit.
+  const zdroj = LINES.join('\n');
+  const keepalive = (zdroj.match(/const KEEPALIVE_KEYS = \[([^\]]*)\]/) || [])[1] || '';
+  check('do udržovacího ON nepatří', /obeh/.test(keepalive), false);
+  check('  ale bazén, bojler a solinátor tam zůstávají',
+    ['pool', 'shelly', 'solinator'].every(k => keepalive.includes(k)), true);
+
+  check('relé je v seznamu zařízení', /obeh:\s*\{[^}]*apiPath: '\/api\/obeh'/.test(zdroj), true);
+  check('  a má český popisek', /obeh: 'Oběhové čerpadlo'/.test(zdroj), true);
+  check('  a vlastní dráhu v časové ose', /timeline: \{[^}]*obeh: \[\]/.test(zdroj), true);
+
+  // Doba běhu na Přehledu je o spotřebičích, které řídí automatika. Kdyby se sem
+  // čerpadlo přidalo, rozjelo by se i denní účtování a karta by ukazovala čtvrtý řádek.
+  const runtimeMs = (zdroj.match(/ms: \{ shelly: 0, pool: 0, solinator: 0 \}/g) || []).length;
+  check('do doby běhu se nepočítá', runtimeMs >= 1, true);
+  check('  a v runtime.ms není', /ms: \{[^}]*obeh/.test(zdroj), false);
+
+  // Telefon vrací serveru pruhy po deployi — bez klíče ve whitelistu by je zahodil
+  const validKey = (zdroj.match(/const validKey = k => \/\^\(([^)]*)\)/) || [])[1] || '';
+  check('obnova časové osy ho propustí', validKey.includes('obeh'), true);
 }
 
 konec();

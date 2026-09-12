@@ -33,6 +33,12 @@ const SOLINATOR_DEVICE_ID = process.env.SOLINATOR_DEVICE_ID || 'dcda0ce01f40';
 const POOL_SERVER_URI = process.env.POOL_SERVER_URI || SHELLY_SERVER_URI;
 const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_URI;
 
+// Oběhové čerpadlo (Shelly Plug S Gen3). Žádná automatika ho neřídí — spouští se ručně
+// z Ovládání nebo časovačem a vypíná ho VLASTNÍ auto-off v relé po 15 minutách. Proto
+// taky nesmí být v KEEPALIVE_KEYS: udržovací ON by ten časovač pořád natahoval.
+const OBEH_DEVICE_ID  = process.env.OBEH_DEVICE_ID  || '543204663bf4';
+const OBEH_SERVER_URI = process.env.OBEH_SERVER_URI || SHELLY_SERVER_URI;
+
 // Tři samostatné měřáky spotřeby bazénu (ne relé). Proměnná je seznam oddělený čárkami.
 const POOL_PM_IDS = (process.env.POOL_PM_IDS || '54320470d17c,5432046cb538,543204702434')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -98,7 +104,8 @@ const DEVICES = {
   lightDole:   { apiPath: '/api/light/zahradadole',   serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_ZAHRADA_DOLE_ID },
   lightNahore: { apiPath: '/api/light/zahradanahore', serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_ZAHRADA_NAHORE_ID },
   lightBazen:  { apiPath: '/api/light/bazen',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_BAZEN_ID },
-  lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID }
+  lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID },
+  obeh:        { apiPath: '/api/obeh',                serverUri: OBEH_SERVER_URI,      deviceId: OBEH_DEVICE_ID }
 };
 
 const shellyCache = new Map();
@@ -172,7 +179,8 @@ const DEVICE_LABELS = {
   lightDole: 'Zahrada dole',
   lightNahore: 'Zahrada nahoře',
   lightBazen: 'Světlo bazén',
-  lightNocni: 'Noční světla'
+  lightNocni: 'Noční světla',
+  obeh: 'Oběhové čerpadlo'
 };
 
 // Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
@@ -209,7 +217,7 @@ const state = {
     lastTs: Date.now()
   },
   // segmenty { from, to } za 48 h; wbPlugged = kdy bylo auto připojené (graf režimů)
-  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [] },
+  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [], obeh: [] },
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za poslední 4 dny
@@ -1079,6 +1087,15 @@ function updateRuntimes() {
     if (last && now - last.to <= TIMELINE_GAP_MS) last.to = now;
     else segs.push({ from: now, to: now });
   }
+  // Oběhové čerpadlo: jen pruh „kdy běželo" do karty na Ovládání. Do doby běhu
+  // (runtime.ms) schválně nepatří — ta je o spotřebičích, které řídí automatika.
+  if (releBezi('obeh')) {
+    if (!state.timeline.obeh) state.timeline.obeh = [];
+    const segs = state.timeline.obeh;
+    const last = segs[segs.length - 1];
+    if (last && now - last.to <= TIMELINE_GAP_MS) last.to = now;
+    else segs.push({ from: now, to: now });
+  }
   // Wallbox: aktivní kdykoli výkon > 0 (nepočítá se do doby běhu relé)
   const wbW = wallboxWatts() ?? 0;
   if (wbW > 0) {
@@ -1676,7 +1693,7 @@ app.post('/api/timeline/restore', (req, res) => {
   const now = Date.now();
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
-  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
