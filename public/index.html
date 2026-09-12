@@ -664,6 +664,13 @@
   }
   /* Osa „kdy běželo" uvnitř karty oběhového čerpadla. Výšku si drawTimeline dopočítá
      podle počtu drah (tady jedna), tohle je jen než se poprvé vykreslí. */
+  .obeh-plan{
+    font-size:11px;
+    color:var(--muted);
+    text-align:center;
+    margin-top:8px;
+  }
+  .obeh-plan:empty{display:none;}
   #obehTimeline{
     width:100%;
     height:70px;
@@ -1874,6 +1881,7 @@
             <button class="power-btn on-btn" id="obehOnBtn">ON</button>
           </div>
           <div class="manual-hold" id="obehHold"></div>
+          <div class="obeh-plan" id="obehPlan"></div>
           <canvas id="obehTimeline"></canvas>
         </div>
       </div>
@@ -4013,6 +4021,21 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
 // `timelineData`, takže se nic nepočítá ani neukládá dvakrát.
 const obehCanvas = document.getElementById('obehTimeline');
 const OBEH_LANE = { key: 'obeh', label: 'Oběhové čerpadlo', color: '#18a999' };
+
+// Rozvrh se vypisuje z TÝCHŽ časů, podle kterých server spíná (chodí ve snapshotu).
+// Ručně opsaný text by se dřív nebo později rozešel se skutečností.
+const obehPlanEl = document.getElementById('obehPlan');
+const obehCas = hhmm => String(hhmm).replace(/^0/, '');
+const obehOkna = okna => (okna || []).map(o => `${obehCas(o[0])}–${obehCas(o[1])}`).join(' a ');
+
+function renderObehPlan(rozvrh) {
+  if (!obehPlanEl) return;
+  const pracovni = obehOkna(rozvrh && rozvrh.pracovni);
+  const vikend = obehOkna(rozvrh && rozvrh.vikend);
+  obehPlanEl.textContent = (pracovni || vikend)
+    ? `Rozvrh: po–pá ${pracovni || 'nic'} · so, ne ${vikend || 'nic'}`
+    : '';
+}
 
 function renderObehTimeline() {
   drawTimeline(obehCanvas, null, [OBEH_LANE], 0, 24);
@@ -7431,6 +7454,7 @@ function applySnapshot(snap) {
   }
   bezpecne(renderTimeline);
   bezpecne(renderObehTimeline);
+  bezpecne(() => renderObehPlan(snap.obehRozvrh));
   bezpecne(renderWallboxChart);   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);

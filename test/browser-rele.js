@@ -92,6 +92,17 @@ setTimeout(() => {
   check('záloha v telefonu si pruhy nechá', (zalohovane.obeh || []).length, 1);
   check('  a cizí klíč pořád zahodí', (pruneTimelineLocal({ nesmysl: [] }).nesmysl || 'pryč'), 'pryč');
 
+  // Rozvrh se v kartě vypisuje z časů, podle kterých server opravdu spíná — ručně
+  // opsaný text by se dřív nebo později rozešel se skutečností.
+  renderObehPlan({ pracovni: [['06:15', '07:15'], ['18:45', '19:30']], vikend: [['18:30', '19:30']] });
+  const plan = document.getElementById('obehPlan').textContent;
+  check('karta ukazuje rozvrh', plan, 'Rozvrh: po–pá 6:15–7:15 a 18:45–19:30 · so, ne 18:30–19:30');
+  renderObehPlan({ pracovni: [['05:00', '05:30']], vikend: [] });
+  check('  a bere časy ze serveru, ne z natvrdo psaného textu',
+    /5:00–5:30/.test(document.getElementById('obehPlan').textContent), true);
+  renderObehPlan(null);
+  check('  bez dat řádek zmizí', document.getElementById('obehPlan').textContent, '');
+
   check('čerpadlo je v nabídce časovače',
     [...document.getElementById('relayTimerDevice').options].some(o => o.value === 'obeh'), true);
 

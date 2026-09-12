@@ -472,6 +472,9 @@ function snapshot() {
     saunaDays: state.saunaDays,
     months: state.months,
     timeline: state.timeline,
+    // Rozvrh čerpadla jde do appky odsud, ať se popisek v kartě nemůže rozejít
+    // se skutečnými časy
+    obehRozvrh: OBEH_ROZVRH,
     blindsEnabled: tahomaEnabled,
     blindTimers,
     relayTimers,
@@ -2312,6 +2315,96 @@ async function sendKeepalive() {
 setTimeout(() => { checkGarageOpen(); checkSources(); }, 60000);
 setInterval(() => { checkGarageOpen(); checkSources(); }, 5 * 60 * 1000);
 scheduleEvery(sendKeepalive, KEEPALIVE_MS, 90000);   // 90 s po startu, pak čtvrtina časovače v relé
+
+// ---------- Oběhové čerpadlo: rozvrh ----------
+// Čerpadlo jezdí v pevných oknech, pracovní dny a víkend zvlášť. Typ dne rozhoduje
+// jen kalendář — přepínač pracovní den/víkend od wallboxu se tu schválně nepoužívá,
+// ať je čerpadlo na autě nezávislé.
+//
+// HLAVNÍ PAST: relé má vlastní auto-off po 15 minutách, ale nejkratší okno je 45.
+// Jedno ON by tedy nestačilo a čerpadlo by se v 6:30 zavřelo samo. Uvnitř okna se
+// proto ON posílá dokola — každý další natáhne časovač v relé od začátku a nic
+// necvakne, protože relé už zapnuté je (totéž dělá sendKeepalive). Auto-off tím
+// zůstává pojistkou, která funguje i bez sítě: když spadne server nebo wifi,
+// čerpadlo se do čtvrt hodiny zavře.
+//
+// Do KEEPALIVE_KEYS ale čerpadlo nepatří ani teď: tam by se držel nažhavený
+// i RUČNÍ ON, který má naopak doběhnout na svých 15 minut. Udržovací ON se posílá
+// jen uvnitř okna a jen z rozvrhu.
+const OBEH_ROZVRH = {
+  pracovni: [['06:15', '07:15'], ['18:45', '19:30']],
+  vikend:   [['18:30', '19:30']]
+};
+// Vlastní tik po minutě. Automatika přebytků jede po pěti minutách a okraje jako
+// 6:15 by rozmazala až o pět minut. Tik je levný — Shelly se volá jen při změně
+// nebo po uplynutí klidové doby.
+const OBEH_TICK_MS = 60 * 1000;
+// Jak často se uvnitř okna připomíná ON. Čtvrtina časovače v relé, stejně jako
+// u ostatních relé — musí to zůstat výrazně pod RELAY_AUTO_OFF_MS.
+const OBEH_KEEPALIVE_MS = Math.round(RELAY_AUTO_OFF_MS / 4);
+
+const naMinuty = hhmm => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+function obehPracovniDen(at = Date.now()) {
+  const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(at);
+  return den !== 'Sat' && den !== 'Sun';
+}
+
+// Okno je zleva uzavřené, zprava otevřené: v 7:15 už neběží, takže „6:15–7:15"
+// je přesně hodina.
+function obehOknoNyni(at = Date.now()) {
+  const okna = OBEH_ROZVRH[obehPracovniDen(at) ? 'pracovni' : 'vikend'];
+  const p = pragueTime(at);
+  const ted = p.hour * 60 + p.minute;
+  for (const [od, do_] of okna) {
+    if (ted >= naMinuty(od) && ted < naMinuty(do_)) return `${od}–${do_}`;
+  }
+  return null;
+}
+
+let obehOkno = null;          // okno, ve kterém jsme byli minulý tik (kvůli hranám)
+let obehKeepaliveAt = 0;      // kdy naposledy odešlo připomenutí ON
+
+// Připomenutí ON jde NÍZKOU CESTOU, ne přes autoSet: logAutoSet počítá opakování
+// a po pár cyklech by začal hlásit „opakovaně" a plnil log. Stav relé se schválně
+// nepřepisuje — optimistické „online: true" by každou čtvrthodinu smazalo výpadek.
+async function obehPripomenON(now) {
+  if (now - obehKeepaliveAt < OBEH_KEEPALIVE_MS) return;
+  const dev = DEVICES.obeh;
+  if (!dev.serverUri || !dev.deviceId) return;
+  obehKeepaliveAt = now;
+  try {
+    await setShellyState(dev.serverUri, dev.deviceId, 'on');
+    noteCmd('obeh', 'on');
+  } catch {
+    // Nedostupnost hlásí checkSources; tady se mlčky zkusí příští tik
+  }
+}
+
+async function runObehSchedule(now = Date.now()) {
+  // Hlavní vypínač automatiky platí i tady. Okno se zapomene, takže po zapnutí
+  // automatiky uprostřed okna naskočí náběžná hrana a čerpadlo se rozjede.
+  if (!autoRunning()) {
+    obehOkno = null;
+    return;
+  }
+  const okno = obehOknoNyni(now);
+  if (okno && okno !== obehOkno) {
+    // Náběžná hrana. `force` je schválně: rozvrh je nastavení uživatele, ne
+    // konkurenční automatika, a ruční odklad by mu jinak okno sebral.
+    obehKeepaliveAt = now;
+    await autoSet('obeh', 'on', `rozvrh ${okno}`, { force: true });
+  } else if (okno) {
+    await obehPripomenON(now);
+  } else if (obehOkno) {
+    // Sestupná hrana. Kdo zmáčkl ON na konci okna, má dostat svých 15 minut —
+    // vypnutí o minutu později by bylo horší než nic.
+    if (!manualHeld('obeh')) await autoSet('obeh', 'off', `konec rozvrhu ${obehOkno}`, { force: true });
+  }
+  obehOkno = okno;
+}
+
+scheduleEvery(() => { runObehSchedule().catch(() => {}); }, OBEH_TICK_MS, 45000);
 
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
