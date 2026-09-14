@@ -14,13 +14,14 @@ const DEN = 86400000, H = 3600000, MIN = 60000;
 const CODE = between('// ---------- Kalendář z iCloudu (CalDAV) ----------',
                      '// ---------- Nuki zámek ----------');
 
-function build() {
+function build({ odpovedi = [] } = {}) {
   const state = { calendar: { days: [], fetchedAt: null, error: null } };
+  const dotazy = [];
   const api = new Function('state', 'app', 'requireAuth', 'addLog', 'broadcast',
     'scheduleEvery', 'pragueDateString', 'fetch', 'Buffer',
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
-         + ' calendarPayload, KAL_DNU };'
+         + ' calendarPayload, kalStahni, kalDotazTelo, KAL_DNU };'
   )(
     state,
     { get: () => {} },
@@ -29,10 +30,15 @@ function build() {
     () => {},
     () => {},
     at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(at === undefined ? new Date() : new Date(at)),
-    async () => { throw new Error('síť se v téhle sadě nepoužívá'); },
+    async (url, opts) => {
+      dotazy.push({ url: String(url), body: (opts && opts.body) || '' });
+      const o = odpovedi.shift();
+      if (!o) throw new Error('došly podstrčené odpovědi');
+      return { ok: o.ok !== false, status: o.status || 200, text: async () => o.body || '' };
+    },
     Buffer
   );
-  return { api, state };
+  return { api, state, dotazy };
 }
 
 const api = build().api;
@@ -200,7 +206,29 @@ nadpis('5) Skládání do dnů');
   check('nesmysl taky ne', api.kalUdalosti(['<html>404</html>'], OD, DO).length, 0);
 }
 
-nadpis('6) Bez přihlašovacích údajů');
+nadpis('6) Pojistka kolem „expand"');
+{
+  // `expand` prosí server, ať opakování rozvine sám. Podporovat ho ale nemusí a nemusí
+  // ho ani mlčky přejít — může odmítnout celý dotaz. Bez pojistky by jedna nepodporovaná
+  // značka shodila kalendář celý.
+  const ODPOVED = '<multistatus><response><calendar-data>BEGIN:VEVENT\r\nUID:z\r\n'
+    + 'SUMMARY:Test\r\nDTSTART:20260914T060000Z\r\nEND:VEVENT</calendar-data></response></multistatus>';
+  const h = build({ odpovedi: [{ ok: false, status: 403 }, { body: ODPOVED }] });
+  // Bez `.catch` by chybějící pojistka sadu shodila výjimkou místo čitelné hlášky
+  return h.api.kalStahni({ url: 'https://x/kal/', nazev: 'K' }, 0, 7 * DEN)
+    .catch(err => { check('odmítnutý expand se má zkusit znovu bez něj', err.message, 'nespadnout'); return []; })
+    .then(texty => {
+    check('odmítnutý expand shodí jen ten dotaz', h.dotazy.length, 2);
+    check('  první se ptal s expandem', /c:expand/.test((h.dotazy[0] || {}).body || ''), true);
+    check('  druhý bez něj', /c:expand/.test((h.dotazy[1] || {}).body || ''), false);
+    check('  a data nakonec dorazila', texty.length, 1);
+    check('  časové okno zůstalo v obou', /time-range/.test((h.dotazy[1] || {}).body || ''), true);
+    dalsi();
+  });
+}
+
+function dalsi() {
+nadpis('7) Bez přihlašovacích údajů');
 {
   const h = build();
   check('kalendář je vypnutý', h.api.calendarPayload().enabled, false);
@@ -209,3 +237,4 @@ nadpis('6) Bez přihlašovacích údajů');
 }
 
 konec();
+}

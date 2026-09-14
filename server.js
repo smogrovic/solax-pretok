@@ -6410,17 +6410,38 @@ function kalCasUTC(ms) {
   return new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
-// Dotaz na okno. `expand` prosí server, ať opakované události rozvine sám; když to
-// neumí, přijdou i tak s RRULE a rozvine je kalRozvin.
-async function kalStahni(kal, od, doKdy) {
-  const s = kalCasUTC(od), e = kalCasUTC(doKdy);
-  const body = `<?xml version="1.0" encoding="utf-8"?>`
+// Dotaz na okno. `expand` prosí server, ať opakované události rozvine sám.
+//
+// POZOR: CalDAV server ho podporovat NEMUSÍ a nemusí ho ani mlčky přejít — může celý
+// dotaz odmítnout. Proto se při chybě zkusí ještě jednou bez něj: to je dotaz, který
+// umí každý server, a opakování si pak rozvine kalRozvin sám. Bez téhle pojistky by
+// jedna nepodporovaná značka shodila celý kalendář a na kartě by svítila jen chyba.
+function kalDotazTelo(s, e, sExpandem) {
+  return `<?xml version="1.0" encoding="utf-8"?>`
     + `<c:calendar-query xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><prop>`
-    + `<c:calendar-data><c:expand start="${s}" end="${e}"/></c:calendar-data></prop>`
-    + `<c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">`
+    + (sExpandem
+      ? `<c:calendar-data><c:expand start="${s}" end="${e}"/></c:calendar-data>`
+      : `<c:calendar-data/>`)
+    + `</prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">`
     + `<c:time-range start="${s}" end="${e}"/>`
     + `</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`;
-  const xml = await caldav(kal.url, { method: 'REPORT', depth: 1, body });
+}
+
+let kalBezExpandu = false;    // jakmile se ukáže, že to server neumí, už se o to neprosí
+
+async function kalStahni(kal, od, doKdy) {
+  const s = kalCasUTC(od), e = kalCasUTC(doKdy);
+  let xml;
+  if (!kalBezExpandu) {
+    try {
+      xml = await caldav(kal.url, { method: 'REPORT', depth: 1, body: kalDotazTelo(s, e, true) });
+    } catch {
+      kalBezExpandu = true;
+    }
+  }
+  if (xml === undefined) {
+    xml = await caldav(kal.url, { method: 'REPORT', depth: 1, body: kalDotazTelo(s, e, false) });
+  }
   return xmlTagy(xml, 'calendar-data').map(xmlText);
 }
 
@@ -6650,9 +6671,11 @@ async function pollKalendar() {
   try {
     const od = kalZacatek();
     const doKdy = od + KAL_DNU * 86400000;
+    kalKrok = 'hledání kalendářů';
     const kalendare = await kalObjev();
     const vse = [];
     for (const kal of kalendare) {
+      kalKrok = `stahování kalendáře „${kal.nazev}"`;
       const texty = await kalStahni(kal, od, doKdy);
       vse.push(...kalUdalosti(texty, od, doKdy, kal));
     }
@@ -6660,7 +6683,7 @@ async function pollKalendar() {
   } catch (err) {
     // Adresy kalendářů mohly zastarat (nový shard) — příště se objeví znovu
     kalKalendare = null;
-    state.calendar = { ...state.calendar, error: err.message };
+    state.calendar = { ...state.calendar, error: `${kalKrok}: ${err.message}` };
     if (!kalChybaZalogovana) {
       kalChybaZalogovana = true;
       addLog(`Kalendář: ${err.message}`, 'error');
@@ -6672,6 +6695,7 @@ async function pollKalendar() {
   broadcast('calendar', { calendar: calendarPayload() });
 }
 let kalChybaZalogovana = false;
+let kalKrok = 'hledání kalendářů';   // do hlášky, ať je vidět, kde to uvázlo
 
 function calendarPayload() {
   return { ...state.calendar, enabled: calendarEnabled, dnu: KAL_DNU };
