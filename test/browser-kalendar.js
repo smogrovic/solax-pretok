@@ -77,7 +77,7 @@ setTimeout(() => {
 
   R.push('\\n3) Denní pohled: sloupec = kalendář');
   check('na širokém displeji je vidět denní pohled',
-    getComputedStyle(document.getElementById('kalDenPohled')).display, 'block');
+    getComputedStyle(document.getElementById('kalDenPohled')).display, 'flex');
   check('  a seznam dnů ustoupí', getComputedStyle(document.getElementById('kalDny')).display, 'none');
 
   const KAL = [
@@ -104,16 +104,25 @@ setTimeout(() => {
   const sloupce = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
   check('každý kalendář má svůj sloupec', sloupce.length, 5);
   check('osa jde od půlnoci do půlnoci',
-    [...document.querySelectorAll('#kalMrizka .kal-hod')].map(h => h.textContent).slice(0, 2).join(','), '00:00,02:00');
-  check('  a končí o půlnoci', [...document.querySelectorAll('#kalMrizka .kal-hod')].pop().textContent, '24:00');
+    [...document.querySelectorAll('#kalMrizka .kal-hod')].map(h => h.textContent).slice(0, 3).join(','), '00:00,01:00,02:00');
+  check('  a je jich čtyřiadvacet', document.querySelectorAll('#kalMrizka .kal-hod').length, 24);
+  check('  a poslední je 23:00', [...document.querySelectorAll('#kalMrizka .kal-hod')].pop().textContent, '23:00');
 
   // Událost sedí na svém čase: 6:00 je čtvrtina dne od půlnoci
   const bloky = [...sloupce[1].querySelectorAll('.kal-blok')];
   check('let je ve sloupci Lukáš', bloky.length, 2);
-  const vyska = parseFloat(getComputedStyle(sloupce[1]).height);
   const let6 = bloky.find(b => /Let Praha/.test(b.textContent));
-  check('  a začíná v šest ráno', Math.round(parseFloat(let6.style.top) / vyska * 24), 6);
-  check('  s délkou osmi hodin', Math.round(parseFloat(let6.style.height) / vyska * 24), 8);
+  // Umisťuje se v PROCENTECH dne, takže celý den je vidět naráz a nikam se neroluje
+  check('  a začíná v šest ráno', Math.round(parseFloat(let6.style.top) / 100 * 24), 6);
+  check('  s délkou osmi hodin', Math.round(parseFloat(let6.style.height.match(/([\\d.]+)%/)[1]) / 100 * 24), 8);
+  // Panel je na zdi — celý den musí být vidět naráz, nikam se neroluje
+  const mr = document.getElementById('kalMrizka');
+  check('celý den se vejde bez rolování', mr.scrollHeight <= mr.clientHeight + 1, true);
+  check('  a osa vyplní zbylou výšku', document.querySelector('.kal-osa').clientHeight > 400, true);
+  // Vzhled podle předlohy: světlá výplň a barevný proužek vlevo, ne plocha syté barvy.
+  // Na pěti sloupcích vedle sebe je sytá plocha nečitelná.
+  check('blok má světlou výplň', /^rgba\\(/.test(let6.style.background), true);
+  check('  a text v barvě kalendáře', let6.style.color, 'rgb(139, 139, 139)');
   // Překryv se nesmí schovat jeden za druhý — na zdi by to vypadalo prázdně
   check('překrývající se události jdou vedle sebe', /50%/.test(let6.style.width), true);
   check('celodenní má vlastní pruh nad osou',
