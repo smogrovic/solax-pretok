@@ -3053,11 +3053,17 @@ async function enforcePoolOffWindow(now, prague, weather) {
   poolAuto.underCount = 0;
 }
 
-// Zima: bazén i solinátor spí. Vypíná se běžným autoSet (bez `force`), takže půlhodinový
-// odklad po ručním zásahu platí i tady — filtraci si na chvíli pustíš, když zazimováváš.
+// Zima: bazén, solinátor i světlo u bazénu spí. Vypíná se běžným autoSet (bez `force`),
+// takže půlhodinový odklad po ručním zásahu platí i tady — filtraci si na chvíli pustíš,
+// když zazimováváš.
+//
+// Světlo je v seznamu kvůli zakrytému bazénu: pod plachtou nemá co svítit. Zhasne se
+// i to, co někdo zapnul MIMO appku (Shelly aplikace, vypínač) — o tom appka žádný
+// odklad neví, takže na nejbližším cyklu automatiky zhasne. Kdo ho zapne z Ovládání,
+// má svých třicet minut a teprve pak zhasne taky.
 async function enforceWinterOff() {
   if (!isWinter()) return;
-  for (const key of ['pool', 'solinator']) {
+  for (const key of ['pool', 'solinator', 'lightBazen']) {
     // Bazén puštěný natvrdo tlačítkem +24 h běží i v zimě; solinátor spí dál
     if (key === 'pool' && poolForceActive()) continue;
     const dev = state.devices[key];
