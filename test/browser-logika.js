@@ -28,12 +28,14 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const li = [...page.querySelectorAll('.logic-list li')];
 
   OUT.push('\\n1) Obsah a délka');
-  check('sekcí je dvanáct', sekce.length, 12);
+  // Třináctá sekce je oběhové čerpadlo. Rozpočet se zvedl vědomě — stránka se dřív
+  // rozrostla do nečitelna, tak ať se to nestane znovu potichu.
+  check('sekcí je třináct', sekce.length, 13);
   for (const s of ['Obecné', 'Zima', 'Bazén (filtrace)', 'Sauna', 'Bojler 1 (TČ)', 'Wallbox',
                    'Ruční zásah vs. automatika', 'Priorita auta', 'Korekce podle předpovědi',
-                   'Data, notifikace, časovače'])
+                   'Data, notifikace, časovače', 'Oběhové čerpadlo'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
-  check('odrážek je nejvýš 56', li.length <= 56, 'true');   // po zeštíhlení jich je 54
+  check('odrážek je nejvýš 58', li.length <= 58, 'true');   // po zeštíhlení jich bylo 54
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);

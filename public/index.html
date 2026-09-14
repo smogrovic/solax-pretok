@@ -664,13 +664,6 @@
   }
   /* Osa „kdy běželo" uvnitř karty oběhového čerpadla. Výšku si drawTimeline dopočítá
      podle počtu drah (tady jedna), tohle je jen než se poprvé vykreslí. */
-  .obeh-plan{
-    font-size:11px;
-    color:var(--muted);
-    text-align:center;
-    margin-top:8px;
-  }
-  .obeh-plan:empty{display:none;}
   #obehTimeline{
     width:100%;
     height:70px;
@@ -1881,7 +1874,6 @@
             <button class="power-btn on-btn" id="obehOnBtn">ON</button>
           </div>
           <div class="manual-hold" id="obehHold"></div>
-          <div class="obeh-plan" id="obehPlan"></div>
           <canvas id="obehTimeline"></canvas>
         </div>
       </div>
@@ -2100,12 +2092,6 @@
         </div>
       </div>
       <div class="card stats-card">
-        <div class="graph-title">Spotřeba okruhu bazénu</div>
-        <div class="device-power" id="poolTotalPower"></div>
-        <div class="wbsrc-note">Celý okruh dohromady — čerpadlo i solinátor. Měřeno třemi Shelly měřáky, není to spotřeba samotného solinátoru.</div>
-      </div>
-
-      <div class="card stats-card">
         <div class="graph-title">Odkud bazén bral (7 dní)</div>
         <div class="wbsrc-list" id="poolSrcList"></div>
         <div class="wbsrc-note">Ze sítě se nejdřív započítá auto, pak bazén a nakonec zbytek domu — všechny tři karty dohromady dají celý odběr ze sítě.</div>
@@ -2224,24 +2210,22 @@
         <div class="graph-title">Dnes</div>
         <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
         <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
-        <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojler">–</span></div>
-        <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazen">–</span></div>
-        <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinator">–</span></div>
         <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
+        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolToday">– kWh</span></div>
         <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Today">– kWh</span></div>
         <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Today">– kWh</span></div>
+        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaToday">– kWh</span></div>
       </div>
 
       <div class="card stats-card">
         <div class="graph-title">Včera</div>
         <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
         <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
-        <div class="stat-row"><span>Bojler běžel</span><span class="stat-val" id="statRunBojlerYest">–</span></div>
-        <div class="stat-row"><span>Bazén běžel</span><span class="stat-val" id="statRunBazenYest">–</span></div>
-        <div class="stat-row"><span>Solinátor běžel</span><span class="stat-val" id="statRunSolinatorYest">–</span></div>
         <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
+        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolYest">– kWh</span></div>
         <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Yest">– kWh</span></div>
         <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Yest">– kWh</span></div>
+        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaYest">– kWh</span></div>
       </div>
 
       <div class="card stats-card">
@@ -2330,6 +2314,14 @@
             <div class="sauna-set-hint" id="saunaSaveHint">Práh ve skriptu uvnitř Shelly je vlastní — ten se mění zvlášť.</div>
           </div>
 
+        </div>
+
+        <div class="logic-sec">
+          <div class="logic-h">Oběhové čerpadlo</div>
+          <ul class="logic-list">
+            <li id="obehPlan">Rozvrh se načítá…</li>
+            <li>Relé se <b>samo vypne po 15 min</b>. Ruční <b>ON</b> jede vždycky a doběhne na ně.</li>
+          </ul>
         </div>
 
         <div class="logic-sec">
@@ -2433,7 +2425,6 @@ const houseEl = document.getElementById('houseValue');
 const batteryEl = document.getElementById('batteryValue');
 const batPowerEl = document.getElementById('batPowerValue');
 const batPowerLabel = document.getElementById('batPowerLabel');
-const poolTotalPowerEl = document.getElementById('poolTotalPower');
 const poolValueEl = document.getElementById('poolValue');
 const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
@@ -2720,17 +2711,20 @@ Object.values(devices).forEach(device => {
 
 // `at` = kdy se součet měřáků naposledy povedl. Zmrzlé číslo nepředstíráme — když
 // měřáky mlčí, jsou tam pomlčky (a ten odběr se na serveru započítá do spotřeby domu).
+let poolOkruhPowerW = null;    // poslední čerstvý součet měřáků, pro kartu čerpadla
+function poolOkruhW() {
+  return typeof poolOkruhPowerW === 'number' ? Math.round(poolOkruhPowerW) + ' W' : null;
+}
 function renderPoolPower(totalPowerW, at) {
   const zname = typeof totalPowerW === 'number'
     && !!at && Date.now() - new Date(at).getTime() <= DEVICE_STALE_MS;
-  poolTotalPowerEl.textContent = zname
-    ? 'Bazén: ' + Math.round(totalPowerW) + ' W'
-    : (typeof totalPowerW === 'number' ? 'Bazén: –' : '');
+  poolOkruhPowerW = zname ? totalPowerW : null;
   if (poolValueEl) {
     poolValueEl.textContent = zname
       ? (totalPowerW / 1000).toFixed(1).replace('.', ',') + ' kW'
       : '– kW';
   }
+  renderHeatpump();   // odběr okruhu se kreslí v kartě čerpadla
 }
 
 // ---------- Graf přetoku za 24 h ----------
@@ -3294,16 +3288,14 @@ setInterval(() => { if (logEntries.some(e => e.open)) renderLog(); }, 60000);
 const weatherInfoEl = document.getElementById('weatherInfo');
 const statFeedinTodayEl = document.getElementById('statFeedinToday');
 const statImportTodayEl = document.getElementById('statImportToday');
-const statRunBojlerEl = document.getElementById('statRunBojler');
-const statRunBazenEl = document.getElementById('statRunBazen');
-const statRunSolinatorEl = document.getElementById('statRunSolinator');
+const statPoolTodayEl = document.getElementById('statPoolToday');
+const statSaunaTodayEl = document.getElementById('statSaunaToday');
 const statB1TodayEl = document.getElementById('statB1Today');
 const statB2TodayEl = document.getElementById('statB2Today');
 const statFeedinYestEl = document.getElementById('statFeedinYest');
 const statImportYestEl = document.getElementById('statImportYest');
-const statRunBojlerYestEl = document.getElementById('statRunBojlerYest');
-const statRunBazenYestEl = document.getElementById('statRunBazenYest');
-const statRunSolinatorYestEl = document.getElementById('statRunSolinatorYest');
+const statPoolYestEl = document.getElementById('statPoolYest');
+const statSaunaYestEl = document.getElementById('statSaunaYest');
 const wbYestEl = document.getElementById('wbYest');
 const statB1YestEl = document.getElementById('statB1Yest');
 const statB2YestEl = document.getElementById('statB2Yest');
@@ -3330,14 +3322,25 @@ function renderWeather(w) {
   weatherInfoEl.textContent = parts.join(' · ');
 }
 
-function formatRuntime(ms) {
-  if (typeof ms !== 'number') return '–';
-  const h = Math.floor(ms / 3600000);
-  const m = Math.round((ms % 3600000) / 60000);
-  return h > 0 ? h + ' h ' + m + ' min' : m + ' min';
-}
 
 function fmtWhKwh(wh) { return typeof wh === 'number' ? (wh / 1000).toFixed(1).replace('.', ',') + ' kWh' : '– kWh'; }
+
+// Klíč dne jako na serveru ('YYYY-MM-DD'), `posun` dní zpátky
+function denKlic(posun = 0) {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);          // poledne, ať letní čas nepřehodí datum
+  d.setDate(d.getDate() - posun);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Součet Wh z denní řady. Bazén má rozpad na síť a FVE, sauna jedno číslo —
+// obojí se sečte na celkovou spotřebu za ten den.
+function denKwh(dny, posun) {
+  const r = (dny || []).find(x => x && x.d === denKlic(posun));
+  if (!r) return '– kWh';
+  const wh = (Number(r.wh) || 0) + (Number(r.grid) || 0) + (Number(r.pv) || 0);
+  return fmtWhKwh(wh);
+}
 
 function renderStats() {
   const midnight = new Date();
@@ -3345,15 +3348,13 @@ function renderStats() {
   const pts = history.filter(p => p.t >= midnight.getTime());
   statFeedinTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, p.kw))) : '–';
   statImportTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw))) : '–';
-  if (runtimeData && runtimeData.ms) {
-    statRunBojlerEl.textContent = formatRuntime(runtimeData.ms.shelly);
-    statRunBazenEl.textContent = formatRuntime(runtimeData.ms.pool);
-    statRunSolinatorEl.textContent = formatRuntime(runtimeData.ms.solinator);
-  }
   // Dnešní energie bojlerů (z denní akumulace na serveru)
   const wh = runtimeData && runtimeData.wh;
   if (statB1TodayEl) statB1TodayEl.textContent = wh ? fmtWhKwh(wh.b1) : '– kWh';
   if (statB2TodayEl) statB2TodayEl.textContent = wh ? fmtWhKwh(wh.b2) : '– kWh';
+  // Bazén a sauna mají vlastní denní řady (poolDays = síť + FVE, saunaDays = Wh)
+  if (statPoolTodayEl) statPoolTodayEl.textContent = denKwh(poolDaysData, 0);
+  if (statSaunaTodayEl) statSaunaTodayEl.textContent = denKwh(saunaDaysData, 0);
   renderYesterday();
   renderSolinator(); // rozpočet solinátoru se počítá z téže doby běhu
 }
@@ -3363,15 +3364,16 @@ function renderYesterday() {
   const y = runtimeData && runtimeData.yesterday;
   const w = (y && y.wh) || {};
   const m = (y && y.ms) || {};
-  const set = (el, v) => { if (el) el.textContent = y ? v : (el.id && el.id.startsWith('statRun') ? '–' : '– kWh'); };
+  const set = (el, v) => { if (el) el.textContent = y ? v : '– kWh'; };
   set(statFeedinYestEl, fmtWhKwh(w.feed));
   set(statImportYestEl, fmtWhKwh(w.import));
-  set(statRunBojlerYestEl, formatRuntime(m.shelly));
-  set(statRunBazenYestEl, formatRuntime(m.pool));
-  set(statRunSolinatorYestEl, formatRuntime(m.solinator));
   set(wbYestEl, fmtWhKwh(w.wb));
   set(statB1YestEl, fmtWhKwh(w.b1));
   set(statB2YestEl, fmtWhKwh(w.b2));
+  // Bazén a sauna nejdou z včerejšího snapshotu, ale ze svých denních řad — ty
+  // přežijí i deploy, protože se zálohují a vrací z telefonu
+  if (statPoolYestEl) statPoolYestEl.textContent = denKwh(poolDaysData, 1);
+  if (statSaunaYestEl) statSaunaYestEl.textContent = denKwh(saunaDaysData, 1);
 }
 
 // Hlavní přepínač má tři polohy; index jezdce ↔ režim na serveru
@@ -4033,8 +4035,8 @@ function renderObehPlan(rozvrh) {
   const pracovni = obehOkna(rozvrh && rozvrh.pracovni);
   const vikend = obehOkna(rozvrh && rozvrh.vikend);
   obehPlanEl.textContent = (pracovni || vikend)
-    ? `Rozvrh: po–pá ${pracovni || 'nic'} · so, ne ${vikend || 'nic'}`
-    : '';
+    ? `Jezdí po–pá ${pracovni || 'nic'}, o víkendu ${vikend || 'nic'}.`
+    : 'Rozvrh se načítá…';
 }
 
 function renderObehTimeline() {
@@ -6147,6 +6149,9 @@ function renderHeatpump() {
   };
   kus('cíl ', hpStupne(d.targetC));
   kus('výkon ', typeof d.vykonPct === 'number' ? Math.round(d.vykonPct) + ' %' : null);
+  // Odběr celého okruhu (čerpadlo i solinátor, tři měřáky) — ne příkon tepelného
+  // čerpadla, to je řádek vedle
+  kus('okruh ', poolOkruhW());
   kus('na výstupu ', hpStupne(d.outC));
   kus('příkon ', typeof d.powerW === 'number' ? Math.round(d.powerW) + ' W' : null);
   if (d.fault) kus('chyba ', String(d.fault));
@@ -7642,6 +7647,7 @@ function connectStream() {
   es.addEventListener('poolDays', e => {
     poolDaysData = mergeWbDays(JSON.parse(e.data).poolDays || [], poolDaysData);
     renderPoolSrc();
+    renderStats();          // „Bazén celkem" na Přehledu jede z téže řady
     savePoolDaysLocal();
   });
   es.addEventListener('usageDays', e => {
@@ -7679,6 +7685,7 @@ function connectStream() {
   es.addEventListener('saunaDays', e => {
     saunaDaysData = mergeSaunaDays(JSON.parse(e.data).saunaDays || [], saunaDaysData);
     renderSaunaDays();
+    renderStats();          // a „Sauna" na Přehledu taky
     saveSaunaDaysLocal();
   });
   es.addEventListener('store', e => {

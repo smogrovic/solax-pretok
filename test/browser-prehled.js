@@ -1,4 +1,6 @@
-// Karta „Odhad vs. skutečnost" na Přehledu: bez přepínače a schválně podle RANNÍHO
+// Přehled: boxy „Dnes" a „Včera" a karta „Odhad vs. skutečnost".
+//
+// Ta druhá je schválně podle RANNÍHO
 // odhadu. Večerní je poslední hodnota dne, do večera se stáhne ke skutečnosti —
 // kdyby se počítalo z něj, graf by vždycky vypadal skvěle a neřekl nic.
 const fs = require('fs');
@@ -44,6 +46,35 @@ setTimeout(() => {
 
   const legenda = Array.from(document.querySelectorAll('#pvLegend span')).map(s => s.textContent);
   check('legenda říká, že je ranní', legenda.join(','), 'Ranní odhad (Infigy),Skutečnost (Solax)');
+
+  // ---- Boxy Dnes a Včera ----
+  // Doba běhu odsud zmizela: u bazénu i bojleru zajímá, kolik to sežralo, ne jak
+  // dlouho to jelo. Kdyby se řádky vrátily, box zase naroste na devět položek.
+  const dnesBox = document.getElementById('statPoolToday').closest('.stats-card');
+  const popisky = [...dnesBox.querySelectorAll('.stat-row > span:first-child')].map(e => e.textContent);
+  check('box Dnes nemluví o době běhu', popisky.some(p => /běžel/.test(p)), false);
+  check('  a má sedm řádků', popisky.length, 7);
+  check('  ve správném pořadí', popisky.join(' | '),
+    'Přetok do sítě | Odběr ze sítě | Wallbox celkem | Bazén celkem | Bojler 1 | Bojler 2 | Sauna');
+
+  const dnes = new Date();
+  const den = o => {
+    const d = new Date(dnes); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - o);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  // Bazén se sčítá ze SÍTĚ i z FVE — je to celková spotřeba, ne jen to, co došlo odjinud
+  poolDaysData = [{ d: den(0), grid: 3000, pv: 9000 }, { d: den(1), grid: 1000, pv: 1000 }];
+  saunaDaysData = [{ d: den(0), wh: 8000, ms: 7200000 }];
+  runtimeData = { date: den(0), ms: {}, wh: { feed: 1000, import: 2000, wb: 4000, b1: 10, b2: 20 },
+                  yesterday: { ms: {}, wh: { feed: 1, import: 2, wb: 3, b1: 4, b2: 5 } } };
+  renderStats();
+  check('bazén se sečte ze sítě i z FVE', document.getElementById('statPoolToday').textContent, '12,0 kWh');
+  check('  a včerejšek jde z téže řady', document.getElementById('statPoolYest').textContent, '2,0 kWh');
+  check('sauna se ukáže', document.getElementById('statSaunaToday').textContent, '8,0 kWh');
+  check('  a bez záznamu je pomlčka', document.getElementById('statSaunaYest').textContent, '– kWh');
+  poolDaysData = [];
+  renderStats();
+  check('bez dat bazénu taky pomlčka', document.getElementById('statPoolToday').textContent, '– kWh');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

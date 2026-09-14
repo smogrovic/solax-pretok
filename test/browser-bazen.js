@@ -114,14 +114,19 @@ setTimeout(() => {
   const karty = [...document.querySelector('.slide[data-title="Bazén"] .page')
     .querySelectorAll(':scope > .card')].filter(c => !c.classList.contains('lock-panel'));
   check('teplota je úplně první karta', karty[0].id, 'heatpumpCard');
-  // Spotřeba visela pod solinátorem a vypadala jako jeho — přitom je to celý okruh
-  const solBlok = document.getElementById('solinatorHold').closest('.device-block');
-  check('spotřeba už není v bloku solinátoru', solBlok.contains(document.getElementById('poolTotalPower')), 'false');
-  const spotrebaKarta = document.getElementById('poolTotalPower').closest('.card');
-  check('má vlastní kartu', spotrebaKarta.querySelector('.graph-title').textContent, 'Spotřeba okruhu bazénu');
-  check('  a je v ní řečeno, že to není jen solinátor', /není to spotřeba samotného solinátoru/.test(spotrebaKarta.textContent), 'true');
-  check('  karta je až pod světlem',
-    karty.indexOf(spotrebaKarta) > karty.findIndex(c => c.contains(document.getElementById('lightBazenLight2'))), 'true');
+  // Spotřeba celého okruhu měla vlastní kartu s dlouhým vysvětlením. Teď je to jeden
+  // údaj v řádku pod teplotou — vedle výkonu čerpadla, kam patří.
+  check('samostatná karta spotřeby je pryč', !!document.getElementById('poolTotalPower'), 'false');
+  ukaz(zaklad({ powerW: 1480, vykonPct: 61 }));
+  renderPoolPower(230, new Date().toISOString());
+  check('odběr okruhu je v kartě čerpadla', /okruh 230 W/.test(hpMeta.textContent), 'true');
+  check('  hned vedle výkonu čerpadla', /výkon 61 % · okruh 230 W/.test(hpMeta.textContent), 'true');
+  // Příkon čerpadla je něco jiného než odběr celého okruhu — nesmí se slít v jedno
+  check('  a příkon čerpadla zůstává zvlášť', /příkon 1480 W/.test(hpMeta.textContent), 'true');
+  renderPoolPower(230, new Date(T - 60 * MIN).toISOString());
+  check('zestárlé měření se nevypisuje', /okruh/.test(hpMeta.textContent), 'false');
+  renderPoolPower(null, null);
+  check('  ani mlčící měřáky', /okruh/.test(hpMeta.textContent), 'false');
 
   R.push('\\n6) Odkud bazén bral');
   poolDaysData = [{ d: new Date(T).toISOString().slice(0, 10), grid: 3000, pv: 9000 }];
