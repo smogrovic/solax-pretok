@@ -76,6 +76,59 @@
     /* Svislá čára mezi sloupci, ať je poznat, kde jedna stránka končí */
     .slide + .slide{box-shadow:inset 1px 0 0 rgba(44,62,80,0.08);}
   }
+  /* Kalendář: na telefonu dny pod sebou, na iPadu sedm sloupců vedle sebe.
+     Panel překrývá celý pás stránek, takže není třetinový jako ostatní stránky. */
+  .kal-panel{
+    flex:1;
+    overflow-y:auto;
+    padding:
+      12px
+      max(16px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+  .kal-panel[hidden]{display:none;}
+  .kal-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:10px;
+  }
+  .kal-title{font-size:17px;font-weight:700;color:var(--grey-text);}
+  .kal-meta{font-size:11px;color:var(--muted);text-align:right;}
+  .kal-dny{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+  .kal-den{
+    background:var(--card);
+    border-radius:18px;
+    padding:12px 14px;
+    box-shadow:0 1px 3px rgba(44,62,80,0.06);
+  }
+  .kal-den.dnes{box-shadow:0 0 0 2px var(--orange);}
+  .kal-den-h{
+    font-size:13px;
+    font-weight:700;
+    color:var(--grey-text);
+    margin-bottom:8px;
+  }
+  .kal-den.dnes .kal-den-h{color:var(--orange);}
+  .kal-udalost{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px;}
+  .kal-cas{
+    color:var(--muted);
+    font-size:11px;
+    font-variant-numeric:tabular-nums;
+    min-width:38px;
+  }
+  .kal-nazev{color:var(--grey-text);flex:1;min-width:0;}
+  .kal-celodenni .kal-nazev{font-weight:600;}
+  .kal-misto{color:var(--muted);font-size:11px;}
+  .kal-nic{color:var(--muted);font-size:12px;}
+  @media (min-width: 700px)  { .kal-dny{grid-template-columns:repeat(4, 1fr);} }
+  @media (min-width: 1000px) { .kal-dny{grid-template-columns:repeat(7, 1fr);} }
   .page{
     width:100%;
     max-width:340px;
@@ -2471,6 +2524,15 @@
 
 </div>
 
+<!-- Kalendář stojí MIMO pás stránek: na iPadu má být přes celou obrazovku, ne
+     jako třetinový sloupec. Přepíná se vlastní záložkou v liště. -->
+<div class="kal-panel" id="kalPanel" hidden>
+  <div class="kal-head">
+    <div class="kal-title">Kalendář</div>
+    <div class="kal-meta" id="kalMeta"></div>
+  </div>
+  <div class="kal-dny" id="kalDny"></div>
+</div>
 
 <script>
 const fveEl = document.getElementById('fveValue');
@@ -7445,6 +7507,7 @@ function applySnapshot(snap) {
   if (snap.assistantEnabled === false) hideAssistantSlide();
   bezpecne(() => renderAssistantLog(snap.assistantLog || []));
   bezpecne(() => renderSceny(snap.sceny));
+  bezpecne(() => renderKalendar(snap.calendar));
   bezpecne(() => renderAway(snap));
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   bezpecne(renderTempAuto);
@@ -7692,6 +7755,9 @@ function connectStream() {
   });
   es.addEventListener('away', e => {
     renderAway(JSON.parse(e.data));
+  });
+  es.addEventListener('calendar', e => {
+    renderKalendar(JSON.parse(e.data).calendar);
   });
   es.addEventListener('runtime', e => {
     // Server po deployi začíná od nuly — nikdy nepřepisujeme nižší hodnotou, bereme vyšší
@@ -8093,10 +8159,96 @@ function updateDots() {
   const tabs = pageTabsEl.querySelectorAll('.page-tab');
   // Když je vidět víc stránek, svítí víc záložek — jinak by lišta ukazovala jednu
   // a zbylé dvě by vypadaly jako zavřené
-  tabs.forEach((t, i) => t.classList.toggle('active', i >= prvni && i < prvni + kolik));
+  // Záložka kalendáře do tohohle počítání nepatří — není to stránka v pásu
+  const stranky = [...tabs].filter(t => !t.classList.contains('page-tab-kal'));
+  const kalOtevreny = !!(kalPanelEl && !kalPanelEl.hidden);
+  stranky.forEach((t, i) => t.classList.toggle('active', !kalOtevreny && i >= prvni && i < prvni + kolik));
   // Aktivní záložku vždy doroluj do viditelné části lišty
-  const active = tabs[prvni];
-  if (active) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  const active = stranky[prvni];
+  if (active && !kalOtevreny) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+}
+
+// ---------- Kalendář ----------
+// Panel stojí mimo pás stránek a přepíná se vlastní záložkou. Na iPadu tak zabere
+// celou obrazovku, kdežto ostatní stránky jsou třetinové.
+const kalPanelEl = document.getElementById('kalPanel');
+const kalDnyEl = document.getElementById('kalDny');
+const kalMetaEl = document.getElementById('kalMeta');
+let kalData = null;
+const KAL_DNY_CZ = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota'];
+
+function kalNadpisDne(d, i) {
+  const [y, m, den] = String(d.d || '').split('-').map(Number);
+  if (!y) return '?';
+  const datum = `${den}. ${m}.`;
+  if (i === 0) return `Dnes ${datum}`;
+  if (i === 1) return `Zítra ${datum}`;
+  return `${KAL_DNY_CZ[new Date(y, m - 1, den).getDay()]} ${datum}`;
+}
+
+function kalCas(u) {
+  if (u.celodenni) return 'celý den';
+  const d = new Date(u.od);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function renderKalendar(data) {
+  if (data) kalData = data;
+  if (!kalDnyEl) return;
+  const d = kalData || {};
+  kalDnyEl.textContent = '';
+  if (kalMetaEl) {
+    kalMetaEl.textContent = !d.enabled
+      ? 'Zatím nenastavený — chybí Apple ID a heslo pro aplikaci na serveru.'
+      : d.error ? d.error
+      : d.fetchedAt ? 'Načteno v ' + fmtSolTime(new Date(d.fetchedAt).getTime())
+      : 'Čeká se na první stažení z iCloudu.';
+  }
+  for (const [i, den] of (d.days || []).entries()) {
+    const box = document.createElement('div');
+    box.className = 'kal-den' + (i === 0 ? ' dnes' : '');
+    const h = document.createElement('div');
+    h.className = 'kal-den-h';
+    h.textContent = kalNadpisDne(den, i);
+    box.appendChild(h);
+    if (!den.udalosti || !den.udalosti.length) {
+      const nic = document.createElement('div');
+      nic.className = 'kal-nic';
+      nic.textContent = 'nic';
+      box.appendChild(nic);
+    }
+    for (const u of (den.udalosti || [])) {
+      const row = document.createElement('div');
+      row.className = 'kal-udalost' + (u.celodenni ? ' kal-celodenni' : '');
+      const cas = document.createElement('span');
+      cas.className = 'kal-cas';
+      cas.textContent = kalCas(u);
+      if (u.barva) cas.style.color = u.barva;
+      const nazev = document.createElement('span');
+      nazev.className = 'kal-nazev';
+      nazev.textContent = u.nazev;
+      if (u.misto) {
+        const misto = document.createElement('span');
+        misto.className = 'kal-misto';
+        misto.textContent = ' · ' + u.misto;
+        nazev.appendChild(misto);
+      }
+      row.appendChild(cas);
+      row.appendChild(nazev);
+      box.appendChild(row);
+    }
+    kalDnyEl.appendChild(box);
+  }
+}
+
+function kalOtevri(otevrit) {
+  if (!kalPanelEl) return;
+  kalPanelEl.hidden = !otevrit;
+  sliderWrap.style.display = otevrit ? 'none' : '';
+  const zalozka = pageTabsEl && pageTabsEl.querySelector('.page-tab-kal');
+  if (zalozka) zalozka.classList.toggle('active', otevrit);
+  if (otevrit) renderKalendar();
+  else updateDots();
 }
 
 function rebuildDots() {
@@ -8108,10 +8260,19 @@ function rebuildDots() {
     tab.className = 'page-tab';
     tab.textContent = slide.dataset.title || `Stránka ${i + 1}`;
     tab.addEventListener('click', () => {
+      kalOtevri(false);
       sliderWrap.scrollTo({ left: i * sirkaStranky(), behavior: 'smooth' });
     });
     pageTabsEl.appendChild(tab);
   });
+  // Kalendář není stránka v pásu — má vlastní záložku, která přepne celou obrazovku
+  if (kalPanelEl) {
+    const kal = document.createElement('button');
+    kal.className = 'page-tab page-tab-kal';
+    kal.textContent = 'Kalendář';
+    kal.addEventListener('click', () => kalOtevri(kalPanelEl.hidden));
+    pageTabsEl.appendChild(kal);
+  }
   updateDots();
 }
 

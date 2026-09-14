@@ -20,11 +20,15 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   await wait(150);
 
   OUT.push('\\n1) Pořadí stránek');
-  const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab')).map(t => t.textContent);
+  // Kalendář se do téhle dvojice nepočítá — není to stránka v pásu, má vlastní
+  // záložku a přepíná celou obrazovku (viz browser-kalendar)
+  const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')).map(t => t.textContent);
   check('záložky jdou v zadaném pořadí', tabs.join(' · '),
     'Asistent · FVE · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Přehled · Log · Logika automatiky');
   const slides = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
+  check('  a kalendář je až za nimi',
+    Array.from(document.querySelectorAll('#pageTabs .page-tab')).pop().textContent, 'Kalendář');
 
   // Pořadí panelů v grafu FVE hlídá test/browser-fve.js (má tam blíž k ostatním
   // kontrolám grafu), tady zůstává jen to, že wallbox v tom grafu vůbec je

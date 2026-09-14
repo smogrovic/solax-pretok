@@ -33,8 +33,11 @@ setTimeout(() => {
     // 3) stránky a záložky drží pohromadě
     const stranky = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
     if (!stranky.includes('Sauna')) CHYBY.push('chybí stránka Sauna');
-    const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab')).map(t => t.textContent);
+    // Kalendář má vlastní záložku, ale stránkou v pásu není — přepíná celou obrazovku
+    const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')).map(t => t.textContent);
     if (tabs.length !== stranky.length) CHYBY.push('záložek (' + tabs.length + ') a stránek (' + stranky.length + ') není stejně');
+    if (!document.querySelector('#pageTabs .page-tab-kal')) CHYBY.push('chybí záložka Kalendář');
+    if (!document.getElementById('kalPanel')) CHYBY.push('chybí panel kalendáře');
   } catch (e) { CHYBY.push('výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
   const pre = document.createElement('pre');
   pre.id = 'VYSLEDEK';

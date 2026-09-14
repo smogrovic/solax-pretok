@@ -203,6 +203,8 @@ const state = {
   // „Nejsme doma": `since` = kdy se to zapnulo. Zamyká se až po AWAY_DELAY_MS,
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
+  // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
+  calendar: { days: [], fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -500,6 +502,7 @@ function snapshot() {
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
     sceny: SCENY,
+    calendar: calendarPayload(),
     ...awayPayload(),
     store: storePayload(),
     nukiEnabled,
@@ -6293,6 +6296,406 @@ if (tuyaEnabled) {
   // Vlastní služba, se Shelly ani HUUM (offset 70 s) nemá nic společného
   scheduleEvery(pollHeatpump, POLL_INTERVAL_MS, 95000);
 }
+
+// ---------- Kalendář z iCloudu (CalDAV) ----------
+// Sedm dní dopředu, jen ke čtení. Apple žádné veřejné API nemá, takže se jede přes
+// CalDAV: Basic auth s Apple ID a HESLEM PRO APLIKACI (běžné heslo neprojde).
+//
+// Tři pasti, kvůli kterým to napoprvé nechodí:
+//  1) hlavička Depth je povinná a iCloud bez ní odpoví chybou,
+//  2) jmenné prefixy v odpovědi nejsou zaručené (`d:`, `D:`, `A:`, někdy žádný),
+//     takže se z XML tahá nezávisle na nich,
+//  3) `calendar-home-set` vrací ABSOLUTNÍ adresu na správný shard (pNN-caldav) —
+//     jde se po ní, ne po přesměrování z caldav.icloud.com.
+//
+// Data se schválně nikam nezálohují: pravda je v iCloudu a po restartu se stáhnou
+// znovu. Je to jediná řada v celé appce, která zálohu nepotřebuje.
+const ICLOUD_ID = process.env.ICLOUD_APPLE_ID || '';
+const ICLOUD_PASS = process.env.ICLOUD_APP_PASSWORD || '';
+const ICLOUD_URL = (process.env.ICLOUD_CALDAV_URL || 'https://caldav.icloud.com').replace(/\/+$/, '');
+// Nepovinné omezení na konkrétní kalendáře (názvy oddělené čárkou). Prázdné = všechny.
+const ICLOUD_ONLY = (process.env.ICLOUD_CALENDARS || '').split(',').map(s => s.trim()).filter(Boolean);
+const calendarEnabled = !!(ICLOUD_ID && ICLOUD_PASS);
+const KAL_DNU = 7;
+const KAL_POLL_MS = 15 * 60 * 1000;
+
+// ---- XML bez parseru ----
+// Odpovědi CalDAVu jsou předvídatelné, ale prefix jmenného prostoru ne. Proto se
+// hledá jen podle lokálního jména značky.
+function xmlTagy(xml, jmeno) {
+  const re = new RegExp(`<(?:[A-Za-z0-9_.-]+:)?${jmeno}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[A-Za-z0-9_.-]+:)?${jmeno}>`, 'gi');
+  return [...String(xml || '').matchAll(re)].map(m => m[1]);
+}
+function xmlTag(xml, jmeno) {
+  const v = xmlTagy(xml, jmeno);
+  return v.length ? v[0] : null;
+}
+function xmlText(xml) {
+  return String(xml || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .trim();
+}
+// `<C:comp name="VEVENT"/>` — tady nejde o obsah značky, ale o atribut
+function maVevent(xml) {
+  return /<[^>]*\bcomp\b[^>]*name\s*=\s*"VEVENT"/i.test(String(xml || ''));
+}
+// Odpověď vrací cesty; server je potřeba doplnit z adresy, na kterou se ptalo
+function absUrl(base, href) {
+  const h = xmlText(href);
+  if (!h) return null;
+  if (/^https?:\/\//i.test(h)) return h;
+  const m = String(base).match(/^(https?:\/\/[^/]+)/i);
+  return m ? m[1] + (h.startsWith('/') ? h : '/' + h) : null;
+}
+
+async function caldav(url, { method, depth = 0, body = null }) {
+  const auth = Buffer.from(`${ICLOUD_ID}:${ICLOUD_PASS}`).toString('base64');
+  const r = await fetch(url, {
+    method,
+    headers: {
+      Authorization: 'Basic ' + auth,
+      'Content-Type': 'application/xml; charset=utf-8',
+      Depth: String(depth),
+      'User-Agent': 'solax-pretok'
+    },
+    body,
+    signal: AbortSignal.timeout(20000)
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    // 401 znamená skoro vždycky obyčejné heslo místo hesla pro aplikaci
+    throw new Error(r.status === 401
+      ? 'iCloud odmítl přihlášení (je to heslo pro aplikaci?)'
+      : `CalDAV HTTP ${r.status}`);
+  }
+  return text;
+}
+
+const PROP = (vnitrek) =>
+  `<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><prop>${vnitrek}</prop></propfind>`;
+
+// Objevovací řetěz. Výsledek se drží v paměti — adresy se nemění, takže běžný cyklus
+// je pak jediný REPORT na kalendář.
+let kalKalendare = null;
+async function kalObjev() {
+  if (kalKalendare) return kalKalendare;
+  const koren = await caldav(ICLOUD_URL + '/', { method: 'PROPFIND', depth: 0, body: PROP('<current-user-principal/>') });
+  const principal = absUrl(ICLOUD_URL, xmlTag(xmlTag(koren, 'current-user-principal'), 'href'));
+  if (!principal) throw new Error('iCloud nevrátil principal (účet bez kalendáře?)');
+
+  const dom = await caldav(principal, { method: 'PROPFIND', depth: 0, body: PROP('<c:calendar-home-set/>') });
+  const home = absUrl(principal, xmlTag(xmlTag(dom, 'calendar-home-set'), 'href'));
+  if (!home) throw new Error('iCloud nevrátil domovskou složku kalendářů');
+
+  const seznam = await caldav(home, {
+    method: 'PROPFIND', depth: 1,
+    body: PROP('<displayname/><resourcetype/><c:supported-calendar-component-set/><calendar-color xmlns="http://apple.com/ns/ical/"/>')
+  });
+  const out = [];
+  for (const resp of xmlTagy(seznam, 'response')) {
+    if (!maVevent(resp)) continue;                    // adresář ani připomínky nechceme
+    const url = absUrl(home, xmlTag(resp, 'href'));
+    const nazev = xmlText(xmlTag(resp, 'displayname')) || 'Kalendář';
+    if (!url) continue;
+    if (ICLOUD_ONLY.length && !ICLOUD_ONLY.some(j => j.toLowerCase() === nazev.toLowerCase())) continue;
+    out.push({ url, nazev, barva: xmlText(xmlTag(resp, 'calendar-color')) || null });
+  }
+  if (!out.length) throw new Error('Nenašel jsem žádný kalendář s událostmi');
+  kalKalendare = out;
+  return out;
+}
+
+function kalCasUTC(ms) {
+  return new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+// Dotaz na okno. `expand` prosí server, ať opakované události rozvine sám; když to
+// neumí, přijdou i tak s RRULE a rozvine je kalRozvin.
+async function kalStahni(kal, od, doKdy) {
+  const s = kalCasUTC(od), e = kalCasUTC(doKdy);
+  const body = `<?xml version="1.0" encoding="utf-8"?>`
+    + `<c:calendar-query xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><prop>`
+    + `<c:calendar-data><c:expand start="${s}" end="${e}"/></c:calendar-data></prop>`
+    + `<c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">`
+    + `<c:time-range start="${s}" end="${e}"/>`
+    + `</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`;
+  const xml = await caldav(kal.url, { method: 'REPORT', depth: 1, body });
+  return xmlTagy(xml, 'calendar-data').map(xmlText);
+}
+
+// ---- Čtení ICS ----
+// PRVNÍ krok musí být rozbalení řádků: ICS láme dlouhé hodnoty a pokračování začíná
+// mezerou nebo tabulátorem. Bez toho se dlouhé názvy událostí rozsypou.
+function icsRozbal(text) {
+  return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '');
+}
+
+function icsOdescapuj(v) {
+  return String(v || '').replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\;/g, ';').replace(/\\\\/g, '\\');
+}
+
+// Jeden řádek „NÁZEV;PARAM=hodnota:obsah" → { jmeno, param, hodnota }
+function icsRadek(radek) {
+  const i = radek.indexOf(':');
+  if (i < 0) return null;
+  const hlava = radek.slice(0, i);
+  const hodnota = radek.slice(i + 1);
+  const casti = hlava.split(';');
+  const param = {};
+  for (const p of casti.slice(1)) {
+    const j = p.indexOf('=');
+    if (j > 0) param[p.slice(0, j).toUpperCase()] = p.slice(j + 1).replace(/^"|"$/g, '');
+  }
+  return { jmeno: casti[0].toUpperCase(), param, hodnota };
+}
+
+// Rozebere VEVENT bloky. Opakovaná pole (EXDATE) se sbírají do seznamu.
+function icsUdalosti(text) {
+  const radky = icsRozbal(text).split('\n');
+  const out = [];
+  let ev = null;
+  for (const r of radky) {
+    if (r === 'BEGIN:VEVENT') { ev = { exdate: [] }; continue; }
+    if (r === 'END:VEVENT') { if (ev) out.push(ev); ev = null; continue; }
+    if (!ev) continue;
+    const p = icsRadek(r);
+    if (!p) continue;
+    if (p.jmeno === 'EXDATE') ev.exdate.push(p);
+    else ev[p.jmeno] = p;
+  }
+  return out;
+}
+
+// Wall-clock v pojmenované zóně → timestamp. Dvouprůchodově kvůli přechodu na letní
+// čas: posun zóny se v ten okamžik sám mění, takže první odhad se musí opravit.
+function zonaPosunMs(ms, tz) {
+  const f = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  const c = {};
+  for (const p of f.formatToParts(new Date(ms))) if (p.type !== 'literal') c[p.type] = Number(p.value);
+  return Date.UTC(c.year, c.month - 1, c.day, c.hour % 24, c.minute, c.second) - ms;
+}
+function zonaNaMs(y, mo, d, h, mi, tz) {
+  const odhad = Date.UTC(y, mo - 1, d, h, mi);
+  const prvni = odhad - zonaPosunMs(odhad, tz);
+  return odhad - zonaPosunMs(prvni, tz);
+}
+
+// DTSTART chodí ve třech tvarech: celodenní (VALUE=DATE), UTC (končí Z) a místní
+// čas v zóně (TZID). Bez TZID a bez Z je to „plovoucí" čas — bereme ho jako pražský.
+function icsCas(pole) {
+  if (!pole || !pole.hodnota) return null;
+  const v = String(pole.hodnota).trim();
+  const den = v.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (den || (pole.param && pole.param.VALUE === 'DATE')) {
+    const m = den || v.match(/^(\d{4})(\d{2})(\d{2})/);
+    if (!m) return null;
+    return { ms: zonaNaMs(+m[1], +m[2], +m[3], 0, 0, 'Europe/Prague'), celodenni: true };
+  }
+  const m = v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+  if (!m) return null;
+  if (m[7]) return { ms: Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]), celodenni: false };
+  const tz = (pole.param && pole.param.TZID) || 'Europe/Prague';
+  let ms;
+  try { ms = zonaNaMs(+m[1], +m[2], +m[3], +m[4], +m[5], tz); }
+  catch { ms = zonaNaMs(+m[1], +m[2], +m[3], +m[4], +m[5], 'Europe/Prague'); }
+  return { ms, celodenni: false };
+}
+
+const RRULE_DNY = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+function rruleRozbor(hodnota) {
+  const out = {};
+  for (const kus of String(hodnota || '').split(';')) {
+    const i = kus.indexOf('=');
+    if (i > 0) out[kus.slice(0, i).toUpperCase()] = kus.slice(i + 1);
+  }
+  return out;
+}
+
+// Rozvine opakování do okna. Protože je okno jen týden, nerozvíjí se od DTSTART
+// donekonečna — hledají se výskyty uvnitř okna a strop kroků je pojistka proti
+// nesmyslnému pravidlu.
+function kalRozvin(zacatek, trvani, rrule, od, doKdy) {
+  const r = rruleRozbor(rrule);
+  const freq = String(r.FREQ || '').toUpperCase();
+  if (!freq) return [zacatek];
+  const krok = Math.max(1, Number(r.INTERVAL) || 1);
+  const count = Number(r.COUNT) || 0;
+  const until = r.UNTIL ? (icsCas({ hodnota: r.UNTIL, param: {} }) || {}).ms : null;
+  const dny = String(r.BYDAY || '').split(',').map(d => RRULE_DNY[d.slice(-2).toUpperCase()])
+    .filter(d => d !== undefined);
+
+  const out = [];
+  let t = zacatek, n = 0;
+  const posun = ms => {
+    const d = new Date(ms);
+    if (freq === 'DAILY') d.setUTCDate(d.getUTCDate() + krok);
+    else if (freq === 'WEEKLY') d.setUTCDate(d.getUTCDate() + 7 * krok);
+    else if (freq === 'MONTHLY') d.setUTCMonth(d.getUTCMonth() + krok);
+    else if (freq === 'YEARLY') d.setUTCFullYear(d.getUTCFullYear() + krok);
+    else return null;
+    return d.getTime();
+  };
+  for (let i = 0; i < 2000; i++) {
+    if (until !== null && t > until) break;
+    if (count && n >= count) break;
+    if (t + trvani > od && t < doKdy) {
+      // BYDAY u týdenního pravidla: v každém týdnu může být víc dnů
+      if (freq === 'WEEKLY' && dny.length) {
+        const zaklad = new Date(t);
+        for (const dw of dny) {
+          const posunDnu = (dw - zaklad.getUTCDay() + 7) % 7;
+          const kdy = t + posunDnu * 86400000;
+          if (kdy + trvani > od && kdy < doKdy) out.push(kdy);
+        }
+      } else {
+        out.push(t);
+      }
+    }
+    n++;
+    const dalsi = posun(t);
+    if (dalsi === null || dalsi <= t) break;
+    t = dalsi;
+    if (t >= doKdy + 7 * 86400000) break;
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+// Z ICS textů udělá seznam výskytů v okně. `RECURRENCE-ID` je přepsaný jednotlivý
+// výskyt — ten vyhrává nad tím, co by vyšlo z pravidla.
+function kalUdalosti(texty, od, doKdy, kal = {}) {
+  const vysledek = [];
+  const prepsane = new Set();
+  const vse = [];
+  for (const t of texty) for (const ev of icsUdalosti(t)) vse.push(ev);
+
+  for (const ev of vse) {
+    if (ev['RECURRENCE-ID']) {
+      const c = icsCas(ev['RECURRENCE-ID']);
+      const uid = ev.UID ? ev.UID.hodnota : '';
+      if (c) prepsane.add(`${uid}|${c.ms}`);
+    }
+  }
+  for (const ev of vse) {
+    if (ev.STATUS && /CANCELLED/i.test(ev.STATUS.hodnota)) continue;
+    const zac = icsCas(ev.DTSTART);
+    if (!zac) continue;
+    const kon = icsCas(ev.DTEND);
+    const trvani = kon && kon.ms > zac.ms ? kon.ms - zac.ms : (zac.celodenni ? 86400000 : 3600000);
+    const uid = ev.UID ? ev.UID.hodnota : '';
+    const vyskyty = ev.RRULE && !ev['RECURRENCE-ID']
+      ? kalRozvin(zac.ms, trvani, ev.RRULE.hodnota, od, doKdy)
+      : [zac.ms];
+    // Vynechané termíny (EXDATE) i ručně přesunuté výskyty se z pravidla škrtnou
+    const ex = new Set();
+    for (const e of (ev.exdate || [])) {
+      for (const kus of String(e.hodnota).split(',')) {
+        const c = icsCas({ hodnota: kus.trim(), param: e.param });
+        if (c) ex.add(c.ms);
+      }
+    }
+    for (const ms of vyskyty) {
+      if (ex.has(ms)) continue;
+      if (!ev['RECURRENCE-ID'] && prepsane.has(`${uid}|${ms}`)) continue;
+      if (ms + trvani <= od || ms >= doKdy) continue;
+      vysledek.push({
+        uid, od: ms, do: ms + trvani,
+        celodenni: zac.celodenni,
+        nazev: icsOdescapuj(ev.SUMMARY ? ev.SUMMARY.hodnota : '') || '(bez názvu)',
+        misto: icsOdescapuj(ev.LOCATION ? ev.LOCATION.hodnota : '') || null,
+        kalendar: kal.nazev || null,
+        barva: kal.barva || null
+      });
+    }
+  }
+  return vysledek;
+}
+
+// Poskládá výskyty do sedmi dnů. Vícedenní událost se objeví v každém dni, kterého
+// se dotkne — jinak by týdenní dovolená byla vidět jen v den odjezdu.
+function kalDoDnu(udalosti, od) {
+  const dny = [];
+  for (let i = 0; i < KAL_DNU; i++) {
+    const zac = od + i * 86400000;
+    dny.push({ d: pragueDateString(zac), od: zac, udalosti: [] });
+  }
+  for (const u of udalosti) {
+    for (const den of dny) {
+      const konecDne = den.od + 86400000;
+      if (u.od < konecDne && u.do > den.od) den.udalosti.push(u);
+    }
+  }
+  for (const den of dny) {
+    den.udalosti.sort((a, b) => (a.celodenni === b.celodenni ? a.od - b.od : (a.celodenni ? -1 : 1)));
+    den.udalosti = den.udalosti.slice(0, 40);
+  }
+  return dny;
+}
+
+// Půlnoc dnešního dne v Praze — okno začíná tam, ne „před sedmi dny od teď"
+function kalZacatek(at = Date.now()) {
+  const d = pragueDateString(at).split('-').map(Number);
+  return zonaNaMs(d[0], d[1], d[2], 0, 0, 'Europe/Prague');
+}
+
+let kalPollRunning = false;
+async function pollKalendar() {
+  if (!calendarEnabled || kalPollRunning) return;
+  kalPollRunning = true;
+  try {
+    const od = kalZacatek();
+    const doKdy = od + KAL_DNU * 86400000;
+    const kalendare = await kalObjev();
+    const vse = [];
+    for (const kal of kalendare) {
+      const texty = await kalStahni(kal, od, doKdy);
+      vse.push(...kalUdalosti(texty, od, doKdy, kal));
+    }
+    state.calendar = { days: kalDoDnu(vse, od), fetchedAt: new Date().toISOString(), error: null };
+  } catch (err) {
+    // Adresy kalendářů mohly zastarat (nový shard) — příště se objeví znovu
+    kalKalendare = null;
+    state.calendar = { ...state.calendar, error: err.message };
+    if (!kalChybaZalogovana) {
+      kalChybaZalogovana = true;
+      addLog(`Kalendář: ${err.message}`, 'error');
+    }
+  } finally {
+    kalPollRunning = false;
+  }
+  if (!state.calendar.error) kalChybaZalogovana = false;
+  broadcast('calendar', { calendar: calendarPayload() });
+}
+let kalChybaZalogovana = false;
+
+function calendarPayload() {
+  return { ...state.calendar, enabled: calendarEnabled, dnu: KAL_DNU };
+}
+
+// Syrové odpovědi z iCloudu. Bez přihlašovacích údajů se napojení odsud otestovat
+// nedá, takže tohle je po nasazení jediná cesta, jak zjistit, co Apple vrací.
+app.get('/api/calendar/raw', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!calendarEnabled) return res.status(503).json({ error: 'Kalendář není nastavený.' });
+  const out = {};
+  try {
+    out.korenPropfind = await caldav(ICLOUD_URL + '/', { method: 'PROPFIND', depth: 0, body: PROP('<current-user-principal/>') });
+    kalKalendare = null;
+    out.kalendare = await kalObjev();
+    const od = kalZacatek();
+    out.prvniKalendar = (await kalStahni(out.kalendare[0], od, od + KAL_DNU * 86400000)).slice(0, 3);
+  } catch (err) {
+    out.chyba = err.message;
+  }
+  res.json(out);
+});
+
+if (calendarEnabled) scheduleEvery(() => { pollKalendar().catch(() => {}); }, KAL_POLL_MS, 30000);
 
 // ---------- Nuki zámek ----------
 // Tajné údaje jen z env — nikdy v kódu/repu.

@@ -41,8 +41,10 @@ setTimeout(() => {
   check('vidět jsou tři', viditelnychStranek(), 3);
 
   R.push('\\n3) Lišta záložek');
-  const tabs = [...document.querySelectorAll('#pageTabs .page-tab')];
+  const tabs = [...document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')];
   check('záložek je tolik co stránek', tabs.length, slides.length);
+  // Kalendář je záložka navíc: není to stránka v pásu, přepíná celou obrazovku
+  check('kalendář má vlastní záložku', !!document.querySelector('.page-tab-kal'), true);
   wrap.scrollLeft = 0;
   updateDots();
   // Kdyby svítila jen jedna, zbylé dvě viditelné stránky by vypadaly jako zavřené
