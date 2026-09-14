@@ -6675,7 +6675,10 @@ function kalUdalosti(texty, od, doKdy, kal = {}) {
         nazev: icsOdescapuj(ev.SUMMARY ? ev.SUMMARY.hodnota : '') || '(bez názvu)',
         misto: icsOdescapuj(ev.LOCATION ? ev.LOCATION.hodnota : '') || null,
         kalendar: kal.nazev || null,
-        barva: kal.barva || null
+        barva: kal.barva || null,
+        // Odkud událost je. Služby z DutyLogu jedou v Lukášově sloupci, ale appka
+        // je kreslí jinou barvou — bez tohohle by se od jeho vlastních nedaly poznat.
+        zdroj: kal.zdroj || null
       });
     }
   }
@@ -6720,7 +6723,9 @@ async function kalStahniDuty(od, doKdy, kal) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const text = await r.text();
     dutyChyba = null;
-    return kalUdalosti([text], od, doKdy, kal);
+    // Značka jde odsud, ne z volajícího: v Lukášově sloupci jedou dva zdroje vedle
+    // sebe a appka potřebuje vědět, který je který, aby létání nakreslila modře.
+    return kalUdalosti([text], od, doKdy, { ...kal, zdroj: 'duty' });
   } catch (err) {
     dutyChyba = err.message;
     return [];

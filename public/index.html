@@ -269,7 +269,12 @@
     border-left:3px solid currentColor;
   }
   .kal-blok b{font-weight:600;display:block;font-size:10px;}
-  .kal-blok-cas{opacity:0.75;font-size:9px;}
+  /* Hodinová událost je na dvě řádky moc nízká — z času by koukala půlka písmen.
+     Takové bloky mají název i čas vedle sebe na jedné řádce. */
+  .kal-blok-uzky{display:flex;gap:4px;align-items:baseline;white-space:nowrap;}
+  .kal-blok-uzky b{display:inline;}
+  /* Čas se NEZTLUMUJE: ztmavení barvy mu dalo kontrast a opacita by ho zase sebrala */
+  .kal-blok-cas{font-size:9px;}
   .page{
     width:100%;
     max-width:340px;
@@ -8356,10 +8361,50 @@ const kalDenNazevEl = document.getElementById('kalDenNazev');
 const kalPct = ms => (ms / 86400000) * 100;
 let kalDenIndex = 0;            // který z došlých dnů se ukazuje (0 = dnes)
 
-// Barva kalendáře z iCloudu, s náhradou pro ty, co žádnou nemají
+// Barvy sloupců podle toho, jak kalendáře vypadají v Kalendáři na telefonu — ať se
+// při pohledu na zeď pozná Elenčina událost stejně rychle jako tam. Barva z iCloudu
+// je až záloha: u sdílených kalendářů ji vrací podle toho, kdo je sdílí, takže se
+// s tím, co je vidět na telefonu, často míjí.
+const KAL_BARVY = {
+  'family': '#e8a800',
+  'miki': '#34a853',
+  'elenka': '#ef5fb8',
+  'zuzka': '#e5453a',
+  'lukáš': '#8e8e93',
+  'lukas': '#8e8e93',
+  'flying': '#2f7dd8'
+};
+// Létání chodí z odebíraného kalendáře za odkazem a slévá se do Lukášova sloupce.
+// Modrá je jediné, co ho tam od jeho vlastních událostí odliší.
+const KAL_BARVA_DUTY = '#2f7dd8';
 const KAL_NAHRADNI = ['#3b82c4', '#e5534b', '#7a9e2f', '#7d5fd6', '#e8a13a', '#18a999'];
 function kalBarva(kal, i) {
-  return (kal && kal.barva) || KAL_NAHRADNI[i % KAL_NAHRADNI.length];
+  const jmeno = String((kal && kal.nazev) || '').trim().toLowerCase();
+  return KAL_BARVY[jmeno] || (kal && kal.barva) || KAL_NAHRADNI[i % KAL_NAHRADNI.length];
+}
+// Barva jedné události. Většinou je to barva sloupce, jen služby mají svoji.
+function kalBarvaU(u, kal, i) {
+  if (u && u.zdroj === 'duty') return KAL_BARVA_DUTY;
+  return kalBarva(kal || { nazev: u && u.kalendar, barva: u && u.barva }, i || 0);
+}
+
+// Karta je bílá, takže syté barvy z telefonu na písmo nestačí — žlutá ani světle
+// šedá se na bílé nepřečte. Text se proto ztmavuje, dokud nemá kontrast 4,5:1;
+// proužek a výplň zůstávají v původní barvě, aby blok vypadal jako v kalendáři.
+// `alfa` je průhlednost té výplně: měřit kontrast proti bílé by lhalo, text sedí
+// na tom světlém podkladu, ne na kartě.
+function kalCitelna(hex, alfa) {
+  const m = String(hex || '').match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return '#2c3e50';
+  const n = parseInt(m[1], 16);
+  let slozky = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const a = alfa || 0;
+  const pozadi = slozky.map(v => v * a + 255 * (1 - a));
+  const kanal = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const jas = c => 0.2126 * kanal(c[0]) + 0.7152 * kanal(c[1]) + 0.0722 * kanal(c[2]);
+  const kontrast = () => (jas(pozadi) + 0.05) / (jas(slozky) + 0.05);
+  for (let i = 0; i < 24 && kontrast() < 4.5; i++) slozky = slozky.map(v => v * 0.88);
+  return '#' + slozky.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
 }
 
 // Blok má světlou výplň a barevný proužek vlevo (jako v kalendáři na Macu), ne plnou
@@ -8430,7 +8475,7 @@ function renderKalDen() {
   kalendare.forEach((k, i) => {
     const h = div('kal-hlava');
     h.textContent = k.nazev;
-    h.style.color = kalBarva(k, i);
+    h.style.color = kalCitelna(kalBarva(k, i));
   });
 
   // 2. řádek: celodenní události
@@ -8442,8 +8487,9 @@ function renderKalDen() {
       if (!u.celodenni || u.kalendar !== k.nazev) continue;
       const chip = div('kal-cely-chip', box);
       chip.textContent = u.nazev;
-      chip.style.background = kalSvetle(kalBarva(k, i), 0.18);
-      chip.style.color = kalBarva(k, i);
+      const cb = kalBarvaU(u, k, i);
+      chip.style.background = kalSvetle(cb, 0.18);
+      chip.style.color = kalCitelna(cb, 0.18);
     }
   });
 
@@ -8470,8 +8516,10 @@ function renderKalDen() {
       b.style.height = `max(14px, calc(${kalPct(doKdy - od)}% - 2px))`;
       b.style.left = `calc(${(u._pruh / u._pruhu) * 100}% + 2px)`;
       b.style.width = `calc(${100 / u._pruhu}% - 4px)`;
-      b.style.color = kalBarva(k, i);
-      b.style.background = kalSvetle(kalBarva(k, i), 0.14);
+      const barva = kalBarvaU(u, k, i);
+      b.style.color = kalCitelna(barva, 0.14);
+      b.style.borderLeftColor = barva;
+      b.style.background = kalSvetle(barva, 0.14);
       const jm = document.createElement('b');
       jm.textContent = u.nazev;
       b.appendChild(jm);
@@ -8479,6 +8527,8 @@ function renderKalDen() {
       cas.className = 'kal-blok-cas';
       cas.textContent = kalCas(u) + (u.misto ? ' · ' + u.misto : '');
       b.appendChild(cas);
+      // Krátká událost nemá výšku na dvě řádky — čas jde vedle názvu, ne pod něj
+      if (doKdy - od < 90 * 60000) b.classList.add('kal-blok-uzky');
     }
     // Čára „teď" — na zdi to nejužitečnější vodítko. Sama se objeví jen v tom dni,
     // do kterého ta chvíle spadá, takže se nemusí zvlášť řešit, který den se ukazuje.
@@ -8530,7 +8580,7 @@ function renderKalendar(data) {
       const cas = document.createElement('span');
       cas.className = 'kal-cas';
       cas.textContent = kalCas(u);
-      if (u.barva) cas.style.color = u.barva;
+      cas.style.color = kalCitelna(kalBarvaU(u));
       const nazev = document.createElement('span');
       nazev.className = 'kal-nazev';
       nazev.textContent = u.nazev;

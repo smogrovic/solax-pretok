@@ -122,7 +122,7 @@ setTimeout(() => {
   // Vzhled podle předlohy: světlá výplň a barevný proužek vlevo, ne plocha syté barvy.
   // Na pěti sloupcích vedle sebe je sytá plocha nečitelná.
   check('blok má světlou výplň', /^rgba\\(/.test(let6.style.background), true);
-  check('  a text v barvě kalendáře', let6.style.color, 'rgb(139, 139, 139)');
+  check('  a proužek v barvě kalendáře', let6.style.borderLeftColor, 'rgb(142, 142, 147)');
   // Překryv se nesmí schovat jeden za druhý — na zdi by to vypadalo prázdně
   check('překrývající se události jdou vedle sebe', /50%/.test(let6.style.width), true);
   check('celodenní má vlastní pruh nad osou',
@@ -138,6 +138,66 @@ setTimeout(() => {
   check('  a zítřek už čáru „teď" nemá', document.querySelectorAll('#kalMrizka .kal-ted').length, 0);
   document.getElementById('kalPrev').click();
   check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
+
+  R.push('\\n3c) Barvy podle telefonu');
+  // Sloupec musí mít tu barvu, kterou má kalendář v telefonu — jinak se na zdi hledá,
+  // čí událost to vlastně je. Barva z iCloudu na to není: u sdílených kalendářů vrací
+  // barvu toho, kdo sdílí, takže KAL schválně hlásí u Family modrou.
+  const dc = dny(7);
+  dc[0].udalosti = [
+    ud('Family', 10, 11, 'Oběd'),
+    ud('Zuzka', 12, 13, 'Kadeřník'),
+    ud('Lukáš', 8, 9, 'Porada'),
+    ud('Lukáš', 15, 18, 'OK123 PRG-FCO', { zdroj: 'duty' })
+  ];
+  renderKalendar({ enabled: true, dnu: 7, days: dc, kalendare: KAL,
+                   fetchedAt: new Date().toISOString(), error: null });
+  const sl2 = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
+  const blok = (i, jm) => [...sl2[i].querySelectorAll('.kal-blok')].find(b => b.textContent.includes(jm));
+  check('Family je žlutá', blok(0, 'Oběd').style.borderLeftColor, 'rgb(232, 168, 0)');
+  check('  i když iCloud hlásí modrou', KAL[0].barva, '#34AADC');
+  check('Zuzka červená', blok(2, 'Kadeřník').style.borderLeftColor, 'rgb(229, 69, 58)');
+  check('Lukáš šedý', blok(1, 'Porada').style.borderLeftColor, 'rgb(142, 142, 147)');
+  // Létání chodí z odebíraného kalendáře a slévá se k Lukášovi — jen modře
+  check('létání je v Lukášově sloupci', !!blok(1, 'OK123'), true);
+  check('  ale modré, ne šedé', blok(1, 'OK123').style.borderLeftColor, 'rgb(47, 125, 216)');
+
+  // Karta je bílá: žlutá ani světle šedá se na ní nepřečtou. Text se proto ztmavuje,
+  // dokud nemá kontrast 4,5:1 — proužek a výplň zůstávají v barvě z telefonu.
+  // Měří se proti podkladu, na kterém text OPRAVDU sedí (světlá výplň bloku, ne bílá),
+  // a se započtenou průhledností — zeslabený text je stejně nečitelný jako světlý.
+  const rgb = s => (s.match(/[\\d.]+/g) || []).map(Number);
+  const kan = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const jas = c => 0.2126 * kan(c[0]) + 0.7152 * kan(c[1]) + 0.0722 * kan(c[2]);
+  const pomer = (fg, bg) => (jas(bg) + 0.05) / (jas(fg) + 0.05);
+  check('kontrolní výpočet sedí',
+    Math.round(pomer([0, 0, 0], [255, 255, 255]) * 100) / 100, 21);
+  const citelnost = el => {
+    const blok = el.closest('.kal-blok');
+    const v = rgb(blok.style.background);                 // rgba(r,g,b,alfa) na bílé kartě
+    const bg = [0, 1, 2].map(i => v[i] * v[3] + 255 * (1 - v[3]));
+    const pruhl = parseFloat(getComputedStyle(el).opacity);
+    const fg = rgb(getComputedStyle(el).color).map((c, i) => c * pruhl + bg[i] * (1 - pruhl));
+    return pomer(fg, bg);
+  };
+  const vsechny = [...document.querySelectorAll('#kalMrizka .kal-blok')];
+  check('bloků je na co koukat', vsechny.length, 4);
+  check('název v bloku je čitelný',
+    vsechny.every(b => citelnost(b.querySelector('b')) >= 4.5), true);
+  check('  a čas pod ním taky', vsechny.every(b => citelnost(b.querySelector('.kal-blok-cas')) >= 4.5), true);
+  check('  a názvy sloupců taky',
+    [...document.querySelectorAll('#kalMrizka .kal-hlava')]
+      .every(h => pomer(rgb(getComputedStyle(h).color), [255, 255, 255]) >= 4.5), true);
+  // Hodinová událost je na dvě řádky moc nízká: z času pod názvem by koukala půlka
+  // písmen. Takový blok má název i čas na jedné řádce.
+  check('nic z bloků nevykoukává',
+    vsechny.every(b => b.scrollHeight <= b.clientHeight + 1), true);
+  check('  hodinovka má čas vedle názvu',
+    blok(1, 'Porada').classList.contains('kal-blok-uzky'), true);
+  check('  a dlouhá událost pod ním', blok(1, 'OK123').classList.contains('kal-blok-uzky'), false);
+  // Ztmavit se nesmí až na černou — barva je to, podle čeho se sloupec pozná
+  const cZuzka = rgb(getComputedStyle(blok(2, 'Kadeřník')).color);
+  check('  ale text si barvu nechá', cZuzka[0] > cZuzka[2] + 20, true);
 
   R.push('\\n4) Když to ještě není nastavené');
   renderKalendar({ enabled: false, dnu: 7, days: [], fetchedAt: null, error: null });

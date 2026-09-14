@@ -379,6 +379,9 @@ nadpis('6b) Pořadí sloupců a pracovní rozpis');
     check('  a spadne do Lukášova sloupce', u[0].kalendar, 'Lukáš');
     check('  i s jeho barvou', u[0].barva, '#8B8B8B');
     check('  a se svým názvem', u[0].nazev, 'OK123 PRG-FCO');
+    // V Lukášově sloupci jedou dva zdroje vedle sebe. Bez značky by appka neměla
+    // podle čeho létání odlišit a nakreslila by ho jako jeho vlastní události.
+    check('  a s poznámkou, odkud je', u[0].zdroj, 'duty');
     // Výpadek DutyLogu nesmí shodit celý kalendář — služby prostě chybí
     const spadly = build({ odpovedi: [{ ok: false, status: 500 }], duty: 'https://dutylog/feed' });
     return spadly.api.kalStahniDuty(OD, DO, cil).catch(err => {
