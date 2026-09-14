@@ -896,6 +896,40 @@
     color:var(--grey-text);
     font-size:12px;
   }
+  /* Pevná tlačítka pod nápovědou. Vypadají jinak než šedé návrhy schválně: návrh se
+     jen předepíše do pole, tohle rovnou něco udělá. */
+  .asst-scenes{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    margin-top:10px;
+  }
+  .asst-scene{
+    border:none;
+    border-radius:16px;
+    padding:12px 10px;
+    background:var(--orange);
+    color:#fff;
+    font-size:13px;
+    font-weight:600;
+  }
+  .asst-scene:disabled{opacity:0.5;}
+  .away-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:14px;
+    font-size:14px;
+    color:var(--grey-text);
+  }
+  .away-row input{width:20px;height:20px;accent-color:var(--orange);}
+  .away-hint{
+    font-size:11px;
+    color:var(--muted);
+    text-align:center;
+    margin-top:6px;
+  }
+  .away-hint:empty{display:none;}
   .asst-log-card{margin-top:12px;}
   .asst-log-title{
     font-size:12px;
@@ -1503,29 +1537,12 @@
           <button class="asst-send" id="asstSend">▶</button>
         </div>
         <div class="asst-examples" id="asstExamples"></div>
+        <div class="asst-scenes" id="asstScenes"></div>
       </div>
       <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
         <div class="asst-log-title">Co asistent udělal</div>
         <div class="asst-log" id="asstLog"></div>
       </div>
-      <div class="card lockable" style="margin-top:12px">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="autoLight"></div>
-            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
-          </div>
-          <input type="range" min="0" max="2" step="1" value="1" id="autoModeSlider"
-                 aria-label="Režim automatiky" list="autoModeTicks">
-          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option></datalist>
-          <div class="mode-scale">
-            <span data-mode="0">Vypnuto</span>
-            <span data-mode="1">Zapnuto</span>
-            <span data-mode="2">Zima</span>
-          </div>
-          <div class="mode-hint" id="autoModeHint"></div>
-        </div>
-      </div>
-
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
         <div class="tempauto-list" id="tempAutoListOwn"></div>
@@ -1545,6 +1562,29 @@
           </div>
           <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSlider">
           <div class="tempauto-thr-hint" id="tempAutoOffHint"></div>
+        </div>
+      </div>
+
+      <div class="card lockable" style="margin-top:12px">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="autoLight"></div>
+            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
+          </div>
+          <input type="range" min="0" max="2" step="1" value="1" id="autoModeSlider"
+                 aria-label="Režim automatiky" list="autoModeTicks">
+          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option></datalist>
+          <div class="mode-scale">
+            <span data-mode="0">Vypnuto</span>
+            <span data-mode="1">Zapnuto</span>
+            <span data-mode="2">Zima</span>
+          </div>
+          <div class="mode-hint" id="autoModeHint"></div>
+          <label class="away-row">
+            <input type="checkbox" id="awayCheck">
+            <span>Nejsme doma</span>
+          </label>
+          <div class="away-hint" id="awayHint"></div>
         </div>
       </div>
 
@@ -6560,6 +6600,49 @@ function hideAssistantSlide() {
   if (slide) { slide.remove(); rebuildDots(); }
 }
 
+// Pevná tlačítka. Seznam chodí ze serveru, takže v appce nemůže být tlačítko na něco,
+// co server neumí — a popisky se nemůžou rozejít s tím, co se doopravdy stane.
+const asstScenesEl = document.getElementById('asstScenes');
+
+function renderSceny(sceny) {
+  if (!asstScenesEl) return;
+  asstScenesEl.textContent = '';
+  for (const s of (sceny || [])) {
+    if (!s || !s.key || !s.label) continue;
+    const btn = document.createElement('button');
+    btn.className = 'asst-scene';
+    btn.dataset.scene = s.key;
+    btn.textContent = s.label;
+    btn.addEventListener('click', () => spustScenu(s.key, btn));
+    asstScenesEl.appendChild(btn);
+  }
+}
+
+async function spustScenu(key, btn) {
+  const vsechna = asstScenesEl ? [...asstScenesEl.querySelectorAll('.asst-scene')] : [];
+  vsechna.forEach(b => { b.disabled = true; });
+  asstReply.classList.remove('err');
+  asstReply.textContent = '';
+  try {
+    const res = await fetch('/api/scene', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ scene: key })
+    });
+    const data = await res.json();
+    if (res.status === 401) {
+      setLocked(true);
+      throw new Error(data.error || 'Ovládání je zamčené.');
+    }
+    if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+    asstReply.textContent = data.reply || 'Hotovo.';
+  } catch (err) {
+    asstReply.classList.add('err');
+    asstReply.textContent = err.message;
+  }
+  vsechna.forEach(b => { b.disabled = false; });
+}
+
 if (asstExamples) {
   for (const ex of ASST_EXAMPLES) {
     const chip = document.createElement('button');
@@ -6602,6 +6685,56 @@ async function sendAssistant() {
 if (asstSend) {
   asstSend.addEventListener('click', sendAssistant);
   asstInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAssistant(); });
+}
+
+// ---------- Nejsme doma ----------
+// Zaškrtnutí spustí patnáctiminutový odpočet, ať se stihne odejít. Hláška pod tím
+// říká, co se stane a kdy — bez ní by zaškrtnutí vypadalo, že se nic neděje.
+const awayCheckEl = document.getElementById('awayCheck');
+const awayHintEl = document.getElementById('awayHint');
+let awayData = { away: false, awayAt: 0, awayActive: false };
+
+function renderAway(d) {
+  if (d) awayData = { ...awayData, ...d };
+  if (!awayCheckEl) return;
+  if (document.activeElement !== awayCheckEl) awayCheckEl.checked = !!awayData.away;
+  if (!awayHintEl) return;
+  if (!awayData.away) {
+    awayHintEl.textContent = '';
+  } else if (awayData.awayActive) {
+    awayHintEl.textContent = 'Dům je zamčený, světla zhasnutá, bojler se nezapíná.';
+  } else {
+    awayHintEl.textContent = `Zamkne se a zhasne v ${fmtSolTime(awayData.awayAt)} — ať se stihne odejít.`;
+  }
+}
+
+// Odpočet doběhne sám, i když ze serveru nic nepřijde — hláška se musí přepnout taky
+setInterval(() => {
+  if (awayData.away && !awayData.awayActive && awayData.awayAt && Date.now() >= awayData.awayAt) {
+    awayData.awayActive = true;
+    renderAway();
+  }
+}, 30000);
+
+if (awayCheckEl) {
+  awayCheckEl.addEventListener('change', async () => {
+    const chtene = awayCheckEl.checked;
+    try {
+      const res = await fetch('/api/away', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ away: chtene })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+      renderAway(data);
+    } catch (err) {
+      awayCheckEl.checked = !chtene;   // server to nevzal, ať přepínač nelže
+      errorEl.textContent = 'Nejsme doma: ' + err.message;
+      errorEl.classList.add('show');
+    }
+  });
 }
 
 // ---------- Teplotní automatika klimatizace ----------
@@ -7298,6 +7431,8 @@ function applySnapshot(snap) {
   }
   if (snap.assistantEnabled === false) hideAssistantSlide();
   bezpecne(() => renderAssistantLog(snap.assistantLog || []));
+  bezpecne(() => renderSceny(snap.sceny));
+  bezpecne(() => renderAway(snap));
   if (snap.tempAuto) tempAutoData = snap.tempAuto;
   bezpecne(renderTempAuto);
   // Spínací teploty: server + záloha v telefonu (přežije deploy)
@@ -7541,6 +7676,9 @@ function connectStream() {
   });
   es.addEventListener('assistantLog', e => {
     renderAssistantLog(JSON.parse(e.data).log || []);
+  });
+  es.addEventListener('away', e => {
+    renderAway(JSON.parse(e.data));
   });
   es.addEventListener('runtime', e => {
     // Server po deployi začíná od nuly — nikdy nepřepisujeme nižší hodnotou, bereme vyšší

@@ -200,6 +200,9 @@ const state = {
   // Poslední teplota bazénu naměřená za PROUDÍCÍ vody — viz blok „Teplota bazénu"
   // u tepelného čerpadla. `bezOd` = odkdy voda koluje (kvůli proplachu trubky).
   poolTemp: { c: null, at: 0, bezOd: 0 },
+  // „Nejsme doma": `since` = kdy se to zapnulo. Zamyká se až po AWAY_DELAY_MS,
+  // ať se stihne odejít. 0 = jsme doma.
+  away: { since: 0 },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -496,6 +499,8 @@ function snapshot() {
     boilerHistory: state.boilerHistory,
     assistantEnabled: !!process.env.ANTHROPIC_API_KEY,
     assistantLog: state.assistantLog,
+    sceny: SCENY,
+    ...awayPayload(),
     store: storePayload(),
     nukiEnabled,
     pushEnabled,
@@ -2992,6 +2997,10 @@ async function runBoilerAutomation(now, prague, weather, totalW, soc, reserveW) 
   // Rezerva na auto se přičítá AŽ NAKONEC — auto si tak drží přednost i v silný den
   threshold += reserveW;
 
+  // Když nejsme doma, teplá voda nikomu nechybí — topit se nezačne. Co už topí, se
+  // nechá dojet: vyhřátá nádrž nikomu nevadí a vypínat to je zbytečné cvakání.
+  if (awayActive()) return;
+
   // Zapnutí (jinak drží stav)
   if (totalW > threshold && !isOn) {
     const why = forecastLabel(fc.band);
@@ -3431,6 +3440,10 @@ async function runAutomation() {
     } else {
       weatherProblemLogged = false;
     }
+
+    // „Nejsme doma" jede i při vypnuté automatice — je to tvoje jednorázové rozhodnutí,
+    // ne automatika na pozadí, a zamčený dům se nesmí ztratit kvůli poloze vypínače
+    await enforceAway();
 
     // Hlavní vypínač: počasí se stahuje dál (kvůli zobrazení), ale zařízení nesaháme
     if (!autoRunning()) return;
@@ -6322,6 +6335,162 @@ app.post('/api/nuki/lock', async (req, res) => {
   }
 });
 
+// ---------- Tlačítka na Asistentovi (scény) a „nejsme doma" ----------
+// Čtyři pevná tlačítka pod polem na instrukce. Schválně NEJDOU přes jazykový model:
+// jsou to pokaždé tytéž kroky, takže je lepší, když je dělá kód — spolehlivě,
+// bez dotazu do cloudu a testovatelně.
+//
+// Seznam se posílá do appky, aby se tlačítka nedala naklikat na něco, co server
+// neumí. Popisky jsou tedy taky odsud.
+const SCENY = [
+  { key: 'sauna',  label: 'Zapni saunu' },
+  { key: 'zhasni', label: 'Zhasni všechna světla' },
+  { key: 'zamkni', label: 'Zamkni dům' },
+  { key: 'sprcha', label: 'Jdu do sprchy' }
+];
+
+function poZapaduSlunce(at = Date.now()) {
+  const w = state.weather;
+  return !!(w && typeof w.sunsetMs === 'number' && at >= w.sunsetMs);
+}
+
+async function scenaSauna() {
+  const kroky = [];
+  // Samotné spínání sauny zatím appka neumí — až bude, přibude sem.
+  try {
+    kroky.push(await assistantControlBlinds({ target: 'ložnice', action: 'up' }));
+  } catch (err) {
+    kroky.push(`Žaluzie v ložnici se nepodařilo vytáhnout (${err.message}).`);
+  }
+  // Ve dne by se svítilo zbytečně — venku je světlo a stejně se to zapomene zhasnout
+  if (poZapaduSlunce()) {
+    try {
+      await actuateRelay('lightDole', true, 'tlačítko sauna');
+      kroky.push('Zahrada dole: rozsvíceno.');
+    } catch (err) {
+      kroky.push(`Zahradu dole se nepodařilo rozsvítit (${err.message}).`);
+    }
+  } else {
+    kroky.push('Zahrada dole zůstala zhasnutá — ještě nezapadlo slunce.');
+  }
+  return kroky.join(' ');
+}
+
+async function scenaZhasni() {
+  return assistantSetRelay('všechna světla', false);
+}
+
+async function scenaZamkni() {
+  if (!nukiEnabled) return 'Zámek není nastavený.';
+  const msg = await nukiLock();
+  addLog('Nuki: zamčeno (tlačítko)');
+  return msg;
+}
+
+async function scenaSprcha() {
+  // Konec si pohlídá auto-off v relé (15 min) — přesně na jednu sprchu
+  await actuateRelay('obeh', true, 'jdu do sprchy');
+  return 'Oběhové čerpadlo běží, za čtvrt hodiny se vypne samo.';
+}
+
+const SCENA_FN = { sauna: scenaSauna, zhasni: scenaZhasni, zamkni: scenaZamkni, sprcha: scenaSprcha };
+
+app.post('/api/scene', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const key = req.body && req.body.scene;
+  const scena = SCENY.find(s => s.key === key);
+  if (!scena) return res.status(400).json({ error: 'Neznámé tlačítko.' });
+  try {
+    const reply = await SCENA_FN[key]();
+    addAssistantLog(`${scena.label}: ${reply}`);
+    res.json({ reply });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ---------- Nejsme doma ----------
+// Zaškrtnutím se spustí patnáctiminutový odpočet, ať se stihne odejít. Teprve pak se
+// dům zamkne, zhasnou světla, vypne klimatizace a zatáhnou žaluzie — a dokud je to
+// zaškrtnuté, světla se drží zhasnutá a bojler se nezapíná.
+//
+// SCHVÁLNĚ to nezávisí na hlavním vypínači automatiky: „nejsme doma" je jednorázové
+// rozhodnutí, které jsi právě udělal, ne automatika běžící na pozadí. Kdyby se to
+// řídilo vypínačem, dům by tiše zůstal odemčený.
+const AWAY_DELAY_MS = 15 * 60 * 1000;
+
+function awayOn() { return ((state.away && state.away.since) || 0) > 0; }
+function awayActive(at = Date.now()) {
+  return awayOn() && at >= state.away.since + AWAY_DELAY_MS;
+}
+function awayPayload() {
+  return {
+    away: awayOn(),
+    awaySince: (state.away && state.away.since) || 0,
+    awayAt: awayOn() ? state.away.since + AWAY_DELAY_MS : 0,
+    awayActive: awayActive()
+  };
+}
+
+let awayDoneAt = 0;    // kdy se odjezdové kroky odbavily (ať neběží dokola)
+
+// Jednorázové kroky při odchodu. Chyba jednoho kroku nesmí shodit ostatní — zamknout
+// dům je důležitější než žaluzie.
+async function awayOdchod() {
+  const kroky = [];
+  const zkus = async (popis, fn) => {
+    try { kroky.push(await fn() || popis); } catch (err) { kroky.push(`${popis} selhalo (${err.message})`); }
+  };
+  if (nukiEnabled) await zkus('zamčeno', async () => { await nukiLock(); return 'zamčeno'; });
+  await zkus('světla zhasnuta', async () => { await assistantSetRelay('všechna světla', false); return 'světla zhasnuta'; });
+  for (const dev of (state.aircon.devices || [])) {
+    if (dev.power) await zkus(`${dev.name} vypnuta`, async () => { await assistantSetAircon({ room: dev.name, power: 'off' }); return `${dev.name} vypnuta`; });
+  }
+  if (tahomaEnabled) await zkus('žaluzie zataženy', async () => { await assistantControlBlinds({ target: 'vše', action: 'down' }); return 'žaluzie zataženy'; });
+  addLog(`Nejsme doma: ${kroky.join(', ')}`);
+}
+
+async function enforceAway() {
+  if (!awayActive()) {
+    awayDoneAt = 0;
+    return;
+  }
+  if (!awayDoneAt) {
+    awayDoneAt = Date.now();
+    await awayOdchod();
+    return;
+  }
+  // Dokud jsme pryč, světla se drží dole — kdyby je někdo (nebo časovač) rozsvítil
+  for (const key of LIGHT_KEYS) {
+    const d = state.devices[key];
+    if (d && d.isOn === true) await autoSet(key, 'off', 'nejsme doma', { force: true });
+  }
+}
+
+app.post('/api/away', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const on = !!(req.body && req.body.away);
+  if (on === awayOn()) return res.json(awayPayload());
+  state.away = { since: on ? Date.now() : 0 };
+  awayDoneAt = 0;
+  addLog(on
+    ? `Nejsme doma: zapnuto, dům se zavře v ${fmtPragueTime(state.away.since + AWAY_DELAY_MS)}`
+    : 'Nejsme doma: vypnuto');
+  broadcast('away', awayPayload());
+  res.json(awayPayload());
+});
+
+// Po restartu serveru se stav vrací ze zálohy. Odpočet se schválně NEPRODLUŽUJE —
+// čas odchodu je ten původní, takže nasazení uprostřed odpočtu ho neshodí zpátky.
+app.post('/api/away/restore', (req, res) => {
+  const since = Number(req.body && req.body.since);
+  if (Number.isFinite(since) && since > 0 && since <= Date.now() && !awayOn()) {
+    state.away = { since };
+    broadcast('away', awayPayload());
+  }
+  res.json(awayPayload());
+});
+
 // ---------- Trvalé úložiště (Upstash Redis přes REST) ----------
 // Render free tier startuje po každém nasazení s prázdnou pamětí a nemá disk, takže
 // historie doteď žila jen v telefonu — a ten umí vrátit jen to, co sám viděl otevřený.
@@ -6345,6 +6514,7 @@ const STORE_POSTS = [
   '/api/sauna/limits/restore',
   '/api/pool/force/restore',
   '/api/pool/temp/restore',
+  '/api/away/restore',
   '/api/history/restore',
   '/api/wallbox-history/restore',
   '/api/boiler-history/restore',
@@ -6379,6 +6549,7 @@ function storeSnapshot() {
     '/api/sauna/limits/restore': { limitW: state.saunaLimitW, holdMin: state.saunaHoldMin },
     '/api/pool/force/restore': { until: state.poolForce.until },
     '/api/pool/temp/restore': { c: state.poolTemp.c, at: state.poolTemp.at },
+    '/api/away/restore': { since: (state.away && state.away.since) || 0 },
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },
     '/api/boiler-history/restore': { points: state.boilerHistory },

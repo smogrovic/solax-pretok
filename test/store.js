@@ -57,6 +57,7 @@ function vzorovyStav() {
     saunaLimitW: 700, saunaHoldMin: 45,
     poolForce: { until: 0 },
     poolTemp: { c: 26.4, at: t, bezOd: 0 },
+    away: { since: t },
     history: [{ t, kw: 1.2, soc: 80, pv: 3 }],
     wallboxHistory: [{ t, w: 3400 }],
     boilerHistory: [{ t, b1: 55, b2: 48 }],
@@ -107,6 +108,8 @@ nadpis('2) Balení');
   // Teplota bazénu se měří jen za chodu čerpadla; bez zálohy by po deployi svítila
   // pomlčka, dokud se bazén znovu nerozběhne — tedy klidně do druhého dne
   check('teplota bazénu se ukládá', snap.posts['/api/pool/temp/restore'].c, 26.4);
+  // Bez zálohy by deploy uprostřed odchodu z domu nechal barák odemčený
+  check('„nejsme doma" se ukládá taky', typeof snap.posts['/api/away/restore'].since, 'number');
   check('  i s časem měření', typeof snap.posts['/api/pool/temp/restore'].at, 'number');
   check('odkud bral bazén taky', snap.posts['/api/pool-days/restore'].poolDays[0].grid, 50);
   check('odkud šla spotřeba taky', snap.posts['/api/usage-days/restore'].usageDays[0].pv, 9000);
@@ -293,6 +296,7 @@ function prazdnyStav() {
     tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 21 },
     saunaLimitW: 500, saunaHoldMin: 30, poolForce: { until: 0 },
     poolTemp: { c: null, at: 0, bezOd: 0 },
+    away: { since: 0 },
     history: [], wallboxHistory: [], boilerHistory: [], airconHistory: [],
     wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], poolDays: [], saunaDays: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
