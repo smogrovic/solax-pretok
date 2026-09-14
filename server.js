@@ -6322,8 +6322,19 @@ const KAL_POLL_MS = 15 * 60 * 1000;
 // ---- XML bez parseru ----
 // Odpovědi CalDAVu jsou předvídatelné, ale prefix jmenného prostoru ne. Proto se
 // hledá jen podle lokálního jména značky.
+//
+// POZOR na SAMOUZAVÍRACÍ prvky. iCloud u každé kolekce vrací dva bloky `propstat`:
+// jeden s 200 a skutečnými hodnotami, druhý se 404 a prázdnými prvky jako
+// `<displayname xmlns="DAV:"/>`. Kdyby se prázdný prvek bral jako otevírací značka,
+// posbíral by se obsah až k nejbližší SKUTEČNÉ zavírací značce — klidně o několik
+// kolekcí dál. Nespadne to, jen se tiše vrátí cizí data; přesně tak se do hlášky
+// o chybějících kalendářích dostal kus XML mezi jejich názvy.
+//
+// Proto část s atributy nesmí skončit lomítkem a za ní nesmí následovat `/>`.
 function xmlTagy(xml, jmeno) {
-  const re = new RegExp(`<(?:[A-Za-z0-9_.-]+:)?${jmeno}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[A-Za-z0-9_.-]+:)?${jmeno}>`, 'gi');
+  const re = new RegExp(
+    `<(?:[A-Za-z0-9_.-]+:)?${jmeno}(?:\\s[^>]*[^/>])?\\s*>([\\s\\S]*?)</(?:[A-Za-z0-9_.-]+:)?${jmeno}>`,
+    'gi');
   return [...String(xml || '').matchAll(re)].map(m => m[1]);
 }
 function xmlTag(xml, jmeno) {
@@ -6353,7 +6364,10 @@ function maVevent(xml) {
 // a podobné kolekce, které události nemají.
 function jeKalendarUdalosti(resp) {
   const rt = xmlTag(resp, 'resourcetype') || '';
-  if (!/<(?:[A-Za-z0-9_.-]+:)?calendar\s*\/?>/i.test(rt)) return false;
+  // iCloud nepoužívá prefixy, ale xmlns atributy: `<calendar xmlns="urn:…:caldav"/>`.
+  // Atributy se tedy musí povolit — ale jméno značky zůstává přesné, jinak by se
+  // chytil i `<calendar-color/>` nebo `<calendar-proxy-read/>`.
+  if (!/<(?:[A-Za-z0-9_.-]+:)?calendar(?:\s[^>]*)?\/?>/i.test(rt)) return false;
   const komp = xmlTag(resp, 'supported-calendar-component-set');
   return komp === null || maVevent(komp);
 }

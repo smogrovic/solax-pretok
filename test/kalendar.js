@@ -21,7 +21,7 @@ function build({ odpovedi = [] } = {}) {
     'scheduleEvery', 'pragueDateString', 'fetch', 'Buffer',
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
-         + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, KAL_DNU };'
+         + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev, KAL_DNU };'
   )(
     state,
     { get: () => {} },
@@ -56,6 +56,15 @@ for (const [popis, xml] of [
 check('značka s atributy projde taky',
   api.xmlText(api.xmlTag('<d:href xml:lang="cs">/y/</d:href>', 'href')), '/y/');
 check('víc značek se najde všech', api.xmlTagy('<href>/a/</href><href>/b/</href>', 'href').length, 2);
+// Samouzavírací prvek NENÍ otevírací značka. iCloud jich posílá plno ve 404 bloku
+// a dokud se braly jako otevírací, sbíral se obsah až k cizí zavírací značce.
+check('prázdná značka se přeskočí',
+  api.xmlTagy('<displayname xmlns="DAV:"/><displayname>Family</displayname>', 'displayname').join(','), 'Family');
+check('  i bez atributů', api.xmlTagy('<x/><x>A</x>', 'x').join(','), 'A');
+check('  a bez skutečné hodnoty nevrátí nic', api.xmlTagy('<x/><y>A</y>', 'x').length, 0);
+check('  ani s mezerou před lomítkem', api.xmlTagy('<x />', 'x').length, 0);
+check('značka s atributy se pořád najde',
+  api.xmlTagy('<displayname xmlns="DAV:">Miki</displayname>', 'displayname').join(','), 'Miki');
 check('entity se přeloží', api.xmlText('<x>Ku&amp;cha&#39;</x>'.replace(/<\/?x>/g, '')), "Ku&cha'");
 check('VEVENT se pozná z atributu',
   api.maVevent('<c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>'), true);
@@ -80,6 +89,11 @@ nadpis('1b) Které kolekce jsou kalendář s událostmi');
     + `</prop></propstat></response>`;
   const KAL = '<collection/><C:calendar/>';
   check('kalendář bez seznamu komponent projde', api.jeKalendarUdalosti(resp(KAL, null)), true);
+  // Takhle to posílá iCloud: bez prefixu, ale s xmlns atributem
+  check('  a se skutečným tvarem značky taky',
+    api.jeKalendarUdalosti(resp('<collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/>', null)), true);
+  check('barva kalendáře se za kalendář nepovažuje',
+    api.jeKalendarUdalosti(resp('<collection/><calendar-color xmlns="http://apple.com/ns/ical/"/>', null)), false);
   check('  s VEVENT taky', api.jeKalendarUdalosti(resp(KAL, '<C:comp name="VEVENT"/>')), true);
   check('  a v jednoduchých uvozovkách taky', api.jeKalendarUdalosti(resp(KAL, "<C:comp name='VEVENT'/>")), true);
   check('kalendář jen s úkoly ne', api.jeKalendarUdalosti(resp(KAL, '<C:comp name="VTODO"/>')), false);
@@ -90,6 +104,93 @@ nadpis('1b) Které kolekce jsou kalendář s událostmi');
   check('notifikace ne', api.jeKalendarUdalosti(resp('<collection/><CS:notification/>', null)), false);
 }
 
+nadpis('1c) Skutečná odpověď z iCloudu');
+{
+  // TOHLE JE TA DŮLEŽITÁ SADA. Dosavadní kontroly používaly markup, KTERÝ JSEM SI
+  // VYMYSLEL — s prefixy (`C:calendar`) a dvojitými uvozovkami. iCloud ale prefixy
+  // nepoužívá vůbec: dává na každý prvek `xmlns` atribut a u komponent má jednoduché
+  // uvozovky. Kvůli tomu prošly dvě chyby naráz a kalendář nenašel ani jeden
+  // kalendář, přestože jich iCloud poslal jedenáct. Fixture je proto opsaná
+  // z odpovědi, která přišla doopravdy.
+  const odpoved = (href, blok200, blok404) =>
+    `<response xmlns="DAV:">\n<href>${href}</href>\n`
+    + `<propstat><prop>\n${blok200}\n</prop><status>HTTP/1.1 200 OK</status></propstat>\n`
+    + (blok404 ? `<propstat><prop>\n${blok404}\n</prop><status>HTTP/1.1 404 Not Found</status></propstat>\n` : '')
+    + `</response>`;
+  const KOMP = (...c) => `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav">`
+    + c.map(x => `<comp name='${x}' xmlns='urn:ietf:params:xml:ns:caldav'/>`).join('')
+    + `</supported-calendar-component-set>`;
+  const PRAZDNE = `<displayname xmlns="DAV:"/>\n<calendar-color xmlns="http://apple.com/ns/ical/"/>`;
+  const kalendar = (href, jmeno, barva) => odpoved(href,
+    `<displayname xmlns="DAV:">${jmeno}</displayname>\n`
+    + `<resourcetype xmlns="DAV:"><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>\n`
+    + KOMP('VEVENT') + `\n<calendar-color xmlns="http://apple.com/ns/ical/">${barva}</calendar-color>`);
+
+  const SEZNAM = `<?xml version="1.0" encoding="UTF-8"?><multistatus xmlns="DAV:">`
+    // domovská složka sama
+    + odpoved('/282156764/calendars/', `<resourcetype xmlns="DAV:"><collection/></resourcetype>`, PRAZDNE)
+    // schránka oznámení — prázdné prvky ve 404 bloku, na kterých se to lámalo
+    + odpoved('/282156764/calendars/notification/',
+        `<resourcetype xmlns="DAV:"><collection/><notification xmlns="http://calendarserver.org/ns/"/></resourcetype>`,
+        `<displayname xmlns="DAV:"/>\n<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"/>\n`
+        + `<calendar-color xmlns="http://apple.com/ns/ical/"/>`)
+    // outbox SÁM hlásí, že umí VEVENT — filtr postavený jen na komponentách by ho vzal
+    + odpoved('/282156764/calendars/outbox/',
+        `<resourcetype xmlns="DAV:"><collection/><schedule-outbox xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>\n`
+        + KOMP('VEVENT', 'VTODO'), PRAZDNE)
+    + odpoved('/282156764/calendars/inbox/',
+        `<resourcetype xmlns="DAV:"><collection/><schedule-inbox xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>\n`
+        + KOMP('VEVENT'), PRAZDNE)
+    + kalendar('/282156764/calendars/93e2554/', 'Family', '#34AADC')
+    + kalendar('/282156764/calendars/59fa298/', 'Miki', '#1D9A57')
+    + kalendar('/282156764/calendars/aa11bb2/', 'Elenka', '#CC73E1')
+    + kalendar('/282156764/calendars/cc33dd4/', 'Zuzka', '#FF2968')
+    + kalendar('/282156764/calendars/ee55ff6/', 'Lukáš', '#8B8B8B')
+    // připomínky mají VTODO, ne události
+    + odpoved('/282156764/calendars/reminders/',
+        `<displayname xmlns="DAV:">Reminders</displayname>\n`
+        + `<resourcetype xmlns="DAV:"><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>\n`
+        + KOMP('VTODO'))
+    + `</multistatus>`;
+
+  const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
+    + `<current-user-principal xmlns="DAV:"><href xmlns="DAV:">/282156764/principal/</href></current-user-principal>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const HOME = `<multistatus xmlns="DAV:"><response><href>/282156764/principal/</href><propstat><prop>`
+    + `<calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">`
+    + `<href xmlns="DAV:">https://p61-caldav.icloud.com/282156764/calendars/</href></calendar-home-set>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+
+  // Přesně ten příznak, který se ukázal naostro: v hlášce o chybějících kalendářích
+  // byl mezi názvy kus XML. Prázdný <displayname/> ve 404 bloku se bral jako otevírací
+  // značka a posbíral obsah až o několik odpovědí dál.
+  const jmena = api.xmlTagy(SEZNAM, 'displayname').map(api.xmlText).filter(Boolean);
+  check('názvy se čtou bez přetečení', jmena.join(', '),
+    'Family, Miki, Elenka, Zuzka, Lukáš, Reminders');
+  check('  a nenese to kus XML', jmena.some(j => /[<>]/.test(j)), false);
+
+  const h = build({ odpovedi: [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM }] });
+  return h.api.kalObjev().then(kal => {
+    check('z jedenácti kolekcí zbudou kalendáře', kal.length, 5);
+    check('  a jsou to ty správné', kal.map(k => k.nazev).join(', '), 'Family, Miki, Elenka, Zuzka, Lukáš');
+    check('  s adresou na správný shard', kal[0].url, 'https://p61-caldav.icloud.com/282156764/calendars/93e2554/');
+    check('  a s barvou', kal[0].barva, '#34AADC');
+    // Názvy se nesmí slít přes hranici sousední kolekce — prázdný <displayname/>
+    // ve 404 bloku dřív posbíral obsah až o několik odpovědí dál
+    check('  název nepřetekl do sousedů', /</.test(kal.map(k => k.nazev).join('')), false);
+    check('domovská složka se nebere', kal.some(k => k.url.endsWith('/calendars/')), false);
+    check('outbox se nebere, i když hlásí VEVENT', kal.some(k => /outbox/.test(k.url)), false);
+    check('inbox taky ne', kal.some(k => /inbox/.test(k.url)), false);
+    check('oznámení taky ne', kal.some(k => /notification/.test(k.url)), false);
+    check('připomínky s VTODO taky ne', kal.some(k => k.nazev === 'Reminders'), false);
+    dalsiB();
+  }).catch(err => {
+    check('objevení kalendářů nespadlo', err.message, 'nespadnout');
+    dalsiB();
+  });
+}
+
+function dalsiB() {
 nadpis('2) Rozbalení zalomených řádků');
 {
   // Tohle musí být první krok. Bez něj se z dlouhého názvu stane „Schůzka s panem"
@@ -258,4 +359,5 @@ nadpis('7) Bez přihlašovacích údajů');
 }
 
 konec();
+}
 }
