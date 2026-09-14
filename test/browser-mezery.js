@@ -1,6 +1,9 @@
 // Mezera mezi kartami. Karta bez modifikátoru se dřív tiše nalepila na sousedku
 // (tak vznikl #nukiCard a naposledy dvě slepené karty na saune) — tahle sada projde
 // všechny stránky a hlídá, že každá karta kromě první nějakou mezeru má.
+//
+// Běží v úzkém okně, takže se tu hlídá i druhá strana rozložení pro iPad: na telefonu
+// musí zůstat jedna stránka přes celou obrazovku. Široké okno má vlastní sadu.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -60,6 +63,13 @@ setTimeout(() => {
   const log = stranky.find(s => s.dataset.title === 'Log');
   check('jediná karta na Logu nemá okraj navíc',
     mezera(log.querySelector('.page > .card')), 0);
+
+  R.push('\\nTelefon: jedna stránka přes celou obrazovku');
+  const wrap = document.getElementById('sliderWrap');
+  const slide = wrap.querySelector('.slide');
+  check('stránka je široká jako okno',
+    Math.round(slide.getBoundingClientRect().width), Math.round(wrap.clientWidth));
+  check('  a je vidět jen jedna', viditelnychStranek(), 1);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

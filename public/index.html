@@ -63,6 +63,19 @@
       max(12px, env(safe-area-inset-bottom))
       max(16px, env(safe-area-inset-left));
   }
+  /* iPad na zeď: na širokém displeji se vejdou tři stránky vedle sebe. Rozhoduje
+     ŠÍŘKA, ne zařízení — telefon se na tenhle práh nikdy nedostane, takže se ho to
+     nedotkne, a na notebooku to funguje taky. Sloupec je schválně pořád široký jako
+     telefon (.page má 340 px), takže se nemusela předělat jediná karta. */
+  @media (min-width: 1000px) {
+    .slide{
+      width:33.3333vw;
+      padding-left:max(10px, env(safe-area-inset-left));
+      padding-right:max(10px, env(safe-area-inset-right));
+    }
+    /* Svislá čára mezi sloupci, ať je poznat, kde jedna stránka končí */
+    .slide + .slide{box-shadow:inset 1px 0 0 rgba(44,62,80,0.08);}
+  }
   .page{
     width:100%;
     max-width:340px;
@@ -8057,13 +8070,32 @@ initPush();
 const sliderWrap = document.getElementById('sliderWrap');
 const pageTabsEl = document.getElementById('pageTabs');
 
+// Šířka JEDNÉ stránky. Na telefonu je to celá obrazovka, na širokém displeji třetina —
+// posouvá se vždycky po jedné stránce, ať je jich vidět kolik chce. Měří se z DOM,
+// ne z konstanty, aby to sedělo s tím, co doopravdy nakreslilo CSS.
+function sirkaStranky() {
+  const prvni = sliderWrap.querySelector('.slide');
+  const w = prvni ? prvni.getBoundingClientRect().width : 0;
+  return w > 1 ? w : sliderWrap.clientWidth;
+}
+
+// Kolik stránek je vidět naráz (1 na telefonu, 3 na iPadu na šířku)
+function viditelnychStranek() {
+  const w = sirkaStranky();
+  return w > 1 ? Math.max(1, Math.round(sliderWrap.clientWidth / w)) : 1;
+}
+
 function updateDots() {
   if (!pageTabsEl || !sliderWrap.clientWidth) return;
-  const idx = Math.round(sliderWrap.scrollLeft / sliderWrap.clientWidth);
+  const w = sirkaStranky();
+  const prvni = Math.round(sliderWrap.scrollLeft / w);
+  const kolik = viditelnychStranek();
   const tabs = pageTabsEl.querySelectorAll('.page-tab');
-  tabs.forEach((t, i) => t.classList.toggle('active', i === idx));
+  // Když je vidět víc stránek, svítí víc záložek — jinak by lišta ukazovala jednu
+  // a zbylé dvě by vypadaly jako zavřené
+  tabs.forEach((t, i) => t.classList.toggle('active', i >= prvni && i < prvni + kolik));
   // Aktivní záložku vždy doroluj do viditelné části lišty
-  const active = tabs[idx];
+  const active = tabs[prvni];
   if (active) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
 
@@ -8076,7 +8108,7 @@ function rebuildDots() {
     tab.className = 'page-tab';
     tab.textContent = slide.dataset.title || `Stránka ${i + 1}`;
     tab.addEventListener('click', () => {
-      sliderWrap.scrollTo({ left: i * sliderWrap.clientWidth, behavior: 'smooth' });
+      sliderWrap.scrollTo({ left: i * sirkaStranky(), behavior: 'smooth' });
     });
     pageTabsEl.appendChild(tab);
   });
