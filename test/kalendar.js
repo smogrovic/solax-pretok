@@ -21,7 +21,7 @@ function build({ odpovedi = [] } = {}) {
     'scheduleEvery', 'pragueDateString', 'fetch', 'Buffer',
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
-         + ' calendarPayload, kalStahni, kalDotazTelo, KAL_DNU };'
+         + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, KAL_DNU };'
   )(
     state,
     { get: () => {} },
@@ -68,6 +68,27 @@ check('absolutní adresa se nechá být',
 check('relativní se doplní o server',
   api.absUrl('https://p61-caldav.icloud.com/123/', '/123/calendars/'),
   'https://p61-caldav.icloud.com/123/calendars/');
+
+nadpis('1b) Které kolekce jsou kalendář s událostmi');
+{
+  // Rozhoduje resourcetype. Seznam komponent server vracet NEMUSÍ — a když se na něm
+  // trvalo, filtr zahodil všechno a appka hlásila „nenašel jsem žádný kalendář",
+  // přestože přihlášení i výpis prošly. Přesně tohle se stalo naostro.
+  const resp = (rt, komp) => `<response><href>/x/</href><propstat><prop>`
+    + `<resourcetype>${rt}</resourcetype>`
+    + (komp === null ? '' : `<C:supported-calendar-component-set>${komp}</C:supported-calendar-component-set>`)
+    + `</prop></propstat></response>`;
+  const KAL = '<collection/><C:calendar/>';
+  check('kalendář bez seznamu komponent projde', api.jeKalendarUdalosti(resp(KAL, null)), true);
+  check('  s VEVENT taky', api.jeKalendarUdalosti(resp(KAL, '<C:comp name="VEVENT"/>')), true);
+  check('  a v jednoduchých uvozovkách taky', api.jeKalendarUdalosti(resp(KAL, "<C:comp name='VEVENT'/>")), true);
+  check('kalendář jen s úkoly ne', api.jeKalendarUdalosti(resp(KAL, '<C:comp name="VTODO"/>')), false);
+  check('obyčejná složka ne', api.jeKalendarUdalosti(resp('<collection/>', null)), false);
+  check('schránka pozvánek ne', api.jeKalendarUdalosti(resp('<collection/><C:schedule-inbox/>', null)), false);
+  // `\bcalendar\b` by tyhle chytlo — proto se hledá přesná značka
+  check('zástupné oprávnění ne', api.jeKalendarUdalosti(resp('<collection/><C:calendar-proxy-read/>', null)), false);
+  check('notifikace ne', api.jeKalendarUdalosti(resp('<collection/><CS:notification/>', null)), false);
+}
 
 nadpis('2) Rozbalení zalomených řádků');
 {

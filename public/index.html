@@ -127,6 +127,28 @@
   .kal-celodenni .kal-nazev{font-weight:600;}
   .kal-misto{color:var(--muted);font-size:11px;}
   .kal-nic{color:var(--muted);font-size:12px;}
+  .kal-diag-btn{
+    border:none;
+    border-radius:14px;
+    padding:8px 14px;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+    font-size:12px;
+    margin-bottom:10px;
+  }
+  .kal-diag{
+    background:var(--card);
+    border-radius:14px;
+    padding:10px 12px;
+    margin-bottom:10px;
+    font-size:10px;
+    line-height:1.45;
+    white-space:pre-wrap;
+    word-break:break-all;
+    max-height:50vh;
+    overflow:auto;
+    color:var(--grey-text);
+  }
   @media (min-width: 700px)  { .kal-dny{grid-template-columns:repeat(4, 1fr);} }
   @media (min-width: 1000px) { .kal-dny{grid-template-columns:repeat(7, 1fr);} }
   .page{
@@ -2531,6 +2553,10 @@
     <div class="kal-title">Kalendář</div>
     <div class="kal-meta" id="kalMeta"></div>
   </div>
+  <!-- Ladit napojení na iCloud jde jen naostro: přihlašovací údaje jsou na serveru.
+       Tlačítko ukáže syrové odpovědi z CalDAVu, ať se nehádá naslepo. -->
+  <button class="kal-diag-btn" id="kalDiagBtn" hidden>Diagnostika napojení</button>
+  <pre class="kal-diag" id="kalDiag" hidden></pre>
   <div class="kal-dny" id="kalDny"></div>
 </div>
 
@@ -8204,6 +8230,7 @@ function renderKalendar(data) {
       : d.fetchedAt ? 'Načteno v ' + fmtSolTime(new Date(d.fetchedAt).getTime())
       : 'Čeká se na první stažení z iCloudu.';
   }
+  if (kalDiagBtn) kalDiagBtn.hidden = !d.enabled || (!d.error && (d.days || []).length > 0);
   for (const [i, den] of (d.days || []).entries()) {
     const box = document.createElement('div');
     box.className = 'kal-den' + (i === 0 ? ' dnes' : '');
@@ -8239,6 +8266,27 @@ function renderKalendar(data) {
     }
     kalDnyEl.appendChild(box);
   }
+}
+
+// Diagnostika se nabízí jen tehdy, když je co ladit — při chybě nebo když nic nedošlo
+const kalDiagBtn = document.getElementById('kalDiagBtn');
+const kalDiagEl = document.getElementById('kalDiag');
+
+if (kalDiagBtn) {
+  kalDiagBtn.addEventListener('click', async () => {
+    kalDiagBtn.disabled = true;
+    kalDiagEl.hidden = false;
+    kalDiagEl.textContent = 'Ptám se iCloudu…';
+    try {
+      const res = await fetch('/api/calendar/raw', { headers: { 'X-Auth-Token': authToken } });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error('Ovládání je zamčené.'); }
+      kalDiagEl.textContent = JSON.stringify(data, null, 1);
+    } catch (err) {
+      kalDiagEl.textContent = 'Diagnostika selhala: ' + err.message;
+    }
+    kalDiagBtn.disabled = false;
+  });
 }
 
 function kalOtevri(otevrit) {

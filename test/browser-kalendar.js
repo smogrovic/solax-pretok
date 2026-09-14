@@ -89,6 +89,22 @@ setTimeout(() => {
     /heslo pro aplikaci/.test(document.getElementById('kalMeta').textContent), true);
   // Poslední známý týden zůstane — výpadek iCloudu nemá vygumovat obrazovku
   check('  a dny zůstanou vykreslené', document.querySelectorAll('#kalDny .kal-den').length, 7);
+
+  R.push('\\n5) Diagnostika napojení');
+  // Ladit napojení jde jen naostro (přihlašovací údaje jsou na serveru), takže
+  // tlačítko musí být po ruce právě tehdy, když je co ladit — a jinak nepřekážet.
+  const diagBtn = document.getElementById('kalDiagBtn');
+  renderKalendar({ enabled: true, dnu: 7, days: dny(7), fetchedAt: new Date().toISOString(),
+                   error: 'hledání kalendářů: Nenašel jsem žádný kalendář s událostmi' });
+  check('při chybě se tlačítko nabídne', diagBtn.hidden, false);
+  renderKalendar({ enabled: true, dnu: 7, days: [], fetchedAt: null, error: null });
+  check('  i když ještě nic nedorazilo', diagBtn.hidden, false);
+  const sDaty = dny(7);
+  sDaty[0].udalosti = [{ uid: 'q', od: denMs(0), do: denMs(1), celodenni: true, nazev: 'Něco', misto: null }];
+  renderKalendar({ enabled: true, dnu: 7, days: sDaty, fetchedAt: new Date().toISOString(), error: null });
+  check('když to jede, tlačítko nepřekáží', diagBtn.hidden, true);
+  renderKalendar({ enabled: false, dnu: 7, days: [], fetchedAt: null, error: null });
+  check('  a bez nastavení taky ne', diagBtn.hidden, true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

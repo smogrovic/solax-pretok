@@ -6338,7 +6338,24 @@ function xmlText(xml) {
 }
 // `<C:comp name="VEVENT"/>` — tady nejde o obsah značky, ale o atribut
 function maVevent(xml) {
-  return /<[^>]*\bcomp\b[^>]*name\s*=\s*"VEVENT"/i.test(String(xml || ''));
+  return /<[^>]*\bcomp\b[^>]*name\s*=\s*["']VEVENT["']/i.test(String(xml || ''));
+}
+
+// Je ta kolekce kalendář s událostmi?
+//
+// ROZHODUJE `resourcetype`, ne seznam komponent. Seznam komponent totiž server
+// vracet NEMUSÍ — a když se na něm trvalo, filtr zahodil úplně všechno a appka
+// hlásila „nenašel jsem žádný kalendář", přestože přihlášení i výpis prošly.
+// Komponenty se proto berou jen jako upřesnění: když je server řekne, musí mezi
+// nimi být VEVENT; když mlčí, bereme kalendář jako kalendář.
+//
+// Přesná značka je schválně: `\bcalendar\b` by chytlo i `calendar-proxy-read`
+// a podobné kolekce, které události nemají.
+function jeKalendarUdalosti(resp) {
+  const rt = xmlTag(resp, 'resourcetype') || '';
+  if (!/<(?:[A-Za-z0-9_.-]+:)?calendar\s*\/?>/i.test(rt)) return false;
+  const komp = xmlTag(resp, 'supported-calendar-component-set');
+  return komp === null || maVevent(komp);
 }
 // Odpověď vrací cesty; server je potřeba doplnit z adresy, na kterou se ptalo
 function absUrl(base, href) {
@@ -6394,14 +6411,20 @@ async function kalObjev() {
   });
   const out = [];
   for (const resp of xmlTagy(seznam, 'response')) {
-    if (!maVevent(resp)) continue;                    // adresář ani připomínky nechceme
+    if (!jeKalendarUdalosti(resp)) continue;          // schránka, připomínky ani adresář nechceme
     const url = absUrl(home, xmlTag(resp, 'href'));
     const nazev = xmlText(xmlTag(resp, 'displayname')) || 'Kalendář';
     if (!url) continue;
     if (ICLOUD_ONLY.length && !ICLOUD_ONLY.some(j => j.toLowerCase() === nazev.toLowerCase())) continue;
     out.push({ url, nazev, barva: xmlText(xmlTag(resp, 'calendar-color')) || null });
   }
-  if (!out.length) throw new Error('Nenašel jsem žádný kalendář s událostmi');
+  if (!out.length) {
+    // Ať je z karty poznat, jestli iCloud nevrátil nic, nebo jestli to zahodil filtr
+    const kolik = xmlTagy(seznam, 'response').length;
+    const jmena = xmlTagy(seznam, 'displayname').map(xmlText).filter(Boolean).slice(0, 8);
+    throw new Error(`Nenašel jsem žádný kalendář s událostmi (odpovědí: ${kolik}`
+      + (jmena.length ? `, názvy: ${jmena.join(', ')}` : '') + ')');
+  }
   kalKalendare = out;
   return out;
 }
