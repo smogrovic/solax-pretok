@@ -204,7 +204,7 @@ const state = {
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
-  calendar: { days: [], fetchedAt: null, error: null },
+  calendar: { days: [], kalendare: [], duty: null, fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -6316,6 +6316,14 @@ const ICLOUD_URL = (process.env.ICLOUD_CALDAV_URL || 'https://caldav.icloud.com'
 // Nepovinné omezení na konkrétní kalendáře (názvy oddělené čárkou). Prázdné = všechny.
 const ICLOUD_ONLY = (process.env.ICLOUD_CALENDARS || '').split(',').map(s => s.trim()).filter(Boolean);
 const calendarEnabled = !!(ICLOUD_ID && ICLOUD_PASS);
+// Pracovní rozpis z DutyLogu — obyčejný odkaz na ICS. Ten odkaz je KLÍČ (kdo ho má,
+// vidí služby), takže patří jen do proměnné na Renderu, ne do kódu.
+const DUTY_ICS_URL = process.env.DUTY_ICS_URL || '';
+// Do kterého kalendáře se pracovní rozpis slije. Sloupec v appce pak zůstane jeden.
+const DUTY_KALENDAR = process.env.DUTY_KALENDAR || 'Lukáš';
+// Pořadí sloupců v denním přehledu. Co v seznamu není, se přidá za ně podle abecedy.
+const KAL_PORADI = (process.env.ICLOUD_PORADI || 'Family,Lukáš,Zuzka,Miki,Elenka')
+  .split(',').map(x => x.trim()).filter(Boolean);
 const KAL_DNU = 7;
 const KAL_POLL_MS = 15 * 60 * 1000;
 
@@ -6701,6 +6709,35 @@ function kalZacatek(at = Date.now()) {
   return zonaNaMs(d[0], d[1], d[2], 0, 0, 'Europe/Prague');
 }
 
+// Pracovní rozpis. Je to prostý ICS soubor za odkazem — žádné přihlašování, takže
+// stačí stáhnout a přečíst týmž kódem jako iCloud. Výpadek nesmí shodit zbytek:
+// když DutyLog neodpoví, kalendář se ukáže bez služeb.
+let dutyChyba = null;
+async function kalStahniDuty(od, doKdy, kal) {
+  if (!DUTY_ICS_URL) return [];
+  try {
+    const r = await fetch(DUTY_ICS_URL, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+    dutyChyba = null;
+    return kalUdalosti([text], od, doKdy, kal);
+  } catch (err) {
+    dutyChyba = err.message;
+    return [];
+  }
+}
+
+// Sloupce mají pevné pořadí (Family, Lukáš, …), ať se nepřehazují podle toho,
+// v jakém pořadí je zrovna vrátil iCloud.
+function kalSerad(kalendare) {
+  const poradi = j => {
+    const i = KAL_PORADI.findIndex(x => x.toLowerCase() === String(j || '').toLowerCase());
+    return i < 0 ? KAL_PORADI.length : i;
+  };
+  return kalendare.slice().sort((a, b) =>
+    poradi(a.nazev) - poradi(b.nazev) || String(a.nazev).localeCompare(String(b.nazev), 'cs'));
+}
+
 let kalPollRunning = false;
 async function pollKalendar() {
   if (!calendarEnabled || kalPollRunning) return;
@@ -6709,14 +6746,26 @@ async function pollKalendar() {
     const od = kalZacatek();
     const doKdy = od + KAL_DNU * 86400000;
     kalKrok = 'hledání kalendářů';
-    const kalendare = await kalObjev();
+    const kalendare = kalSerad(await kalObjev());
     const vse = [];
     for (const kal of kalendare) {
       kalKrok = `stahování kalendáře „${kal.nazev}"`;
       const texty = await kalStahni(kal, od, doKdy);
       vse.push(...kalUdalosti(texty, od, doKdy, kal));
     }
-    state.calendar = { days: kalDoDnu(vse, od), fetchedAt: new Date().toISOString(), error: null };
+    // Pracovní rozpis se slije do jednoho z kalendářů, takže sloupec zůstane jeden
+    const cil = kalendare.find(k => k.nazev === DUTY_KALENDAR)
+      || { nazev: DUTY_KALENDAR, barva: null };
+    kalKrok = 'stahování pracovního rozpisu';
+    vse.push(...await kalStahniDuty(od, doKdy, cil));
+    if (DUTY_ICS_URL && !kalendare.some(k => k.nazev === cil.nazev)) kalendare.push(cil);
+    state.calendar = {
+      days: kalDoDnu(vse, od),
+      kalendare: kalendare.map(k => ({ nazev: k.nazev, barva: k.barva })),
+      duty: DUTY_ICS_URL ? { kalendar: cil.nazev, error: dutyChyba } : null,
+      fetchedAt: new Date().toISOString(),
+      error: null
+    };
   } catch (err) {
     // Adresy kalendářů mohly zastarat (nový shard) — příště se objeví znovu
     kalKalendare = null;

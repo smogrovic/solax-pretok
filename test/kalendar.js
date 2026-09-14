@@ -7,21 +7,24 @@
 //  * prefixy v XML nejsou zaručené (`d:`, `D:`, `A:`, žádný),
 //  * opakované události chodí jako JEDNO pravidlo, ne jako dvacet událostí,
 //  * čas má tři tvary a v neděli, kdy se mění čas, se posun zóny sám hne.
-const { between, suite } = require('./zdroj');
+const { LINES, between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('kalendář');
 
 const DEN = 86400000, H = 3600000, MIN = 60000;
 const CODE = between('// ---------- Kalendář z iCloudu (CalDAV) ----------',
                      '// ---------- Nuki zámek ----------');
 
-function build({ odpovedi = [] } = {}) {
+function build({ odpovedi = [], duty = '' } = {}) {
+  // Odkaz na pracovní rozpis čte kód z prostředí (je to klíč, do repozitáře nepatří)
+  process.env.DUTY_ICS_URL = duty;
   const state = { calendar: { days: [], fetchedAt: null, error: null } };
   const dotazy = [];
   const api = new Function('state', 'app', 'requireAuth', 'addLog', 'broadcast',
     'scheduleEvery', 'pragueDateString', 'fetch', 'Buffer',
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
-         + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev, KAL_DNU };'
+         + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev,'
+         + ' kalSerad, kalStahniDuty, KAL_PORADI, DUTY_KALENDAR, KAL_DNU };'
   )(
     state,
     { get: () => {} },
@@ -350,6 +353,61 @@ nadpis('6) Pojistka kolem „expand"');
 }
 
 function dalsi() {
+nadpis('6b) Pořadí sloupců a pracovní rozpis');
+{
+  // Sloupce mají pevné pořadí, ať se nepřehazují podle toho, jak je zrovna vrátil
+  // iCloud. Co v seznamu není, jde za ně podle abecedy.
+  const h = build();
+  const kal = n => ({ nazev: n, url: 'u', barva: null });
+  const serazene = h.api.kalSerad(['Elenka', 'Zuzka', 'Flying', 'Family', 'Miki', 'Lukáš', 'Aarón'].map(kal));
+  check('sloupce jdou v zadaném pořadí', serazene.slice(0, 5).map(k => k.nazev).join(', '),
+    'Family, Lukáš, Zuzka, Miki, Elenka');
+  check('  a zbytek abecedně za nimi', serazene.slice(5).map(k => k.nazev).join(', '), 'Aarón, Flying');
+  check('pořadí se dá přenastavit zvenčí', h.api.KAL_PORADI.join(','), 'Family,Lukáš,Zuzka,Miki,Elenka');
+  check('  a rozpis míří do Lukášova kalendáře', h.api.DUTY_KALENDAR, 'Lukáš');
+}
+{
+  // Pracovní rozpis je obyčejný ICS za odkazem — čte se týmž kódem jako iCloud
+  const FEED = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:duty1\r\nSUMMARY:OK123 PRG-FCO\r\n'
+    + 'DTSTART:20260914T050000Z\r\nDTEND:20260914T133000Z\r\nEND:VEVENT\r\nEND:VCALENDAR';
+  const h = build({ odpovedi: [{ body: FEED }], duty: 'https://dutylog/feed' });
+  const cil = { nazev: 'Lukáš', barva: '#8B8B8B' };
+  return h.api.kalStahniDuty(OD, DO, cil).catch(err => {
+    check('stažení rozpisu nespadlo', err.message, 'nespadnout'); return [];
+  }).then(u => {
+    check('služba se načte', u.length, 1);
+    check('  a spadne do Lukášova sloupce', u[0].kalendar, 'Lukáš');
+    check('  i s jeho barvou', u[0].barva, '#8B8B8B');
+    check('  a se svým názvem', u[0].nazev, 'OK123 PRG-FCO');
+    // Výpadek DutyLogu nesmí shodit celý kalendář — služby prostě chybí
+    const spadly = build({ odpovedi: [{ ok: false, status: 500 }], duty: 'https://dutylog/feed' });
+    return spadly.api.kalStahniDuty(OD, DO, cil).catch(err => {
+      check('výpadek se má spolknout, ne vyhodit', err.message, 'spolknout'); return ['x'];
+    }).then(prazdno => {
+      check('výpadek DutyLogu nic neshodí', prazdno.length, 0);
+      const bez = build({ duty: '' });
+      return bez.api.kalStahniDuty(OD, DO, cil).then(nic => {
+        check('bez odkazu se nikam nechodí', nic.length, 0);
+        check('  a nic se nezkoušelo stáhnout', bez.dotazy.length, 0);
+        dalsiC();
+      });
+    });
+  });
+}
+
+function dalsiC() {
+nadpis('6c) Zapojení v polleru');
+{
+  // kalSerad i stahování rozpisu mají vlastní kontroly výš, ale poller si je musí
+  // taky zavolat — jinak by sloupce chodily v pořadí od iCloudu a služby by chyběly.
+  const zdroj = LINES.join('\n');
+  const POLLER = zdroj.slice(zdroj.indexOf('async function pollKalendar()'),
+                             zdroj.indexOf('function calendarPayload()'));
+  check('poller kalendáře seřadí', /kalSerad\(await kalObjev\(\)\)/.test(POLLER), true);
+  check('  a přidá pracovní rozpis', /kalStahniDuty\(od, doKdy/.test(POLLER), true);
+  check('  a pošle appce seznam sloupců', /kalendare: kalendare\.map/.test(POLLER), true);
+}
+
 nadpis('7) Bez přihlašovacích údajů');
 {
   const h = build();
@@ -359,5 +417,6 @@ nadpis('7) Bez přihlašovacích údajů');
 }
 
 konec();
+}
 }
 }

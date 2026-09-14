@@ -150,7 +150,111 @@
     color:var(--grey-text);
   }
   @media (min-width: 700px)  { .kal-dny{grid-template-columns:repeat(4, 1fr);} }
-  @media (min-width: 1000px) { .kal-dny{grid-template-columns:repeat(7, 1fr);} }
+
+  /* Denní pohled se sloupci po kalendářích — jen na širokém displeji */
+  .kal-den-pohled{display:none;}
+  @media (min-width: 1000px) {
+    .kal-den-pohled{display:block;}
+    .kal-dny{display:none;}
+  }
+  .kal-den-lista{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    margin-bottom:10px;
+  }
+  .kal-den-nazev{font-size:14px;font-weight:700;color:var(--grey-text);min-width:260px;text-align:center;}
+  .kal-sipka{
+    border:none;
+    border-radius:50%;
+    width:32px;
+    height:32px;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+    font-size:18px;
+    line-height:1;
+  }
+  .kal-sipka:disabled{opacity:0.3;}
+  .kal-mrizka{
+    display:grid;
+    grid-template-columns:52px repeat(var(--sloupcu, 1), minmax(0, 1fr));
+    grid-template-rows:auto auto 1fr;
+    background:var(--card);
+    border-radius:18px;
+    overflow:hidden;
+    box-shadow:0 1px 3px rgba(44,62,80,0.06);
+  }
+  .kal-hlava{
+    padding:10px 8px;
+    font-size:12px;
+    font-weight:700;
+    text-align:center;
+    color:var(--grey-text);
+    border-bottom:1px solid rgba(44,62,80,0.08);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .kal-hlava-prazdna{border-bottom:1px solid rgba(44,62,80,0.08);}
+  /* Celodenní události nemají v ose kde být — mají vlastní pruh nad ní */
+  .kal-cely{
+    padding:4px 5px;
+    border-bottom:1px solid rgba(44,62,80,0.08);
+    min-height:10px;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+  }
+  .kal-cely-chip{
+    font-size:10px;
+    padding:2px 6px;
+    border-radius:8px;
+    background:rgba(44,62,80,0.08);
+    color:var(--grey-text);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .kal-osa{position:relative;}
+  .kal-hod{
+    position:absolute;
+    right:6px;
+    font-size:10px;
+    color:var(--muted);
+    transform:translateY(-50%);
+    font-variant-numeric:tabular-nums;
+  }
+  .kal-sloupec{
+    position:relative;
+    border-left:1px solid rgba(44,62,80,0.06);
+  }
+  .kal-linka{
+    position:absolute;
+    left:0;
+    right:0;
+    border-top:1px solid rgba(44,62,80,0.05);
+  }
+  .kal-ted{
+    position:absolute;
+    left:0;
+    right:0;
+    border-top:2px solid var(--orange);
+    z-index:3;
+  }
+  .kal-blok{
+    position:absolute;
+    border-radius:7px;
+    padding:2px 5px;
+    font-size:10px;
+    line-height:1.25;
+    color:#fff;
+    background:var(--orange);
+    overflow:hidden;
+    z-index:2;
+  }
+  .kal-blok b{font-weight:600;display:block;font-size:10px;}
+  .kal-blok-cas{opacity:0.85;font-size:9px;}
   .page{
     width:100%;
     max-width:340px;
@@ -2557,6 +2661,17 @@
        Tlačítko ukáže syrové odpovědi z CalDAVu, ať se nehádá naslepo. -->
   <button class="kal-diag-btn" id="kalDiagBtn" hidden>Diagnostika napojení</button>
   <pre class="kal-diag" id="kalDiag" hidden></pre>
+  <!-- Široký displej: jeden den, sloupec = kalendář, svisle 00:00–24:00.
+       Telefon zůstává u seznamu dnů pod sebou — pět sloupců po 24 h by tam bylo
+       nečitelné. O tom, co se ukáže, rozhoduje CSS, ne detekce zařízení. -->
+  <div class="kal-den-pohled" id="kalDenPohled">
+    <div class="kal-den-lista">
+      <button class="kal-sipka" id="kalPrev" aria-label="Předchozí den">‹</button>
+      <div class="kal-den-nazev" id="kalDenNazev"></div>
+      <button class="kal-sipka" id="kalNext" aria-label="Další den">›</button>
+    </div>
+    <div class="kal-mrizka" id="kalMrizka"></div>
+  </div>
   <div class="kal-dny" id="kalDny"></div>
 </div>
 
@@ -8218,6 +8333,145 @@ function kalCas(u) {
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
+// ---------- Denní pohled: sloupec = kalendář, svisle 00:00–24:00 ----------
+const kalMrizkaEl = document.getElementById('kalMrizka');
+const kalDenNazevEl = document.getElementById('kalDenNazev');
+const KAL_PX_HOD = 44;          // výška jedné hodiny; 24 h = 1056 px, panel se roluje
+let kalDenIndex = 0;            // který z došlých dnů se ukazuje (0 = dnes)
+
+// Barva kalendáře z iCloudu, s náhradou pro ty, co žádnou nemají
+const KAL_NAHRADNI = ['#3b82c4', '#e5534b', '#7a9e2f', '#7d5fd6', '#e8a13a', '#18a999'];
+function kalBarva(kal, i) {
+  return (kal && kal.barva) || KAL_NAHRADNI[i % KAL_NAHRADNI.length];
+}
+
+// Události, které se překrývají, se rozdělí vedle sebe. Bez toho by se schovaly
+// jedna za druhou a na zdi by to vypadalo, že tam nic není.
+function kalDoPruhu(udalosti) {
+  const razene = udalosti.slice().sort((a, b) => a.od - b.od || a.do - b.do);
+  const out = [];
+  let shluk = [], konecShluku = -Infinity;
+  const vysyp = () => {
+    if (!shluk.length) return;
+    const pruhy = [];   // pruh -> konec poslední události v něm
+    for (const u of shluk) {
+      let i = pruhy.findIndex(konec => konec <= u.od);
+      if (i < 0) { i = pruhy.length; pruhy.push(0); }
+      pruhy[i] = u.do;
+      u._pruh = i;
+    }
+    for (const u of shluk) { u._pruhu = pruhy.length; out.push(u); }
+    shluk = [];
+  };
+  for (const u of razene) {
+    if (u.od >= konecShluku) { vysyp(); konecShluku = u.do; }
+    else konecShluku = Math.max(konecShluku, u.do);
+    shluk.push(u);
+  }
+  vysyp();
+  return out;
+}
+
+function renderKalDen() {
+  if (!kalMrizkaEl) return;
+  const d = kalData || {};
+  const dny = d.days || [];
+  const kalendare = (d.kalendare && d.kalendare.length)
+    ? d.kalendare
+    // Když server seznam nepošle, poskládá se z toho, co v událostech je
+    : [...new Set(dny.flatMap(x => (x.udalosti || []).map(u => u.kalendar)).filter(Boolean))]
+        .map(nazev => ({ nazev, barva: null }));
+  kalDenIndex = Math.max(0, Math.min(kalDenIndex, dny.length - 1));
+  const den = dny[kalDenIndex];
+  if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
+  if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 1;
+  if (kalDenNazevEl) kalDenNazevEl.textContent = den ? kalNadpisDne(den, kalDenIndex) : '';
+
+  kalMrizkaEl.textContent = '';
+  kalMrizkaEl.style.setProperty('--sloupcu', String(Math.max(1, kalendare.length)));
+  if (!den || !kalendare.length) return;
+
+  const pulnoc = den.od;
+  const div = (trida, rodic) => {
+    const e = document.createElement('div');
+    e.className = trida;
+    (rodic || kalMrizkaEl).appendChild(e);
+    return e;
+  };
+
+  // 1. řádek: názvy kalendářů
+  div('kal-hlava-prazdna');
+  kalendare.forEach((k, i) => {
+    const h = div('kal-hlava');
+    h.textContent = k.nazev;
+    h.style.color = kalBarva(k, i);
+  });
+
+  // 2. řádek: celodenní události
+  div('kal-cely');
+  kalendare.forEach((k, i) => {
+    const box = div('kal-cely');
+    for (const u of (den.udalosti || [])) {
+      if (!u.celodenni || u.kalendar !== k.nazev) continue;
+      const chip = div('kal-cely-chip', box);
+      chip.textContent = u.nazev;
+      chip.style.background = kalBarva(k, i);
+      chip.style.color = '#fff';
+    }
+  });
+
+  // 3. řádek: osa a sloupce
+  const osa = div('kal-osa');
+  osa.style.height = (24 * KAL_PX_HOD) + 'px';
+  for (let h = 0; h <= 24; h += 1) {
+    if (h % 2 && KAL_PX_HOD < 50) continue;    // po dvou hodinách, ať se popisky nelepí
+    const p = div('kal-hod', osa);
+    p.textContent = String(h).padStart(2, '0') + ':00';
+    p.style.top = (h * KAL_PX_HOD) + 'px';
+  }
+  kalendare.forEach((k, i) => {
+    const sl = div('kal-sloupec');
+    sl.style.height = (24 * KAL_PX_HOD) + 'px';
+    for (let h = 1; h < 24; h++) {
+      const l = div('kal-linka', sl);
+      l.style.top = (h * KAL_PX_HOD) + 'px';
+    }
+    const vlastni = (den.udalosti || []).filter(u => !u.celodenni && u.kalendar === k.nazev);
+    for (const u of kalDoPruhu(vlastni)) {
+      const b = div('kal-blok', sl);
+      // Vícedenní událost se v tomhle dni ořízne na půlnoc
+      const od = Math.max(u.od, pulnoc), doKdy = Math.min(u.do, pulnoc + 86400000);
+      const top = (od - pulnoc) / 3600000 * KAL_PX_HOD;
+      b.style.top = top + 'px';
+      b.style.height = Math.max(16, (doKdy - od) / 3600000 * KAL_PX_HOD - 2) + 'px';
+      b.style.left = `calc(${(u._pruh / u._pruhu) * 100}% + 2px)`;
+      b.style.width = `calc(${100 / u._pruhu}% - 4px)`;
+      b.style.background = kalBarva(k, i);
+      const jm = document.createElement('b');
+      jm.textContent = u.nazev;
+      b.appendChild(jm);
+      const cas = document.createElement('span');
+      cas.className = 'kal-blok-cas';
+      cas.textContent = kalCas(u) + (u.misto ? ' · ' + u.misto : '');
+      b.appendChild(cas);
+    }
+    // Čára „teď" — na zdi to nejužitečnější vodítko. Sama se objeví jen v tom dni,
+    // do kterého ta chvíle spadá, takže se nemusí zvlášť řešit, který den se ukazuje.
+    const ted = Date.now();
+    if (ted >= pulnoc && ted < pulnoc + 86400000) {
+      const l = div('kal-ted', sl);
+      l.style.top = ((ted - pulnoc) / 3600000 * KAL_PX_HOD) + 'px';
+    }
+  });
+}
+
+const kalPrevBtn = document.getElementById('kalPrev');
+const kalNextBtn = document.getElementById('kalNext');
+if (kalPrevBtn) kalPrevBtn.addEventListener('click', () => { kalDenIndex--; renderKalDen(); });
+if (kalNextBtn) kalNextBtn.addEventListener('click', () => { kalDenIndex++; renderKalDen(); });
+// Čára „teď" se musí posouvat i bez nových dat ze serveru
+setInterval(() => { if (kalPanelEl && !kalPanelEl.hidden) renderKalDen(); }, 60000);
+
 function renderKalendar(data) {
   if (data) kalData = data;
   if (!kalDnyEl) return;
@@ -8231,6 +8485,7 @@ function renderKalendar(data) {
       : 'Čeká se na první stažení z iCloudu.';
   }
   if (kalDiagBtn) kalDiagBtn.hidden = !d.enabled || (!d.error && (d.days || []).length > 0);
+  renderKalDen();
   for (const [i, den] of (d.days || []).entries()) {
     const box = document.createElement('div');
     box.className = 'kal-den' + (i === 0 ? ' dnes' : '');

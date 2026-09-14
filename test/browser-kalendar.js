@@ -3,8 +3,11 @@
 // zabírá CELOU obrazovku — na rozdíl od ostatních stránek, které jsou na iPadu
 // třetinové. V úzkém okně by se ten rozdíl nedal změřit.
 //
-// Panel schválně není `.slide`: kdyby byl, dostal by třetinovou šířku a týden by
+// Panel schválně není `.slide`: kdyby byl, dostal by třetinovou šířku a den by
 // se do něj nevešel.
+//
+// Na širokém displeji se ukazuje DENNÍ pohled: sloupec = kalendář, svisle 00:00–24:00.
+// Seznam dnů pod sebou zůstává pro telefon, kde by pět sloupců po 24 h bylo nečitelné.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -72,9 +75,60 @@ setTimeout(() => {
   check('  časovaná má hodinu', boxy[0].querySelectorAll('.kal-cas')[1].textContent, '09:00');
   check('  a místo se připíše', /Benešov/.test(boxy[0].textContent), true);
 
-  R.push('\\n3) Sedm sloupců na iPadu');
-  const sl = getComputedStyle(document.getElementById('kalDny')).gridTemplateColumns.split(' ').length;
-  check('dny jsou vedle sebe', sl, 7);
+  R.push('\\n3) Denní pohled: sloupec = kalendář');
+  check('na širokém displeji je vidět denní pohled',
+    getComputedStyle(document.getElementById('kalDenPohled')).display, 'block');
+  check('  a seznam dnů ustoupí', getComputedStyle(document.getElementById('kalDny')).display, 'none');
+
+  const KAL = [
+    { nazev: 'Family', barva: '#34AADC' }, { nazev: 'Lukáš', barva: '#8B8B8B' },
+    { nazev: 'Zuzka', barva: '#FF2968' }, { nazev: 'Miki', barva: '#1D9A57' },
+    { nazev: 'Elenka', barva: '#CC73E1' }
+  ];
+  const ud = (kal, odH, doH, nazev, extra) => Object.assign(
+    { uid: nazev, kalendar: kal, od: denMs(0) + odH * 3600000, do: denMs(0) + doH * 3600000,
+      celodenni: false, nazev, misto: null }, extra || {});
+  const dd = dny(7);
+  dd[0].udalosti = [
+    ud('Lukáš', 6, 14, 'Let Praha–Řím'),
+    ud('Lukáš', 8, 9, 'Porada'),                 // překrývá se s letem
+    ud('Miki', 8, 12, 'Škola'),
+    { uid: 'sv', kalendar: 'Family', od: denMs(0), do: denMs(1), celodenni: true, nazev: 'Svátek', misto: null }
+  ];
+  renderKalendar({ enabled: true, dnu: 7, days: dd, kalendare: KAL,
+                   fetchedAt: new Date().toISOString(), error: null });
+
+  const hlavy = [...document.querySelectorAll('#kalMrizka .kal-hlava')].map(h => h.textContent);
+  check('sloupců je pět', hlavy.length, 5);
+  check('  v zadaném pořadí', hlavy.join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
+  const sloupce = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
+  check('každý kalendář má svůj sloupec', sloupce.length, 5);
+  check('osa jde od půlnoci do půlnoci',
+    [...document.querySelectorAll('#kalMrizka .kal-hod')].map(h => h.textContent).slice(0, 2).join(','), '00:00,02:00');
+  check('  a končí o půlnoci', [...document.querySelectorAll('#kalMrizka .kal-hod')].pop().textContent, '24:00');
+
+  // Událost sedí na svém čase: 6:00 je čtvrtina dne od půlnoci
+  const bloky = [...sloupce[1].querySelectorAll('.kal-blok')];
+  check('let je ve sloupci Lukáš', bloky.length, 2);
+  const vyska = parseFloat(getComputedStyle(sloupce[1]).height);
+  const let6 = bloky.find(b => /Let Praha/.test(b.textContent));
+  check('  a začíná v šest ráno', Math.round(parseFloat(let6.style.top) / vyska * 24), 6);
+  check('  s délkou osmi hodin', Math.round(parseFloat(let6.style.height) / vyska * 24), 8);
+  // Překryv se nesmí schovat jeden za druhý — na zdi by to vypadalo prázdně
+  check('překrývající se události jdou vedle sebe', /50%/.test(let6.style.width), true);
+  check('celodenní má vlastní pruh nad osou',
+    document.querySelectorAll('#kalMrizka .kal-cely-chip').length, 1);
+  check('  a není v ose', sloupce[0].querySelectorAll('.kal-blok').length, 0);
+  check('dnešek má čáru „teď"', document.querySelectorAll('#kalMrizka .kal-ted').length, 5);
+
+  R.push('\\n3b) Přepínání dnů');
+  check('název říká, že je dnes', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
+  check('zpátky se nedá', document.getElementById('kalPrev').disabled, true);
+  document.getElementById('kalNext').click();
+  check('dopředu ano', /^Zítra /.test(document.getElementById('kalDenNazev').textContent), true);
+  check('  a zítřek už čáru „teď" nemá', document.querySelectorAll('#kalMrizka .kal-ted').length, 0);
+  document.getElementById('kalPrev').click();
+  check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
 
   R.push('\\n4) Když to ještě není nastavené');
   renderKalendar({ enabled: false, dnu: 7, days: [], fetchedAt: null, error: null });
