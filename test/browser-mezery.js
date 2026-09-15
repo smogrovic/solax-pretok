@@ -70,6 +70,20 @@ setTimeout(() => {
   check('stránka je široká jako okno',
     Math.round(slide.getBoundingClientRect().width), Math.round(wrap.clientWidth));
   check('  a je vidět jen jedna', viditelnychStranek(), 1);
+  // Kalendář jako výchozí obrazovka i samovolné přepínání po pěti minutách patří
+  // jen na iPad na zdi. Na telefonu je appka v ruce — přepnout stránku pod prstem
+  // by bylo k vzteku a odsazení pod výřez tu musí zůstat.
+  check('na telefonu se kalendář sám neotevře', document.getElementById('kalPanel').hidden, true);
+  check('  a pás stránek je vidět', wrap.style.display, '');
+  const lista = document.querySelector('.page-tabs-bar');
+  check('lišta zůstala odsazená od horní hrany',
+    parseFloat(getComputedStyle(lista).paddingTop) >= 30, true);
+  let odlozeno = null;
+  const puvodniTimeout = window.setTimeout;
+  window.setTimeout = (fn, ms) => { odlozeno = ms; return 0; };
+  window.dispatchEvent(new Event('pointerdown'));
+  window.setTimeout = puvodniTimeout;
+  check('  a žádný odpočet se nespouští', odlozeno, null);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

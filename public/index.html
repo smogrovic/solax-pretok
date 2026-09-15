@@ -91,15 +91,10 @@
       max(16px, env(safe-area-inset-left));
   }
   .kal-panel[hidden]{display:none;}
-  .kal-head{
-    display:flex;
-    align-items:baseline;
-    justify-content:space-between;
-    gap:10px;
-    margin-bottom:10px;
-  }
-  .kal-title{font-size:17px;font-weight:700;color:var(--grey-text);}
-  .kal-meta{font-size:11px;color:var(--muted);text-align:right;}
+  /* „Načteno v…" je poznámka pod čarou, ne nadpis: sedí pod kalendářem vpravo dole
+     a nebere mu výšku nahoře. Nadpis „Kalendář" tu nebyl k ničemu — v liště je
+     svítící záložka téhož jména. */
+  .kal-meta{font-size:11px;color:var(--muted);text-align:right;margin-top:6px;flex-shrink:0;}
   .kal-dny{
     display:grid;
     grid-template-columns:1fr;
@@ -562,6 +557,13 @@
     background:var(--bg);
   }
   .page-tabs::-webkit-scrollbar{display:none;}
+  /* iPad na zdi výřez nemá, takže odsazení pod něj je tu jen ztracená výška. Pár
+     pixelů zůstává schválně: posuvná část lišty nesmí sahat úplně na hranu, jinak
+     na ni iOS nasadí „scroll edge" efekt a záložky se rozmažou.
+     Musí to stát AŽ ZA výchozím pravidlem — jinak by ho nepřebilo. */
+  @media (min-width: 1000px) {
+    .page-tabs-bar{--tabs-drop:0px;padding-top:6px;}
+  }
   .page-tab{
     flex:0 0 auto;
     border:none;
@@ -2673,10 +2675,6 @@
 <!-- Kalendář stojí MIMO pás stránek: na iPadu má být přes celou obrazovku, ne
      jako třetinový sloupec. Přepíná se vlastní záložkou v liště. -->
 <div class="kal-panel" id="kalPanel" hidden>
-  <div class="kal-head">
-    <div class="kal-title">Kalendář</div>
-    <div class="kal-meta" id="kalMeta"></div>
-  </div>
   <!-- Ladit napojení na iCloud jde jen naostro: přihlašovací údaje jsou na serveru.
        Tlačítko ukáže syrové odpovědi z CalDAVu, ať se nehádá naslepo. -->
   <button class="kal-diag-btn" id="kalDiagBtn" hidden>Diagnostika napojení</button>
@@ -2693,6 +2691,7 @@
     <div class="kal-mrizka" id="kalMrizka"></div>
   </div>
   <div class="kal-dny" id="kalDny"></div>
+  <div class="kal-meta" id="kalMeta"></div>
 </div>
 
 <script>
@@ -8657,6 +8656,26 @@ function rebuildDots() {
 sliderWrap.addEventListener('scroll', updateDots, { passive: true });
 window.addEventListener('resize', updateDots);
 rebuildDots();
+
+// ---------- iPad na zdi: doma je kalendář ----------
+// Na zdi se appka skoro pořád jen kouká — kalendář je to, co má být vidět, když
+// kolem nikdo nestojí. Kdo si odskočí na Ovládání, nemusí nic vracet: po pěti
+// minutách bez doteku se panel přepne zpátky sám.
+// Na telefonu nic z toho neplatí, tam by to přepínalo stránku pod rukama.
+const KAL_VYCHOZI_MS = 5 * 60 * 1000;
+const sirokyDisplej = () => window.matchMedia('(min-width: 1000px)').matches;
+let kalNavratTimer = null;
+function kalNaplanujNavrat() {
+  clearTimeout(kalNavratTimer);
+  if (!sirokyDisplej()) return;
+  // Kontrola se opakuje i při spuštění: mezitím se mohlo otočit okno
+  kalNavratTimer = setTimeout(() => { if (sirokyDisplej()) kalOtevri(true); }, KAL_VYCHOZI_MS);
+}
+for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+  window.addEventListener(ev, kalNaplanujNavrat, { passive: true });
+}
+if (sirokyDisplej()) kalOtevri(true);
+kalNaplanujNavrat();
 </script>
 </body>
 </html>

@@ -36,12 +36,14 @@ setTimeout(() => {
   check('kalendář není mezi stránkami', panel.classList.contains('slide'), false);
   check('  a stojí mimo pás', document.getElementById('sliderWrap').contains(panel), false);
   check('záložka existuje', zalozka.textContent, 'Kalendář');
-  check('na začátku je schovaný', panel.hidden, true);
-
+  // iPad visí na zdi: to, co má být vidět, když kolem nikdo nestojí, je kalendář
+  check('na širokém displeji je hned otevřený', panel.hidden, false);
+  check('  a pás stránek je schovaný', document.getElementById('sliderWrap').style.display, 'none');
+  check('  a jeho záložka svítí', zalozka.classList.contains('active'), true);
   zalozka.click();
-  check('klik ho otevře', panel.hidden, false);
-  check('  a pás stránek se schová', document.getElementById('sliderWrap').style.display, 'none');
-  check('  záložka svítí', zalozka.classList.contains('active'), true);
+  check('klik ho zavře', panel.hidden, true);
+  zalozka.click();
+  check('  a znovu otevře', panel.hidden, false);
   // Tady je celá pointa: přes celou šířku, ne třetina jako ostatní stránky
   const sirkaStr = document.querySelector('.slide').getBoundingClientRect().width;
   check('zabírá celou šířku', panel.getBoundingClientRect().width > 2.5 * sirkaStr, true);
@@ -139,6 +141,17 @@ setTimeout(() => {
   document.getElementById('kalPrev').click();
   check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
 
+  R.push('\\n3d) Nadpis pryč, „načteno" dolů');
+  // Nadpis „Kalendář" nad kalendářem jen bral výšku — v liště svítí záložka téhož
+  // jména. „Načteno v…" je poznámka pod čarou a patří pod kalendář, ne nad něj.
+  check('nad kalendářem už není nadpis', document.querySelectorAll('.kal-title').length, 0);
+  const meta = document.getElementById('kalMeta');
+  check('„načteno" je poslední v panelu', panel.lastElementChild === meta, true);
+  check('  a je pod mřížkou',
+    meta.getBoundingClientRect().top >= document.getElementById('kalMrizka').getBoundingClientRect().bottom, true);
+  check('  vpravo', getComputedStyle(meta).textAlign, 'right');
+  check('  a pořád píše, kdy se to načetlo', /^Načteno v /.test(meta.textContent), true);
+
   R.push('\\n3c) Barvy podle telefonu');
   // Sloupec musí mít tu barvu, kterou má kalendář v telefonu — jinak se na zdi hledá,
   // čí událost to vlastně je. Barva z iCloudu na to není: u sdílených kalendářů vrací
@@ -228,6 +241,31 @@ setTimeout(() => {
   check('když to jede, tlačítko nepřekáží', diagBtn.hidden, true);
   renderKalendar({ enabled: false, dnu: 7, days: [], fetchedAt: null, error: null });
   check('  a bez nastavení taky ne', diagBtn.hidden, true);
+
+  R.push('\\n6) Sám se vrátí ke kalendáři');
+  // Kdo si na zdi odskočí na Ovládání, nemusí nic vracet. Čeká se na klid: kdyby se
+  // odpočet nerestartoval, přepnulo by to stránku někomu pod rukama.
+  document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')[2].click();
+  check('odskok na jinou stránku kalendář zavře', panel.hidden, true);
+  let odlozeno = null;
+  const puvodniTimeout = window.setTimeout;
+  window.setTimeout = (fn, ms) => { odlozeno = { fn: fn, ms: ms }; return 0; };
+  window.dispatchEvent(new Event('pointerdown'));
+  window.setTimeout = puvodniTimeout;
+  check('dotek nastartuje odpočet', odlozeno && odlozeno.ms, 5 * 60 * 1000);
+  odlozeno.fn();
+  check('  a po pěti minutách klidu je kalendář zpátky', panel.hidden, false);
+  // Otočený iPad je úzký displej. Odpočet mohl naskočit ještě na šířku, přepnout
+  // se ale nesmí — na výšku je denní pohled schovaný a zbyla by prázdná obrazovka.
+  document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')[2].click();
+  window.setTimeout = (fn, ms) => { odlozeno = { fn: fn, ms: ms }; return 0; };
+  window.dispatchEvent(new Event('pointerdown'));
+  window.setTimeout = puvodniTimeout;
+  const puvodniMM = window.matchMedia;
+  window.matchMedia = () => ({ matches: false });
+  odlozeno.fn();
+  window.matchMedia = puvodniMM;
+  check('na úzkém displeji se nepřepne', panel.hidden, true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

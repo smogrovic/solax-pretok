@@ -22,6 +22,9 @@ window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: tr
 setTimeout(() => {
  try {
   const wrap = document.getElementById('sliderWrap');
+  // Na širokém displeji je po startu vidět kalendář (iPad visí na zdi). Tahle sada
+  // je o pásu stránek, takže se na něj napřed přepne — klikem na záložku, jako uživatel.
+  document.querySelector('#pageTabs .page-tab:not(.page-tab-kal)').click();
   const slides = [...wrap.querySelectorAll('.slide')];
   const sirka = slides[0].getBoundingClientRect().width;
   const okno = wrap.clientWidth;
@@ -65,7 +68,16 @@ setTimeout(() => {
   check('roluje na pátou stránku', Math.round(kam), Math.round(4 * sirka));
   check('  a ne třikrát dál', Math.round(kam) === Math.round(4 * okno), false);
 
-  R.push('\\n5) Svislé rolování zůstalo v sloupci');
+  R.push('\\n5) Lišta u horní hrany');
+  // Na iPadu není výřez, takže odsazení pod něj je jen ztracená výška obrazovky.
+  // Pár pixelů zůstává: posuvná část lišty nesmí sahat na hranu, jinak ji iOS rozmaže.
+  const lista = document.querySelector('.page-tabs-bar');
+  check('lišta sedí u horního okraje', Math.round(lista.getBoundingClientRect().top), 0);
+  const odsazeni = parseFloat(getComputedStyle(lista).paddingTop);
+  check('  bez odsazení pod výřez', odsazeni < 10, true);
+  check('  ale ne úplně na hraně', odsazeni > 0, true);
+
+  R.push('\\n6) Svislé rolování zůstalo v sloupci');
   check('stránka roluje svisle sama', getComputedStyle(slides[0]).overflowY, 'auto');
   check('  a pás jen vodorovně', getComputedStyle(wrap).overflowY, 'hidden');
   check('přichytává se po stránkách', getComputedStyle(slides[0]).scrollSnapAlign, 'start');
