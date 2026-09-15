@@ -10,8 +10,12 @@
 const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('tuya');
 
+// Konec rozsahu je hlavička kalendáře, ne Nuki: mezi čerpadlem a Nuki leží ještě
+// celý blok kalendáře a ten sem nepatří. Když se do něj přidala další cesta
+// (`app.post`), spadla tahle sada na tom, že si v atrapě Expressu žádnou `post`
+// nedržela — na kódu, který vůbec neověřuje.
 const CODE = between('// ---------- Tepelné čerpadlo bazénu (Fairland přes Tuya cloud) ----------',
-                     '// ---------- Nuki zámek ----------');
+                     '// ---------- Kalendář z iCloudu (CalDAV) ----------');
 
 function build({ id = 'cid', secret = 'tajne', devId = 'abc', zapnuto = true,
                  odpovedi = [], ted = Date.now() } = {}) {

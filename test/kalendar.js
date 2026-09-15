@@ -19,15 +19,17 @@ function build({ odpovedi = [], duty = '' } = {}) {
   process.env.DUTY_ICS_URL = duty;
   const state = { calendar: { days: [], fetchedAt: null, error: null } };
   const dotazy = [];
+  const routy = {};
   const api = new Function('state', 'app', 'requireAuth', 'addLog', 'broadcast',
     'scheduleEvery', 'pragueDateString', 'fetch', 'Buffer',
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
          + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev,'
-         + ' kalSerad, kalStahniDuty, KAL_PORADI, DUTY_KALENDAR, KAL_DNU };'
+         + ' kalSerad, kalStahniDuty, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS };'
   )(
     state,
-    { get: () => {} },
+    { get: (cesta, fn) => { routy['GET ' + cesta] = fn; },
+      post: (cesta, fn) => { routy['POST ' + cesta] = fn; } },
     () => true,
     () => {},
     () => {},
@@ -41,7 +43,7 @@ function build({ odpovedi = [], duty = '' } = {}) {
     },
     Buffer
   );
-  return { api, state, dotazy };
+  return { api, state, dotazy, routy };
 }
 
 const api = build().api;
@@ -399,7 +401,22 @@ nadpis('6b) Pořadí sloupců a pracovní rozpis');
 }
 
 function dalsiC() {
-nadpis('6c) Zapojení v polleru');
+nadpis('6c) Jak často a na požádání');
+{
+  // Kalendář se stahuje sám dokola. Tlačítko v appce je tatáž práce, jen hned —
+  // schválně bez zámku: iPad na zdi bývá zamčený a stahování nic nepřepíná.
+  const h = build();
+  check('stahuje se po pěti minutách', h.api.KAL_POLL_MS, 5 * 60 * 1000);
+  check('appka si umí říct o stažení hned', typeof h.routy['POST /api/calendar/refresh'], 'function');
+  const zdroj = LINES.join('\n');
+  const CESTA = zdroj.slice(zdroj.indexOf("app.post('/api/calendar/refresh'"),
+                            zdroj.indexOf('if (calendarEnabled) scheduleEvery'));
+  check('  a zavolá tentýž poller', /await pollKalendar\(\)/.test(CESTA), true);
+  check('  a pošle zpátky rovnou data', /calendar: calendarPayload\(\)/.test(CESTA), true);
+  check('  zámek si nevynucuje', /requireAuth/.test(CESTA), false);
+}
+
+nadpis('6d) Zapojení v polleru');
 {
   // kalSerad i stahování rozpisu mají vlastní kontroly výš, ale poller si je musí
   // taky zavolat — jinak by sloupce chodily v pořadí od iCloudu a služby by chyběly.

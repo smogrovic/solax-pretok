@@ -20,7 +20,7 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno.padEnd(52) + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
-setTimeout(() => {
+setTimeout(async () => {
  try {
   const panel = document.getElementById('kalPanel');
   const zalozka = document.querySelector('.page-tab-kal');
@@ -146,11 +146,17 @@ setTimeout(() => {
   // jména. „Načteno v…" je poznámka pod čarou a patří pod kalendář, ne nad něj.
   check('nad kalendářem už není nadpis', document.querySelectorAll('.kal-title').length, 0);
   const meta = document.getElementById('kalMeta');
-  check('„načteno" je poslední v panelu', panel.lastElementChild === meta, true);
-  check('  a je pod mřížkou',
+  const pata = document.querySelector('.kal-pata');
+  check('patička je poslední v panelu', panel.lastElementChild === pata, true);
+  check('  a „načteno" je v ní', pata.contains(meta), true);
+  check('  je pod mřížkou',
     meta.getBoundingClientRect().top >= document.getElementById('kalMrizka').getBoundingClientRect().bottom, true);
-  check('  vpravo', getComputedStyle(meta).textAlign, 'right');
   check('  a pořád píše, kdy se to načetlo', /^Načteno v /.test(meta.textContent), true);
+  // Tlačítko stojí vedle něj, ne někde nahoře
+  const obnov = document.getElementById('kalObnov');
+  check('tlačítko „Aktualizovat" je v patičce', pata.contains(obnov), true);
+  check('  a je vedle „načteno"',
+    Math.abs(obnov.getBoundingClientRect().top - meta.getBoundingClientRect().top) < 20, true);
 
   R.push('\\n3c) Barvy podle telefonu');
   // Sloupec musí mít tu barvu, kterou má kalendář v telefonu — jinak se na zdi hledá,
@@ -320,6 +326,35 @@ setTimeout(() => {
   mrizka.classList.remove('kal-den-dopredu', 'kal-den-zpet');
   tah(-200);
   check('na kraji týdne se neanimuje', getComputedStyle(mrizka).animationName, 'none');
+
+  R.push('\\n9) Klik na datum a ruční aktualizace');
+  // Po prolistování týdne je skok na dnešek kratší než šestkrát šipka. Jsme na konci
+  // týdne z předchozí části, takže je co přeskakovat.
+  check('  (jsme pořád na konci týdne)', /^Dnes /.test(nazev()), false);
+  document.getElementById('kalDenNazev').click();
+  check('klik na datum skočí na dnešek', /^Dnes /.test(nazev()), true);
+  check('  a přijede zleva, jako by se listovalo zpátky',
+    getComputedStyle(mrizka).animationName, 'kal-zleva');
+  mrizka.classList.remove('kal-den-dopredu', 'kal-den-zpet');
+  document.getElementById('kalDenNazev').click();
+  check('  na dnešku už klik nic nedělá', getComputedStyle(mrizka).animationName, 'none');
+
+  // Tlačítko říká serveru, ať stáhne hned — jinak se čeká až na další kolo polleru
+  const volani = [];
+  const puvodniFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    volani.push((opts && opts.method) + ' ' + url);
+    return { ok: true, status: 200, json: async () => ({ ok: true, calendar:
+      { enabled: true, dnu: 7, days: dd, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null } }) };
+  };
+  obnov.click();
+  check('  a než se to stáhne, nejde mačkat', obnov.disabled, true);
+  await new Promise(r => setTimeout(r, 30));
+  window.fetch = puvodniFetch;
+  check('tlačítko si o stažení řekne', volani.join(','), 'POST /api/calendar/refresh');
+  check('  a překreslí tím, co přišlo zpátky',
+    document.querySelectorAll('#kalMrizka .kal-hlava').length, 5);
+  check('  a zase se dá zmáčknout', obnov.disabled, false);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

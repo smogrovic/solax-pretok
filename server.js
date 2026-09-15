@@ -6325,7 +6325,7 @@ const DUTY_KALENDAR = process.env.DUTY_KALENDAR || 'Lukáš';
 const KAL_PORADI = (process.env.ICLOUD_PORADI || 'Family,Lukáš,Zuzka,Miki,Elenka')
   .split(',').map(x => x.trim()).filter(Boolean);
 const KAL_DNU = 7;
-const KAL_POLL_MS = 15 * 60 * 1000;
+const KAL_POLL_MS = 5 * 60 * 1000;
 
 // ---- XML bez parseru ----
 // Odpovědi CalDAVu jsou předvídatelné, ale prefix jmenného prostoru ne. Proto se
@@ -6808,6 +6808,15 @@ app.get('/api/calendar/raw', async (req, res) => {
     out.chyba = err.message;
   }
   res.json(out);
+});
+
+// Ruční „Aktualizovat" z appky. Schválně bez zámku: je to přesně to, co poller dělá
+// sám dokola, jen dřív — a iPad na zdi bývá zamčený. Když už stahování běží,
+// pollKalendar se sám vrátí a odpověď nese to, co je právě v paměti.
+app.post('/api/calendar/refresh', async (req, res) => {
+  if (!calendarEnabled) return res.status(503).json({ error: 'Kalendář není nastavený.' });
+  await pollKalendar();
+  res.json({ ok: true, calendar: calendarPayload() });
 });
 
 if (calendarEnabled) scheduleEvery(() => { pollKalendar().catch(() => {}); }, KAL_POLL_MS, 30000);
