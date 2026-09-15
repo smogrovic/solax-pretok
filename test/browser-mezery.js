@@ -84,6 +84,13 @@ setTimeout(() => {
   window.dispatchEvent(new Event('pointerdown'));
   window.setTimeout = puvodniTimeout;
   check('  a žádný odpočet se nespouští', odlozeno, null);
+  // Listování prstem patří k dennímu pohledu, a ten je na telefonu schovaný. Tah
+  // přes seznam dnů nesmí kalendář zavřít — je to rolování, ne listování.
+  const kal = document.getElementById('kalPanel');
+  document.querySelector('.page-tab-kal').click();
+  kal.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 400, bubbles: true }));
+  kal.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 400, bubbles: true }));
+  check('tah prstem na telefonu nelistuje', kal.hidden, false);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

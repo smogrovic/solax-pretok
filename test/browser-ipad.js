@@ -68,14 +68,21 @@ setTimeout(() => {
   check('roluje na pátou stránku', Math.round(kam), Math.round(4 * sirka));
   check('  a ne třikrát dál', Math.round(kam) === Math.round(4 * okno), false);
 
-  R.push('\\n5) Lišta u horní hrany');
-  // Na iPadu není výřez, takže odsazení pod něj je jen ztracená výška obrazovky.
-  // Pár pixelů zůstává: posuvná část lišty nesmí sahat na hranu, jinak ji iOS rozmaže.
+  R.push('\\n5) Lišta nahoře, ale pod stavovým řádkem');
+  // Na iPadu není výřez, takže těch 30 px navíc je jen ztracená výška. Stavový řádek
+  // s hodinami a baterií ale iPad má a appku překrývá — odsazení pod něj musí zůstat,
+  // jinak se lišta schová pod hodiny. (V testovacím prohlížeči je safe-area nulová,
+  // takže se tu měří to, co jde: že zmizel jen ten přídavek.)
   const lista = document.querySelector('.page-tabs-bar');
   check('lišta sedí u horního okraje', Math.round(lista.getBoundingClientRect().top), 0);
-  const odsazeni = parseFloat(getComputedStyle(lista).paddingTop);
-  check('  bez odsazení pod výřez', odsazeni < 10, true);
-  check('  ale ne úplně na hraně', odsazeni > 0, true);
+  check('přídavek pod výřez je pryč',
+    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '0px');
+  // Odsazení je max(8px, safe-area). V prohlížeči bez výřezu z toho vyjde 8 px —
+  // kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu něco jiného.
+  check('  ale odsazení pod stavový řádek zůstalo',
+    parseFloat(getComputedStyle(lista).paddingTop), 8);
+  check('  a záložky jsou pod ním vidět',
+    document.querySelector('.page-tab').getBoundingClientRect().top >= 8, true);
 
   R.push('\\n6) Svislé rolování zůstalo v sloupci');
   check('stránka roluje svisle sama', getComputedStyle(slides[0]).overflowY, 'auto');

@@ -557,12 +557,12 @@
     background:var(--bg);
   }
   .page-tabs::-webkit-scrollbar{display:none;}
-  /* iPad na zdi výřez nemá, takže odsazení pod něj je tu jen ztracená výška. Pár
-     pixelů zůstává schválně: posuvná část lišty nesmí sahat úplně na hranu, jinak
-     na ni iOS nasadí „scroll edge" efekt a záložky se rozmažou.
+  /* iPad na zdi výřez nemá, takže těch 30 px navíc je tu jen ztracená výška.
+     Stavový řádek s hodinami a baterií ale má i iPad a appku překrývá — odsazení
+     pod něj (safe-area) proto ZŮSTÁVÁ, jinak se lišta schová pod hodiny.
      Musí to stát AŽ ZA výchozím pravidlem — jinak by ho nepřebilo. */
   @media (min-width: 1000px) {
-    .page-tabs-bar{--tabs-drop:0px;padding-top:6px;}
+    .page-tabs-bar{--tabs-drop:0px;}
   }
   .page-tab{
     flex:0 0 auto;
@@ -8676,6 +8676,32 @@ for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
 }
 if (sirokyDisplej()) kalOtevri(true);
 kalNaplanujNavrat();
+
+// Prstem přes kalendář se listuje po dnech. Dny leží pomyslně vpravo od pásu
+// stránek: tah doleva jde na zítřek, tah doprava na včerejšek — a z dneška, kde
+// už žádný předchozí den není, se stejným tahem vyjde zpátky na stránky appky.
+const KAL_SWIPE_PX = 50;
+let kalSwipeOd = null;
+function kalZpetNaStranky() {
+  kalOtevri(false);
+  // Kalendář je v liště až za všemi stránkami, takže se vychází na ty poslední
+  sliderWrap.scrollTo({ left: sliderWrap.scrollWidth, behavior: 'smooth' });
+}
+if (kalPanelEl) {
+  kalPanelEl.addEventListener('pointerdown', e => { kalSwipeOd = { x: e.clientX, y: e.clientY }; });
+  kalPanelEl.addEventListener('pointerup', e => {
+    const od = kalSwipeOd;
+    kalSwipeOd = null;
+    if (!od || !sirokyDisplej()) return;
+    const dx = e.clientX - od.x, dy = e.clientY - od.y;
+    // Svislý tah je rolování, krátký tah je klepnutí — ani jedno není listování
+    if (Math.abs(dx) < KAL_SWIPE_PX || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) kalDenIndex++;
+    else if (kalDenIndex > 0) kalDenIndex--;
+    else return kalZpetNaStranky();
+    renderKalDen();
+  });
+}
 </script>
 </body>
 </html>

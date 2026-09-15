@@ -266,6 +266,36 @@ setTimeout(() => {
   odlozeno.fn();
   window.matchMedia = puvodniMM;
   check('na úzkém displeji se nepřepne', panel.hidden, true);
+
+  R.push('\\n7) Listování prstem');
+  // Dny leží pomyslně vpravo od pásu stránek: tah doleva jde na zítřek, tah doprava
+  // na včerejšek — a z dneška, kde žádný předchozí den není, se stejným tahem vyjde
+  // zpátky do appky. Bez toho by se z kalendáře dalo ven jen přes lištu.
+  zalozka.click();
+  renderKalendar({ enabled: true, dnu: 7, days: dd, kalendare: KAL,
+                   fetchedAt: new Date().toISOString(), error: null });
+  const nazev = () => document.getElementById('kalDenNazev').textContent;
+  const tah = (dx, dy) => {
+    panel.dispatchEvent(new PointerEvent('pointerdown', { clientX: 600, clientY: 400, bubbles: true }));
+    panel.dispatchEvent(new PointerEvent('pointerup',
+      { clientX: 600 + dx, clientY: 400 + (dy || 0), bubbles: true }));
+  };
+  check('začínáme na dnešku', /^Dnes /.test(nazev()), true);
+  tah(-200);
+  check('tah doleva ukáže zítřek', /^Zítra /.test(nazev()), true);
+  tah(-200);
+  check('  a další tah pozítří', /^Dnes |^Zítra /.test(nazev()), false);
+  tah(200); tah(200);
+  check('tah doprava se vrací', /^Dnes /.test(nazev()), true);
+  // Klepnutí ani rolování prstem nahoru nesmí listovat
+  tah(-20);
+  check('krátký tah je klepnutí, ne listování', /^Dnes /.test(nazev()), true);
+  tah(-200, 400);
+  check('  a svislý tah je rolování', /^Dnes /.test(nazev()), true);
+  // Poslední tah doprava už nemá kam v kalendáři jít — vede zpátky do appky
+  tah(200);
+  check('z dneška doprava se vyjde na stránky', panel.hidden, true);
+  check('  a pás stránek je zpátky', document.getElementById('sliderWrap').style.display, '');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
