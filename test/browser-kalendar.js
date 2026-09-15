@@ -167,7 +167,7 @@ setTimeout(() => {
                    fetchedAt: new Date().toISOString(), error: null });
   const sl2 = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
   const blok = (i, jm) => [...sl2[i].querySelectorAll('.kal-blok')].find(b => b.textContent.includes(jm));
-  check('Family je žlutá', blok(0, 'Oběd').style.borderLeftColor, 'rgb(232, 168, 0)');
+  check('Family je žlutá', blok(0, 'Oběd').style.borderLeftColor, 'rgb(255, 214, 10)');
   check('  i když iCloud hlásí modrou', KAL[0].barva, '#34AADC');
   check('Zuzka červená', blok(2, 'Kadeřník').style.borderLeftColor, 'rgb(229, 69, 58)');
   check('Lukáš šedý', blok(1, 'Porada').style.borderLeftColor, 'rgb(142, 142, 147)');

@@ -571,10 +571,10 @@
   /* iPad na zdi výřez nemá, takže těch 30 px navíc je tu jen ztracená výška.
      Stavový řádek s hodinami a baterií ale má i iPad a appku překrývá — odsazení
      pod něj (safe-area) proto ZŮSTÁVÁ, jinak se lišta schová pod hodiny. Přídavek
-     zbyl jen půlka řádku se záložkami, ať se nelepí těsně pod hodiny.
+     je jen dýchací mezera pod nimi, ať se na ně záložky nelepí.
      Musí to stát AŽ ZA výchozím pravidlem — jinak by ho nepřebilo. */
   @media (min-width: 1000px) {
-    .page-tabs-bar{--tabs-drop:9px;}
+    .page-tabs-bar{--tabs-drop:14px;}
   }
   .page-tab{
     flex:0 0 auto;
@@ -8377,7 +8377,7 @@ let kalDenIndex = 0;            // který z došlých dnů se ukazuje (0 = dnes)
 // je až záloha: u sdílených kalendářů ji vrací podle toho, kdo je sdílí, takže se
 // s tím, co je vidět na telefonu, často míjí.
 const KAL_BARVY = {
-  'family': '#e8a800',
+  'family': '#ffd60a',
   'miki': '#34a853',
   'elenka': '#ef5fb8',
   'zuzka': '#e5453a',

@@ -75,14 +75,14 @@ setTimeout(() => {
   // takže se tu měří to, co jde: že zmizel jen ten přídavek.)
   const lista = document.querySelector('.page-tabs-bar');
   check('lišta sedí u horního okraje', Math.round(lista.getBoundingClientRect().top), 0);
-  // Z původních 30 px zbyla půlka řádku se záložkami — lišta se nemá lepit těsně
-  // pod hodiny, ale ani pod nimi mizet.
-  check('přídavek pod výřez je jen půlka řádku',
-    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '9px');
+  // Z původních 30 px zbyla dýchací mezera pod hodinami — lišta se na ně nemá lepit,
+  // ale ani pod nimi mizet.
+  check('přídavek pod výřez je jen mezera pod hodinami',
+    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '14px');
   // Odsazení je max(8px, safe-area) + přídavek. V prohlížeči bez výřezu z toho vyjde
-  // 8 + 9 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
+  // 8 + 14 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
   check('  a odsazení pod stavový řádek zůstalo',
-    parseFloat(getComputedStyle(lista).paddingTop), 17);
+    parseFloat(getComputedStyle(lista).paddingTop), 22);
   check('  a záložky jsou pod ním vidět',
     document.querySelector('.page-tab').getBoundingClientRect().top >= 8, true);
 
