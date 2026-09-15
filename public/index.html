@@ -580,8 +580,11 @@
   /* Lišta je schválně rozdělená: posuvná část NESMÍ sahat na horní hranu displeje,
      jinak na ni nové iOS nasadí svůj „scroll edge" efekt a záložky jsou rozmazané.
      Odsazení pod výřez a pozadí drží statický obal.
-     --tabs-drop posouvá záložky pod rozmazaný pruh, který sahá kus pod výřez;
-     kdyby se rozmazání vrátilo, zvedne se jen tohle jedno číslo. */
+     --tabs-drop posouvá záložky pod rozmazaný pruh; kdyby se rozmazání vrátilo,
+     zvedne se jen tohle jedno číslo.
+     Platí všude stejně, i na iPadu: rozmazaný pruh nedrží výřez (ten iPad nemá),
+     ale stavový řádek. Zkoušelo se to na iPadu zkrátit na 6 až 25 px a rozmazání
+     zmizelo až u téhle hodnoty — proto tu žádná výjimka pro široký displej není. */
   .page-tabs-bar{
     --tabs-drop:30px;
     flex-shrink:0;
@@ -599,14 +602,6 @@
     background:var(--bg);
   }
   .page-tabs::-webkit-scrollbar{display:none;}
-  /* iPad na zdi výřez nemá, takže těch 30 px navíc je tu jen ztracená výška.
-     Stavový řádek s hodinami a baterií ale má i iPad a appku překrývá — odsazení
-     pod něj (safe-area) proto ZŮSTÁVÁ, jinak se lišta schová pod hodiny. Přídavek
-     je jen dýchací mezera pod nimi, ať se na ně záložky nelepí.
-     Musí to stát AŽ ZA výchozím pravidlem — jinak by ho nepřebilo. */
-  @media (min-width: 1000px) {
-    .page-tabs-bar{--tabs-drop:25px;}
-  }
   .page-tab{
     flex:0 0 auto;
     border:none;

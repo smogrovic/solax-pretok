@@ -68,23 +68,21 @@ setTimeout(() => {
   check('roluje na pátou stránku', Math.round(kam), Math.round(4 * sirka));
   check('  a ne třikrát dál', Math.round(kam) === Math.round(4 * okno), false);
 
-  R.push('\\n5) Lišta nahoře, ale pod stavovým řádkem');
-  // Na iPadu není výřez, takže těch 30 px navíc je jen ztracená výška. Stavový řádek
-  // s hodinami a baterií ale iPad má a appku překrývá — odsazení pod něj musí zůstat,
-  // jinak se lišta schová pod hodiny. (V testovacím prohlížeči je safe-area nulová,
-  // takže se tu měří to, co jde: že zmizel jen ten přídavek.)
+  R.push('\\n5) Lišta pod stavovým řádkem');
+  // Záložky nesmí sahat na horní hranu: iOS na ně tam nasadí „scroll edge" efekt a
+  // rozmaže je. Na iPadu se zkoušelo přídavek zkrátit (výřez tam není) — jenže ten
+  // rozmazaný pruh nedrží výřez, ale stavový řádek, a zmizel až u plné hodnoty.
+  // Proto tu žádná výjimka pro široký displej NENÍ a hlídá se, že se nevrátí.
   const lista = document.querySelector('.page-tabs-bar');
   check('lišta sedí u horního okraje', Math.round(lista.getBoundingClientRect().top), 0);
-  // Z původních 30 px zbyla dýchací mezera pod hodinami — lišta se na ně nemá lepit,
-  // ale ani pod nimi mizet.
-  check('přídavek pod výřez je jen mezera pod hodinami',
-    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '25px');
+  check('přídavek platí i na širokém displeji',
+    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '30px');
   // Odsazení je max(8px, safe-area) + přídavek. V prohlížeči bez výřezu z toho vyjde
-  // 8 + 25 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
-  check('  a odsazení pod stavový řádek zůstalo',
-    parseFloat(getComputedStyle(lista).paddingTop), 33);
+  // 8 + 30 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
+  check('  a odsazení pod stavový řádek drží',
+    parseFloat(getComputedStyle(lista).paddingTop), 38);
   check('  a záložky jsou pod ním vidět',
-    document.querySelector('.page-tab').getBoundingClientRect().top >= 8, true);
+    document.querySelector('.page-tab').getBoundingClientRect().top >= 30, true);
 
   R.push('\\n6) Svislé rolování zůstalo v sloupci');
   check('stránka roluje svisle sama', getComputedStyle(slides[0]).overflowY, 'auto');
