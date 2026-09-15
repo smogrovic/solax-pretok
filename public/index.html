@@ -142,7 +142,6 @@
   }
   .kal-nazev{color:var(--grey-text);flex:1;min-width:0;}
   .kal-celodenni .kal-nazev{font-weight:600;}
-  .kal-misto{color:var(--muted);font-size:11px;}
   .kal-nic{color:var(--muted);font-size:12px;}
   .kal-diag-btn{
     border:none;
@@ -586,7 +585,7 @@
      ale stavový řádek. Zkoušelo se to na iPadu zkrátit na 6 až 25 px a rozmazání
      zmizelo až u téhle hodnoty — proto tu žádná výjimka pro široký displej není. */
   .page-tabs-bar{
-    --tabs-drop:30px;
+    --tabs-drop:34px;
     flex-shrink:0;
     padding-top:calc(max(8px, env(safe-area-inset-top)) + var(--tabs-drop));
     background:var(--bg);
@@ -1084,12 +1083,6 @@
   .mode-btn:disabled{opacity:0.5;}
   .mode-btn.active{background:var(--orange);color:#fff;}
   .asszistant-card{align-items:stretch;}
-  .asst-hint{
-    font-size:12px;
-    color:var(--grey-text);
-    text-align:center;
-    margin-bottom:10px;
-  }
   .asst-reply{
     font-size:14px;
     color:var(--navy);
@@ -1782,7 +1775,6 @@
         <div class="lock-error"></div>
       </div>
       <div class="card lockable asszistant-card">
-        <div class="asst-hint">Napiš nebo nadiktuj, co mám udělat.</div>
         <div class="asst-reply" id="asstReply"></div>
         <div class="asst-row">
           <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
@@ -1790,10 +1782,6 @@
         </div>
         <div class="asst-examples" id="asstExamples"></div>
         <div class="asst-scenes" id="asstScenes"></div>
-      </div>
-      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
-        <div class="asst-log-title">Co asistent udělal</div>
-        <div class="asst-log" id="asstLog"></div>
       </div>
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
@@ -2028,6 +2016,12 @@
         </div>
       </div>
 
+      <div class="card stats-card">
+        <div class="graph-title">Teplota v pokojích (12 h)</div>
+        <canvas id="airconChart"></canvas>
+        <div class="timeline-legend" id="airconChartLegend"></div>
+      </div>
+
       <div class="card lockable timer-card">
         <div class="graph-title">Časovač</div>
         <select id="timerDevice" class="timer-select"></select>
@@ -2044,11 +2038,6 @@
         <div class="timer-list" id="timerList"></div>
       </div>
 
-      <div class="card stats-card">
-        <div class="graph-title">Teplota v pokojích (12 h)</div>
-        <canvas id="airconChart"></canvas>
-        <div class="timeline-legend" id="airconChartLegend"></div>
-      </div>
     </div>
   </div>
 
@@ -2537,6 +2526,12 @@
         <div class="log-list" id="logList">
           <div class="log-empty">Zatím žádné záznamy</div>
         </div>
+      </div>
+
+      <!-- Výpis asistenta patří k ostatním výpisům, ne mezi ovládání -->
+      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
+        <div class="asst-log-title">Co asistent udělal</div>
+        <div class="asst-log" id="asstLog"></div>
       </div>
 
       <div class="card log-card">
@@ -4380,8 +4375,20 @@ let blinds = [];
 let blindsReloadTimer = null;
 
 // Rozložení místností: co nesedí do seznamů, přijde na konec druhé stránky
-const BLINDS_PAGE1 = ['obyvak', 'terasa', 'garaz'];
+const BLINDS_PAGE1 = ['obyvak', 'kuchyn', 'terasa', 'garaz'];
 const BLINDS_PAGE2 = ['loznice', 'miky', 'elenka', 'hoste'];
+
+// Kuchyň a obývák jsou jeden otevřený prostor, takže je TaHoma hlásí jako jednu
+// místnost a všechny tři žaluzie skončily v jednom šedém boxu. „Kuchyň" se tam mezi
+// „Obývák Okno" a „Obývák Dveře" ztrácela — dostane vlastní box, jako má ložnice
+// nebo Mikiho pokoj. Rozhoduje štítek žaluzie, ne místnost z TaHomy.
+const BLINDS_VLASTNI_BOX = [{ stitek: 'kuchyn', nazev: 'Kuchyň' }];
+
+function blindSkupina(b) {
+  const lab = normalizeName(b.label);
+  const vlastni = lab && BLINDS_VLASTNI_BOX.find(v => lab.includes(v.stitek));
+  return vlastni ? vlastni.nazev : b.room;
+}
 
 function normalizeName(s) {
   return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -4776,8 +4783,9 @@ function renderBlinds() {
   // Seskupení podle místností a seřazení podle definovaného rozložení stránek
   const roomsMap = new Map();
   for (const b of blinds) {
-    if (!roomsMap.has(b.room)) roomsMap.set(b.room, []);
-    roomsMap.get(b.room).push(b);
+    const skupina = blindSkupina(b);
+    if (!roomsMap.has(skupina)) roomsMap.set(skupina, []);
+    roomsMap.get(skupina).push(b);
   }
   const rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
   rooms.sort((a, b) => a.page - b.page || a.order - b.order || a.room.localeCompare(b.room, 'cs'));
@@ -4834,8 +4842,9 @@ function blindTimerOptions(page) {
   const roomsMap = new Map();
   for (const b of blinds) {
     if (b.type !== 'cover') continue;
-    if (!roomsMap.has(b.room)) roomsMap.set(b.room, []);
-    roomsMap.get(b.room).push(b);
+    const skupina = blindSkupina(b);
+    if (!roomsMap.has(skupina)) roomsMap.set(skupina, []);
+    roomsMap.get(skupina).push(b);
   }
   const rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
   rooms.sort((a, b) => a.page - b.page || a.order - b.order || a.room.localeCompare(b.room, 'cs'));
@@ -8565,7 +8574,7 @@ function renderKalDen() {
       b.appendChild(jm);
       const cas = document.createElement('span');
       cas.className = 'kal-blok-cas';
-      cas.textContent = kalCas(u) + (u.misto ? ' · ' + u.misto : '');
+      cas.textContent = kalCas(u);
       b.appendChild(cas);
       // Krátká událost nemá výšku na dvě řádky — čas jde vedle názvu, ne pod něj
       if (doKdy - od < 90 * 60000) b.classList.add('kal-blok-uzky');
@@ -8666,12 +8675,6 @@ function renderKalendar(data) {
       const nazev = document.createElement('span');
       nazev.className = 'kal-nazev';
       nazev.textContent = u.nazev;
-      if (u.misto) {
-        const misto = document.createElement('span');
-        misto.className = 'kal-misto';
-        misto.textContent = ' · ' + u.misto;
-        nazev.appendChild(misto);
-      }
       row.appendChild(cas);
       row.appendChild(nazev);
       box.appendChild(row);

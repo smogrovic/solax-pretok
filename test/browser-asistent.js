@@ -58,14 +58,27 @@ setTimeout(async () => {
 
   R.push('\\n2) Pořadí karet');
   const karty = [...slide.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
-  const popis = c => (c.querySelector('.asst-log-title, .shelly-label, .asst-hint') || {}).textContent || c.id || '?';
+  const popis = c => (c.querySelector('.asst-log-title, .shelly-label') || {}).textContent
+    || (c.classList.contains('asszistant-card') ? 'pole pro asistenta' : c.id || '?');
   // Teplotní automatika má být PŘED automatikou — dřív to bylo obráceně
   const iTemp = karty.findIndex(c => c.id === 'tempAutoCard');
   const iAuto = karty.findIndex(c => c.querySelector('#autoModeSlider'));
   check('teplotní automatika je dřív než automatika', iTemp < iAuto, true);
   check('  a jsou vedle sebe', iAuto - iTemp, 1);
   check('pořadí karet sedí', karty.map(popis).join(' | '),
-    'Napiš nebo nadiktuj, co mám udělat. | Co asistent udělal | Teplotní automatika | Automatika: –');
+    'pole pro asistenta | Teplotní automatika | Automatika: –');
+  // Nad polem nic nestojí — co se do něj píše, je vidět z placeholderu
+  check('žádný popisek nad polem', document.querySelectorAll('.asst-hint').length, 0);
+  check('  ale pole říká, co do něj patří',
+    /zapni bojler/.test(document.getElementById('asstInput').placeholder), true);
+  // Výpis patří k ostatním výpisům, ne mezi ovládání
+  const logKarta = document.getElementById('asstLogCard');
+  check('„Co asistent udělal" je pryč z Asistenta', slide.contains(logKarta), false);
+  const logSlide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Log');
+  check('  a stojí na stránce Log', logSlide.contains(logKarta), true);
+  const logKarty = [...logSlide.querySelectorAll(':scope > .page > .card')];
+  const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
+  check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);
 
   R.push('\\n3) Nejsme doma');
   const check2 = document.getElementById('awayCheck');

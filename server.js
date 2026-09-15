@@ -6673,7 +6673,6 @@ function kalUdalosti(texty, od, doKdy, kal = {}) {
         uid, od: ms, do: ms + trvani,
         celodenni: zac.celodenni,
         nazev: icsOdescapuj(ev.SUMMARY ? ev.SUMMARY.hodnota : '') || '(bez názvu)',
-        misto: icsOdescapuj(ev.LOCATION ? ev.LOCATION.hodnota : '') || null,
         kalendar: kal.nazev || null,
         barva: kal.barva || null,
         // Odkud událost je. Služby z DutyLogu jedou v Lukášově sloupci, ale appka

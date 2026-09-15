@@ -76,11 +76,11 @@ setTimeout(() => {
   const lista = document.querySelector('.page-tabs-bar');
   check('lišta sedí u horního okraje', Math.round(lista.getBoundingClientRect().top), 0);
   check('přídavek platí i na širokém displeji',
-    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '30px');
+    getComputedStyle(lista).getPropertyValue('--tabs-drop').trim(), '34px');
   // Odsazení je max(8px, safe-area) + přídavek. V prohlížeči bez výřezu z toho vyjde
-  // 8 + 30 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
+  // 8 + 34 px — kdyby se odsazení přebilo vlastním číslem nebo nulou, sedělo by tu jiné.
   check('  a odsazení pod stavový řádek drží',
-    parseFloat(getComputedStyle(lista).paddingTop), 38);
+    parseFloat(getComputedStyle(lista).paddingTop), 42);
   check('  a záložky jsou pod ním vidět',
     document.querySelector('.page-tab').getBoundingClientRect().top >= 30, true);
 

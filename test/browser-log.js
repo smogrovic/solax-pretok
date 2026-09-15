@@ -21,7 +21,11 @@ setTimeout(() => {
 
   check('karta výpadků je pod logem', !!document.getElementById('outageList'), true);
   const karty = Array.from(document.querySelectorAll('.slide[data-title="Log"] .page > .card'));
-  check('  a je to samostatná karta', karty.length, 2);
+  // Tři výpisy pod sebou: co se dělo, co udělal asistent, a co vypadlo
+  check('  a je to samostatná karta', karty.length, 3);
+  check('  výpadky nejsou promíchané s logem',
+    document.getElementById('outageList').closest('.card')
+      .contains(document.getElementById('logList')), false);
   check('  s mezerou jako všude jinde',
     parseFloat(getComputedStyle(karty[1]).marginTop) >= 10, true);
 

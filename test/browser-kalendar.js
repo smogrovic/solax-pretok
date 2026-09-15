@@ -75,7 +75,8 @@ setTimeout(async () => {
   check('  celodenní je první', boxy[0].querySelector('.kal-udalost').textContent.includes('Svátek'), true);
   check('  a píše se u ní „celý den"', boxy[0].querySelector('.kal-cas').textContent, 'celý den');
   check('  časovaná má hodinu', boxy[0].querySelectorAll('.kal-cas')[1].textContent, '09:00');
-  check('  a místo se připíše', /Benešov/.test(boxy[0].textContent), true);
+  // Adresa je v telefonu k navigaci; na zdi jen zabírá řádek, na kterém má být název
+  check('  ale adresa se nepíše', /Benešov/.test(boxy[0].textContent), false);
 
   R.push('\\n3) Denní pohled: sloupec = kalendář');
   check('na širokém displeji je vidět denní pohled',
@@ -164,7 +165,7 @@ setTimeout(async () => {
   // barvu toho, kdo sdílí, takže KAL schválně hlásí u Family modrou.
   const dc = dny(7);
   dc[0].udalosti = [
-    ud('Family', 10, 11, 'Oběd'),
+    ud('Family', 10, 11, 'Oběd', { misto: 'S-centrum' }),
     ud('Zuzka', 12, 13, 'Kadeřník'),
     ud('Lukáš', 8, 9, 'Porada'),
     ud('Lukáš', 15, 18, 'OK123 PRG-FCO', { zdroj: 'duty' })
@@ -209,6 +210,8 @@ setTimeout(async () => {
       .every(h => pomer(rgb(getComputedStyle(h).color), [255, 255, 255]) >= 4.5), true);
   // Hodinová událost je na dvě řádky moc nízká: z času pod názvem by koukala půlka
   // písmen. Takový blok má název i čas na jedné řádce.
+  check('ani v denním pohledu není adresa', /Benešov|S-centrum/.test(
+    document.getElementById('kalMrizka').textContent), false);
   check('nic z bloků nevykoukává',
     vsechny.every(b => b.scrollHeight <= b.clientHeight + 1), true);
   check('  hodinovka má čas vedle názvu',

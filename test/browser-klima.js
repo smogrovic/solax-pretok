@@ -122,6 +122,12 @@ setTimeout(() => {
   renderAirconChart();
   check('legenda vypíše jen ty dva',
     document.querySelectorAll('#airconChartLegend span').length, 2);
+  // Teplota v pokojích je to, kvůli čemu se na stránku kouká — patří nad časovač
+  const karty = [...document.querySelector('.slide[data-title="Klima"]')
+    .querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
+  const nazev = c => (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
+  check('pořadí karet sedí', karty.map(nazev).join(' | '),
+    'seznam klimatizací | Teplota v pokojích (12 h) | Časovač');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
