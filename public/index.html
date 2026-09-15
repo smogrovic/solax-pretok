@@ -263,6 +263,17 @@
     z-index:2;
     border-left:3px solid currentColor;
   }
+  /* Listování po dnech má být poznat: nový den přijíždí z té strany, odkud jde.
+     Bez toho se na zdi mezi včerejškem a zítřkem nepozná, že se vůbec něco stalo. */
+  @keyframes kal-zprava{from{transform:translateX(26px);opacity:0;}to{transform:none;opacity:1;}}
+  @keyframes kal-zleva{from{transform:translateX(-26px);opacity:0;}to{transform:none;opacity:1;}}
+  .kal-den-dopredu{animation:kal-zprava 0.22s ease-out;}
+  .kal-den-zpet{animation:kal-zleva 0.22s ease-out;}
+  /* Kalendář je v liště až za stránkami, takže i celý panel přijíždí zprava */
+  .kal-panel-prichod{animation:kal-zprava 0.22s ease-out;}
+  @media (prefers-reduced-motion: reduce) {
+    .kal-den-dopredu,.kal-den-zpet,.kal-panel-prichod{animation:none;}
+  }
   .kal-blok b{font-weight:600;display:block;font-size:10px;}
   /* Hodinová událost je na dvě řádky moc nízká — z času by koukala půlka písmen.
      Takové bloky mají název i čas vedle sebe na jedné řádce. */
@@ -559,10 +570,11 @@
   .page-tabs::-webkit-scrollbar{display:none;}
   /* iPad na zdi výřez nemá, takže těch 30 px navíc je tu jen ztracená výška.
      Stavový řádek s hodinami a baterií ale má i iPad a appku překrývá — odsazení
-     pod něj (safe-area) proto ZŮSTÁVÁ, jinak se lišta schová pod hodiny.
+     pod něj (safe-area) proto ZŮSTÁVÁ, jinak se lišta schová pod hodiny. Přídavek
+     zbyl jen půlka řádku se záložkami, ať se nelepí těsně pod hodiny.
      Musí to stát AŽ ZA výchozím pravidlem — jinak by ho nepřebilo. */
   @media (min-width: 1000px) {
-    .page-tabs-bar{--tabs-drop:0px;}
+    .page-tabs-bar{--tabs-drop:9px;}
   }
   .page-tab{
     flex:0 0 auto;
@@ -8539,10 +8551,26 @@ function renderKalDen() {
   });
 }
 
+// Přesun o den, ať se stane z šipky nebo prstem. Animace se pouští až po vykreslení
+// a třída se napřed sundá — jinak by při rychlém listování druhý přesun neanimoval,
+// protože stejná animace už na prvku běží.
+function kalPrehod(smer) {
+  const kam = kalDenIndex + smer;
+  kalDenIndex = kam;
+  renderKalDen();
+  if (!kalMrizkaEl || kalDenIndex !== kam) return;   // narazilo se na kraj týdne
+  kalOzivMrizku(smer > 0 ? 'kal-den-dopredu' : 'kal-den-zpet');
+}
+function kalOzivMrizku(trida) {
+  kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
+  void kalMrizkaEl.offsetWidth;                      // restart animace
+  kalMrizkaEl.classList.add(trida);
+}
+
 const kalPrevBtn = document.getElementById('kalPrev');
 const kalNextBtn = document.getElementById('kalNext');
-if (kalPrevBtn) kalPrevBtn.addEventListener('click', () => { kalDenIndex--; renderKalDen(); });
-if (kalNextBtn) kalNextBtn.addEventListener('click', () => { kalDenIndex++; renderKalDen(); });
+if (kalPrevBtn) kalPrevBtn.addEventListener('click', () => kalPrehod(-1));
+if (kalNextBtn) kalNextBtn.addEventListener('click', () => kalPrehod(1));
 // Čára „teď" se musí posouvat i bez nových dat ze serveru
 setInterval(() => { if (kalPanelEl && !kalPanelEl.hidden) renderKalDen(); }, 60000);
 
@@ -8620,7 +8648,13 @@ if (kalDiagBtn) {
 
 function kalOtevri(otevrit) {
   if (!kalPanelEl) return;
+  const zmena = kalPanelEl.hidden === otevrit;
   kalPanelEl.hidden = !otevrit;
+  if (otevrit && zmena) {
+    kalPanelEl.classList.remove('kal-panel-prichod');
+    void kalPanelEl.offsetWidth;
+    kalPanelEl.classList.add('kal-panel-prichod');
+  }
   sliderWrap.style.display = otevrit ? 'none' : '';
   const zalozka = pageTabsEl && pageTabsEl.querySelector('.page-tab-kal');
   if (zalozka) zalozka.classList.toggle('active', otevrit);
@@ -8696,10 +8730,9 @@ if (kalPanelEl) {
     const dx = e.clientX - od.x, dy = e.clientY - od.y;
     // Svislý tah je rolování, krátký tah je klepnutí — ani jedno není listování
     if (Math.abs(dx) < KAL_SWIPE_PX || Math.abs(dx) <= Math.abs(dy)) return;
-    if (dx < 0) kalDenIndex++;
-    else if (kalDenIndex > 0) kalDenIndex--;
-    else return kalZpetNaStranky();
-    renderKalDen();
+    if (dx < 0) kalPrehod(1);
+    else if (kalDenIndex > 0) kalPrehod(-1);
+    else kalZpetNaStranky();
   });
 }
 </script>

@@ -296,6 +296,30 @@ setTimeout(() => {
   tah(200);
   check('z dneška doprava se vyjde na stránky', panel.hidden, true);
   check('  a pás stránek je zpátky', document.getElementById('sliderWrap').style.display, '');
+
+  R.push('\\n8) Slide animace');
+  // Na zdi se mezi včerejškem a zítřkem jinak nepozná, že se vůbec něco stalo.
+  // Nový den přijíždí z té strany, odkud jde — a panel zprava, kde v liště leží.
+  zalozka.click();
+  check('panel přijíždí zprava', panel.classList.contains('kal-panel-prichod'), true);
+  check('  a animace opravdu běží', getComputedStyle(panel).animationName, 'kal-zprava');
+  renderKalendar({ enabled: true, dnu: 7, days: dd, kalendare: KAL,
+                   fetchedAt: new Date().toISOString(), error: null });
+  const mrizka = document.getElementById('kalMrizka');
+  document.getElementById('kalNext').click();
+  check('další den přijíždí zprava', getComputedStyle(mrizka).animationName, 'kal-zprava');
+  document.getElementById('kalPrev').click();
+  check('  a předchozí zleva', getComputedStyle(mrizka).animationName, 'kal-zleva');
+  // Obě třídy naráz by znamenaly, že se ta stará neuklidila a druhý přesun neanimuje
+  check('  jen jedna třída naráz', mrizka.classList.contains('kal-den-dopredu'), false);
+  tah(-200);
+  check('prstem stejně jako šipkou', getComputedStyle(mrizka).animationName, 'kal-zprava');
+  // Na kraji týdne se nikam nepřesouvá, tak se nemá ani animovat
+  for (let i = 0; i < 6; i++) tah(-200);
+  check('  (jsme na konci týdne)', /^Dnes |^Zítra /.test(nazev()), false);
+  mrizka.classList.remove('kal-den-dopredu', 'kal-den-zpet');
+  tah(-200);
+  check('na kraji týdne se neanimuje', getComputedStyle(mrizka).animationName, 'none');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
