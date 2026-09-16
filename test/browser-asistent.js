@@ -35,6 +35,7 @@ window.fetch = async (url, opts) => {
 setTimeout(async () => {
  try {
   const MIN = 60000;
+  const pockej = () => new Promise(r => setTimeout(r, 30));
   const slide = document.querySelector('.slide[data-title="Asistent"]');
 
   R.push('1) Tlačítka pod instrukcemi');
@@ -91,12 +92,34 @@ setTimeout(async () => {
   const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
   check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);
 
+  R.push('\\n2b) Zítra jsou prázdniny');
+  // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
+  // zítřek se má počítat jako víkend, i když je středa.
+  const praz = document.getElementById('prazdninyBtn');
+  check('tlačítko je na Asistentovi', slide.contains(praz), true);
+  renderPrazdniny({ zitra: false, dnes: false });
+  check('  a je vypnuté', praz.classList.contains('on'), false);
+  check('  s výzvou', praz.textContent, 'Zítra jsou prázdniny');
+  poslano.length = 0;
+  praz.click();
+  await pockej();
+  check('stisk je zapne', poslano[0].url, '/api/prazdniny');
+  check('  s hodnotou', poslano[0].body.zapnout, true);
+  renderPrazdniny({ zitra: true, dnes: false });
+  check('  a tlačítko se rozsvítí', praz.classList.contains('on'), true);
+  poslano.length = 0;
+  praz.click();
+  await pockej();
+  // Bez toho by se prázdniny nedaly zrušit, jen počkat, až přejdou
+  check('druhý stisk je zruší', poslano[0].body.zapnout, false);
+  renderPrazdniny({ zitra: false, dnes: true });
+  check('v den prázdnin to tlačítko řekne', praz.textContent, 'Dnes jsou prázdniny');
+
   R.push('\\n3) Jezdec automatiky má čtyři polohy');
   const jezdec = document.getElementById('autoModeSlider');
   const hint = document.getElementById('autoModeHint');
   const okno = document.getElementById('potvrzOkno');
   const posun = i => { jezdec.value = String(i); jezdec.dispatchEvent(new Event('change')); };
-  const pockej = () => new Promise(r => setTimeout(r, 30));
   check('jezdec sahá po čtvrtou polohu', jezdec.max, '3');
   // Vypnuto a „jsme pryč" stojí vedle sebe schválně: obojí dům utlumí a obojí se ptá
   check('  a popisky sedí', [...document.querySelectorAll('.mode-scale span')].map(s => s.textContent).join(', '),

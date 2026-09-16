@@ -62,6 +62,7 @@ function vzorovyStav() {
     poolForce: { until: 0 },
     poolTemp: { c: 26.4, at: t, bezOd: 0 },
     away: { since: t },
+    prazdniny: '2026-09-02',
     history: [{ t, kw: 1.2, soc: 80, pv: 3 }],
     wallboxHistory: [{ t, w: 3400 }],
     boilerHistory: [{ t, b1: 55, b2: 48 }],

@@ -22,13 +22,18 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
   const povely = [];
   const logy = [];
   const routy = {};
-  const state = { weather: { sunsetMs: null, sunriseMs: null, ...pocasi } };
+  const state = {
+    weather: { sunsetMs: null, sunriseMs: null, ...pocasi },
+    sauna: { lastHeatAt: 0 },
+    prazdniny: null
+  };
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'scheduleEvery',
     'pragueTime', 'pragueDateString', 'naMinuty', 'validTimerTime',
     'assistantControlBlinds', 'autoRunning', 'awayActive',
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
+         + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
   )(
@@ -61,10 +66,10 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
 const pravidlo = (zm = {}) => Object.assign({
   id: 1, zapnuto: true, nazev: '', dny: [true, true, true, true, true, false, false],
   kdy: { typ: 'cas', cas: '06:00' },
-  kroky: [{ cil: 'Ložnice', akce: 'up', naklopeni: null }],
+  kroky: [{ cil: 'Ložnice', akce: 'up', hodnota: null }],
   spustenoDne: null
 }, zm);
-const krok = (cil, akce = 'up', naklopeni = null) => ({ cil, akce, naklopeni });
+const krok = (cil, akce = 'up', hodnota = null) => ({ cil, akce, hodnota });
 
 const volej = (routy, cesta, telo) => {
   let out = null, kod = 200;
@@ -180,6 +185,11 @@ nadpis('6) Co se pošle do TaHomy');
   t.api.pravidla = [pravidlo({ kroky: [krok('Ložnice', 'tilt', 30)] })];
   await t.api.runBlindSchedule(PO_6);
   check('samotné naklopení je „orientation"', t.povely.join(','), 'Ložnice:orientation:30');
+  // „Sjet do 20 %" znamená pětinu dráhy, ne zatáhnout s pootevřenými lamelami
+  const pol = build();
+  pol.api.pravidla = [pravidlo({ kroky: [krok('Obývák Dveře', 'poloha', 20)] })];
+  await pol.api.runBlindSchedule(PO_6);
+  check('poloha je „closure"', pol.povely.join(','), 'Obývák Dveře:closure:20');
   check('zavřeno je sto procent', h.api.ZALUZIE_ZAVRENO, 100);
 }
 
@@ -227,7 +237,110 @@ nadpis('6c) Starý tvar ze zálohy');
   check('staré pravidlo se přečte', !!stare, true);
   check('  a udělá se z něj jeden krok', stare.kroky.length, 1);
   check('  se vším, co v něm bylo',
-    `${stare.kroky[0].cil}:${stare.kroky[0].akce}:${stare.kroky[0].naklopeni}`, 'Ložnice:down:100');
+    `${stare.kroky[0].cil}:${stare.kroky[0].akce}:${stare.kroky[0].hodnota}`, 'Ložnice:down:100');
+}
+
+nadpis('6d) Odklad kvůli sauně');
+{
+  // Po západu se zavře všechno kromě ložnice, když jede sauna. Ložnice se zavře
+  // až 30 minut po posledním nátopu — sauna je přes ložnici a nemá se zatemnit
+  // dřív, než se dosauní.
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);          // 20:15 pražského času
+  const PO_2015 = Date.UTC(2026, 8, 14, 18, 15);
+  const s = build({ pocasi: { sunsetMs: zapad } });
+  const loznice = pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] });
+  s.api.pravidla = [loznice];
+  s.state.sauna.lastHeatAt = PO_2015 - 5 * MIN;          // sauna topila před chvílí
+  await s.api.runBlindSchedule(PO_2015);
+  check('při sauně se ložnice po západu nezavře', s.povely.length, 0);
+  // Kdyby se to zapsalo jako splněné, ložnice by zůstala otevřená celou noc
+  check('  a pravidlo zůstane na řadě', s.api.pravidla[0].spustenoDne, null);
+  await s.api.runBlindSchedule(PO_2015 + 20 * MIN);
+  check('ani po dvaceti minutách', s.povely.length, 0);
+  await s.api.runBlindSchedule(PO_2015 + 26 * MIN);
+  check('třicet minut po nátopu se zavře', s.povely.join(','), 'Ložnice:down:100');
+}
+{
+  // Bez sauny se ložnice zavře po západu jako ostatní
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const b = build({ pocasi: { sunsetMs: zapad } });
+  b.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  await b.api.runBlindSchedule(zapad);
+  check('bez sauny se zavře hned', b.povely.join(','), 'Ložnice:down:100');
+  // Odpolední sauna večer nic nezdrží
+  const o = build({ pocasi: { sunsetMs: zapad } });
+  o.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  o.state.sauna.lastHeatAt = zapad - 4 * H;
+  await o.api.runBlindSchedule(zapad);
+  check('odpolední sauna večer nezdrží', o.povely.length, 1);
+}
+{
+  // Čekání na saunu je delší než dvacetiminutové okno na dohánění — odložené
+  // pravidlo se jím proto neřídí a platí do konce dne
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const d = build({ pocasi: { sunsetMs: zapad } });
+  const p = pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] });
+  check('odložené pravidlo neomezuje okno na dohánění',
+    d.api.rozvrhSpustit(p, zapad + 2 * H), true);
+  check('  ale neodložené ano',
+    d.api.rozvrhSpustit(pravidlo({ kdy: { typ: 'zapad', posunMin: 0 } }), zapad + 2 * H), false);
+}
+
+nadpis('6e) Zítra jsou prázdniny');
+{
+  // Prázdninový den se počítá jako neděle: pravidla Po–Pá nespadnou, víkendová ano.
+  // Jinak by musel mít každý rozvrh druhou sadu dnů.
+  const h = build();
+  const stredaRano = PO_6 + 2 * DEN;
+  check('středa je normálně všední den', h.api.rozvrhDenIndex(stredaRano), 2);
+  check('  a pravidlo Po–Pá spustí', h.api.rozvrhSpustit(pravidlo(), stredaRano), true);
+  h.state.prazdniny = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(stredaRano));
+  check('o prázdninách se počítá jako neděle', h.api.rozvrhDenIndex(stredaRano), 6);
+  check('  pravidlo Po–Pá nespustí', h.api.rozvrhSpustit(pravidlo(), stredaRano), false);
+  const vikendove = pravidlo({ dny: [false, false, false, false, false, true, true] });
+  check('  víkendové ano', h.api.rozvrhSpustit(vikendove, stredaRano), true);
+  const kazdyDen = pravidlo({ dny: [true, true, true, true, true, true, true] });
+  check('  a „každý den" jede pořád', h.api.rozvrhSpustit(kazdyDen, stredaRano), true);
+  check('jiný den prázdniny neovlivní', h.api.rozvrhDenIndex(PO_6), 0);
+}
+{
+  const h = build();
+  const { out } = await volej(h.routy, 'POST /api/prazdniny', { zapnout: true });
+  check('tlačítko zapne zítřek', out.zitra, true);
+  const zitra = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(Date.now() + DEN));
+  check('  a uloží jeho datum', h.state.prazdniny, zitra);
+  await volej(h.routy, 'POST /api/prazdniny', { zapnout: false });
+  check('druhý stisk je zruší', h.state.prazdniny, null);
+  // Prošlé datum by po nasazení oživlo prázdniny z minulého týdne
+  await volej(h.routy, 'POST /api/prazdniny/restore', { datum: '2020-01-01' });
+  check('staré datum se ze zálohy nebere', h.state.prazdniny, null);
+  await volej(h.routy, 'POST /api/prazdniny/restore', { datum: zitra });
+  check('  a zítřejší ano', h.state.prazdniny, zitra);
+}
+
+nadpis('6f) Předvyplněný rozvrh');
+{
+  const h = build();
+  check('je tam sedm skupin', h.api.ROZVRH_VYCHOZI.length, 7);
+  check('  a nasadí se rovnou', h.api.pravidla.length, 7);
+  // Kdyby výchozí pravidlo neprošlo vlastní validací, tiše by se do rozvrhu nedostalo
+  check('všechna projdou validací',
+    h.api.ROZVRH_VYCHOZI.every(p => !!h.api.rozvrhOcisti(p)), true);
+  check('  a mají razítko nula', h.api.savedAt, 0);
+  const podle = jm => h.api.pravidla.find(p => p.nazev === jm);
+  check('ráno pokoje je na 6:40 Po–Pá', podle('Ráno pokoje').kdy.cas + ' ' + podle('Ráno pokoje').dny.join(','),
+    '06:40 true,true,true,true,true,false,false');
+  check('garáž se zavírá ve 23:00 každý den',
+    podle('Garáž').kdy.cas + ' ' + podle('Garáž').dny.filter(Boolean).length, '23:00 7');
+  check('po západu je posun dvacet minut', podle('Po západu').kdy.posunMin, 20);
+  check('  a dveře sjedou do 20 %',
+    podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
+    'Obývák Dveře:20');
+  check('ložnice má odklad na saunu', podle('Ložnice po západu').odloz.minut, 30);
 }
 
 nadpis('7) Co appka pošle, to se ověří');
@@ -259,6 +372,7 @@ nadpis('7) Co appka pošle, to se ověří');
 nadpis('8) Cesty a obnova');
 {
   const h = build();
+  h.api.pravidla = [];
   const { out } = await volej(h.routy, 'POST /api/blinds/schedule', {
     dny: [true, true, true, true, true, false, false],
     kdy: { typ: 'cas', cas: '06:00' }, kroky: [krok('Ložnice')]
@@ -282,6 +396,7 @@ nadpis('8) Cesty a obnova');
   // Obnova PŘEPISUJE, neslučuje: rozvrh je jeden celek a slučováním by smazané
   // pravidlo obživlo ze zálohy
   const h = build();
+  h.api.pravidla = [];
   await volej(h.routy, 'POST /api/blinds/schedule', {
     dny: [true, true, true, true, true, false, false],
     kdy: { typ: 'cas', cas: '06:00' }, kroky: [krok('Ložnice')]

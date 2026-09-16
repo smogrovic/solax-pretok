@@ -1225,6 +1225,20 @@
     font-weight:600;
   }
   .asst-scene:disabled{opacity:0.5;}
+  .prazdniny-btn{
+    width:100%;
+    margin-top:8px;
+    border:none;
+    border-radius:16px;
+    padding:11px 10px;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+    font-size:13px;
+    font-weight:600;
+    font-family:inherit;
+  }
+  .prazdniny-btn.on{background:var(--orange);color:#fff;}
+  .prazdniny-btn:disabled{opacity:0.5;}
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
   .potvrz{
@@ -1885,6 +1899,9 @@
         </div>
         <div class="asst-examples" id="asstExamples"></div>
         <div class="asst-scenes" id="asstScenes"></div>
+        <!-- Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne,
+             že zítřek má počítat jako víkend, i když je středa. -->
+        <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
       </div>
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
@@ -2196,7 +2213,23 @@
             <option value="zapad">Západ slunce</option>
           </select>
           <input type="time" class="timer-time" id="rozvrhCas" value="07:00">
-          <input type="number" class="timer-time" id="rozvrhPosun" value="0" min="-180" max="180" step="5" hidden>
+          <select class="timer-select" id="rozvrhPosun" hidden>
+            <option value="-90">90 min před</option>
+            <option value="-60">60 min před</option>
+            <option value="-45">45 min před</option>
+            <option value="-30">30 min před</option>
+            <option value="-20">20 min před</option>
+            <option value="-15">15 min před</option>
+            <option value="-10">10 min před</option>
+            <option value="0">přesně</option>
+            <option value="10">10 min po</option>
+            <option value="15">15 min po</option>
+            <option value="20" selected>20 min po</option>
+            <option value="30">30 min po</option>
+            <option value="45">45 min po</option>
+            <option value="60">60 min po</option>
+            <option value="90">90 min po</option>
+          </select>
         </div>
         <input type="text" class="timer-select" id="rozvrhNazev" placeholder="Název (nepovinný), např. Ráno" maxlength="40">
         <!-- Kroky: v 7:00 se obvykle stane víc věcí. Spouštěč je jeden, kroků kolik
@@ -2208,14 +2241,15 @@
             <option value="up">Vytáhnout</option>
             <option value="down">Zatáhnout</option>
             <option value="tilt">Jen naklopit</option>
+            <option value="poloha">Sjet do polohy</option>
           </select>
         </div>
         <div class="blind-tilt" style="margin-top:10px;padding-bottom:0">
-          <span class="blind-tilt-label">Naklopení</span>
+          <span class="blind-tilt-label" id="rozvrhNaklonLabel">Naklopení</span>
           <input type="range" min="0" max="100" value="100" id="rozvrhNaklon">
           <span class="blind-tilt-val" id="rozvrhNaklonVal">100 %</span>
         </div>
-        <div class="rozvrh-pozn">100 % = zavřeno</div>
+        <div class="rozvrh-pozn">100 % = zavřeno · o prázdninách se den počítá jako neděle</div>
         <button class="rozvrh-krok-btn" id="rozvrhKrokAdd" type="button">+ Přidat krok</button>
         <button class="timer-add-btn" id="rozvrhAdd">Přidat pravidlo</button>
         <div class="timer-list" id="rozvrhList"></div>
@@ -5242,6 +5276,7 @@ const rozvrhPosunEl = document.getElementById('rozvrhPosun');
 const rozvrhAkceEl = document.getElementById('rozvrhAkce');
 const rozvrhNaklonEl = document.getElementById('rozvrhNaklon');
 const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
+const rozvrhNaklonLabelEl = document.getElementById('rozvrhNaklonLabel');
 const rozvrhAddEl = document.getElementById('rozvrhAdd');
 const rozvrhNazevEl = document.getElementById('rozvrhNazev');
 const rozvrhKrokyEl = document.getElementById('rozvrhKroky');
@@ -5297,8 +5332,10 @@ function rozvrhKdyText(p) {
 }
 
 function rozvrhKrokText(k) {
+  const h = k.hodnota === undefined ? k.naklopeni : k.hodnota;
+  if (k.akce === 'poloha') return `${k.cil} — sjet do ${h} %`;
   const akce = k.akce === 'up' ? 'vytáhnout' : (k.akce === 'down' ? 'zatáhnout' : 'naklopit');
-  return `${k.cil} — ${akce}${k.naklopeni === null || k.naklopeni === undefined ? '' : ` na ${k.naklopeni} %`}`;
+  return `${k.cil} — ${akce}${h === null || h === undefined ? '' : ` na ${h} %`}`;
 }
 
 function rozvrhText(p) {
@@ -5338,8 +5375,15 @@ function rozvrhKrokZFormulare() {
   return {
     cil: rozvrhCilEl ? rozvrhCilEl.value : '',
     akce,
-    naklopeni: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null
+    hodnota: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null
   };
+}
+
+// Jedno číslo, dva významy: u naklopení jsou to lamely, u polohy výška. Bez popisku
+// by se z „100 %" nepoznalo, jestli žaluzie sjede dolů, nebo jen zavře lamely.
+function rozvrhPrepniHodnotu() {
+  if (!rozvrhNaklonLabelEl || !rozvrhAkceEl) return;
+  rozvrhNaklonLabelEl.textContent = rozvrhAkceEl.value === 'poloha' ? 'Poloha' : 'Naklopení';
 }
 
 function renderRozvrh(data) {
@@ -5380,7 +5424,9 @@ function renderRozvrh(data) {
     row.appendChild(hlava);
     const kroky = document.createElement('div');
     kroky.className = 'rozvrh-podkroky';
-    kroky.textContent = (p.kroky || []).map(rozvrhKrokText).join(' · ');
+    // Odklad patří ke krokům, ne do sloupce s časem — tam by rozhodil celý řádek
+    const odlozText = p.odloz ? ` · čeká ${p.odloz.minut} min po sauně` : '';
+    kroky.textContent = (p.kroky || []).map(rozvrhKrokText).join(' · ') + odlozText;
     row.appendChild(kroky);
     rozvrhListEl.appendChild(row);
   }
@@ -5423,12 +5469,16 @@ function rozvrhZFormulare() {
     : { typ, posunMin: Number(rozvrhPosunEl ? rozvrhPosunEl.value : 0) || 0 };
   // Nenaklikané kroky = jednoduché pravidlo z aktuálního výběru
   const kroky = rozvrhKrokyStav.length ? rozvrhKrokyStav.map(k => ({ ...k })) : [rozvrhKrokZFormulare()];
+  // Odklad („počkej na saunu") se v appce nenastavuje, ale při úpravě pravidla
+  // se nesmí ztratit — jinak by se ložnice po první opravě času zavírala i při sauně
+  const puvodni = rozvrhData.find(x => x.id === rozvrhUpravovane);
   return {
     id: rozvrhUpravovane || undefined,
     nazev: rozvrhNazevEl ? rozvrhNazevEl.value : '',
     dny: rozvrhDnyStav.slice(),
     kdy,
     kroky,
+    odloz: puvodni ? puvodni.odloz : null,
     zapnuto: true
   };
 }
@@ -5495,6 +5545,7 @@ async function maybeRestoreRozvrh() {
 }
 
 if (rozvrhKdyEl) rozvrhKdyEl.addEventListener('change', rozvrhPrepniPole);
+if (rozvrhAkceEl) rozvrhAkceEl.addEventListener('change', rozvrhPrepniHodnotu);
 if (rozvrhNaklonEl) {
   rozvrhNaklonEl.addEventListener('input', () => {
     if (rozvrhNaklonValEl) rozvrhNaklonValEl.textContent = rozvrhNaklonEl.value + ' %';
@@ -5520,6 +5571,7 @@ if (rozvrhAddEl) rozvrhAddEl.addEventListener('click', () => rozvrhUloz(rozvrhZF
 rozvrhKresliDny();
 rozvrhKresliKroky();
 rozvrhPrepniPole();
+rozvrhPrepniHodnotu();
 
 // ---------- Klima (Panasonic Comfort Cloud) ----------
 
@@ -7453,6 +7505,42 @@ function renderSceny(sceny) {
   }
 }
 
+// ---------- Zítra jsou prázdniny ----------
+// Rozvrh žaluzií počítá takový den jako neděli, takže pojede víkendová sada.
+const prazdninyBtnEl = document.getElementById('prazdninyBtn');
+let prazdninyData = { zitra: false, dnes: false };
+
+function renderPrazdniny(d) {
+  if (d) prazdninyData = { ...prazdninyData, ...d };
+  if (!prazdninyBtnEl) return;
+  prazdninyBtnEl.classList.toggle('on', !!prazdninyData.zitra);
+  prazdninyBtnEl.textContent = prazdninyData.zitra
+    ? 'Zítra jsou prázdniny ✓'
+    : (prazdninyData.dnes ? 'Dnes jsou prázdniny' : 'Zítra jsou prázdniny');
+}
+
+if (prazdninyBtnEl) {
+  prazdninyBtnEl.addEventListener('click', async () => {
+    const zapnout = !prazdninyData.zitra;
+    prazdninyBtnEl.disabled = true;
+    try {
+      const res = await fetch('/api/prazdniny', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ zapnout })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      renderPrazdniny(data);
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Prázdniny: ' + err.message;
+      errorEl.classList.add('show');
+    }
+    prazdninyBtnEl.disabled = false;
+  });
+}
+
 async function spustScenu(key, btn) {
   const vsechna = asstScenesEl ? [...asstScenesEl.querySelectorAll('.asst-scene')] : [];
   vsechna.forEach(b => { b.disabled = true; });
@@ -8383,6 +8471,7 @@ function applySnapshot(snap) {
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
+  bezpecne(() => renderPrazdniny(snap.prazdniny));
   rozvrhSavedAt = snap.blindRulesAt || 0;
   bezpecne(() => renderRozvrh({ rules: snap.blindRules || [], savedAt: snap.blindRulesAt || 0 }));
   bezpecne(maybeRestoreRozvrh);
@@ -8682,6 +8771,7 @@ function connectStream() {
     renderBlindTimers();
     saveTimersLocal();
   });
+  es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('blindRules', e => {
     const d = JSON.parse(e.data);
     renderRozvrh({ rules: d.rules || [], savedAt: d.savedAt });

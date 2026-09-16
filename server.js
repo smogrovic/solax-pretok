@@ -203,6 +203,7 @@ const state = {
   // „Nejsme doma": `since` = kdy se to zapnulo. Zamyká se až po AWAY_DELAY_MS,
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
+  prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
   calendar: { days: [], kalendare: [], duty: null, fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
@@ -484,6 +485,7 @@ function snapshot() {
     blindTimers,
     blindRules,
     blindRulesAt,
+    prazdniny: prazdninyPayload(),
     relayTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
@@ -976,6 +978,10 @@ function updateSauna(powerW) {
   state.sauna.fetchedAt = typeof powerW === 'number' ? new Date(now).toISOString() : state.sauna.fetchedAt;
   state.sauna.error = typeof powerW === 'number' ? null : 'Sauna: měřák neodpověděl';
   if (saunaTopi()) {
+    // Kdy naposledy odebírala nad prahem. Rozvrh žaluzií podle toho odkládá ložnici;
+    // odvozovat to ze saunaBlockUntil by šlo, ale ta se počítá z nastavitelné doby
+    // držení a rozvrh by se rozešel, kdyby ji někdo změnil.
+    state.sauna.lastHeatAt = now;
     if (!state.sauna.since) {
       state.sauna.since = now;
       addLog(`Sauna: topí (${Math.round(state.sauna.powerW)} W) — bazén a solinátor jdou dolů`);
@@ -3904,22 +3910,88 @@ const ROZVRH_MAX = 20;
 // ráno.
 const ROZVRH_DOHNAT_MS = 20 * 60 * 1000;
 const ROZVRH_TICK_MS = 60 * 1000;
-const ROZVRH_AKCE = ['up', 'down', 'tilt'];
+// „poloha" = sjet do X % dráhy (0 vytaženo, 100 zataženo); „tilt" jen naklopí lamely.
+// U obou je to jedno číslo, jen znamená pokaždé něco jiného — proto se jmenuje hodnota.
+const ROZVRH_AKCE = ['up', 'down', 'tilt', 'poloha'];
+const ROZVRH_AKCE_CMD = { up: 'up', down: 'down', tilt: 'orientation', poloha: 'closure' };
 const ROZVRH_KDY = ['cas', 'vychod', 'zapad'];
 const ROZVRH_POSUN_MAX = 180;
 // Kolik kroků unese jedna skupina. Víc než deset žaluzií naráz stejně nemáme.
 const ROZVRH_KROKU_MAX = 10;
 
-let blindRules = [];
+// Rozvrh opsaný z TaHomy. Nasadí se JEN když v úložišti nic není: `blindRulesAt`
+// zůstane nula, takže první záloha z telefonu (savedAt > 0) ho přebije a vlastní
+// úpravy se po nasazení neztratí.
+const PRAC = [true, true, true, true, true, false, false];
+const VIKEND = [false, false, false, false, false, true, true];
+const VSE = [true, true, true, true, true, true, true];
+const krok = (cil, akce, hodnota = null) => ({ cil, akce, hodnota });
+const ROZVRH_VYCHOZI = [
+  { nazev: 'Ráno pokoje', dny: PRAC, kdy: { typ: 'cas', cas: '06:40' }, kroky: [
+    krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] },
+  { nazev: 'Dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '08:00' }, kroky: [
+    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25), krok('Hosté', 'tilt', 25),
+    krok('Kuchyň', 'tilt', 25), krok('Obývák Okno', 'tilt', 25), krok('Obývák Dveře', 'up')] },
+  { nazev: 'Ráno', dny: VIKEND, kdy: { typ: 'cas', cas: '08:00' }, kroky: [
+    krok('Kuchyň', 'tilt', 25), krok('Obývák Okno', 'tilt', 25), krok('Obývák Dveře', 'up')] },
+  { nazev: 'Pokoje', dny: VIKEND, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
+    krok('Elenka', 'tilt', 50), krok('Miky', 'tilt', 50)] },
+  { nazev: 'Garáž', dny: VSE, kdy: { typ: 'cas', cas: '23:00' }, kroky: [
+    krok('Garáž', 'down')] },
+  { nazev: 'Po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 20 }, kroky: [
+    krok('Kuchyň', 'down', 100), krok('Obývák Okno', 'down', 100), krok('Miky', 'down', 100),
+    krok('Elenka', 'down', 100), krok('Hosté', 'down', 100), krok('Obývák Dveře', 'poloha', 20)] },
+  // Ložnice má vlastní skupinu kvůli odkladu: při sauně se čeká, až dotopí
+  { nazev: 'Ložnice po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 20 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] }
+];
+
 let blindRuleSeq = 1;
+let blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
 let blindRulesAt = 0;         // kdy se rozvrh naposledy měnil (kvůli obnově ze zálohy)
 
 // Pondělí = 0. Anglické zkratky z Intl jsou stabilní napříč verzemi Node, české ne.
 const ROZVRH_DNY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// O prázdninách se den počítá jako NEDĚLE: pravidla Po–Pá tím nespadnou, víkendová
+// ano a „každý den" jede pořád. Jinak by musel mít každý rozvrh druhou sadu dnů.
 function rozvrhDenIndex(at = Date.now()) {
+  if (prazdninyPlati(at)) return ROZVRH_DNY.indexOf('Sun');
   const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(at);
   return ROZVRH_DNY.indexOf(den);
 }
+
+// „Zítra jsou prázdniny" z Asistenta. Drží se datum, ne příznak — prošlý den tím
+// přestane platit sám a není co uklízet.
+function prazdninyPlati(at = Date.now()) {
+  return !!state.prazdniny && state.prazdniny === pragueDateString(at);
+}
+function prazdninyZitra(at = Date.now()) {
+  return pragueDateString(at + 86400000);
+}
+function prazdninyPayload(at = Date.now()) {
+  return { datum: state.prazdniny || null, zitra: state.prazdniny === prazdninyZitra(at), dnes: prazdninyPlati(at) };
+}
+
+app.post('/api/prazdniny', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const zapnout = !(req.body && req.body.zapnout === false);
+  state.prazdniny = zapnout ? prazdninyZitra() : null;
+  addLog(zapnout ? `Zítra jsou prázdniny (${state.prazdniny}) — rozvrh pojede jako o víkendu`
+                 : 'Prázdniny zrušeny — zítra pojede rozvrh všedního dne');
+  broadcast('prazdniny', prazdninyPayload());
+  res.json(prazdninyPayload());
+});
+
+app.post('/api/prazdniny/restore', (req, res) => {
+  const d = req.body && req.body.datum;
+  // Ze zálohy se bere jen datum, které ještě nebylo — jinak by po nasazení obživly
+  // prázdniny z minulého týdne
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= pragueDateString()) {
+    state.prazdniny = d;
+    broadcast('prazdniny', prazdninyPayload());
+  }
+  res.json({ ok: true, datum: state.prazdniny || null });
+});
 
 // Minuta dne, kdy má pravidlo dnes spadnout. U slunce se vezme čas z počasí a posune
 // se o zadané minuty. Když počasí ještě nedorazilo, vrátí null a pravidlo se dnes
@@ -3934,6 +4006,17 @@ function rozvrhMinuta(p, at = Date.now()) {
   return Math.min(1439, Math.max(0, m));
 }
 
+// Odklad: pravidlo je sice na řadě, ale ještě se nemá provést. Dokud od posledního
+// nátopu sauny neuplynulo zadaných pár minut, tik pravidlo přeskočí a NEZAPÍŠE ho
+// jako splněné — zkusí to zas za minutu. Ložnice se tím po západu zavře jen tehdy,
+// když se zrovna nesaunuje, jinak až po sauně.
+function rozvrhOdlozeno(p, at = Date.now()) {
+  if (!p.odloz || p.odloz.typ !== 'sauna') return false;
+  const naposled = (state.sauna && state.sauna.lastHeatAt) || 0;
+  if (!naposled) return false;
+  return at < naposled + p.odloz.minut * 60000;
+}
+
 function rozvrhSpustit(p, at = Date.now()) {
   if (!p.zapnuto) return false;
   const den = rozvrhDenIndex(at);
@@ -3943,10 +4026,15 @@ function rozvrhSpustit(p, at = Date.now()) {
   if (plan === null) return false;
   const t = pragueTime(at);
   const zpozdeni = (t.hour * 60 + t.minute - plan) * 60000;
-  return zpozdeni >= 0 && zpozdeni <= ROZVRH_DOHNAT_MS;
+  if (zpozdeni < 0) return false;
+  if (rozvrhOdlozeno(p, at)) return false;
+  // Odložené pravidlo se nemůže řídit oknem na dohánění — čekání na saunu je delší
+  // než dvacet minut. Platí tedy do konce dne.
+  if (p.odloz) return true;
+  return zpozdeni <= ROZVRH_DOHNAT_MS;
 }
 
-const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit' };
+const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit', poloha: 'sjet do' };
 
 function rozvrhKdyPopis(p) {
   if (p.kdy.typ === 'cas') return p.kdy.cas;
@@ -3955,7 +4043,9 @@ function rozvrhKdyPopis(p) {
 }
 
 function rozvrhKrokPopis(k) {
-  return `${k.cil} ${ROZVRH_AKCE_SLOVY[k.akce]}${k.naklopeni === null ? '' : ` na ${k.naklopeni} %`}`;
+  if (k.akce === 'poloha') return `${k.cil} sjet do ${k.hodnota} %`;
+  const bez = k.hodnota === null || k.hodnota === undefined;
+  return `${k.cil} ${ROZVRH_AKCE_SLOVY[k.akce]}${bez ? '' : ` na ${k.hodnota} %`}`;
 }
 
 function rozvrhPopis(p) {
@@ -3970,11 +4060,10 @@ async function rozvrhProved(p) {
   let ok = 0;
   const chyby = [];
   for (const k of p.kroky) {
-    // „tilt" je u TaHomy „orientation" — u ostatních akcí je naklopení jen přívažek
-    const akce = k.akce === 'tilt' ? 'orientation' : k.akce;
-    const naklop = k.naklopeni === null ? undefined : k.naklopeni;
+    const akce = ROZVRH_AKCE_CMD[k.akce];
+    const hodnota = k.hodnota === null ? undefined : k.hodnota;
     try {
-      await assistantControlBlinds({ target: k.cil, action: akce, orientation: naklop });
+      await assistantControlBlinds({ target: k.cil, action: akce, orientation: hodnota });
       ok++;
     } catch (err) {
       chyby.push(`${k.cil}: ${String(err.message).slice(0, 60)}`);
@@ -4034,7 +4123,13 @@ function rozvrhOcisti(v) {
     kroky.push(ocisteny);
   }
   const nazev = typeof v.nazev === 'string' ? v.nazev.trim().slice(0, 40) : '';
-  return { nazev, dny, kdy, kroky, zapnuto: v.zapnuto !== false };
+  let odloz = null;
+  if (v.odloz && v.odloz.typ === 'sauna') {
+    const minut = Math.round(Number(v.odloz.minut) || 0);
+    if (!Number.isFinite(minut) || minut < 0 || minut > 240) return null;
+    odloz = { typ: 'sauna', minut };
+  }
+  return { nazev, dny, kdy, kroky, odloz, zapnuto: v.zapnuto !== false };
 }
 
 function rozvrhKrok(k) {
@@ -4042,12 +4137,14 @@ function rozvrhKrok(k) {
   const cil = typeof k.cil === 'string' ? k.cil.trim().slice(0, 60) : '';
   if (!cil) return null;
   if (!ROZVRH_AKCE.includes(k.akce)) return null;
-  let naklopeni = k.naklopeni === null || k.naklopeni === undefined ? null : Number(k.naklopeni);
-  if (naklopeni !== null && (!Number.isFinite(naklopeni) || naklopeni < 0 || naklopeni > 100)) return null;
-  if (naklopeni !== null) naklopeni = Math.round(naklopeni);
-  // Naklopení bez hodnoty by byl povel bez obsahu
-  if (k.akce === 'tilt' && naklopeni === null) return null;
-  return { cil, akce: k.akce, naklopeni };
+  // `naklopeni` je starý název ze zálohy v telefonu
+  const surova = k.hodnota === undefined ? k.naklopeni : k.hodnota;
+  let hodnota = surova === null || surova === undefined ? null : Number(surova);
+  if (hodnota !== null && (!Number.isFinite(hodnota) || hodnota < 0 || hodnota > 100)) return null;
+  if (hodnota !== null) hodnota = Math.round(hodnota);
+  // Naklopení ani poloha bez čísla by byl povel bez obsahu
+  if ((k.akce === 'tilt' || k.akce === 'poloha') && hodnota === null) return null;
+  return { cil, akce: k.akce, hodnota };
 }
 
 function rozvrhPosli(res) {
@@ -7298,6 +7395,7 @@ const STORE_POSTS = [
   '/api/solinator/restore',
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
+  '/api/prazdniny/restore',
   '/api/runtime/restore',
   '/api/wallbox/daytype/restore'
 ];
@@ -7337,6 +7435,7 @@ function storeSnapshot() {
     },
     // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
+    '/api/prazdniny/restore': { datum: state.prazdniny },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
       dayType: state.wbDayType.manual, until: state.wbDayType.until

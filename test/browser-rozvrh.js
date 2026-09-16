@@ -92,8 +92,8 @@ setTimeout(async () => {
   // Nenaklikané kroky = jednoduché pravidlo z výběru, ať nestojí dva kliky navíc
   check('  a jedním krokem z výběru', poslano[0].body.kroky.length, 1);
   check('  s cílem', poslano[0].body.kroky[0].cil, 'Ložnice');
-  check('  akcí a naklopením',
-    poslano[0].body.kroky[0].akce + ':' + poslano[0].body.kroky[0].naklopeni, 'down:100');
+  check('  akcí a hodnotou',
+    poslano[0].body.kroky[0].akce + ':' + poslano[0].body.kroky[0].hodnota, 'down:100');
   check('  a bez id, protože je nové', poslano[0].body.id, undefined);
 
   R.push('\\n4b) Skupina: víc kroků pod jedním časem');
@@ -132,8 +132,8 @@ setTimeout(async () => {
 
   SERVER = [{ id: 7, zapnuto: true, nazev: 'Ráno', dny: [true, true, true, true, true, false, false],
               kdy: { typ: 'cas', cas: '06:15' },
-              kroky: [{ cil: 'Ložnice', akce: 'up', naklopeni: null },
-                      { cil: 'Obývák', akce: 'down', naklopeni: 100 }] }];
+              kroky: [{ cil: 'Ložnice', akce: 'up', hodnota: null },
+                      { cil: 'Obývák', akce: 'down', hodnota: 100 }] }];
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });
   const radky = () => [...document.querySelectorAll('#rozvrhList .timer-row')];
   check('skupina je v seznamu jako jeden blok', radky().length, 1);
@@ -146,6 +146,23 @@ setTimeout(async () => {
   radky()[0].querySelector('.rozvrh-hlava').click();
   check('klik načte celou skupinu', kroky().length, 2);
   check('  i s názvem', document.getElementById('rozvrhNazev').value, 'Ráno');
+  // Odklad („počkej, až sauna dotopí") se v appce nenastavuje, ale při opravě času
+  // se nesmí ztratit — jinak by se ložnice po první úpravě zavírala i při sauně
+  SERVER = [{ ...SERVER[0], odloz: { typ: 'sauna', minut: 30 } }];
+  renderRozvrh({ rules: SERVER, savedAt: Date.now() });
+  // Odklad patří ke krokům, ne do sloupce s časem — tam by rozhodil celý řádek
+  check('odklad je v seznamu vidět',
+    /čeká 30 min po sauně/.test(radky()[0].querySelector('.rozvrh-podkroky').textContent), true);
+  check('  a nerozhodí sloupec s časem',
+    radky()[0].querySelector('.timer-row-time').textContent, '06:15');
+  radky()[0].querySelector('.rozvrh-hlava').click();
+  poslano.length = 0;
+  document.getElementById('rozvrhAdd').click();
+  await pockej();
+  check('  a úpravou se neztratí', (poslano[0].body.odloz || {}).minut, 30);
+  SERVER = [{ ...SERVER[0], odloz: null }];
+  renderRozvrh({ rules: SERVER, savedAt: Date.now() });
+  radky()[0].querySelector('.rozvrh-hlava').click();
   check('klik na řádek načte pravidlo', cas.value, '06:15');
   check('  a tlačítko změní popis', document.getElementById('rozvrhAdd').textContent, 'Uložit změnu');
   cas.value = '06:45';
@@ -157,6 +174,44 @@ setTimeout(async () => {
   check('  a kroky zůstanou', poslano[0].body.kroky.length, 2);
   check('a tlačítko se vrátí', document.getElementById('rozvrhAdd').textContent, 'Přidat pravidlo');
   check('  a kroky se vyprázdní', kroky().length, 0);
+
+  R.push('\\n4c) Sjet do polohy a popisek hodnoty');
+  // Jedno číslo, dva významy: u naklopení lamely, u polohy výška. Bez popisku by se
+  // z „20 %" nepoznalo, jestli žaluzie sjede do pětiny, nebo zavře lamely.
+  const popisek = document.getElementById('rozvrhNaklonLabel');
+  document.getElementById('rozvrhAkce').value = 'tilt';
+  document.getElementById('rozvrhAkce').dispatchEvent(new Event('change'));
+  check('u naklopení se píše Naklopení', popisek.textContent, 'Naklopení');
+  document.getElementById('rozvrhAkce').value = 'poloha';
+  document.getElementById('rozvrhAkce').dispatchEvent(new Event('change'));
+  check('  u polohy Poloha', popisek.textContent, 'Poloha');
+  rozvrhKrokyStav = [];
+  rozvrhKresliKroky();
+  cil.value = 'Obývák Okno';
+  document.getElementById('rozvrhNaklon').value = '20';
+  document.getElementById('rozvrhKrokAdd').click();
+  check('krok s polohou se čte srozumitelně',
+    kroky()[0].querySelector('span').textContent, 'Obývák Okno — sjet do 20 %');
+  poslano.length = 0;
+  document.getElementById('rozvrhAdd').click();
+  await pockej();
+  check('  a pošle se jako poloha',
+    poslano[0].body.kroky[0].akce + ':' + poslano[0].body.kroky[0].hodnota, 'poloha:20');
+
+  // Posun od slunce se vybírá, ne píše — na zeď se to mačká líp
+  check('posun je výběr', posun.tagName, 'SELECT');
+  check('  s rozumnými hodnotami',
+    [...posun.options].map(o => o.value).join(','),
+    '-90,-60,-45,-30,-20,-15,-10,0,10,15,20,30,45,60,90');
+  kdy.value = 'zapad';
+  kdy.dispatchEvent(new Event('change'));
+  posun.value = '30';
+  poslano.length = 0;
+  document.getElementById('rozvrhAdd').click();
+  await pockej();
+  check('  a pošle se číslem', poslano[0].body.kdy.posunMin, 30);
+  kdy.value = 'cas';
+  kdy.dispatchEvent(new Event('change'));
 
   R.push('\\n5) Vypnutí a smazání');
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });
