@@ -234,8 +234,17 @@ setTimeout(async () => {
   check('  ale zešedne', radky()[0].classList.contains('rozvrh-vyp'), true);
   poslano.length = 0;
   radky()[0].querySelector('.timer-del').click();
+  // Smazané pravidlo se nedá vzít zpátky a křížek je hned vedle pauzy
+  check('křížek se napřed zeptá', document.getElementById('potvrzOkno').hidden, false);
+  check('  a zatím nemaže', poslano.length, 0);
+  check('  s desetivteřinovým odpočtem',
+    /^Potvrdit \\(10 s\\)$/.test(document.getElementById('potvrzAno').textContent), true);
+  document.getElementById('potvrzZpet').click();
+  check('  „zpět" pravidlo nechá být', poslano.length, 0);
+  radky()[0].querySelector('.timer-del').click();
+  document.getElementById('potvrzAno').click();
   await pockej();
-  check('křížek maže', poslano[0].url, '/api/blinds/schedule/delete');
+  check('po potvrzení křížek maže', poslano[0].url, '/api/blinds/schedule/delete');
   check('  podle id', poslano[0].body.id, 7);
 
   R.push('\\n5b) Prázdný rozvrh');

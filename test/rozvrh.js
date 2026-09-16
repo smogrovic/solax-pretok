@@ -7,7 +7,7 @@
 //  * Pravidlo se smí spustit jednou za den. Tik chodí po minutě a TaHoma odpovídá
 //    pomalu, takže značka „dnes už běželo" musí padnout PŘED povelem.
 //  * Když jsme pryč, dům je zavřený a takový má zůstat.
-const { between, suite } = require('./zdroj');
+const { LINES, between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('rozvrh žaluzií');
 
 const CODE = between('// ---------- Rozvrh žaluzií (opakovaná pravidla místo scénářů v TaHomě) ----------',
@@ -35,7 +35,7 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
-         + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi,'
+         + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
   )(
@@ -383,6 +383,41 @@ nadpis('6f) Předvyplněný rozvrh');
     podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
     'Obývák Dveře:20');
   check('ložnice má odklad na saunu', podle('Ložnice po západu').odloz.minut, 30);
+}
+
+nadpis('6f2) Chronologické pořadí');
+{
+  // V appce má rozvrh stát v pořadí, ve kterém se odehraje — ne v tom, jak pravidla
+  // vznikla. Čas u slunce se přes rok posouvá o hodiny, takže se to musí rovnat
+  // pořád, ne jen při uložení.
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);        // 20:15 pražského času
+  const h = build({ pocasi: { sunsetMs: zapad, sunriseMs: Date.UTC(2026, 8, 14, 4, 30) } });
+  h.api.pravidla = [
+    pravidlo({ id: 1, nazev: 'večer', kdy: { typ: 'zapad', posunMin: 0 } }),
+    pravidlo({ id: 2, nazev: 'ráno', kdy: { typ: 'cas', cas: '06:40' } }),
+    pravidlo({ id: 3, nazev: 'garáž', kdy: { typ: 'cas', cas: '23:00' } }),
+    pravidlo({ id: 4, nazev: 'východ', kdy: { typ: 'vychod', posunMin: 0 } })
+  ];
+  check('seřadí se podle času', h.api.rozvrhSerad(PO_6).map(p => p.nazev).join(','),
+    'východ,ráno,večer,garáž');
+  // V prosinci zapadá v 16:00 a večerní pravidlo je najednou před garáží i před
+  // osmou večerní — proto se řadí podle dneška, ne jednou provždy
+  h.state.weather.sunsetMs = Date.UTC(2026, 11, 14, 15, 0);   // 16:00
+  h.api.pravidla.push(pravidlo({ id: 5, nazev: 'podvečer', kdy: { typ: 'cas', cas: '17:00' } }));
+  check('  a po posunu západu znovu', h.api.rozvrhSerad(PO_6).map(p => p.nazev).join(','),
+    'východ,ráno,večer,podvečer,garáž');
+  // Bez počasí se nesmí nic zhroutit — pořadí je pak jen odhad
+  const bez = build();
+  bez.api.pravidla = [pravidlo({ id: 1, nazev: 'večer', kdy: { typ: 'zapad', posunMin: 0 } }),
+                      pravidlo({ id: 2, nazev: 'ráno', kdy: { typ: 'cas', cas: '06:40' } })];
+  check('bez počasí to nespadne', bez.api.rozvrhSerad(PO_6).map(p => p.nazev).join(','), 'ráno,večer');
+}
+{
+  // Tik pořadí srovnává sám, jinak by se rozešlo s během roku
+  const zdroj = LINES.join('\n');
+  const TIK = zdroj.slice(zdroj.indexOf('async function runBlindSchedule'),
+                          zdroj.indexOf('function rozvrhOcisti'));
+  check('tik si pořadí srovná', /rozvrhSerad\(at\)/.test(TIK), true);
 }
 
 nadpis('6g) Prázdná záloha rozvrh nesmaže');

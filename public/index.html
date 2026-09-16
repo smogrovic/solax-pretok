@@ -5460,7 +5460,13 @@ function renderRozvrh(data) {
     const del = document.createElement('button');
     del.className = 'timer-del';
     del.textContent = '✕';
-    del.addEventListener('click', e => { e.stopPropagation(); rozvrhSmaz(p.id, del); });
+    // Smazané pravidlo se nedá vzít zpátky a křížek je hned vedle pauzy
+    del.addEventListener('click', e => {
+      e.stopPropagation();
+      potvrzZeptej('Smazat pravidlo?',
+        `${rozvrhKdyText(p)} · ${(p.kroky || []).map(rozvrhKrokText).join(' · ')}`,
+        () => rozvrhSmaz(p.id, del), 10);
+    });
     hlava.appendChild(time);
     hlava.appendChild(text);
     hlava.appendChild(prep);

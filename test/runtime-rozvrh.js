@@ -86,6 +86,11 @@ function snapshot() {
   check('  a dá jim razítko', po.savedAt > 0, true);
   const snap2 = await snapshot();
   check('a v appce jsou taky', (snap2.blindRules || []).length, 7);
+  // Pořadí je chronologické, ne podle toho, jak pravidla vznikla. Bez počasí
+  // (server tu jede bez klíče k předpovědi) se u slunce sáhne po odhadu.
+  check('  a v pořadí, jak se odehrají',
+    snap2.blindRules.map(p => p.nazev).join(' → '),
+    'Ráno pokoje → Dopoledne → Ráno → Pokoje → Po západu → Ložnice po západu → Garáž');
 
   srv.kill();
   await pauza(200);

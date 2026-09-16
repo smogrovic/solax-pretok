@@ -3958,7 +3958,7 @@ let blindRules = [];
 
 function rozvrhNasadVychozi() {
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
-  return blindRules;
+  return rozvrhSerad();
 }
 
 // Předvyplnění se nasadí jen tehdy, když úložiště nic nepřineslo. Kdo si všechna
@@ -4063,6 +4063,22 @@ function rozvrhOdlozeno(p, at = Date.now()) {
   return at < naposled + p.odloz.minut * 60000;
 }
 
+// Pořadí v appce je chronologické, ne podle toho, jak pravidla vznikla. Čas u slunce
+// se během roku posouvá (v prosinci zapadá v 16:00, v červnu ve 21:00), takže se
+// řadí podle toho, kdy pravidlo vyjde DNES, a rovná se to při každém tiku.
+// Bez počasí se sáhne po hrubém odhadu — je to jen na řazení, ne na spouštění.
+const ROZVRH_ODHAD = { vychod: 6 * 60, zapad: 20 * 60 };
+function rozvrhPoradi(p, at = Date.now()) {
+  const m = rozvrhMinuta(p, at);
+  if (m !== null) return m;
+  return ROZVRH_ODHAD[p.kdy.typ] + (state.zapadDelayMin || 0) + (Number(p.kdy.posunMin) || 0);
+}
+
+function rozvrhSerad(at = Date.now()) {
+  blindRules.sort((a, b) => rozvrhPoradi(a, at) - rozvrhPoradi(b, at) || a.id - b.id);
+  return blindRules;
+}
+
 function rozvrhSpustit(p, at = Date.now()) {
   if (!p.zapnuto) return false;
   const den = rozvrhDenIndex(at);
@@ -4120,6 +4136,9 @@ async function rozvrhProved(p) {
 
 async function runBlindSchedule(at = Date.now()) {
   if (!blindRules.length) return;
+  // Slunce se za den posune o minuty, za půl roku o hodiny — pořadí se proto
+  // srovnává při každém tiku, ne jen když někdo pravidlo uloží
+  rozvrhSerad(at);
   // Hlavní vypínač platí i tady: „vypnuto" znamená, že se nic nehýbe samo
   if (!autoRunning()) return;
   // Když jsme pryč, dům je zavřený a takový má zůstat — ranní „vytáhni" by ho otevřel
@@ -4194,6 +4213,7 @@ function rozvrhKrok(k) {
 }
 
 function rozvrhPosli(res) {
+  rozvrhSerad();
   blindRulesAt = Date.now();
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
   res.json({ rules: blindRules, savedAt: blindRulesAt });
@@ -4260,6 +4280,7 @@ app.post('/api/blinds/schedule/restore', (req, res) => {
   const zahozeno = prislo.length - nova.length;
   blindRules = nova;
   blindRulesAt = savedAt;
+  rozvrhSerad();
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
   addLog(`Rozvrh žaluzií obnoven ze zálohy (${nova.length})`
     + (zahozeno ? `, ${zahozeno} pravidel neprošlo` : ''));
