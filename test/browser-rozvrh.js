@@ -89,21 +89,63 @@ setTimeout(async () => {
   check('pravidlo se pošle', poslano[0].url, '/api/blinds/schedule');
   check('  se dny', poslano[0].body.dny.join(','), 'true,true,true,true,true,false,false');
   check('  časem', poslano[0].body.kdy.cas, '06:15');
-  check('  cílem', poslano[0].body.cil, 'Ložnice');
-  check('  akcí a naklopením', poslano[0].body.akce + ':' + poslano[0].body.naklopeni, 'down:100');
+  // Nenaklikané kroky = jednoduché pravidlo z výběru, ať nestojí dva kliky navíc
+  check('  a jedním krokem z výběru', poslano[0].body.kroky.length, 1);
+  check('  s cílem', poslano[0].body.kroky[0].cil, 'Ložnice');
+  check('  akcí a naklopením',
+    poslano[0].body.kroky[0].akce + ':' + poslano[0].body.kroky[0].naklopeni, 'down:100');
   check('  a bez id, protože je nové', poslano[0].body.id, undefined);
 
-  SERVER = [{ id: 7, zapnuto: true, dny: [true, true, true, true, true, false, false],
-              kdy: { typ: 'cas', cas: '06:15' }, cil: 'Ložnice', akce: 'down', naklopeni: 100 }];
+  R.push('\\n4b) Skupina: víc kroků pod jedním časem');
+  // V 7:00 se obvykle stane víc věcí. Čas se pak mění na jednom místě, ne ve třech
+  // pravidlech, u kterých se jedno dá zapomenout.
+  const kroky = () => [...document.querySelectorAll('#rozvrhKroky .rozvrh-krok')];
+  check('na začátku jsou kroky prázdné', kroky().length, 0);
+  cil.value = 'Ložnice';
+  document.getElementById('rozvrhAkce').value = 'up';
+  document.getElementById('rozvrhKrokAdd').click();
+  cil.value = 'Obývák';
+  document.getElementById('rozvrhAkce').value = 'down';
+  document.getElementById('rozvrhNaklon').value = '100';
+  document.getElementById('rozvrhKrokAdd').click();
+  cil.value = 'Kuchyň';
+  document.getElementById('rozvrhAkce').value = 'tilt';
+  document.getElementById('rozvrhNaklon').value = '40';
+  document.getElementById('rozvrhKrokAdd').click();
+  check('tři kroky se přidaly', kroky().length, 3);
+  check('  a jsou očíslované', kroky().map(k => k.querySelector('b').textContent).join(''), '1.2.3.');
+  check('  s popisem', kroky()[1].querySelector('span').textContent, 'Obývák — zatáhnout na 100 %');
+  kroky()[1].querySelector('button').click();
+  check('křížek krok ubere', kroky().length, 2);
+  check('  a zbudou ty správné',
+    kroky().map(k => k.querySelector('span').textContent.split(' —')[0]).join(','), 'Ložnice,Kuchyň');
+  document.getElementById('rozvrhNazev').value = 'Ráno';
+  poslano.length = 0;
+  document.getElementById('rozvrhAdd').click();
+  await pockej();
+  check('pošlou se oba kroky', poslano[0].body.kroky.length, 2);
+  // Pořadí je to, co člověk naklikal — „vytáhni a pak zaklop" je něco jiného než obráceně
+  check('  v naklikaném pořadí',
+    poslano[0].body.kroky.map(k => k.cil).join(','), 'Ložnice,Kuchyň');
+  check('  s názvem skupiny', poslano[0].body.nazev, 'Ráno');
+  check('  a jedním spouštěčem', poslano[0].body.kdy.cas, '06:15');
+
+  SERVER = [{ id: 7, zapnuto: true, nazev: 'Ráno', dny: [true, true, true, true, true, false, false],
+              kdy: { typ: 'cas', cas: '06:15' },
+              kroky: [{ cil: 'Ložnice', akce: 'up', naklopeni: null },
+                      { cil: 'Obývák', akce: 'down', naklopeni: 100 }] }];
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });
   const radky = () => [...document.querySelectorAll('#rozvrhList .timer-row')];
-  check('pravidlo je v seznamu', radky().length, 1);
+  check('skupina je v seznamu jako jeden blok', radky().length, 1);
   check('  s časem', radky()[0].querySelector('.timer-row-time').textContent, '06:15');
-  check('  a popisem', radky()[0].querySelector('.timer-row-text').textContent,
-    'Ložnice — zatáhnout na 100 % · Po Út St Čt Pá');
+  check('  názvem a dny', radky()[0].querySelector('.timer-row-text').textContent, 'Ráno · Po Út St Čt Pá');
+  check('  a kroky pod tím', radky()[0].querySelector('.rozvrh-podkroky').textContent,
+    'Ložnice — vytáhnout · Obývák — zatáhnout na 100 %');
 
-  // Klik na řádek ho načte do formuláře; další uložení musí pravidlo PŘEPSAT
-  radky()[0].querySelector('.timer-row-text').click();
+  // Klik na hlavičku načte celou skupinu; další uložení ji musí PŘEPSAT
+  radky()[0].querySelector('.rozvrh-hlava').click();
+  check('klik načte celou skupinu', kroky().length, 2);
+  check('  i s názvem', document.getElementById('rozvrhNazev').value, 'Ráno');
   check('klik na řádek načte pravidlo', cas.value, '06:15');
   check('  a tlačítko změní popis', document.getElementById('rozvrhAdd').textContent, 'Uložit změnu');
   cas.value = '06:45';
@@ -112,7 +154,9 @@ setTimeout(async () => {
   await pockej();
   check('úprava jde na totéž id', poslano[0].body.id, 7);
   check('  s novým časem', poslano[0].body.kdy.cas, '06:45');
+  check('  a kroky zůstanou', poslano[0].body.kroky.length, 2);
   check('a tlačítko se vrátí', document.getElementById('rozvrhAdd').textContent, 'Přidat pravidlo');
+  check('  a kroky se vyprázdní', kroky().length, 0);
 
   R.push('\\n5) Vypnutí a smazání');
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });

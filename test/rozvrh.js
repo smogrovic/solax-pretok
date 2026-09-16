@@ -18,6 +18,7 @@ const PO_6 = Date.UTC(2026, 8, 14, 4, 0);
 const H = 3600000, MIN = 60000, DEN = 86400000;
 
 function build({ auto = true, pryc = false, pocasi = {} } = {}) {
+  const h = { zlobi: null };     // cíl, na kterém TaHoma spadne
   const povely = [];
   const logy = [];
   const routy = {};
@@ -47,20 +48,23 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
     hhmm => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)),
     t => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t),
     async ({ target, action, orientation }) => {
+      if (h.zlobi === target) throw new Error('TaHoma neodpovídá');
       povely.push(`${target}:${action}${orientation === undefined ? '' : ':' + orientation}`);
       return `${target}: hotovo.`;
     },
     () => auto,
     () => pryc
   );
-  return { api, povely, logy, routy, state };
+  return Object.assign(h, { api, povely, logy, routy, state });
 }
 
 const pravidlo = (zm = {}) => Object.assign({
-  id: 1, zapnuto: true, dny: [true, true, true, true, true, false, false],
-  kdy: { typ: 'cas', cas: '06:00' }, cil: 'Ložnice', akce: 'up', naklopeni: null,
+  id: 1, zapnuto: true, nazev: '', dny: [true, true, true, true, true, false, false],
+  kdy: { typ: 'cas', cas: '06:00' },
+  kroky: [{ cil: 'Ložnice', akce: 'up', naklopeni: null }],
   spustenoDne: null
 }, zm);
+const krok = (cil, akce = 'up', naklopeni = null) => ({ cil, akce, naklopeni });
 
 const volej = (routy, cesta, telo) => {
   let out = null, kod = 200;
@@ -119,7 +123,7 @@ nadpis('4) Jednou za den');
   h.api.pravidla = [pravidlo()];
   await h.api.runBlindSchedule(PO_6);
   check('pravidlo spustí povel', h.povely.join(','), 'Ložnice:up');
-  check('  a zapíše se do logu', /Rozvrh žaluzií: Ložnice vytáhnout v 06:00/.test(h.logy[0]), true);
+  check('  a zapíše se do logu', /Rozvrh žaluzií: \(06:00\): Ložnice vytáhnout — hotovo/.test(h.logy[0]), true);
   await h.api.runBlindSchedule(PO_6 + MIN);
   check('další tik už nic', h.povely.length, 1);
   await h.api.runBlindSchedule(PO_6 + DEN);
@@ -160,25 +164,70 @@ nadpis('5) Kdy rozvrh mlčí');
 {
   // Výpadek TaHomy nesmí shodit tik ani zbytek pravidel
   const h = build();
-  h.api.pravidla = [pravidlo(), pravidlo({ id: 2, cil: 'Obývák' })];
-  const puvodni = h.povely.push.bind(h.povely);
-  h.api.pravidla[0].cil = 'Neznámá';
+  h.api.pravidla = [pravidlo(), pravidlo({ id: 2, kroky: [krok('Obývák')] })];
   await h.api.runBlindSchedule(PO_6);
-  check('druhé pravidlo jede i tak', h.povely.length, 2);
+  check('obě pravidla jedou', h.povely.length, 2);
 }
 
 nadpis('6) Co se pošle do TaHomy');
 {
   const h = build();
-  h.api.pravidla = [pravidlo({ akce: 'down', naklopeni: 100 })];
+  h.api.pravidla = [pravidlo({ kroky: [krok('Ložnice', 'down', 100)] })];
   await h.api.runBlindSchedule(PO_6);
   // Zatažení i naklopení jedním povelem — zřetězené by si pohyb přerušily
   check('zatáhnout a zaklopit je jeden povel', h.povely.join(','), 'Ložnice:down:100');
   const t = build();
-  t.api.pravidla = [pravidlo({ akce: 'tilt', naklopeni: 30 })];
+  t.api.pravidla = [pravidlo({ kroky: [krok('Ložnice', 'tilt', 30)] })];
   await t.api.runBlindSchedule(PO_6);
   check('samotné naklopení je „orientation"', t.povely.join(','), 'Ložnice:orientation:30');
   check('zavřeno je sto procent', h.api.ZALUZIE_ZAVRENO, 100);
+}
+
+nadpis('6b) Skupina kroků');
+{
+  // V 7:00 se obvykle stane víc věcí. Spouštěč je jeden, kroků kolik je potřeba —
+  // čas se pak mění na jednom místě, ne ve třech pravidlech.
+  const h = build();
+  h.api.pravidla = [pravidlo({ nazev: 'Ráno', kroky: [
+    krok('Ložnice'), krok('Obývák', 'down', 100), krok('Kuchyň', 'tilt', 40)
+  ] })];
+  await h.api.runBlindSchedule(PO_6);
+  check('projedou všechny kroky', h.povely.length, 3);
+  // Pořadí je to, co člověk naklikal: „vytáhni a pak zaklop" je něco jiného než obráceně
+  check('  a v zadaném pořadí', h.povely.join(' | '),
+    'Ložnice:up | Obývák:down:100 | Kuchyň:orientation:40');
+  check('  log zmíní název i počet', /Ráno \(06:00\): .* — hotovo \(3\)/.test(h.logy[0]), true);
+}
+{
+  // Když neodpoví jedna žaluzie, ostatní se hýbat mají
+  const h = build();
+  h.zlobi = 'Obývák';
+  h.api.pravidla = [pravidlo({ kroky: [krok('Ložnice'), krok('Obývák'), krok('Kuchyň')] })];
+  // Výjimka se musí spolknout uvnitř skupiny. Kdyby vylétla ven, shodí celý tik —
+  // a tahle sada by se bez toho `catch` jen tiše ukončila uprostřed.
+  await h.api.runBlindSchedule(PO_6)
+    .catch(err => check('skupina výjimku nepustí ven', err.message, '(nic)'));
+  check('pád prostředního kroku nezastaví zbytek', h.povely.join(','), 'Ložnice:up,Kuchyň:up');
+  check('  a zapíše se jako chyba', /^CHYBA /.test(h.logy[0]), true);
+  check('  se zmínkou, kolik prošlo', /2 z 3/.test(h.logy[0]), true);
+  check('  a co selhalo', /Obývák/.test(h.logy[0]), true);
+  await h.api.runBlindSchedule(PO_6 + MIN);
+  check('neúspěšná skupina se neopakuje', h.povely.length, 2);
+}
+
+nadpis('6c) Starý tvar ze zálohy');
+{
+  // V telefonu může ležet záloha z doby, kdy pravidlo mělo jen jeden cíl a akci.
+  // Bez převodu by se tiše zahodila.
+  const h = build();
+  const stare = h.api.rozvrhOcisti({
+    dny: [true, true, true, true, true, false, false],
+    kdy: { typ: 'cas', cas: '06:00' }, cil: 'Ložnice', akce: 'down', naklopeni: 100
+  });
+  check('staré pravidlo se přečte', !!stare, true);
+  check('  a udělá se z něj jeden krok', stare.kroky.length, 1);
+  check('  se vším, co v něm bylo',
+    `${stare.kroky[0].cil}:${stare.kroky[0].akce}:${stare.kroky[0].naklopeni}`, 'Ložnice:down:100');
 }
 
 nadpis('7) Co appka pošle, to se ověří');
@@ -197,6 +246,14 @@ nadpis('7) Co appka pošle, to se ověří');
   // Naklopení bez hodnoty by byl povel bez obsahu
   check('naklopení bez hodnoty ne', ok({ ...zaklad, akce: 'tilt', naklopeni: null }), false);
   check('naklopení mimo rozsah ne', ok({ ...zaklad, akce: 'tilt', naklopeni: 120 }), false);
+  const skupina = (kroky) => ok({ dny: [true, false, false, false, false, false, false], kdy: { typ: 'cas', cas: '07:30' }, kroky });
+  check('skupina s kroky projde', skupina([krok('Ložnice'), krok('Obývák', 'down', 100)]), true);
+  // Pravidlo bez jediného kroku by v domě nic neudělalo
+  check('prázdná skupina ne', skupina([]), false);
+  check('jedenáct kroků ne', skupina(Array.from({ length: 11 }, () => krok('Ložnice'))), false);
+  check('  ale deset ano', skupina(Array.from({ length: 10 }, () => krok('Ložnice'))), true);
+  // Jeden rozbitý krok shodí celé pravidlo — půlka pravidla by byla horší než chyba
+  check('rozbitý krok mezi dobrými ne', skupina([krok('Ložnice'), krok('', 'up')]), false);
 }
 
 nadpis('8) Cesty a obnova');
@@ -204,18 +261,19 @@ nadpis('8) Cesty a obnova');
   const h = build();
   const { out } = await volej(h.routy, 'POST /api/blinds/schedule', {
     dny: [true, true, true, true, true, false, false],
-    kdy: { typ: 'cas', cas: '06:00' }, cil: 'Ložnice', akce: 'up'
+    kdy: { typ: 'cas', cas: '06:00' }, kroky: [krok('Ložnice')]
   });
   check('pravidlo se přidá', out.rules.length, 1);
   const id = out.rules[0].id;
   const { out: po } = await volej(h.routy, 'POST /api/blinds/schedule', {
     id, dny: [true, true, true, true, true, false, false],
-    kdy: { typ: 'cas', cas: '06:30' }, cil: 'Ložnice', akce: 'up'
+    kdy: { typ: 'cas', cas: '06:30' }, kroky: [krok('Ložnice'), krok('Obývák')]
   });
   // Úprava nesmí založit druhé pravidlo — jinak by se čas „opravoval" mazáním
   check('úprava nepřidá druhé', po.rules.length, 1);
   check('  a čas se změní', po.rules[0].kdy.cas, '06:30');
-  const { kod } = await volej(h.routy, 'POST /api/blinds/schedule', { dny: [], kdy: {}, cil: '', akce: 'x' });
+  check('  i kroky', po.rules[0].kroky.length, 2);
+  const { kod } = await volej(h.routy, 'POST /api/blinds/schedule', { dny: [], kdy: {}, kroky: [] });
   check('nesmysl se odmítne', kod, 400);
   await volej(h.routy, 'POST /api/blinds/schedule/delete', { id });
   check('smazání zabere', h.api.pravidla.length, 0);
@@ -226,27 +284,27 @@ nadpis('8) Cesty a obnova');
   const h = build();
   await volej(h.routy, 'POST /api/blinds/schedule', {
     dny: [true, true, true, true, true, false, false],
-    kdy: { typ: 'cas', cas: '06:00' }, cil: 'Ložnice', akce: 'up'
+    kdy: { typ: 'cas', cas: '06:00' }, kroky: [krok('Ložnice')]
   });
   const starsi = h.api.savedAt - 1000;
   await volej(h.routy, 'POST /api/blinds/schedule/restore', {
     savedAt: starsi,
-    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, cil: 'Obývák', akce: 'down', naklopeni: 100 }]
+    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, kroky: [krok('Obývák', 'down', 100)] }]
   });
-  check('starší záloha nepřepíše novější rozvrh', h.api.pravidla[0].cil, 'Ložnice');
+  check('starší záloha nepřepíše novější rozvrh', h.api.pravidla[0].kroky[0].cil, 'Ložnice');
   // Shoda na milisekundu drží server — po nasazení je jeho savedAt nula, takže
   // záloha z telefonu stejně vyhraje
   await volej(h.routy, 'POST /api/blinds/schedule/restore', {
     savedAt: h.api.savedAt,
-    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, cil: 'Obývák', akce: 'down', naklopeni: 100 }]
+    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, kroky: [krok('Obývák', 'down', 100)] }]
   });
-  check('  a při shodě taky ne', h.api.pravidla[0].cil, 'Ložnice');
+  check('  a při shodě taky ne', h.api.pravidla[0].kroky[0].cil, 'Ložnice');
   await new Promise(r => setTimeout(r, 5));
   await volej(h.routy, 'POST /api/blinds/schedule/restore', {
     savedAt: Date.now(),
-    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, cil: 'Obývák', akce: 'down', naklopeni: 100 }]
+    rules: [{ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '09:00' }, kroky: [krok('Obývák', 'down', 100)] }]
   });
-  check('novější přepíše celý rozvrh', h.api.pravidla.map(p => p.cil).join(','), 'Obývák');
+  check('novější přepíše celý rozvrh', h.api.pravidla.map(p => p.kroky[0].cil).join(','), 'Obývák');
   const { kod } = await volej(h.routy, 'POST /api/blinds/schedule/restore', { rules: [] });
   check('bez savedAt se obnova odmítne', kod, 400);
 }

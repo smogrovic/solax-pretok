@@ -3907,6 +3907,8 @@ const ROZVRH_TICK_MS = 60 * 1000;
 const ROZVRH_AKCE = ['up', 'down', 'tilt'];
 const ROZVRH_KDY = ['cas', 'vychod', 'zapad'];
 const ROZVRH_POSUN_MAX = 180;
+// Kolik kroků unese jedna skupina. Víc než deset žaluzií naráz stejně nemáme.
+const ROZVRH_KROKU_MAX = 10;
 
 let blindRules = [];
 let blindRuleSeq = 1;
@@ -3945,19 +3947,40 @@ function rozvrhSpustit(p, at = Date.now()) {
 }
 
 const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit' };
-function rozvrhPopis(p) {
-  const kdy = p.kdy.typ === 'cas'
-    ? p.kdy.cas
-    : `${p.kdy.typ === 'zapad' ? 'západ' : 'východ'} slunce${p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : ''}`;
-  const naklop = p.naklopeni === null ? '' : ` na ${p.naklopeni} %`;
-  return `${p.cil} ${ROZVRH_AKCE_SLOVY[p.akce]}${naklop} v ${kdy}`;
+
+function rozvrhKdyPopis(p) {
+  if (p.kdy.typ === 'cas') return p.kdy.cas;
+  const jm = p.kdy.typ === 'zapad' ? 'západ' : 'východ';
+  return `${jm} slunce${p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : ''}`;
 }
 
+function rozvrhKrokPopis(k) {
+  return `${k.cil} ${ROZVRH_AKCE_SLOVY[k.akce]}${k.naklopeni === null ? '' : ` na ${k.naklopeni} %`}`;
+}
+
+function rozvrhPopis(p) {
+  const kroky = p.kroky.map(rozvrhKrokPopis).join(', ');
+  return `${p.nazev ? p.nazev + ' ' : ''}(${rozvrhKdyPopis(p)}): ${kroky}`;
+}
+
+// Kroky jdou po jednom a v pořadí, ve kterém je člověk naklikal — „vytáhni a pak
+// zaklop" dává jiný výsledek než obráceně. Pád jednoho kroku nesmí zastavit zbytek:
+// když neodpoví jedna žaluzie, ostatní se hýbat mají.
 async function rozvrhProved(p) {
-  // „tilt" je u TaHomy „orientation" — u ostatních akcí je naklopení jen přívažek
-  const akce = p.akce === 'tilt' ? 'orientation' : p.akce;
-  const naklop = p.naklopeni === null ? undefined : p.naklopeni;
-  return assistantControlBlinds({ target: p.cil, action: akce, orientation: naklop });
+  let ok = 0;
+  const chyby = [];
+  for (const k of p.kroky) {
+    // „tilt" je u TaHomy „orientation" — u ostatních akcí je naklopení jen přívažek
+    const akce = k.akce === 'tilt' ? 'orientation' : k.akce;
+    const naklop = k.naklopeni === null ? undefined : k.naklopeni;
+    try {
+      await assistantControlBlinds({ target: k.cil, action: akce, orientation: naklop });
+      ok++;
+    } catch (err) {
+      chyby.push(`${k.cil}: ${String(err.message).slice(0, 60)}`);
+    }
+  }
+  return { ok, celkem: p.kroky.length, chyby };
 }
 
 async function runBlindSchedule(at = Date.now()) {
@@ -3973,11 +3996,11 @@ async function runBlindSchedule(at = Date.now()) {
     // Zapsat PŘED povelem: TaHoma odpovídá pomalu a další tik by pravidlo pustil znovu
     p.spustenoDne = dnes;
     neco = true;
-    try {
-      const odpoved = await rozvrhProved(p);
-      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — ${odpoved}`);
-    } catch (err) {
-      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} selhalo (${String(err.message).slice(0, 100)})`, 'error');
+    const v = await rozvrhProved(p);
+    if (v.chyby.length) {
+      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}`, 'error');
+    } else {
+      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — hotovo (${v.ok})`);
     }
   }
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
@@ -4000,15 +4023,31 @@ function rozvrhOcisti(v) {
     if (!Number.isFinite(posun) || Math.abs(posun) > ROZVRH_POSUN_MAX) return null;
     kdy = { typ: kdyIn.typ, posunMin: posun };
   }
-  const cil = typeof v.cil === 'string' ? v.cil.trim().slice(0, 60) : '';
+  // Záloha z telefonu může být z doby, kdy pravidlo mělo jen jeden cíl a akci —
+  // udělá se z ní skupina o jednom kroku. Bez tohohle by se tiše zahodila.
+  const krokyIn = Array.isArray(v.kroky) ? v.kroky : [{ cil: v.cil, akce: v.akce, naklopeni: v.naklopeni }];
+  if (!krokyIn.length || krokyIn.length > ROZVRH_KROKU_MAX) return null;
+  const kroky = [];
+  for (const k of krokyIn) {
+    const ocisteny = rozvrhKrok(k);
+    if (!ocisteny) return null;
+    kroky.push(ocisteny);
+  }
+  const nazev = typeof v.nazev === 'string' ? v.nazev.trim().slice(0, 40) : '';
+  return { nazev, dny, kdy, kroky, zapnuto: v.zapnuto !== false };
+}
+
+function rozvrhKrok(k) {
+  if (!k || typeof k !== 'object') return null;
+  const cil = typeof k.cil === 'string' ? k.cil.trim().slice(0, 60) : '';
   if (!cil) return null;
-  if (!ROZVRH_AKCE.includes(v.akce)) return null;
-  let naklopeni = v.naklopeni === null || v.naklopeni === undefined ? null : Number(v.naklopeni);
+  if (!ROZVRH_AKCE.includes(k.akce)) return null;
+  let naklopeni = k.naklopeni === null || k.naklopeni === undefined ? null : Number(k.naklopeni);
   if (naklopeni !== null && (!Number.isFinite(naklopeni) || naklopeni < 0 || naklopeni > 100)) return null;
   if (naklopeni !== null) naklopeni = Math.round(naklopeni);
   // Naklopení bez hodnoty by byl povel bez obsahu
-  if (v.akce === 'tilt' && naklopeni === null) return null;
-  return { dny, kdy, cil, akce: v.akce, naklopeni, zapnuto: v.zapnuto !== false };
+  if (k.akce === 'tilt' && naklopeni === null) return null;
+  return { cil, akce: k.akce, naklopeni };
 }
 
 function rozvrhPosli(res) {

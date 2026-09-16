@@ -878,6 +878,38 @@
     color:var(--grey-text);
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
+  #rozvrhNazev{margin-top:6px;}
+  .rozvrh-kroky{width:100%;display:flex;flex-direction:column;gap:4px;margin:8px 0 2px;}
+  .rozvrh-kroky:empty{display:none;}
+  .rozvrh-krok{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:rgba(44,62,80,0.05);
+    border-radius:10px;
+    padding:6px 10px;
+    font-size:12px;
+    color:var(--navy);
+  }
+  .rozvrh-krok span{flex:1;min-width:0;}
+  .rozvrh-krok button{border:none;background:none;color:var(--grey-text);font-size:13px;padding:0 2px;}
+  .rozvrh-krok-btn{
+    width:100%;
+    border:none;
+    border-radius:12px;
+    padding:9px 0;
+    margin-top:8px;
+    font-size:12px;
+    font-weight:700;
+    font-family:inherit;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+  }
+  /* Kroky pod hlavičkou skupiny v seznamu pravidel */
+  .rozvrh-radek{flex-direction:column;align-items:stretch;gap:2px;}
+  .rozvrh-hlava{display:flex;align-items:center;gap:8px;}
+  .rozvrh-hlava .timer-row-text{flex:1;min-width:0;}
+  .rozvrh-podkroky{font-size:11px;color:var(--grey-text);padding-left:2px;line-height:1.5;}
   /* Vypnuté pravidlo zůstane v seznamu, ale je vidět, že nejede */
   .rozvrh-vyp{opacity:0.45;}
   .rozvrh-prep{
@@ -2157,7 +2189,6 @@
           <button type="button" data-dny="vikend">So–Ne</button>
           <button type="button" data-dny="vse">Každý den</button>
         </div>
-        <select class="timer-select" id="rozvrhCil"></select>
         <div class="timer-form-row">
           <select class="timer-select" id="rozvrhKdy">
             <option value="cas">V čase</option>
@@ -2167,6 +2198,11 @@
           <input type="time" class="timer-time" id="rozvrhCas" value="07:00">
           <input type="number" class="timer-time" id="rozvrhPosun" value="0" min="-180" max="180" step="5" hidden>
         </div>
+        <input type="text" class="timer-select" id="rozvrhNazev" placeholder="Název (nepovinný), např. Ráno" maxlength="40">
+        <!-- Kroky: v 7:00 se obvykle stane víc věcí. Spouštěč je jeden, kroků kolik
+             je potřeba — čas se pak mění na jednom místě. -->
+        <div class="rozvrh-kroky" id="rozvrhKroky"></div>
+        <select class="timer-select" id="rozvrhCil"></select>
         <div class="timer-form-row">
           <select class="timer-select" id="rozvrhAkce">
             <option value="up">Vytáhnout</option>
@@ -2180,6 +2216,7 @@
           <span class="blind-tilt-val" id="rozvrhNaklonVal">100 %</span>
         </div>
         <div class="rozvrh-pozn">100 % = zavřeno</div>
+        <button class="rozvrh-krok-btn" id="rozvrhKrokAdd" type="button">+ Přidat krok</button>
         <button class="timer-add-btn" id="rozvrhAdd">Přidat pravidlo</button>
         <div class="timer-list" id="rozvrhList"></div>
       </div>
@@ -5206,10 +5243,14 @@ const rozvrhAkceEl = document.getElementById('rozvrhAkce');
 const rozvrhNaklonEl = document.getElementById('rozvrhNaklon');
 const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
 const rozvrhAddEl = document.getElementById('rozvrhAdd');
+const rozvrhNazevEl = document.getElementById('rozvrhNazev');
+const rozvrhKrokyEl = document.getElementById('rozvrhKroky');
+const rozvrhKrokAddEl = document.getElementById('rozvrhKrokAdd');
 let rozvrhData = [];
 let rozvrhSavedAt = 0;
 let rozvrhUpravovane = null;      // id pravidla, které je zrovna ve formuláři
 let rozvrhDnyStav = [true, true, true, true, true, false, false];
+let rozvrhKrokyStav = [];         // kroky rozepsaného pravidla
 
 function rozvrhKresliDny() {
   if (!rozvrhDnyEl) return;
@@ -5255,12 +5296,50 @@ function rozvrhKdyText(p) {
   return `${jm} ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min`;
 }
 
+function rozvrhKrokText(k) {
+  const akce = k.akce === 'up' ? 'vytáhnout' : (k.akce === 'down' ? 'zatáhnout' : 'naklopit');
+  return `${k.cil} — ${akce}${k.naklopeni === null || k.naklopeni === undefined ? '' : ` na ${k.naklopeni} %`}`;
+}
+
 function rozvrhText(p) {
-  const akce = p.akce === 'up' ? 'vytáhnout' : (p.akce === 'down' ? 'zatáhnout' : 'naklopit');
-  let t = `${p.cil} — ${akce}`;
-  if (p.naklopeni !== null && p.naklopeni !== undefined) t += ` na ${p.naklopeni} %`;
   const dny = ROZVRH_DNY_CZ.filter((_, i) => p.dny[i]).join(' ');
-  return `${t} · ${dny}`;
+  return p.nazev ? `${p.nazev} · ${dny}` : dny;
+}
+
+// Kroky rozepsaného pravidla ve formuláři. Prázdný seznam neznamená chybu: při
+// uložení se vezme aktuální výběr jako jediný krok, ať jednoduché pravidlo nestojí
+// dva kliky navíc.
+function rozvrhKresliKroky() {
+  if (!rozvrhKrokyEl) return;
+  rozvrhKrokyEl.textContent = '';
+  rozvrhKrokyStav.forEach((k, i) => {
+    const row = document.createElement('div');
+    row.className = 'rozvrh-krok';
+    const cislo = document.createElement('b');
+    cislo.textContent = (i + 1) + '.';
+    const text = document.createElement('span');
+    text.textContent = rozvrhKrokText(k);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = '✕';
+    del.addEventListener('click', () => {
+      rozvrhKrokyStav.splice(i, 1);
+      rozvrhKresliKroky();
+    });
+    row.appendChild(cislo);
+    row.appendChild(text);
+    row.appendChild(del);
+    rozvrhKrokyEl.appendChild(row);
+  });
+}
+
+function rozvrhKrokZFormulare() {
+  const akce = rozvrhAkceEl ? rozvrhAkceEl.value : 'up';
+  return {
+    cil: rozvrhCilEl ? rozvrhCilEl.value : '',
+    akce,
+    naklopeni: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null
+  };
 }
 
 function renderRozvrh(data) {
@@ -5273,28 +5352,36 @@ function renderRozvrh(data) {
   rozvrhListEl.textContent = '';
   for (const p of rozvrhData) {
     const row = document.createElement('div');
-    row.className = 'timer-row' + (p.zapnuto ? '' : ' rozvrh-vyp');
+    row.className = 'timer-row rozvrh-radek' + (p.zapnuto ? '' : ' rozvrh-vyp');
+    const hlava = document.createElement('div');
+    hlava.className = 'rozvrh-hlava';
     const time = document.createElement('span');
     time.className = 'timer-row-time';
     time.textContent = rozvrhKdyText(p);
     const text = document.createElement('span');
     text.className = 'timer-row-text';
     text.textContent = rozvrhText(p);
-    // Klik na text načte pravidlo do formuláře — jinak by se čas opravoval smazáním
-    text.addEventListener('click', () => rozvrhDoFormulare(p));
+    // Klik na hlavičku načte celou skupinu do formuláře — jinak by se čas opravoval
+    // smazáním a nakliknutím všech kroků znovu
+    hlava.addEventListener('click', () => rozvrhDoFormulare(p));
     const prep = document.createElement('button');
     prep.className = 'rozvrh-prep';
     prep.textContent = p.zapnuto ? '⏸' : '▶';
     prep.title = p.zapnuto ? 'Dočasně vypnout' : 'Zapnout';
-    prep.addEventListener('click', () => rozvrhUloz({ ...p, zapnuto: !p.zapnuto }, prep));
+    prep.addEventListener('click', e => { e.stopPropagation(); rozvrhUloz({ ...p, zapnuto: !p.zapnuto }, prep); });
     const del = document.createElement('button');
     del.className = 'timer-del';
     del.textContent = '✕';
-    del.addEventListener('click', () => rozvrhSmaz(p.id, del));
-    row.appendChild(time);
-    row.appendChild(text);
-    row.appendChild(prep);
-    row.appendChild(del);
+    del.addEventListener('click', e => { e.stopPropagation(); rozvrhSmaz(p.id, del); });
+    hlava.appendChild(time);
+    hlava.appendChild(text);
+    hlava.appendChild(prep);
+    hlava.appendChild(del);
+    row.appendChild(hlava);
+    const kroky = document.createElement('div');
+    kroky.className = 'rozvrh-podkroky';
+    kroky.textContent = (p.kroky || []).map(rozvrhKrokText).join(' · ');
+    row.appendChild(kroky);
     rozvrhListEl.appendChild(row);
   }
 }
@@ -5303,21 +5390,21 @@ function rozvrhDoFormulare(p) {
   rozvrhUpravovane = p.id;
   rozvrhDnyStav = p.dny.slice();
   rozvrhKresliDny();
-  if (rozvrhCilEl) rozvrhCilEl.value = p.cil;
+  rozvrhKrokyStav = (p.kroky || []).map(k => ({ ...k }));
+  rozvrhKresliKroky();
+  if (rozvrhNazevEl) rozvrhNazevEl.value = p.nazev || '';
   if (rozvrhKdyEl) rozvrhKdyEl.value = p.kdy.typ;
   if (p.kdy.typ === 'cas' && rozvrhCasEl) rozvrhCasEl.value = p.kdy.cas;
   if (p.kdy.typ !== 'cas' && rozvrhPosunEl) rozvrhPosunEl.value = String(p.kdy.posunMin || 0);
-  if (rozvrhAkceEl) rozvrhAkceEl.value = p.akce;
-  if (rozvrhNaklonEl && p.naklopeni !== null && p.naklopeni !== undefined) {
-    rozvrhNaklonEl.value = String(p.naklopeni);
-    if (rozvrhNaklonValEl) rozvrhNaklonValEl.textContent = p.naklopeni + ' %';
-  }
   rozvrhPrepniPole();
   if (rozvrhAddEl) rozvrhAddEl.textContent = 'Uložit změnu';
 }
 
 function rozvrhZrusUpravu() {
   rozvrhUpravovane = null;
+  rozvrhKrokyStav = [];
+  rozvrhKresliKroky();
+  if (rozvrhNazevEl) rozvrhNazevEl.value = '';
   if (rozvrhAddEl) rozvrhAddEl.textContent = 'Přidat pravidlo';
 }
 
@@ -5334,14 +5421,14 @@ function rozvrhZFormulare() {
   const kdy = typ === 'cas'
     ? { typ: 'cas', cas: rozvrhCasEl ? rozvrhCasEl.value : '' }
     : { typ, posunMin: Number(rozvrhPosunEl ? rozvrhPosunEl.value : 0) || 0 };
-  const akce = rozvrhAkceEl ? rozvrhAkceEl.value : 'up';
+  // Nenaklikané kroky = jednoduché pravidlo z aktuálního výběru
+  const kroky = rozvrhKrokyStav.length ? rozvrhKrokyStav.map(k => ({ ...k })) : [rozvrhKrokZFormulare()];
   return {
     id: rozvrhUpravovane || undefined,
+    nazev: rozvrhNazevEl ? rozvrhNazevEl.value : '',
     dny: rozvrhDnyStav.slice(),
     kdy,
-    cil: rozvrhCilEl ? rozvrhCilEl.value : '',
-    akce,
-    naklopeni: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null,
+    kroky,
     zapnuto: true
   };
 }
@@ -5421,8 +5508,17 @@ if (rozvrhCardEl) {
     });
   }
 }
+if (rozvrhKrokAddEl) {
+  rozvrhKrokAddEl.addEventListener('click', () => {
+    const k = rozvrhKrokZFormulare();
+    if (!k.cil) return;
+    rozvrhKrokyStav.push(k);
+    rozvrhKresliKroky();
+  });
+}
 if (rozvrhAddEl) rozvrhAddEl.addEventListener('click', () => rozvrhUloz(rozvrhZFormulare(), rozvrhAddEl));
 rozvrhKresliDny();
+rozvrhKresliKroky();
 rozvrhPrepniPole();
 
 // ---------- Klima (Panasonic Comfort Cloud) ----------
