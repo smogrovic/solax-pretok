@@ -15,8 +15,8 @@ const { check, nadpis, konec } = suite('rozvrh naostro');
 const SERVER = path.join(__dirname, '..', 'server.js');
 const PORT = 3897;
 
-const spat = (cesta) => new Promise((ok, chyba) => {
-  const req = http.request({ host: '127.0.0.1', port: PORT, path: cesta, method: 'GET' },
+const spat = (cesta, metoda = 'GET') => new Promise((ok, chyba) => {
+  const req = http.request({ host: '127.0.0.1', port: PORT, path: cesta, method: metoda },
     r => { let b = ''; r.on('data', d => { b += d; }); r.on('end', () => ok({ status: r.statusCode, body: b })); });
   req.on('error', chyba);
   req.end();
@@ -76,6 +76,16 @@ function snapshot() {
   check('zpoždění po západu je ve snapshotu taky', snap.zapadDelayMin, 20);
   check('prázdniny taky', typeof snap.prazdniny, 'object');
   check('  a zatím nejsou', snap.prazdniny.zitra, false);
+
+  nadpis('2) Tlačítko „nahrát doporučený rozvrh"');
+  // Ať se rozvrh dá vrátit bez ohledu na to, co ho vymazalo
+  await spat('/api/blinds/schedule/default', 'POST');
+  const po = JSON.parse((await spat('/api/blinds/schedule')).body);
+  check('nahraje sedm skupin', po.rules.length, 7);
+  // Bez razítka by je stará záloha z telefonu hned zase přepsala
+  check('  a dá jim razítko', po.savedAt > 0, true);
+  const snap2 = await snapshot();
+  check('a v appce jsou taky', (snap2.blindRules || []).length, 7);
 
   srv.kill();
   await pauza(200);

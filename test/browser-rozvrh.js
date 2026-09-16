@@ -238,11 +238,39 @@ setTimeout(async () => {
   check('křížek maže', poslano[0].url, '/api/blinds/schedule/delete');
   check('  podle id', poslano[0].body.id, 7);
 
+  R.push('\\n5b) Prázdný rozvrh');
+  // Prázdný seznam vypadal stejně jako „ještě se nenačetl". Teď je vidět, že appka
+  // žádná pravidla nemá, a jde to jedním klikem spravit.
+  const prazdno = document.getElementById('rozvrhPrazdno');
+  renderRozvrh({ rules: [], savedAt: Date.now() });
+  check('prázdný rozvrh to řekne', prazdno.hidden, false);
+  poslano.length = 0;
+  document.getElementById('rozvrhVychozi').click();
+  await pockej();
+  check('tlačítko si řekne o doporučený rozvrh', poslano[0].url, '/api/blinds/schedule/default');
+  SERVER = [{ id: 9, zapnuto: true, nazev: 'Ráno', odloz: null, dny: [true, true, true, true, true, false, false],
+              kdy: { typ: 'cas', cas: '06:40' }, kroky: [{ cil: 'Miky', akce: 'tilt', hodnota: 50 }] }];
+  renderRozvrh({ rules: SERVER, savedAt: Date.now() });
+  check('  s pravidly už tlačítko nepřekáží', prazdno.hidden, true);
+
   R.push('\\n6) Záloha v telefonu');
   // Rozvrh je nastavení od člověka a v paměti serveru nepřežije nasazení
   const zaloha = JSON.parse(localStorage.getItem('blindRules') || 'null');
   check('rozvrh se ukládá do telefonu', Array.isArray(zaloha.rules), true);
   check('  i s časem uložení', typeof zaloha.savedAt, 'number');
+
+  // Záloha bez pravidel nemá co obnovovat — a serveru by jen vzala ta jeho.
+  // Přesně tudy nejspíš zmizel předvyplněný rozvrh.
+  localStorage.setItem('blindRules', JSON.stringify({ savedAt: Date.now(), rules: [] }));
+  rozvrhSavedAt = 0;          // ať to nezastaví až porovnání razítek
+  poslano.length = 0;
+  await maybeRestoreRozvrh();
+  check('prázdná záloha se serveru neposílá', poslano.length, 0);
+  localStorage.setItem('blindRules', JSON.stringify({ savedAt: Date.now(), rules: SERVER }));
+  rozvrhSavedAt = 0;
+  poslano.length = 0;
+  await maybeRestoreRozvrh();
+  check('  ale záloha s pravidly ano', poslano[0].url, '/api/blinds/schedule/restore');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

@@ -878,6 +878,8 @@
     color:var(--grey-text);
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
+  .rozvrh-prazdno{width:100%;text-align:center;font-size:12px;color:var(--grey-text);margin-top:10px;}
+  .rozvrh-prazdno[hidden]{display:none;}
   .zapad-row{display:flex;align-items:center;gap:10px;margin-top:8px;}
   .zapad-label{font-size:12px;color:var(--grey-text);flex:1;}
   .zapad-row select{width:auto;min-width:110px;}
@@ -2258,6 +2260,12 @@
         <button class="rozvrh-krok-btn" id="rozvrhKrokAdd" type="button">+ Přidat krok</button>
         <button class="timer-add-btn" id="rozvrhAdd">Přidat pravidlo</button>
         <div class="timer-list" id="rozvrhList"></div>
+        <!-- Prázdný rozvrh vypadal stejně jako „ještě se nenačetl". Teď je vidět,
+             že appka žádná pravidla nemá, a jde to jedním klikem spravit. -->
+        <div class="rozvrh-prazdno" id="rozvrhPrazdno" hidden>
+          <div>Rozvrh je prázdný — žaluzie se samy hýbat nebudou.</div>
+          <button class="rozvrh-krok-btn" id="rozvrhVychozi" type="button">Nahrát doporučený rozvrh</button>
+        </div>
       </div>
     </div>
   </div>
@@ -5299,6 +5307,8 @@ const rozvrhNaklonEl = document.getElementById('rozvrhNaklon');
 const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
 const rozvrhNaklonLabelEl = document.getElementById('rozvrhNaklonLabel');
 const rozvrhAddEl = document.getElementById('rozvrhAdd');
+const rozvrhPrazdnoEl = document.getElementById('rozvrhPrazdno');
+const rozvrhVychoziEl = document.getElementById('rozvrhVychozi');
 const rozvrhNazevEl = document.getElementById('rozvrhNazev');
 const rozvrhKrokyEl = document.getElementById('rozvrhKroky');
 const rozvrhKrokAddEl = document.getElementById('rozvrhKrokAdd');
@@ -5413,6 +5423,7 @@ function renderRozvrh(data) {
     if (typeof data.savedAt === 'number') rozvrhSavedAt = data.savedAt;
     saveRozvrhLocal();
   }
+  if (rozvrhPrazdnoEl) rozvrhPrazdnoEl.hidden = rozvrhData.length > 0;
   if (!rozvrhListEl) return;
   rozvrhListEl.textContent = '';
   for (const p of rozvrhData) {
@@ -5555,6 +5566,8 @@ async function maybeRestoreRozvrh() {
   let ulozeno = null;
   try { ulozeno = JSON.parse(localStorage.getItem('blindRules') || 'null'); } catch {}
   if (!ulozeno || !Array.isArray(ulozeno.rules) || !ulozeno.savedAt) return;
+  // Záloha bez pravidel nemá co obnovovat — a serveru by jen vzala ta jeho
+  if (!ulozeno.rules.length) return;
   if (ulozeno.savedAt <= rozvrhSavedAt) return;
   try {
     await fetch('/api/blinds/schedule/restore', {
@@ -5589,6 +5602,26 @@ if (rozvrhKrokAddEl) {
   });
 }
 if (rozvrhAddEl) rozvrhAddEl.addEventListener('click', () => rozvrhUloz(rozvrhZFormulare(), rozvrhAddEl));
+if (rozvrhVychoziEl) {
+  rozvrhVychoziEl.addEventListener('click', async () => {
+    rozvrhVychoziEl.disabled = true;
+    try {
+      const res = await fetch('/api/blinds/schedule/default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+      renderRozvrh(data);
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Rozvrh žaluzií: ' + err.message;
+      errorEl.classList.add('show');
+    }
+    rozvrhVychoziEl.disabled = false;
+  });
+}
 rozvrhKresliDny();
 rozvrhKresliKroky();
 rozvrhPrepniPole();

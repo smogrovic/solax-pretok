@@ -3954,7 +3954,22 @@ const ROZVRH_VYCHOZI = [
 ];
 
 let blindRuleSeq = 1;
-let blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
+let blindRules = [];
+
+function rozvrhNasadVychozi() {
+  blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
+  return blindRules;
+}
+
+// Předvyplnění se nasadí jen tehdy, když úložiště nic nepřineslo. Kdo si všechna
+// pravidla smaže, nedostane je po nasazení zpátky — a naopak: záloha z telefonu
+// (savedAt > 0) má vždycky přednost.
+function rozvrhVychoziPoStartu() {
+  if (blindRules.length || blindRulesAt) return false;
+  rozvrhNasadVychozi();
+  addLog(`Rozvrh žaluzií: nasazen doporučený rozvrh (${blindRules.length} skupin)`);
+  return true;
+}
 let blindRulesAt = 0;         // kdy se rozvrh naposledy měnil (kvůli obnově ze zálohy)
 
 // Pondělí = 0. Anglické zkratky z Intl jsou stabilní napříč verzemi Node, české ne.
@@ -4229,16 +4244,35 @@ app.post('/api/blinds/schedule/restore', (req, res) => {
     return res.status(400).json({ error: 'Chybí savedAt.' });
   }
   if (savedAt <= blindRulesAt) return res.json({ ok: true, prevzato: 0 });
+  const prislo = (Array.isArray(b.rules) ? b.rules : []).slice(0, ROZVRH_MAX);
   const nova = [];
-  for (const v of (Array.isArray(b.rules) ? b.rules : []).slice(0, ROZVRH_MAX)) {
+  for (const v of prislo) {
     const ocisteno = rozvrhOcisti(v);
     if (ocisteno) nova.push({ id: blindRuleSeq++, ...ocisteno, spustenoDne: null });
   }
+  // Prázdná záloha nenese nic, kvůli čemu by se vyplatilo mazat hotový rozvrh.
+  // Tudy zmizel předvyplněný rozvrh a protože se to hned uložilo do Upstashe,
+  // opakovalo se to po každém nasazení — a nikde o tom nebylo slovo.
+  if (!nova.length && blindRules.length) {
+    addLog(`Rozvrh žaluzií: záloha bez pravidel (${prislo.length} přišlo, 0 prošlo) — rozvrh zůstal`, 'error');
+    return res.json({ ok: true, prevzato: 0, odmitnuto: true });
+  }
+  const zahozeno = prislo.length - nova.length;
   blindRules = nova;
   blindRulesAt = savedAt;
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
-  if (nova.length) addLog(`Rozvrh žaluzií obnoven (${nova.length})`);
+  addLog(`Rozvrh žaluzií obnoven ze zálohy (${nova.length})`
+    + (zahozeno ? `, ${zahozeno} pravidel neprošlo` : ''));
   res.json({ ok: true, prevzato: nova.length });
+});
+
+// Nahrání doporučeného rozvrhu z appky. Razítko se nastaví na teď, takže výsledek
+// přebije i starou zálohu v telefonu — jinak by ji příští připojení zase přepsalo.
+app.post('/api/blinds/schedule/default', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  rozvrhNasadVychozi();
+  addLog(`Rozvrh žaluzií: nahrán doporučený rozvrh (${blindRules.length} skupin)`);
+  rozvrhPosli(res);
 });
 
 // Vlastní tik po minutě — automatika přebytků jede po pěti a rozmazala by čas
@@ -7692,6 +7726,9 @@ const server = app.listen(PORT, async () => {
   // Nejdřív záloha, pak teprve pollery — ať čerstvá data přibývají do obnovené
   // historie, ne aby se obnova prala s prvním vzorkem
   await storeLoad(server.address().port);
+  // Až po obnově: kdyby se nasadilo dřív, záloha by ho jen přepsala a při prvním
+  // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
+  rozvrhVychoziPoStartu();
   storeStart();
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);

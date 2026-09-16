@@ -35,6 +35,7 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
+         + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
   )(
@@ -357,11 +358,20 @@ nadpis('6f) Předvyplněný rozvrh');
 {
   const h = build();
   check('je tam sedm skupin', h.api.ROZVRH_VYCHOZI.length, 7);
-  check('  a nasadí se rovnou', h.api.pravidla.length, 7);
+  // Nasazuje se až po obnově z úložiště, ne při startu — jinak by zálohu jen přepsalo
+  check('na prázdném serveru se nasadí', h.api.rozvrhVychoziPoStartu(), true);
+  check('  a je jich sedm', h.api.pravidla.length, 7);
+  check('podruhé už ne', h.api.rozvrhVychoziPoStartu(), false);
   // Kdyby výchozí pravidlo neprošlo vlastní validací, tiše by se do rozvrhu nedostalo
   check('všechna projdou validací',
     h.api.ROZVRH_VYCHOZI.every(p => !!h.api.rozvrhOcisti(p)), true);
   check('  a mají razítko nula', h.api.savedAt, 0);
+  // Kdo si všechna pravidla smaže, nedostane je po nasazení zpátky
+  {
+    const smazane = build();
+    await volej(smazane.routy, 'POST /api/blinds/schedule/restore', { savedAt: Date.now(), rules: [] });
+    check('po smazaném rozvrhu se předvyplnění nevrací', smazane.api.rozvrhVychoziPoStartu(), false);
+  }
   const podle = jm => h.api.pravidla.find(p => p.nazev === jm);
   check('ráno pokoje je na 6:40 Po–Pá', podle('Ráno pokoje').kdy.cas + ' ' + podle('Ráno pokoje').dny.join(','),
     '06:40 true,true,true,true,true,false,false');
@@ -373,6 +383,41 @@ nadpis('6f) Předvyplněný rozvrh');
     podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
     'Obývák Dveře:20');
   check('ložnice má odklad na saunu', podle('Ložnice po západu').odloz.minut, 30);
+}
+
+nadpis('6g) Prázdná záloha rozvrh nesmaže');
+{
+  // Tudy zmizel předvyplněný rozvrh: obnova vzala razítko, zahodila pravidla, která
+  // neprošla kontrolou, a výsledek byl prázdno — potichu a rovnou i do úložiště,
+  // takže se to opakovalo po každém nasazení.
+  const h = build();
+  h.api.rozvrhVychoziPoStartu();
+  const { out } = await volej(h.routy, 'POST /api/blinds/schedule/restore', { savedAt: Date.now(), rules: [] });
+  check('prázdná záloha hotový rozvrh nesmaže', h.api.pravidla.length, 7);
+  check('  a řekne to', out.odmitnuto, true);
+  check('  nahlas do logu', h.logy.some(l => /^CHYBA .*záloha bez pravidel/.test(l)), true);
+  // Ani záloha, ze které nic neprojde kontrolou
+  const rozbita = build();
+  rozbita.api.rozvrhVychoziPoStartu();
+  await volej(rozbita.routy, 'POST /api/blinds/schedule/restore',
+    { savedAt: Date.now(), rules: [{ dny: [], kdy: {}, kroky: [] }] });
+  check('rozbitá záloha taky ne', rozbita.api.pravidla.length, 7);
+}
+{
+  // Na prázdném rozvrhu projít musí — jinak by se všechna pravidla dala smazat
+  // jen jednou a po nasazení by se vrátila
+  const h = build();
+  const { out } = await volej(h.routy, 'POST /api/blinds/schedule/restore', { savedAt: Date.now(), rules: [] });
+  check('na prázdném rozvrhu prázdná záloha projde', !out.odmitnuto, true);
+  check('  a razítko se převezme', h.api.savedAt > 0, true);
+}
+{
+  // Tlačítko v appce: ať se rozvrh dá vrátit bez ohledu na to, co ho vymazalo
+  const h = build();
+  const { out } = await volej(h.routy, 'POST /api/blinds/schedule/default', {});
+  check('tlačítko nahraje doporučený rozvrh', out.rules.length, 7);
+  // Bez razítka by ho stará záloha z telefonu hned zase přepsala
+  check('  s razítkem teď', out.savedAt > 0, true);
 }
 
 nadpis('7) Co appka pošle, to se ověří');
