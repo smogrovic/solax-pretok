@@ -1159,6 +1159,40 @@
     font-weight:600;
   }
   .asst-scene:disabled{opacity:0.5;}
+  /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
+     dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
+  .potvrz{
+    position:fixed;
+    inset:0;
+    z-index:60;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+    background:rgba(20,30,40,0.45);
+  }
+  .potvrz[hidden]{display:none;}
+  .potvrz-box{
+    width:100%;
+    max-width:320px;
+    background:var(--card);
+    border-radius:20px;
+    padding:18px 18px 14px;
+    box-shadow:0 8px 30px rgba(20,30,40,0.25);
+  }
+  .potvrz-nadpis{font-size:16px;font-weight:800;color:var(--navy);text-align:center;}
+  .potvrz-text{font-size:12px;color:var(--grey-text);line-height:1.5;text-align:center;margin-top:8px;}
+  .potvrz-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+  .potvrz-btns button{
+    border:none;
+    border-radius:14px;
+    padding:12px 8px;
+    font-size:13px;
+    font-weight:700;
+    font-family:inherit;
+  }
+  .potvrz-zpet{background:rgba(44,62,80,0.08);color:var(--grey-text);}
+  .potvrz-ano{background:var(--orange);color:#fff;}
   .away-row{
     display:flex;
     align-items:center;
@@ -1266,9 +1300,12 @@
     color:var(--grey-text);
     margin-top:2px;
   }
-  /* Krajní popisky lícují s koncem dráhy, prostřední se drží středu */
+  /* Stejně široké sloupce, ne pružný řádek: s „Jsme pryč" je poslední popisek
+     dvakrát delší než ostatní a rozhodil by rozestupy. Krajní lícují s koncem
+     dráhy, prostřední se drží středu svého sloupce. */
+  .mode-scale{display:grid;grid-template-columns:repeat(4, 1fr);}
+  .mode-scale span{text-align:center;}
   .mode-scale span:first-child{text-align:left;}
-  .mode-scale span:nth-child(2){text-align:center;}
   .mode-scale span:last-child{text-align:right;}
   .mode-scale span.on{color:var(--navy);font-weight:800;}
   .mode-hint{
@@ -1811,19 +1848,16 @@
             <div class="traffic-light" id="autoLight"></div>
             <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
           </div>
-          <input type="range" min="0" max="2" step="1" value="1" id="autoModeSlider"
+          <input type="range" min="0" max="3" step="1" value="1" id="autoModeSlider"
                  aria-label="Režim automatiky" list="autoModeTicks">
-          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option></datalist>
+          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
           <div class="mode-scale">
             <span data-mode="0">Vypnuto</span>
             <span data-mode="1">Zapnuto</span>
             <span data-mode="2">Zima</span>
+            <span data-mode="3">Jsme pryč</span>
           </div>
           <div class="mode-hint" id="autoModeHint"></div>
-          <label class="away-row">
-            <input type="checkbox" id="awayCheck">
-            <span>Nejsme doma</span>
-          </label>
           <div class="away-hint" id="awayHint"></div>
         </div>
       </div>
@@ -2727,6 +2761,19 @@
   <div class="kal-pata">
     <button class="kal-obnov" id="kalObnov" type="button">Aktualizovat</button>
     <div class="kal-meta" id="kalMeta"></div>
+  </div>
+</div>
+
+<!-- Potvrzení u poloh jezdce, které dům utlumí. Stojí mimo pás stránek, aby ho
+     nemohl uříznout sloupec na iPadu. -->
+<div class="potvrz" id="potvrzOkno" hidden>
+  <div class="potvrz-box">
+    <div class="potvrz-nadpis" id="potvrzNadpis"></div>
+    <div class="potvrz-text" id="potvrzText"></div>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="potvrzZpet" type="button">Zpět</button>
+      <button class="potvrz-ano" id="potvrzAno" type="button">Potvrdit</button>
+    </div>
   </div>
 </div>
 
@@ -3688,7 +3735,10 @@ function renderYesterday() {
   if (statSaunaYestEl) statSaunaYestEl.textContent = denKwh(saunaDaysData, 1);
 }
 
-// Hlavní přepínač má tři polohy; index jezdce ↔ režim na serveru
+// Jezdec má čtyři polohy, ale skládá se ze DVOU nezávislých věcí: režimu automatiky
+// (to je ten, co zná server) a toho, jestli jsme pryč. „Jsme pryč" je nadřazené —
+// režim pod ním zůstává, jaký byl, takže po návratu není co dohadovat a v zimě se
+// mezitím dál hlídá zhasnuté světlo u bazénu.
 const AUTO_MODES_UI = ['off', 'on', 'winter'];
 const AUTO_MODE_STATE = { off: 'vypnuta', on: 'zapnuta', winter: 'zima' };
 const AUTO_MODE_HINT = {
@@ -3697,20 +3747,97 @@ const AUTO_MODE_HINT = {
   winter: 'Bazén a solinátor spí. Bojler topí z přebytku i bez bazénu, auto se dobíjí pořád na FAST'
     + ' a klimatizace drží nastavenou teplotu v režimu AUTO.'
 };
+const AWAY_POLOHA = 3;
+const AWAY_HINT = 'Za čtvrt hodiny se dům zamkne, zhasne, zatáhnou se žaluzie a vypne klimatizace.'
+  + ' Bojler se nezapíná.';
 let autoModeData = 'on';
+// Deklarace patří sem, ne dolů k obsluze: jezdec se kreslí ze snapshotu dřív, než by
+// se řádek o tři tisíce řádků níž vůbec vykonal.
+let awayData = { away: false, awayAt: 0, awayActive: false };
+
+function autoSliderIndex() {
+  if (awayData.away) return AWAY_POLOHA;
+  return Math.max(0, AUTO_MODES_UI.indexOf(autoModeData));
+}
+
+function autoHint(i) {
+  if (i === AWAY_POLOHA) return AWAY_HINT + ` Automatika zůstává v režimu ${AUTO_MODE_STATE[autoModeData]}.`;
+  return AUTO_MODE_HINT[AUTO_MODES_UI[i]] || '';
+}
+
+function renderAutoSlider() {
+  // Dokud se někdo rozhoduje v potvrzovacím okně, jezdec se mu pod rukou nehne
+  if (potvrzCeka()) return;
+  const i = autoSliderIndex();
+  autoLight.className = 'traffic-light ' + (autoModeData === 'off' && !awayData.away ? 'off' : 'on');
+  autoStateEl.textContent = awayData.away ? 'jsme pryč' : AUTO_MODE_STATE[autoModeData];
+  if (autoModeSliderEl && document.activeElement !== autoModeSliderEl) autoModeSliderEl.value = String(i);
+  autoModeScaleEls.forEach(el => el.classList.toggle('on', Number(el.dataset.mode) === i));
+  if (autoModeHintEl) autoModeHintEl.textContent = autoHint(i);
+}
 
 function renderAutomation(mode) {
   autoModeData = AUTO_MODES_UI.includes(mode) ? mode : 'on';
-  const i = AUTO_MODES_UI.indexOf(autoModeData);
-  autoLight.className = 'traffic-light ' + (autoModeData === 'off' ? 'off' : 'on');
-  autoStateEl.textContent = AUTO_MODE_STATE[autoModeData];
-  if (autoModeSliderEl && document.activeElement !== autoModeSliderEl) autoModeSliderEl.value = String(i);
-  autoModeScaleEls.forEach(el => el.classList.toggle('on', Number(el.dataset.mode) === i));
-  if (autoModeHintEl) autoModeHintEl.textContent = AUTO_MODE_HINT[autoModeData];
+  renderAutoSlider();
   saveAutoModeLocal();
   renderTempAutoThreshold();   // v zimě se ukazuje jiný jezdec
   renderWbAuto();              // a jiná nápověda u wallboxu
 }
+
+// ---------- Potvrzení u poloh, které dům utlumí ----------
+// „Vypnuto" zastaví celou automatiku, „Jsme pryč" zamkne dům a zhasne. Obojí se dá
+// přehodit omylem prstem přes jezdec, tak se to potvrzuje. A samo se to nepotvrdí:
+// když se nikdo do půl minuty neozve, okno zmizí a jezdec skočí zpátky tam, kde byl.
+const POTVRZ_MS = 30000;
+const POTVRZ_POLOHY = {
+  0: { nadpis: 'Vypnout automatiku?',
+       text: 'Nic se nebude spínat samo. Bazén, solinátor, bojler i wallbox zůstanou tak, jak zrovna jsou,'
+           + ' dokud je nepřepneš ručně.' },
+  3: { nadpis: 'Odcházíme z domu?',
+       text: AWAY_HINT + ' Čtvrt hodiny je na to, abys stihl odejít.' }
+};
+const potvrzOknoEl = document.getElementById('potvrzOkno');
+const potvrzNadpisEl = document.getElementById('potvrzNadpis');
+const potvrzTextEl = document.getElementById('potvrzText');
+const potvrzAnoEl = document.getElementById('potvrzAno');
+const potvrzZpetEl = document.getElementById('potvrzZpet');
+let potvrzAkce = null;
+let potvrzDoKdy = 0;
+let potvrzTimer = null;
+
+function potvrzCeka() { return !!potvrzAkce; }
+
+function potvrzZeptej(nadpis, text, akce) {
+  potvrzAkce = akce;
+  potvrzDoKdy = Date.now() + POTVRZ_MS;
+  if (potvrzNadpisEl) potvrzNadpisEl.textContent = nadpis;
+  if (potvrzTextEl) potvrzTextEl.textContent = text;
+  if (potvrzOknoEl) potvrzOknoEl.hidden = false;
+  clearInterval(potvrzTimer);
+  potvrzTimer = setInterval(potvrzTik, 1000);
+  potvrzTik();
+}
+
+// Odpočet je na tlačítku vidět — jinak by okno po půl minutě zmizelo bez vysvětlení
+function potvrzTik() {
+  if (!potvrzCeka()) return;
+  const zbyva = Math.ceil((potvrzDoKdy - Date.now()) / 1000);
+  if (zbyva <= 0) { potvrzKonec(false); return; }
+  if (potvrzAnoEl) potvrzAnoEl.textContent = `Potvrdit (${zbyva} s)`;
+}
+
+function potvrzKonec(potvrzeno) {
+  const akce = potvrzAkce;
+  potvrzAkce = null;
+  clearInterval(potvrzTimer);
+  potvrzTimer = null;
+  if (potvrzOknoEl) potvrzOknoEl.hidden = true;
+  if (potvrzeno && akce) akce();
+  else renderAutoSlider();          // nepotvrzeno: jezdec zpátky tam, kde byl
+}
+
+if (potvrzAnoEl) potvrzAnoEl.addEventListener('click', () => potvrzKonec(true));
+if (potvrzZpetEl) potvrzZpetEl.addEventListener('click', () => potvrzKonec(false));
 
 async function setAutomation(mode) {
   if (autoModeSliderEl) autoModeSliderEl.disabled = true;
@@ -3756,15 +3883,26 @@ async function maybeRestoreAutoMode() {
   } catch {}
 }
 
+// Návrat domů se neptá — zapnout dům zpátky není nic, co by šlo litovat
+async function zvolRezim(i) {
+  if (i === AWAY_POLOHA) { await setAway(true); return; }
+  if (awayData.away) await setAway(false);
+  await setAutomation(AUTO_MODES_UI[i] || 'on');
+}
+
 if (autoModeSliderEl) {
   autoModeSliderEl.addEventListener('change', () => {
-    setAutomation(AUTO_MODES_UI[Number(autoModeSliderEl.value)] || 'on');
+    const i = Number(autoModeSliderEl.value);
+    if (i === autoSliderIndex()) return;            // vrátilo se to tam, kde to bylo
+    const p = POTVRZ_POLOHY[i];
+    if (p) potvrzZeptej(p.nadpis, p.text, () => zvolRezim(i));
+    else zvolRezim(i);
   });
   // Popisky reagují už při tažení, povel se pošle až po puštění
   autoModeSliderEl.addEventListener('input', () => {
     const i = Number(autoModeSliderEl.value);
     autoModeScaleEls.forEach(el => el.classList.toggle('on', Number(el.dataset.mode) === i));
-    if (autoModeHintEl) autoModeHintEl.textContent = AUTO_MODE_HINT[AUTO_MODES_UI[i]] || '';
+    if (autoModeHintEl) autoModeHintEl.textContent = autoHint(i);
   });
 }
 
@@ -6973,16 +7111,14 @@ if (asstSend) {
 }
 
 // ---------- Nejsme doma ----------
-// Zaškrtnutí spustí patnáctiminutový odpočet, ať se stihne odejít. Hláška pod tím
-// říká, co se stane a kdy — bez ní by zaškrtnutí vypadalo, že se nic neděje.
-const awayCheckEl = document.getElementById('awayCheck');
+// Poslední poloha jezdce automatiky. Spustí patnáctiminutový odpočet, ať se stihne
+// odejít. Hláška pod jezdcem říká, co se stane a kdy — bez ní by přehození vypadalo,
+// že se nic neděje.
 const awayHintEl = document.getElementById('awayHint');
-let awayData = { away: false, awayAt: 0, awayActive: false };
 
 function renderAway(d) {
   if (d) awayData = { ...awayData, ...d };
-  if (!awayCheckEl) return;
-  if (document.activeElement !== awayCheckEl) awayCheckEl.checked = !!awayData.away;
+  renderAutoSlider();
   if (!awayHintEl) return;
   if (!awayData.away) {
     awayHintEl.textContent = '';
@@ -7001,25 +7137,23 @@ setInterval(() => {
   }
 }, 30000);
 
-if (awayCheckEl) {
-  awayCheckEl.addEventListener('change', async () => {
-    const chtene = awayCheckEl.checked;
-    try {
-      const res = await fetch('/api/away', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ away: chtene })
-      });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
-      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
-      renderAway(data);
-    } catch (err) {
-      awayCheckEl.checked = !chtene;   // server to nevzal, ať přepínač nelže
-      errorEl.textContent = 'Nejsme doma: ' + err.message;
-      errorEl.classList.add('show');
-    }
-  });
+async function setAway(on) {
+  try {
+    const res = await fetch('/api/away', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ away: on })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+    renderAway(data);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Nejsme doma: ' + err.message;
+    errorEl.classList.add('show');
+    renderAutoSlider();          // server to nevzal, ať jezdec nelže
+  }
 }
 
 // ---------- Teplotní automatika klimatizace ----------
