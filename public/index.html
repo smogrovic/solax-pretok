@@ -1853,9 +1853,9 @@
           <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
           <div class="mode-scale">
             <span data-mode="0">Vypnuto</span>
-            <span data-mode="1">Zapnuto</span>
-            <span data-mode="2">Zima</span>
-            <span data-mode="3">Jsme pryč</span>
+            <span data-mode="1">Jsme pryč</span>
+            <span data-mode="2">Zapnuto</span>
+            <span data-mode="3">Zima</span>
           </div>
           <div class="mode-hint" id="autoModeHint"></div>
           <div class="away-hint" id="awayHint"></div>
@@ -3740,6 +3740,9 @@ function renderYesterday() {
 // režim pod ním zůstává, jaký byl, takže po návratu není co dohadovat a v zimě se
 // mezitím dál hlídá zhasnuté světlo u bazénu.
 const AUTO_MODES_UI = ['off', 'on', 'winter'];
+// Polohy jezdce zleva doprava. Není to totéž co režimy: „away" server jako režim
+// nezná, drží si ho zvlášť — proto tu stojí dva seznamy vedle sebe.
+const AUTO_POLOHY = ['off', 'away', 'on', 'winter'];
 const AUTO_MODE_STATE = { off: 'vypnuta', on: 'zapnuta', winter: 'zima' };
 const AUTO_MODE_HINT = {
   off: 'Nic se nespíná samo — všechno ovládáš ručně.',
@@ -3747,7 +3750,7 @@ const AUTO_MODE_HINT = {
   winter: 'Bazén a solinátor spí. Bojler topí z přebytku i bez bazénu, auto se dobíjí pořád na FAST'
     + ' a klimatizace drží nastavenou teplotu v režimu AUTO.'
 };
-const AWAY_POLOHA = 3;
+const AWAY_POLOHA = AUTO_POLOHY.indexOf('away');
 const AWAY_HINT = 'Za čtvrt hodiny se dům zamkne, zhasne, zatáhnou se žaluzie a vypne klimatizace.'
   + ' Bojler se nezapíná.';
 let autoModeData = 'on';
@@ -3757,12 +3760,12 @@ let awayData = { away: false, awayAt: 0, awayActive: false };
 
 function autoSliderIndex() {
   if (awayData.away) return AWAY_POLOHA;
-  return Math.max(0, AUTO_MODES_UI.indexOf(autoModeData));
+  return Math.max(0, AUTO_POLOHY.indexOf(autoModeData));
 }
 
 function autoHint(i) {
   if (i === AWAY_POLOHA) return AWAY_HINT + ` Automatika zůstává v režimu ${AUTO_MODE_STATE[autoModeData]}.`;
-  return AUTO_MODE_HINT[AUTO_MODES_UI[i]] || '';
+  return AUTO_MODE_HINT[AUTO_POLOHY[i]] || '';
 }
 
 function renderAutoSlider() {
@@ -3790,10 +3793,10 @@ function renderAutomation(mode) {
 // když se nikdo do půl minuty neozve, okno zmizí a jezdec skočí zpátky tam, kde byl.
 const POTVRZ_MS = 30000;
 const POTVRZ_POLOHY = {
-  0: { nadpis: 'Vypnout automatiku?',
+  [AUTO_POLOHY.indexOf('off')]: { nadpis: 'Vypnout automatiku?',
        text: 'Nic se nebude spínat samo. Bazén, solinátor, bojler i wallbox zůstanou tak, jak zrovna jsou,'
            + ' dokud je nepřepneš ručně.' },
-  3: { nadpis: 'Odcházíme z domu?',
+  [AWAY_POLOHA]: { nadpis: 'Odcházíme z domu?',
        text: AWAY_HINT + ' Čtvrt hodiny je na to, abys stihl odejít.' }
 };
 const potvrzOknoEl = document.getElementById('potvrzOkno');
@@ -3887,7 +3890,7 @@ async function maybeRestoreAutoMode() {
 async function zvolRezim(i) {
   if (i === AWAY_POLOHA) { await setAway(true); return; }
   if (awayData.away) await setAway(false);
-  await setAutomation(AUTO_MODES_UI[i] || 'on');
+  await setAutomation(AUTO_POLOHY[i] || 'on');
 }
 
 if (autoModeSliderEl) {

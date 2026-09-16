@@ -98,17 +98,18 @@ setTimeout(async () => {
   const posun = i => { jezdec.value = String(i); jezdec.dispatchEvent(new Event('change')); };
   const pockej = () => new Promise(r => setTimeout(r, 30));
   check('jezdec sahá po čtvrtou polohu', jezdec.max, '3');
+  // Vypnuto a „jsme pryč" stojí vedle sebe schválně: obojí dům utlumí a obojí se ptá
   check('  a popisky sedí', [...document.querySelectorAll('.mode-scale span')].map(s => s.textContent).join(', '),
-    'Vypnuto, Zapnuto, Zima, Jsme pryč');
+    'Vypnuto, Jsme pryč, Zapnuto, Zima');
 
   renderAutomation('winter');
   renderAway({ away: false, awayAt: 0, awayActive: false });
-  check('zima je třetí poloha', jezdec.value, '2');
+  check('zima je poslední poloha', jezdec.value, '3');
   check('  a nic se nehlásí', document.getElementById('awayHint').textContent, '');
 
   const T = Date.now();
   renderAway({ away: true, awaySince: T, awayAt: T + 15 * MIN, awayActive: false });
-  check('„jsme pryč" je čtvrtá', jezdec.value, '3');
+  check('„jsme pryč" je druhá', jezdec.value, '1');
   check('  a semafor svítí dál', document.getElementById('autoLight').classList.contains('off'), false);
   check('  stav to říká', document.getElementById('autoState').textContent, 'jsme pryč');
   // Pryč je nadřazené režimu, ne náhrada za něj — jinak by se v zimě přestalo hlídat
@@ -126,7 +127,7 @@ setTimeout(async () => {
   // Návrat domů se neptá: zapnout dům zpátky není nic, co by šlo litovat
   renderAway({ away: true, awaySince: T, awayAt: T + 15 * MIN, awayActive: false });
   poslano.length = 0;
-  posun(1);
+  posun(2);
   await pockej();
   check('návrat domů se neptá', okno.hidden, true);
   check('  a pošle obojí', poslano.map(x => x.url).join(' + '), '/api/away + /api/automation');
@@ -144,7 +145,7 @@ setTimeout(async () => {
   check('  a jezdec zůstává u volby', jezdec.value, '0');
   document.getElementById('potvrzZpet').click();
   check('„zpět" okno zavře', okno.hidden, true);
-  check('  jezdec skočí zpátky na zimu', jezdec.value, '2');
+  check('  jezdec skočí zpátky na zimu', jezdec.value, '3');
   check('  a nic se neposlalo', poslano.length, 0);
 
   posun(0);
@@ -156,17 +157,17 @@ setTimeout(async () => {
   // Když se člověk mezitím zvedne a odejde, okno nesmí zůstat viset donekonečna
   renderAutomation('winter');
   poslano.length = 0;
-  posun(3);
+  posun(1);
   check('„jsme pryč" se taky ptá', okno.hidden, false);
   potvrzDoKdy = Date.now() - 1;
   potvrzTik();
   check('po půl minutě okno zmizí samo', okno.hidden, true);
-  check('  jezdec skočí zpátky tam, kde byl', jezdec.value, '2');
+  check('  jezdec skočí zpátky tam, kde byl', jezdec.value, '3');
   check('  a dům zůstane, jak byl', poslano.length, 0);
   check('odpočet je půlminutový', POTVRZ_MS, 30000);
 
   poslano.length = 0;
-  posun(3);
+  posun(1);
   document.getElementById('potvrzAno').click();
   await pockej();
   check('potvrzené „jsme pryč" se pošle', poslano[0].url, '/api/away');
