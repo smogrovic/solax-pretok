@@ -34,12 +34,16 @@ function build({ env = {}, state: st, kv = {} } = {}) {
 
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
-    'airconTimers', 'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
+    'airconTimers', 'blindRules', 'blindRulesAt',
+    'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
     'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
   )(state, zlib, fakeFetch, pushSubscriptions, [], [], [],
+    [{ id: 1, zapnuto: true, dny: [true, true, true, true, true, false, false],
+       kdy: { typ: 'cas', cas: '06:15' }, cil: 'Ložnice', akce: 'up', naklopeni: null }],
+    1758000000000,
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
@@ -147,9 +151,17 @@ nadpis('3) Ukládání');
     check('teď už se uloží', await h.api.storeSave(), true);
     check('  a v úložišti něco je', typeof h.kv.hodnota, 'string');
     check('beze změny se podruhé neposílá', await h.api.storeSave(), false);
+    // Časovače si do zálohy berou razítko Date.now(). Kdyby se počítalo do otisku,
+    // lišila by se každá dvě volání a do Upstashe by se psalo pořád dokola.
+    const otisk1 = h.api.storeOtisk(h.api.storeSnapshot());
+    await new Promise(r => setTimeout(r, 3));
     check('  razítko časovačů se do porovnání nepočítá',
-      h.api.storeOtisk(h.api.storeSnapshot()).includes('savedAt'), false);
+      h.api.storeOtisk(h.api.storeSnapshot()) === otisk1, true);
     check('  ale ukládá se s ním', h.api.storeSnapshot().posts['/api/timers/restore'].savedAt > 0, true);
+    // Rozvrh žaluzií je nastavení od člověka — bez něj v záloze by ho nasazení smazalo
+    const rozvrh = h.api.storeSnapshot().posts['/api/blinds/schedule/restore'];
+    check('rozvrh žaluzií je v záloze', rozvrh.rules.length, 1);
+    check('  i s časem poslední změny', rozvrh.savedAt, 1758000000000);
     h.state.months[0].sauna = 41000;
     check('po změně zase ano', await h.api.storeSave(), true);
   })();

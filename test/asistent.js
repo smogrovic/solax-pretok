@@ -32,7 +32,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'addAssistantLog', 'broadcast', 'fmtPragueTime',
     'assistantControlBlinds', 'assistantSetRelay', 'assistantSetAircon', 'actuateRelay',
-    'autoSet', 'nukiLock', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS',
+    'autoSet', 'nukiLock', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -43,14 +43,18 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     m => logy.push('asistent: ' + m),
     () => {},
     ts => new Date(ts).toISOString().slice(11, 16),
-    async ({ target, action }) => { akce.push(`zaluzie:${target}:${action}`); return `Žaluzie ${target}: ${action}.`; },
+    async ({ target, action, orientation }) => {
+      akce.push(`zaluzie:${target}:${action}${orientation === undefined ? '' : ':' + orientation}`);
+      return `Žaluzie ${target}: ${action}.`;
+    },
     async (co, on) => { akce.push(`rele:${co}:${on ? 'on' : 'off'}`); return `${co}: ${on ? 'zap' : 'vyp'}.`; },
     async ({ room, power }) => { akce.push(`klima:${room}:${power}`); return `${room}: ${power}.`; },
     async (key, on, duvod) => { akce.push(`${key}:${on ? 'on' : 'off'} (${duvod})`); state.devices[key].isOn = on; },
     async (key, turn, duvod) => { akce.push(`auto:${key}:${turn} (${duvod})`); state.devices[key].isOn = turn === 'on'; return true; },
     async () => { if (zamekSelze) throw new Error('Nuki HTTP 503'); akce.push('zamek:lock'); return 'Zamčeno.'; },
     nuki, tahoma,
-    ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni']
+    ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'],
+    100                       // zavřeno; konstanta bydlí v bloku rozvrhu žaluzií
   );
   return { api, state, akce, logy, routy };
 }
@@ -147,8 +151,10 @@ nadpis('4) Nejsme doma — odpočet');
   h.state.away.since -= 16 * MIN;         // uplynul odklad
   check('po patnácti minutách už platí', h.api.awayActive(), true);
   await h.api.enforceAway();
+  // Zatáhnout a zaklopit do zavřeno (100 %) jde jedním povelem — zřetězené by si
+  // pohyb přerušily a žaluzie by zůstaly zataženy s otevřenými lamelami
   check('zamkne, zhasne, vypne klimu a zatáhne', h.akce.join(' | '),
-    'zamek:lock | rele:všechna světla:off | klima:Obývák:off | zaluzie:vše:down');
+    'zamek:lock | rele:všechna světla:off | klima:Obývák:off | zaluzie:vše:down:100');
   const kroku = h.akce.length;
   await h.api.enforceAway();
   check('  a podruhé už se odjezd neopakuje', h.akce.length > kroku, true);

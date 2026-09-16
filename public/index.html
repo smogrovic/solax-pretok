@@ -854,6 +854,40 @@
     font-size:11px;
     color:var(--grey-text);
   }
+  /* Rozvrh žaluzií: sedm dnů v řadě, aktivní oranžové */
+  .rozvrh-dny{display:grid;grid-template-columns:repeat(7, 1fr);gap:4px;width:100%;margin-bottom:6px;}
+  .rozvrh-dny button{
+    border:none;
+    border-radius:10px;
+    padding:7px 0;
+    font-size:11px;
+    font-weight:700;
+    font-family:inherit;
+    background:rgba(44,62,80,0.06);
+    color:var(--grey-text);
+  }
+  .rozvrh-dny button.on{background:var(--orange);color:#fff;}
+  .rozvrh-rychle{display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;width:100%;margin-bottom:8px;}
+  .rozvrh-rychle button{
+    border:none;
+    border-radius:10px;
+    padding:6px 0;
+    font-size:11px;
+    font-family:inherit;
+    background:rgba(44,62,80,0.04);
+    color:var(--grey-text);
+  }
+  .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
+  /* Vypnuté pravidlo zůstane v seznamu, ale je vidět, že nejede */
+  .rozvrh-vyp{opacity:0.45;}
+  .rozvrh-prep{
+    border:none;
+    background:none;
+    font-size:14px;
+    padding:0 4px;
+    color:var(--grey-text);
+    font-family:inherit;
+  }
   .blind-room{
     background:rgba(44,62,80,0.04);
     border-radius:16px;
@@ -2110,6 +2144,44 @@
         </div>
         <button class="timer-add-btn bt-add">Přidat časovač</button>
         <div class="timer-list bt-list"></div>
+      </div>
+
+      <!-- Rozvrh: opakovaná pravidla místo scénářů v TaHomě. Je jen na první
+           stránce žaluzií — pravidla míří na jména, ne na stránky, takže druhá
+           karta by ukazovala totéž dvakrát. -->
+      <div class="card lockable timer-card" id="rozvrhCard">
+        <div class="graph-title">Rozvrh žaluzií</div>
+        <div class="rozvrh-dny" id="rozvrhDny"></div>
+        <div class="rozvrh-rychle">
+          <button type="button" data-dny="pracovni">Po–Pá</button>
+          <button type="button" data-dny="vikend">So–Ne</button>
+          <button type="button" data-dny="vse">Každý den</button>
+        </div>
+        <select class="timer-select" id="rozvrhCil"></select>
+        <div class="timer-form-row">
+          <select class="timer-select" id="rozvrhKdy">
+            <option value="cas">V čase</option>
+            <option value="vychod">Východ slunce</option>
+            <option value="zapad">Západ slunce</option>
+          </select>
+          <input type="time" class="timer-time" id="rozvrhCas" value="07:00">
+          <input type="number" class="timer-time" id="rozvrhPosun" value="0" min="-180" max="180" step="5" hidden>
+        </div>
+        <div class="timer-form-row">
+          <select class="timer-select" id="rozvrhAkce">
+            <option value="up">Vytáhnout</option>
+            <option value="down">Zatáhnout</option>
+            <option value="tilt">Jen naklopit</option>
+          </select>
+        </div>
+        <div class="blind-tilt" style="margin-top:10px;padding-bottom:0">
+          <span class="blind-tilt-label">Naklopení</span>
+          <input type="range" min="0" max="100" value="100" id="rozvrhNaklon">
+          <span class="blind-tilt-val" id="rozvrhNaklonVal">100 %</span>
+        </div>
+        <div class="rozvrh-pozn">100 % = zavřeno</div>
+        <button class="timer-add-btn" id="rozvrhAdd">Přidat pravidlo</button>
+        <div class="timer-list" id="rozvrhList"></div>
       </div>
     </div>
   </div>
@@ -4961,6 +5033,7 @@ async function loadBlinds() {
     blinds = data.blinds || [];
     renderBlinds();
     renderBlindTimerDevices();
+    renderRozvrhCile();
   } catch {
     blindsMessage(blindsList1El, 'Rolety se nepodařilo načíst.');
   }
@@ -5111,6 +5184,246 @@ for (const card of blindTimerCards) {
     addBtn.disabled = false;
   });
 }
+
+// ---------- Rozvrh žaluzií (opakovaná pravidla) ----------
+// Časovač výš je jednorázový, tohle platí pořád dokola. Formulář slouží i k úpravě:
+// klik na řádek ho do něj načte, další „uložit" pravidlo přepíše místo přidání —
+// jinak by se při každé opravě času založilo druhé pravidlo navíc.
+const ROZVRH_DNY_CZ = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+const ROZVRH_RYCHLE = {
+  pracovni: [true, true, true, true, true, false, false],
+  vikend:   [false, false, false, false, false, true, true],
+  vse:      [true, true, true, true, true, true, true]
+};
+const rozvrhCardEl = document.getElementById('rozvrhCard');
+const rozvrhDnyEl = document.getElementById('rozvrhDny');
+const rozvrhListEl = document.getElementById('rozvrhList');
+const rozvrhCilEl = document.getElementById('rozvrhCil');
+const rozvrhKdyEl = document.getElementById('rozvrhKdy');
+const rozvrhCasEl = document.getElementById('rozvrhCas');
+const rozvrhPosunEl = document.getElementById('rozvrhPosun');
+const rozvrhAkceEl = document.getElementById('rozvrhAkce');
+const rozvrhNaklonEl = document.getElementById('rozvrhNaklon');
+const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
+const rozvrhAddEl = document.getElementById('rozvrhAdd');
+let rozvrhData = [];
+let rozvrhSavedAt = 0;
+let rozvrhUpravovane = null;      // id pravidla, které je zrovna ve formuláři
+let rozvrhDnyStav = [true, true, true, true, true, false, false];
+
+function rozvrhKresliDny() {
+  if (!rozvrhDnyEl) return;
+  rozvrhDnyEl.textContent = '';
+  ROZVRH_DNY_CZ.forEach((jm, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = jm;
+    b.className = rozvrhDnyStav[i] ? 'on' : '';
+    b.addEventListener('click', () => {
+      rozvrhDnyStav[i] = !rozvrhDnyStav[i];
+      rozvrhKresliDny();
+    });
+    rozvrhDnyEl.appendChild(b);
+  });
+}
+
+// Cíle jsou jména, ne adresy zařízení — server je páruje stejně jako u asistenta,
+// takže „Obývák" ovládne obě obývákové a „Kuchyň" jen tu jednu
+function rozvrhCile() {
+  const skupiny = [...new Set(blinds.filter(b => b.type === 'cover').map(blindSkupina))];
+  const stitky = blinds.filter(b => b.type === 'cover').map(b => b.label);
+  return ['Vše', ...skupiny, ...stitky.filter(l => !skupiny.includes(l))];
+}
+
+function renderRozvrhCile() {
+  if (!rozvrhCilEl) return;
+  const prev = rozvrhCilEl.value;
+  rozvrhCilEl.textContent = '';
+  for (const c of rozvrhCile()) {
+    const o = document.createElement('option');
+    o.value = c;
+    o.textContent = c;
+    rozvrhCilEl.appendChild(o);
+  }
+  if (prev) rozvrhCilEl.value = prev;
+}
+
+function rozvrhKdyText(p) {
+  if (p.kdy.typ === 'cas') return p.kdy.cas;
+  const jm = p.kdy.typ === 'zapad' ? 'západ' : 'východ';
+  if (!p.kdy.posunMin) return jm;
+  return `${jm} ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min`;
+}
+
+function rozvrhText(p) {
+  const akce = p.akce === 'up' ? 'vytáhnout' : (p.akce === 'down' ? 'zatáhnout' : 'naklopit');
+  let t = `${p.cil} — ${akce}`;
+  if (p.naklopeni !== null && p.naklopeni !== undefined) t += ` na ${p.naklopeni} %`;
+  const dny = ROZVRH_DNY_CZ.filter((_, i) => p.dny[i]).join(' ');
+  return `${t} · ${dny}`;
+}
+
+function renderRozvrh(data) {
+  if (data) {
+    rozvrhData = data.rules || [];
+    if (typeof data.savedAt === 'number') rozvrhSavedAt = data.savedAt;
+    saveRozvrhLocal();
+  }
+  if (!rozvrhListEl) return;
+  rozvrhListEl.textContent = '';
+  for (const p of rozvrhData) {
+    const row = document.createElement('div');
+    row.className = 'timer-row' + (p.zapnuto ? '' : ' rozvrh-vyp');
+    const time = document.createElement('span');
+    time.className = 'timer-row-time';
+    time.textContent = rozvrhKdyText(p);
+    const text = document.createElement('span');
+    text.className = 'timer-row-text';
+    text.textContent = rozvrhText(p);
+    // Klik na text načte pravidlo do formuláře — jinak by se čas opravoval smazáním
+    text.addEventListener('click', () => rozvrhDoFormulare(p));
+    const prep = document.createElement('button');
+    prep.className = 'rozvrh-prep';
+    prep.textContent = p.zapnuto ? '⏸' : '▶';
+    prep.title = p.zapnuto ? 'Dočasně vypnout' : 'Zapnout';
+    prep.addEventListener('click', () => rozvrhUloz({ ...p, zapnuto: !p.zapnuto }, prep));
+    const del = document.createElement('button');
+    del.className = 'timer-del';
+    del.textContent = '✕';
+    del.addEventListener('click', () => rozvrhSmaz(p.id, del));
+    row.appendChild(time);
+    row.appendChild(text);
+    row.appendChild(prep);
+    row.appendChild(del);
+    rozvrhListEl.appendChild(row);
+  }
+}
+
+function rozvrhDoFormulare(p) {
+  rozvrhUpravovane = p.id;
+  rozvrhDnyStav = p.dny.slice();
+  rozvrhKresliDny();
+  if (rozvrhCilEl) rozvrhCilEl.value = p.cil;
+  if (rozvrhKdyEl) rozvrhKdyEl.value = p.kdy.typ;
+  if (p.kdy.typ === 'cas' && rozvrhCasEl) rozvrhCasEl.value = p.kdy.cas;
+  if (p.kdy.typ !== 'cas' && rozvrhPosunEl) rozvrhPosunEl.value = String(p.kdy.posunMin || 0);
+  if (rozvrhAkceEl) rozvrhAkceEl.value = p.akce;
+  if (rozvrhNaklonEl && p.naklopeni !== null && p.naklopeni !== undefined) {
+    rozvrhNaklonEl.value = String(p.naklopeni);
+    if (rozvrhNaklonValEl) rozvrhNaklonValEl.textContent = p.naklopeni + ' %';
+  }
+  rozvrhPrepniPole();
+  if (rozvrhAddEl) rozvrhAddEl.textContent = 'Uložit změnu';
+}
+
+function rozvrhZrusUpravu() {
+  rozvrhUpravovane = null;
+  if (rozvrhAddEl) rozvrhAddEl.textContent = 'Přidat pravidlo';
+}
+
+// Čas nebo posun od slunce — obojí naráz by jen mátlo
+function rozvrhPrepniPole() {
+  if (!rozvrhKdyEl) return;
+  const cas = rozvrhKdyEl.value === 'cas';
+  if (rozvrhCasEl) rozvrhCasEl.hidden = !cas;
+  if (rozvrhPosunEl) rozvrhPosunEl.hidden = cas;
+}
+
+function rozvrhZFormulare() {
+  const typ = rozvrhKdyEl ? rozvrhKdyEl.value : 'cas';
+  const kdy = typ === 'cas'
+    ? { typ: 'cas', cas: rozvrhCasEl ? rozvrhCasEl.value : '' }
+    : { typ, posunMin: Number(rozvrhPosunEl ? rozvrhPosunEl.value : 0) || 0 };
+  const akce = rozvrhAkceEl ? rozvrhAkceEl.value : 'up';
+  return {
+    id: rozvrhUpravovane || undefined,
+    dny: rozvrhDnyStav.slice(),
+    kdy,
+    cil: rozvrhCilEl ? rozvrhCilEl.value : '',
+    akce,
+    naklopeni: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null,
+    zapnuto: true
+  };
+}
+
+async function rozvrhUloz(pravidlo, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/blinds/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(pravidlo)
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Pravidlo se nepodařilo uložit.');
+    renderRozvrh(data);
+    rozvrhZrusUpravu();
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Rozvrh žaluzií: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+async function rozvrhSmaz(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/blinds/schedule/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    renderRozvrh(data);
+    if (rozvrhUpravovane === id) rozvrhZrusUpravu();
+  } catch (err) {
+    errorEl.textContent = 'Rozvrh žaluzií: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+// Rozvrh je nastavení od člověka a v paměti serveru nepřežije nasazení — záloha
+// v telefonu ho vrátí zpátky stejně jako časovače nebo zimní režim
+function saveRozvrhLocal() {
+  try {
+    localStorage.setItem('blindRules', JSON.stringify({ savedAt: rozvrhSavedAt, rules: rozvrhData }));
+  } catch {}
+}
+async function maybeRestoreRozvrh() {
+  let ulozeno = null;
+  try { ulozeno = JSON.parse(localStorage.getItem('blindRules') || 'null'); } catch {}
+  if (!ulozeno || !Array.isArray(ulozeno.rules) || !ulozeno.savedAt) return;
+  if (ulozeno.savedAt <= rozvrhSavedAt) return;
+  try {
+    await fetch('/api/blinds/schedule/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ulozeno)
+    });
+  } catch {}
+}
+
+if (rozvrhKdyEl) rozvrhKdyEl.addEventListener('change', rozvrhPrepniPole);
+if (rozvrhNaklonEl) {
+  rozvrhNaklonEl.addEventListener('input', () => {
+    if (rozvrhNaklonValEl) rozvrhNaklonValEl.textContent = rozvrhNaklonEl.value + ' %';
+  });
+}
+if (rozvrhCardEl) {
+  for (const b of rozvrhCardEl.querySelectorAll('.rozvrh-rychle button')) {
+    b.addEventListener('click', () => {
+      rozvrhDnyStav = ROZVRH_RYCHLE[b.dataset.dny].slice();
+      rozvrhKresliDny();
+    });
+  }
+}
+if (rozvrhAddEl) rozvrhAddEl.addEventListener('click', () => rozvrhUloz(rozvrhZFormulare(), rozvrhAddEl));
+rozvrhKresliDny();
+rozvrhPrepniPole();
 
 // ---------- Klima (Panasonic Comfort Cloud) ----------
 
@@ -7974,6 +8287,9 @@ function applySnapshot(snap) {
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
+  rozvrhSavedAt = snap.blindRulesAt || 0;
+  bezpecne(() => renderRozvrh({ rules: snap.blindRules || [], savedAt: snap.blindRulesAt || 0 }));
+  bezpecne(maybeRestoreRozvrh);
   relayTimersData = snap.relayTimers || [];
   bezpecne(renderRelayTimers);
   // Časovače (i ty klimatizační výš) — nejdřív serveru vrátit, co mu deploy sebral,
@@ -8269,6 +8585,10 @@ function connectStream() {
     blindTimersData = JSON.parse(e.data).timers || [];
     renderBlindTimers();
     saveTimersLocal();
+  });
+  es.addEventListener('blindRules', e => {
+    const d = JSON.parse(e.data);
+    renderRozvrh({ rules: d.rules || [], savedAt: d.savedAt });
   });
   es.addEventListener('relayTimers', e => {
     relayTimersData = JSON.parse(e.data).timers || [];

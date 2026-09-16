@@ -482,6 +482,8 @@ function snapshot() {
     obehRozvrh: OBEH_ROZVRH,
     blindsEnabled: tahomaEnabled,
     blindTimers,
+    blindRules,
+    blindRulesAt,
     relayTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
@@ -2681,7 +2683,13 @@ async function fetchWeather() {
 
     // Uložíme i pro zobrazení v appce (teplota venku + kdy automatika vypíná)
     const tempC = data.main && typeof data.main.temp === 'number' ? data.main.temp : null;
-    state.weather = { tempC, sunsetMs: data.sys.sunset * 1000, fetchedAt: new Date().toISOString() };
+    // Východ slunce se ukládá kvůli rozvrhu žaluzií — západ appka používala už dřív
+    state.weather = {
+      tempC,
+      sunsetMs: data.sys.sunset * 1000,
+      sunriseMs: typeof data.sys.sunrise === 'number' ? data.sys.sunrise * 1000 : null,
+      fetchedAt: new Date().toISOString()
+    };
     broadcast('weather', { weather: state.weather });
 
     return data;
@@ -3877,6 +3885,198 @@ setInterval(async () => {
     }
   }
 }, 30000);
+
+// ---------- Rozvrh žaluzií (opakovaná pravidla místo scénářů v TaHomě) ----------
+// Časovače výš jsou jednorázové: „dnes v 18:00 zatáhni" a zmizí. Tohle je rozvrh —
+// platí pořád dokola, dokud ho někdo nezruší, a nastavuje se v appce.
+//
+// Cíl se ukládá JMÉNEM, ne adresou zařízení. Adresy se v TaHomě po přepárování mění
+// a rozvrh má vydržet roky; párování jmen umí matchBlinds, takže „Obývák" chytne obě
+// obývákové a „Kuchyň" jen tu jednu.
+//
+// Zavřeno je 100 %. Vytažení i zatažení se posílá i s naklopením jedním povelem —
+// blindCommand to u žaluzií umí atomicky, zřetězené povely by si pohyb přerušily.
+const ZALUZIE_ZAVRENO = 100;
+const ROZVRH_MAX = 20;
+// Po nasazení se pravidlo dožene, ale jen chvíli zpátky. Render appku restartuje při
+// každém nasazení a čekání na přesnou minutu (jako u časovačů) by ranní pravidlo tiše
+// spolklo. Dvacet minut stačí na restart a je málo na to, aby večerní pravidlo spadlo
+// ráno.
+const ROZVRH_DOHNAT_MS = 20 * 60 * 1000;
+const ROZVRH_TICK_MS = 60 * 1000;
+const ROZVRH_AKCE = ['up', 'down', 'tilt'];
+const ROZVRH_KDY = ['cas', 'vychod', 'zapad'];
+const ROZVRH_POSUN_MAX = 180;
+
+let blindRules = [];
+let blindRuleSeq = 1;
+let blindRulesAt = 0;         // kdy se rozvrh naposledy měnil (kvůli obnově ze zálohy)
+
+// Pondělí = 0. Anglické zkratky z Intl jsou stabilní napříč verzemi Node, české ne.
+const ROZVRH_DNY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function rozvrhDenIndex(at = Date.now()) {
+  const den = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(at);
+  return ROZVRH_DNY.indexOf(den);
+}
+
+// Minuta dne, kdy má pravidlo dnes spadnout. U slunce se vezme čas z počasí a posune
+// se o zadané minuty. Když počasí ještě nedorazilo, vrátí null a pravidlo se dnes
+// nespustí — radši nic než v náhodný čas.
+function rozvrhMinuta(p, at = Date.now()) {
+  if (p.kdy.typ === 'cas') return naMinuty(p.kdy.cas);
+  const w = state.weather || {};
+  const zaklad = p.kdy.typ === 'zapad' ? w.sunsetMs : w.sunriseMs;
+  if (typeof zaklad !== 'number') return null;
+  const t = pragueTime(zaklad);
+  const m = t.hour * 60 + t.minute + (Number(p.kdy.posunMin) || 0);
+  return Math.min(1439, Math.max(0, m));
+}
+
+function rozvrhSpustit(p, at = Date.now()) {
+  if (!p.zapnuto) return false;
+  const den = rozvrhDenIndex(at);
+  if (den < 0 || !p.dny[den]) return false;
+  if (p.spustenoDne === pragueDateString(at)) return false;
+  const plan = rozvrhMinuta(p, at);
+  if (plan === null) return false;
+  const t = pragueTime(at);
+  const zpozdeni = (t.hour * 60 + t.minute - plan) * 60000;
+  return zpozdeni >= 0 && zpozdeni <= ROZVRH_DOHNAT_MS;
+}
+
+const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit' };
+function rozvrhPopis(p) {
+  const kdy = p.kdy.typ === 'cas'
+    ? p.kdy.cas
+    : `${p.kdy.typ === 'zapad' ? 'západ' : 'východ'} slunce${p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : ''}`;
+  const naklop = p.naklopeni === null ? '' : ` na ${p.naklopeni} %`;
+  return `${p.cil} ${ROZVRH_AKCE_SLOVY[p.akce]}${naklop} v ${kdy}`;
+}
+
+async function rozvrhProved(p) {
+  // „tilt" je u TaHomy „orientation" — u ostatních akcí je naklopení jen přívažek
+  const akce = p.akce === 'tilt' ? 'orientation' : p.akce;
+  const naklop = p.naklopeni === null ? undefined : p.naklopeni;
+  return assistantControlBlinds({ target: p.cil, action: akce, orientation: naklop });
+}
+
+async function runBlindSchedule(at = Date.now()) {
+  if (!blindRules.length) return;
+  // Hlavní vypínač platí i tady: „vypnuto" znamená, že se nic nehýbe samo
+  if (!autoRunning()) return;
+  // Když jsme pryč, dům je zavřený a takový má zůstat — ranní „vytáhni" by ho otevřel
+  if (awayActive()) return;
+  const dnes = pragueDateString(at);
+  let neco = false;
+  for (const p of blindRules) {
+    if (!rozvrhSpustit(p, at)) continue;
+    // Zapsat PŘED povelem: TaHoma odpovídá pomalu a další tik by pravidlo pustil znovu
+    p.spustenoDne = dnes;
+    neco = true;
+    try {
+      const odpoved = await rozvrhProved(p);
+      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — ${odpoved}`);
+    } catch (err) {
+      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} selhalo (${String(err.message).slice(0, 100)})`, 'error');
+    }
+  }
+  if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+}
+
+// Očistí pravidlo z appky. Vrací null, když je nepoužitelné — tiše opravovat by
+// znamenalo, že se v domě děje něco jiného, než co je v appce vidět.
+function rozvrhOcisti(v) {
+  if (!v || typeof v !== 'object') return null;
+  const dny = Array.isArray(v.dny) && v.dny.length === 7 ? v.dny.map(x => !!x) : null;
+  if (!dny || !dny.some(Boolean)) return null;
+  const kdyIn = v.kdy || {};
+  if (!ROZVRH_KDY.includes(kdyIn.typ)) return null;
+  let kdy;
+  if (kdyIn.typ === 'cas') {
+    if (!validTimerTime(kdyIn.cas)) return null;
+    kdy = { typ: 'cas', cas: kdyIn.cas };
+  } else {
+    const posun = Math.round(Number(kdyIn.posunMin) || 0);
+    if (!Number.isFinite(posun) || Math.abs(posun) > ROZVRH_POSUN_MAX) return null;
+    kdy = { typ: kdyIn.typ, posunMin: posun };
+  }
+  const cil = typeof v.cil === 'string' ? v.cil.trim().slice(0, 60) : '';
+  if (!cil) return null;
+  if (!ROZVRH_AKCE.includes(v.akce)) return null;
+  let naklopeni = v.naklopeni === null || v.naklopeni === undefined ? null : Number(v.naklopeni);
+  if (naklopeni !== null && (!Number.isFinite(naklopeni) || naklopeni < 0 || naklopeni > 100)) return null;
+  if (naklopeni !== null) naklopeni = Math.round(naklopeni);
+  // Naklopení bez hodnoty by byl povel bez obsahu
+  if (v.akce === 'tilt' && naklopeni === null) return null;
+  return { dny, kdy, cil, akce: v.akce, naklopeni, zapnuto: v.zapnuto !== false };
+}
+
+function rozvrhPosli(res) {
+  blindRulesAt = Date.now();
+  broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  res.json({ rules: blindRules, savedAt: blindRulesAt });
+}
+
+app.get('/api/blinds/schedule', (req, res) => {
+  res.json({ rules: blindRules, savedAt: blindRulesAt });
+});
+
+app.post('/api/blinds/schedule', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const b = req.body || {};
+  const ocisteno = rozvrhOcisti(b);
+  if (!ocisteno) return res.status(400).json({ error: 'Pravidlo nedává smysl — zkontroluj dny, čas a cíl.' });
+  const stare = b.id ? blindRules.find(x => x.id === b.id) : null;
+  if (stare) {
+    // Úprava: běh z dneška se zahodí, ať se změněné pravidlo může dnes ještě chytit
+    Object.assign(stare, ocisteno, { spustenoDne: null });
+    addLog(`Rozvrh žaluzií upraven: ${rozvrhPopis(stare)}`);
+  } else {
+    if (blindRules.length >= ROZVRH_MAX) {
+      return res.status(400).json({ error: `Maximálně ${ROZVRH_MAX} pravidel.` });
+    }
+    const pravidlo = { id: blindRuleSeq++, ...ocisteno, spustenoDne: null };
+    blindRules.push(pravidlo);
+    addLog(`Rozvrh žaluzií: ${rozvrhPopis(pravidlo)}`);
+  }
+  rozvrhPosli(res);
+});
+
+app.post('/api/blinds/schedule/delete', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { id } = req.body || {};
+  const p = blindRules.find(x => x.id === id);
+  if (p) {
+    blindRules = blindRules.filter(x => x.id !== id);
+    addLog(`Rozvrh žaluzií zrušen: ${rozvrhPopis(p)}`);
+  }
+  rozvrhPosli(res);
+});
+
+// Obnova NEslučuje, ale přepisuje: rozvrh je jeden celek a slučováním by smazané
+// pravidlo obživlo ze zálohy. Rozhoduje, kdo je novější.
+app.post('/api/blinds/schedule/restore', (req, res) => {
+  const b = req.body || {};
+  const savedAt = Number(b.savedAt);
+  if (!Number.isFinite(savedAt) || savedAt <= 0 || savedAt > Date.now()) {
+    return res.status(400).json({ error: 'Chybí savedAt.' });
+  }
+  if (savedAt <= blindRulesAt) return res.json({ ok: true, prevzato: 0 });
+  const nova = [];
+  for (const v of (Array.isArray(b.rules) ? b.rules : []).slice(0, ROZVRH_MAX)) {
+    const ocisteno = rozvrhOcisti(v);
+    if (ocisteno) nova.push({ id: blindRuleSeq++, ...ocisteno, spustenoDne: null });
+  }
+  blindRules = nova;
+  blindRulesAt = savedAt;
+  broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  if (nova.length) addLog(`Rozvrh žaluzií obnoven (${nova.length})`);
+  res.json({ ok: true, prevzato: nova.length });
+});
+
+// Vlastní tik po minutě — automatika přebytků jede po pěti a rozmazala by čas
+// pravidla až o pět minut.
+scheduleEvery(() => { runBlindSchedule().catch(() => {}); }, ROZVRH_TICK_MS, 25000);
 
 // ---------- Časovače relé (bojler, bazén, solinátor, světla) ----------
 
@@ -6972,7 +7172,9 @@ async function awayOdchod() {
   for (const dev of (state.aircon.devices || [])) {
     if (dev.power) await zkus(`${dev.name} vypnuta`, async () => { await assistantSetAircon({ room: dev.name, power: 'off' }); return `${dev.name} vypnuta`; });
   }
-  if (tahomaEnabled) await zkus('žaluzie zataženy', async () => { await assistantControlBlinds({ target: 'vše', action: 'down' }); return 'žaluzie zataženy'; });
+  // Zatáhnout a zaklopit do zavřeno jde jedním povelem — blindCommand to u žaluzií
+  // pošle atomicky, zřetězené povely by si pohyb přerušily
+  if (tahomaEnabled) await zkus('žaluzie zataženy', async () => { await assistantControlBlinds({ target: 'vše', action: 'down', orientation: ZALUZIE_ZAVRENO }); return 'žaluzie zataženy a zaklopeny'; });
   addLog(`Nejsme doma: ${kroky.join(', ')}`);
 }
 
@@ -7056,6 +7258,7 @@ const STORE_POSTS = [
   '/api/months/restore',
   '/api/solinator/restore',
   '/api/timers/restore',
+  '/api/blinds/schedule/restore',
   '/api/runtime/restore',
   '/api/wallbox/daytype/restore'
 ];
@@ -7093,6 +7296,8 @@ function storeSnapshot() {
     '/api/timers/restore': {
       savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers
     },
+    // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
+    '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
       dayType: state.wbDayType.manual, until: state.wbDayType.until
