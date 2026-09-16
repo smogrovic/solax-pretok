@@ -913,10 +913,17 @@
     color:var(--grey-text);
   }
   /* Kroky pod hlavičkou skupiny v seznamu pravidel */
-  .rozvrh-radek{flex-direction:column;align-items:stretch;gap:2px;}
-  .rozvrh-hlava{display:flex;align-items:center;gap:8px;}
-  .rozvrh-hlava .timer-row-text{flex:1;min-width:0;}
-  .rozvrh-podkroky{font-size:11px;color:var(--grey-text);padding-left:2px;line-height:1.5;}
+  /* Řádek bez šířky se smrskne na obsah a vycentruje se — pak každý čas začínal
+     jinde. Čas a popis lícují vlevo, tlačítka drží pravý okraj.
+     Selektor je schválně dvojitý: .timer-row stojí v souboru NÍŽ a se stejnou
+     vahou by přebil align-items, takže by se obsah řádku zase centroval. */
+  .timer-row.rozvrh-radek{width:100%;flex-direction:column;align-items:stretch;gap:2px;text-align:left;}
+  .rozvrh-hlava{display:flex;align-items:center;gap:8px;width:100%;}
+  .rozvrh-hlava .timer-row-time{text-align:left;}
+  /* Volné místo si bere popis (flex:1 má už z .timer-row-text), čímž odtlačí
+     tlačítka k pravému okraji — platí to i pro pravidlo bez názvu */
+  .rozvrh-hlava .timer-row-text{text-align:left;}
+  .rozvrh-podkroky{font-size:11px;color:var(--grey-text);padding-left:2px;line-height:1.5;text-align:left;}
   /* Vypnuté pravidlo zůstane v seznamu, ale je vidět, že nejede */
   .rozvrh-vyp{opacity:0.45;}
   .rozvrh-prep{
@@ -2885,6 +2892,9 @@
             <select class="timer-select" id="zapadDelay"></select>
           </div>
           <div class="zapad-hint" id="zapadHint"></div>
+          <!-- Natrvalo, ne jen v prázdné kartě: po nahrání by zmizelo zrovna ve
+               chvíli, kdy se s ním dá něco opravit. -->
+          <button class="rozvrh-krok-btn" id="rozvrhVychoziLogika" type="button">Nahrát doporučený rozvrh</button>
         </div>
 
         <div class="logic-sec">
@@ -3982,9 +3992,9 @@ let potvrzTimer = null;
 
 function potvrzCeka() { return !!potvrzAkce; }
 
-function potvrzZeptej(nadpis, text, akce) {
+function potvrzZeptej(nadpis, text, akce, sekundy) {
   potvrzAkce = akce;
-  potvrzDoKdy = Date.now() + POTVRZ_MS;
+  potvrzDoKdy = Date.now() + (sekundy ? sekundy * 1000 : POTVRZ_MS);
   if (potvrzNadpisEl) potvrzNadpisEl.textContent = nadpis;
   if (potvrzTextEl) potvrzTextEl.textContent = text;
   if (potvrzOknoEl) potvrzOknoEl.hidden = false;
@@ -5308,7 +5318,9 @@ const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
 const rozvrhNaklonLabelEl = document.getElementById('rozvrhNaklonLabel');
 const rozvrhAddEl = document.getElementById('rozvrhAdd');
 const rozvrhPrazdnoEl = document.getElementById('rozvrhPrazdno');
-const rozvrhVychoziEl = document.getElementById('rozvrhVychozi');
+// Dvě tlačítka, jedna obsluha: v prázdné kartě a natrvalo na Logice automatiky
+const rozvrhVychoziEls = ['rozvrhVychozi', 'rozvrhVychoziLogika']
+  .map(id => document.getElementById(id)).filter(Boolean);
 const rozvrhNazevEl = document.getElementById('rozvrhNazev');
 const rozvrhKrokyEl = document.getElementById('rozvrhKroky');
 const rozvrhKrokAddEl = document.getElementById('rozvrhKrokAdd');
@@ -5602,24 +5614,32 @@ if (rozvrhKrokAddEl) {
   });
 }
 if (rozvrhAddEl) rozvrhAddEl.addEventListener('click', () => rozvrhUloz(rozvrhZFormulare(), rozvrhAddEl));
-if (rozvrhVychoziEl) {
-  rozvrhVychoziEl.addEventListener('click', async () => {
-    rozvrhVychoziEl.disabled = true;
-    try {
-      const res = await fetch('/api/blinds/schedule/default', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }
-      });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
-      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
-      renderRozvrh(data);
-      errorEl.classList.remove('show');
-    } catch (err) {
-      errorEl.textContent = 'Rozvrh žaluzií: ' + err.message;
-      errorEl.classList.add('show');
-    }
-    rozvrhVychoziEl.disabled = false;
+async function rozvrhNahrajVychozi(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/blinds/schedule/default', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+    renderRozvrh(data);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Rozvrh žaluzií: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+for (const btn of rozvrhVychoziEls) {
+  btn.addEventListener('click', () => {
+    // Na prázdném rozvrhu není co ztratit; jinak to přepíše všechno, včetně úprav
+    if (!rozvrhData.length) return rozvrhNahrajVychozi(btn);
+    potvrzZeptej('Nahrát doporučený rozvrh?',
+      `Přepíše to všech ${rozvrhData.length} pravidel, která teď máš, za sedm doporučených.`,
+      () => rozvrhNahrajVychozi(btn));
   });
 }
 rozvrhKresliDny();
@@ -7554,7 +7574,7 @@ function renderSceny(sceny) {
     btn.className = 'asst-scene';
     btn.dataset.scene = s.key;
     btn.textContent = s.label;
-    btn.addEventListener('click', () => spustScenu(s.key, btn));
+    btn.addEventListener('click', () => scenaKlik(s.key, btn));
     asstScenesEl.appendChild(btn);
   }
 }
@@ -7653,6 +7673,18 @@ if (prazdninyBtnEl) {
     }
     prazdninyBtnEl.disabled = false;
   });
+}
+
+// Tlačítka, která se ptají, a na kolik vteřin. Otevřené dveře jsou horší omyl než
+// cokoli jiného, co se odsud dá spustit.
+const POTVRZ_SCENY = {
+  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 10 }
+};
+
+function scenaKlik(key, btn) {
+  const p = POTVRZ_SCENY[key];
+  if (!p) return spustScenu(key, btn);
+  potvrzZeptej(p.nadpis, p.text, () => spustScenu(key, btn), p.sekundy);
 }
 
 async function spustScenu(key, btn) {

@@ -7250,6 +7250,21 @@ async function nukiLock() {
   return 'Zamčeno.';
 }
 
+// Otevřít dveře = stáhnout západku (unlatch, action 3). Zkratku jako /action/lock
+// na to Nuki nemá, jde to jen obecnou cestou. Zámek to umí, jen když dveře mají
+// západku, kterou dokáže stáhnout — jinak vrátí chybu a ta se ukáže v appce.
+async function nukiOtevri() {
+  const id = await nukiSmartlockId();
+  const r = await fetch(`https://api.nuki.io/smartlock/${id}/action`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${NUKI_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 3, option: 0 }),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`Nuki HTTP ${r.status}`);
+  return 'Dveře otevřeny.';
+}
+
 app.post('/api/nuki/lock', async (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!nukiEnabled) return res.status(503).json({ error: 'Nuki není nastaven.' });
@@ -7273,7 +7288,10 @@ const SCENY = [
   { key: 'sauna',  label: 'Zapni saunu' },
   { key: 'zhasni', label: 'Zhasni všechna světla' },
   { key: 'zamkni', label: 'Zamkni dům' },
-  { key: 'sprcha', label: 'Jdu do sprchy' }
+  { key: 'sprcha', label: 'Jdu do sprchy' },
+  // Otevřít, ne jen odemknout. V appce se na to ptá potvrzovací okno — omylem
+  // otevřené dveře jsou horší než omylem cokoliv jiného.
+  { key: 'otevri', label: 'Otevři dveře' }
 ];
 
 function poZapaduSlunce(at = Date.now()) {
@@ -7320,7 +7338,15 @@ async function scenaSprcha() {
   return 'Oběhové čerpadlo běží, za čtvrt hodiny se vypne samo.';
 }
 
-const SCENA_FN = { sauna: scenaSauna, zhasni: scenaZhasni, zamkni: scenaZamkni, sprcha: scenaSprcha };
+async function scenaOtevri() {
+  if (!nukiEnabled) return 'Zámek není nastavený.';
+  const msg = await nukiOtevri();
+  addLog('Nuki: dveře otevřeny (tlačítko)');
+  return msg;
+}
+
+const SCENA_FN = { sauna: scenaSauna, zhasni: scenaZhasni, zamkni: scenaZamkni,
+                   sprcha: scenaSprcha, otevri: scenaOtevri };
 
 app.post('/api/scene', async (req, res) => {
   if (!requireAuth(req, res)) return;

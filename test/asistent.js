@@ -32,7 +32,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'addAssistantLog', 'broadcast', 'fmtPragueTime',
     'assistantControlBlinds', 'assistantSetRelay', 'assistantSetAircon', 'actuateRelay',
-    'autoSet', 'nukiLock', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
+    'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -52,6 +52,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     async (key, on, duvod) => { akce.push(`${key}:${on ? 'on' : 'off'} (${duvod})`); state.devices[key].isOn = on; },
     async (key, turn, duvod) => { akce.push(`auto:${key}:${turn} (${duvod})`); state.devices[key].isOn = turn === 'on'; return true; },
     async () => { if (zamekSelze) throw new Error('Nuki HTTP 503'); akce.push('zamek:lock'); return 'Zamčeno.'; },
+    async () => { akce.push('zamek:otevri'); return 'Dveře otevřeny.'; },
     nuki, tahoma,
     ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'],
     100                       // zavřeno; konstanta bydlí v bloku rozvrhu žaluzií
@@ -70,8 +71,8 @@ const volej = (routy, cesta, telo) => {
 nadpis('1) Seznam tlačítek');
 {
   const h = build();
-  check('jsou čtyři', h.api.SCENY.length, 4);
-  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zhasni,zamkni,sprcha');
+  check('je jich pět', h.api.SCENY.length, 5);
+  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zhasni,zamkni,sprcha,otevri');
   check('každé má popisek', h.api.SCENY.every(s => s.label && s.label.length > 3), true);
   // Tlačítko bez obsluhy by v appce svítilo a nic nedělalo
   check('a každé má co dělat', h.api.SCENY.every(s => typeof h.api.SCENA_FN[s.key] === 'function'), true);
@@ -114,6 +115,15 @@ nadpis('3) Ostatní tlačítka');
 {
   const h = build({ nuki: false });
   check('bez Nuki to řekne', await h.api.SCENA_FN.zamkni(), 'Zámek není nastavený.');
+}
+{
+  // Otevřít, ne jen odemknout — západku stáhne jiný povel než zamykání
+  const h = build();
+  const reply = await h.api.SCENA_FN.otevri();
+  check('otevři dveře sáhne na zámek', h.akce.join(','), 'zamek:otevri');
+  check('  a odpoví', reply, 'Dveře otevřeny.');
+  const bez = build({ nuki: false });
+  check('  bez Nuki to řekne taky', await bez.api.SCENA_FN.otevri(), 'Zámek není nastavený.');
 }
 {
   const h = build();

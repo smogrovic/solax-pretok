@@ -92,6 +92,31 @@ setTimeout(async () => {
   const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
   check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);
 
+  R.push('\\n1b) Otevři dveře se ptá');
+  // Otevřené dveře jsou horší omyl než cokoli jiného, co se odsud dá spustit
+  renderSceny([{ key: 'zhasni', label: 'Zhasni všechna světla' }, { key: 'otevri', label: 'Otevři dveře' }]);
+  const okno0 = document.getElementById('potvrzOkno');
+  const tlac = k => document.querySelector('#asstScenes [data-scene=\"' + k + '\"]');
+  poslano.length = 0;
+  tlac('zhasni').click();
+  await pockej();
+  check('ostatní tlačítka se neptají', okno0.hidden, true);
+  check('  a rovnou pošlou scénu', poslano[0].body.scene, 'zhasni');
+  poslano.length = 0;
+  tlac('otevri').click();
+  check('otevři dveře se ptá', okno0.hidden, false);
+  check('  a zatím nic neposílá', poslano.length, 0);
+  // Deset vteřin, ne třicet jako u jezdce automatiky
+  check('  odpočet je desetivteřinový',
+    /^Potvrdit \\(10 s\\)$/.test(document.getElementById('potvrzAno').textContent), true);
+  document.getElementById('potvrzZpet').click();
+  check('„zpět" dveře neotevře', poslano.length, 0);
+  tlac('otevri').click();
+  document.getElementById('potvrzAno').click();
+  await pockej();
+  check('potvrzení je otevře', poslano[0].url, '/api/scene');
+  check('  se správnou scénou', poslano[0].body.scene, 'otevri');
+
   R.push('\\n2b) Zítra jsou prázdniny');
   // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
   // zítřek se má počítat jako víkend, i když je středa.

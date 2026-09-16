@@ -253,6 +253,61 @@ setTimeout(async () => {
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });
   check('  s pravidly už tlačítko nepřekáží', prazdno.hidden, true);
 
+  R.push('\\n5c) Zarovnání řádků');
+  // Řádek bez šířky se smrskne na obsah a karta ho vycentruje — pak každý čas
+  // začínal jinde a tlačítka se lepila k textu.
+  SERVER = [
+    { id: 11, zapnuto: true, nazev: 'Ráno pokoje', odloz: null, dny: [true, true, true, true, true, false, false],
+      kdy: { typ: 'cas', cas: '06:40' }, kroky: [{ cil: 'Miky', akce: 'tilt', hodnota: 50 }] },
+    // Druhý řádek má schválně mnohem delší čas i prázdný název — právě na nich se
+    // pozná, jestli se řádek zarovnává, nebo centruje
+    { id: 12, zapnuto: true, nazev: '', odloz: null, dny: [false, false, false, false, false, true, true],
+      kdy: { typ: 'zapad', posunMin: 0 }, kroky: [{ cil: 'Kuchyň', akce: 'up', hodnota: null }] }
+  ];
+  renderRozvrh({ rules: SERVER, savedAt: Date.now() });
+  const r1 = radky()[0].getBoundingClientRect();
+  const r2 = radky()[1].getBoundingClientRect();
+  const seznam = document.getElementById('rozvrhList').getBoundingClientRect();
+  check('řádky jsou široké jako seznam', Math.round(r1.width), Math.round(seznam.width));
+  const casy = radky().map(r => Math.round(r.querySelector('.timer-row-time').getBoundingClientRect().left));
+  check('časy začínají na stejném místě', casy[0] === casy[1], true);
+  check('  a u levého okraje', casy[0] - Math.round(seznam.left) <= 4, true);
+  // Popis stojí hned za časem (mezera je jen rozestup mřížky). Kdyby se obsah řádku
+  // centroval, byl by od času odsazený mnohem víc.
+  const mezery = radky().map(r => Math.round(
+    r.querySelector('.timer-row-text').getBoundingClientRect().left
+    - r.querySelector('.timer-row-time').getBoundingClientRect().right));
+  check('popis navazuje na čas', mezery.every(d => d >= 0 && d <= 12), true);
+  // Křížek u pravého okraje, ať je popis jakkoli krátký
+  const krizky = radky().map(r => Math.round(seznam.right - r.querySelector('.timer-del').getBoundingClientRect().right));
+  check('křížek drží pravý okraj', krizky[0] === krizky[1] && krizky[0] <= 4, true);
+  check('kroky pod hlavičkou začínají vlevo',
+    Math.round(radky()[0].querySelector('.rozvrh-podkroky').getBoundingClientRect().left) - Math.round(seznam.left) <= 4, true);
+
+  R.push('\\n5d) Nahrání rozvrhu z Logiky automatiky');
+  // Natrvalo, ne jen v prázdné kartě — po nahrání by zmizelo zrovna ve chvíli,
+  // kdy se s ním dá něco opravit
+  const naLogice = document.getElementById('rozvrhVychoziLogika');
+  check('tlačítko je na stránce Logika automatiky',
+    naLogice.closest('.slide').dataset.title, 'Logika automatiky');
+  poslano.length = 0;
+  naLogice.click();
+  // S pravidly v rozvrhu se to napřed zeptá — přepsalo by je to všechna
+  check('  a s hotovým rozvrhem se ptá', document.getElementById('potvrzOkno').hidden, false);
+  check('  zatím bez odeslání', poslano.length, 0);
+  document.getElementById('potvrzZpet').click();
+  check('  „zpět" rozvrh nechá být', poslano.length, 0);
+  naLogice.click();
+  document.getElementById('potvrzAno').click();
+  await pockej();
+  check('  po potvrzení nahraje', poslano[0].url, '/api/blinds/schedule/default');
+  // Na prázdném rozvrhu není co ztratit, tam se neptá
+  renderRozvrh({ rules: [], savedAt: Date.now() });
+  poslano.length = 0;
+  naLogice.click();
+  await pockej();
+  check('na prázdném rozvrhu se neptá', poslano[0].url, '/api/blinds/schedule/default');
+
   R.push('\\n6) Záloha v telefonu');
   // Rozvrh je nastavení od člověka a v paměti serveru nepřežije nasazení
   const zaloha = JSON.parse(localStorage.getItem('blindRules') || 'null');
