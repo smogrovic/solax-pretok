@@ -878,6 +878,11 @@
     color:var(--grey-text);
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
+  .zapad-row{display:flex;align-items:center;gap:10px;margin-top:8px;}
+  .zapad-label{font-size:12px;color:var(--grey-text);flex:1;}
+  .zapad-row select{width:auto;min-width:110px;}
+  .zapad-hint{font-size:11px;color:var(--muted);margin-top:6px;}
+  .zapad-hint:empty{display:none;}
   #rozvrhNazev{margin-top:6px;}
   .rozvrh-kroky{width:100%;display:flex;flex-direction:column;gap:4px;margin:8px 0 2px;}
   .rozvrh-kroky:empty{display:none;}
@@ -2861,6 +2866,20 @@
         </div>
 
         <div class="logic-sec">
+          <div class="logic-h">Rozvrh žaluzií</div>
+          <ul class="logic-list">
+            <li>„Západ slunce" v rozvrhu znamená <b>západ + tohle zpoždění</b> — venku je ještě dlouho vidět.</li>
+            <li>O <b>prázdninách</b> (tlačítko na Asistentovi) se den počítá jako neděle, takže jede víkendová sada.</li>
+            <li>Rozvrh mlčí na <b>vypnuto</b> i když <b>jsme pryč</b>; po nasazení dožene, co propásl, do 20 min.</li>
+          </ul>
+          <div class="zapad-row">
+            <span class="zapad-label">Zpoždění po západu</span>
+            <select class="timer-select" id="zapadDelay"></select>
+          </div>
+          <div class="zapad-hint" id="zapadHint"></div>
+        </div>
+
+        <div class="logic-sec">
           <div class="logic-h">Data, notifikace, časovače</div>
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
@@ -3811,6 +3830,8 @@ let runtimeData = null;
 let weatherData = null;
 function renderWeather(w) {
   weatherData = w || null;   // rozpis solinátoru potřebuje čas západu
+  // Nápověda u zpoždění ukazuje, kdy to dnes vyjde — bez čerstvého západu by lhala
+  if (typeof renderZapadDelay === 'function') renderZapadDelay();
   if (!w) {
     weatherInfoEl.textContent = '';
     return;
@@ -7505,6 +7526,66 @@ function renderSceny(sceny) {
   }
 }
 
+// ---------- Zpoždění po západu slunce ----------
+// „Západ slunce" v rozvrhu žaluzií neznamená přesný okamžik západu, ale západ plus
+// tohle zpoždění. Je to jedno číslo pro všechna pravidla — jinak by se posun musel
+// přepisovat v každém zvlášť.
+const ZAPAD_DELAY_MAX = 60;
+const ZAPAD_DELAY_KROK = 5;
+const zapadDelayEl = document.getElementById('zapadDelay');
+const zapadHintEl = document.getElementById('zapadHint');
+let zapadDelayMin = 20;
+
+if (zapadDelayEl) {
+  for (let m = 0; m <= ZAPAD_DELAY_MAX; m += ZAPAD_DELAY_KROK) {
+    const o = document.createElement('option');
+    o.value = String(m);
+    o.textContent = m === 0 ? 'přesně při západu' : `+${m} min`;
+    zapadDelayEl.appendChild(o);
+  }
+}
+
+function renderZapadDelay(minut) {
+  if (typeof minut === 'number') zapadDelayMin = minut;
+  if (zapadDelayEl && document.activeElement !== zapadDelayEl) zapadDelayEl.value = String(zapadDelayMin);
+  // Kdy to dnes vyjde — jinak je „+20 min" jen číslo bez souvislosti
+  if (zapadHintEl) {
+    const z = weatherData && typeof weatherData.sunsetMs === 'number' ? weatherData.sunsetMs : null;
+    zapadHintEl.textContent = z
+      ? `Dnes zapadá v ${fmtSolTime(z)}, rozvrh tedy jede v ${fmtSolTime(z + zapadDelayMin * 60000)}.`
+      : '';
+  }
+  // V rozvrhu je pak vidět, co „západ slunce" doopravdy znamená
+  if (rozvrhKdyEl) {
+    const opt = rozvrhKdyEl.querySelector('option[value="zapad"]');
+    if (opt) opt.textContent = zapadDelayMin ? `Západ slunce (+${zapadDelayMin} min)` : 'Západ slunce';
+  }
+}
+
+if (zapadDelayEl) {
+  zapadDelayEl.addEventListener('change', async () => {
+    const minut = Number(zapadDelayEl.value);
+    zapadDelayEl.disabled = true;
+    try {
+      const res = await fetch('/api/zapad-delay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ minut })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+      renderZapadDelay(data.minut);
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Zpoždění po západu: ' + err.message;
+      errorEl.classList.add('show');
+      renderZapadDelay();          // server to nevzal, ať výběr nelže
+    }
+    zapadDelayEl.disabled = false;
+  });
+}
+
 // ---------- Zítra jsou prázdniny ----------
 // Rozvrh žaluzií počítá takový den jako neděli, takže pojede víkendová sada.
 const prazdninyBtnEl = document.getElementById('prazdninyBtn');
@@ -8472,6 +8553,7 @@ function applySnapshot(snap) {
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
   bezpecne(() => renderPrazdniny(snap.prazdniny));
+  bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
   bezpecne(() => renderRozvrh({ rules: snap.blindRules || [], savedAt: snap.blindRulesAt || 0 }));
   bezpecne(maybeRestoreRozvrh);
@@ -8772,6 +8854,7 @@ function connectStream() {
     saveTimersLocal();
   });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
+  es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('blindRules', e => {
     const d = JSON.parse(e.data);
     renderRozvrh({ rules: d.rules || [], savedAt: d.savedAt });

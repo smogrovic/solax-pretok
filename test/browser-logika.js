@@ -28,14 +28,14 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const li = [...page.querySelectorAll('.logic-list li')];
 
   OUT.push('\\n1) Obsah a délka');
-  // Třináctá sekce je oběhové čerpadlo. Rozpočet se zvedl vědomě — stránka se dřív
+  // Čtrnáctá sekce je rozvrh žaluzií. Rozpočet se zvedá vědomě — stránka se dřív
   // rozrostla do nečitelna, tak ať se to nestane znovu potichu.
-  check('sekcí je třináct', sekce.length, 13);
+  check('sekcí je čtrnáct', sekce.length, 14);
   for (const s of ['Obecné', 'Zima', 'Bazén (filtrace)', 'Sauna', 'Bojler 1 (TČ)', 'Wallbox',
                    'Ruční zásah vs. automatika', 'Priorita auta', 'Korekce podle předpovědi',
-                   'Data, notifikace, časovače', 'Oběhové čerpadlo'])
+                   'Data, notifikace, časovače', 'Oběhové čerpadlo', 'Rozvrh žaluzií'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
-  check('odrážek je nejvýš 58', li.length <= 58, 'true');   // po zeštíhlení jich bylo 54
+  check('odrážek je nejvýš 61', li.length <= 61, 'true');   // po zeštíhlení jich bylo 54
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);
@@ -47,6 +47,22 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('  i víkend', /Víkend o 4 h později/.test(txt), 'true');
   check('  a hysterezi s prahy', /10 min nad 3,5 kW/.test(txt) && /10 min pod 2,5 kW/.test(txt), 'true');
   check('  a že přebytek je před autem', /před autem/.test(txt), 'true');
+
+  OUT.push('\\n1b) Zpoždění po západu');
+  // Jedno číslo pro všechna pravidla rozvrhu. Bez něj by se posun musel přepisovat
+  // v každém pravidle zvlášť — a „západ" by znamenal přesný okamžik západu.
+  const zap = document.getElementById('zapadDelay');
+  check('výběr je na téhle stránce', page.contains(zap), 'true');
+  check('  od nuly do hodiny po pěti minutách',
+    [...zap.options].map(o => o.value).join(','), '0,5,10,15,20,25,30,35,40,45,50,55,60');
+  renderZapadDelay(20);
+  check('  a ukazuje nastavenou hodnotu', zap.value, '20');
+  poslano = null;
+  zap.value = '35';
+  zap.dispatchEvent(new Event('change'));
+  await wait(30);
+  check('změna se pošle serveru', poslano.url, '/api/zapad-delay');
+  check('  s minutami', poslano.body.minut, 35);
 
   OUT.push('\\n2) Nová pravidla');
   check('bazén má denní minimum', /Aspoň 2 h denně/.test(txt), 'true');

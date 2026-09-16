@@ -59,6 +59,19 @@ const SNAP = {
   solinator: { date: '', bonusMs: 0, boostMs: 0, carryMs: 0, disabledUntil: 0 },
   solinatorPlan: null, assistantLog: [{ t: T - MIN, text: 'zapnul jsem bazén' }],
   blindTimers: [], relayTimers: [], airconTimers: [],
+  // Předvyplněný rozvrh přijde ze serveru takhle — appka ho musí ukázat i bez
+  // jediného kliknutí, tahle cesta se jinak nikde neověřuje
+  blindRules: [{ id: 1, zapnuto: true, nazev: 'Ráno pokoje', odloz: null,
+                 dny: [true, true, true, true, true, false, false],
+                 kdy: { typ: 'cas', cas: '06:40' },
+                 kroky: [{ cil: 'Miky', akce: 'tilt', hodnota: 50 }] },
+               { id: 2, zapnuto: true, nazev: 'Po západu', odloz: null,
+                 dny: [true, true, true, true, true, true, true],
+                 kdy: { typ: 'zapad', posunMin: 0 },
+                 kroky: [{ cil: 'Kuchyň', akce: 'down', hodnota: 100 }] }],
+  blindRulesAt: 0,
+  prazdniny: { datum: null, zitra: false, dnes: false },
+  zapadDelayMin: 20,
   tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false },
   tempAutoOn: 22, tempAutoOnRooms: { obyvak: 22 }, tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 21 },
   store: { enabled: true, loadedAt: T - 3600000, savedAt: T - MIN, error: null }
@@ -68,6 +81,15 @@ setTimeout(() => {
  try {
   applySnapshot(SNAP);
   check('applySnapshot proběhla bez chyby v renderu', RENDER_CHYBY.join(' | ') || 'nic', 'nic');
+
+  // Rozvrh žaluzií chodí ze serveru předvyplněný. Kdyby se z něj do seznamu
+  // nedostal, appka by vypadala prázdně, i když dům podle něj jede.
+  check('rozvrh žaluzií se ze snapshotu ukázal',
+    document.querySelectorAll('#rozvrhList .timer-row').length, 2);
+  check('  i s kroky', /Miky — naklopit na 50 %/.test(document.getElementById('rozvrhList').textContent), true);
+  check('zpoždění po západu se převzalo', document.getElementById('zapadDelay').value, '20');
+  check('  a je vidět, kdy to dnes vyjde',
+    /rozvrh tedy jede v \\d\\d?:\\d\\d/.test(document.getElementById('zapadHint').textContent), true);
 
   // Přesně ty série, které dřív spadly pod useknutou applySnapshot
   check('historie přetoku se načetla', history.length > 100, true);

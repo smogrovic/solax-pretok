@@ -25,7 +25,8 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
   const state = {
     weather: { sunsetMs: null, sunriseMs: null, ...pocasi },
     sauna: { lastHeatAt: 0 },
-    prazdniny: null
+    prazdniny: null,
+    zapadDelayMin: 0
   };
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'scheduleEvery',
@@ -33,7 +34,7 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
     'assistantControlBlinds', 'autoRunning', 'awayActive',
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
-         + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI,'
+         + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
   )(
@@ -240,6 +241,36 @@ nadpis('6c) Starý tvar ze zálohy');
     `${stare.kroky[0].cil}:${stare.kroky[0].akce}:${stare.kroky[0].hodnota}`, 'Ložnice:down:100');
 }
 
+nadpis('2b) Společné zpoždění po západu');
+{
+  // „Západ slunce" v rozvrhu neznamená přesný okamžik západu, ale západ plus jedno
+  // společné zpoždění. Jinak by se posun musel přepisovat v každém pravidle zvlášť.
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);           // 20:15 pražského času
+  const h = build({ pocasi: { sunsetMs: zapad, sunriseMs: Date.UTC(2026, 8, 14, 4, 30) } });
+  const p = pravidlo({ kdy: { typ: 'zapad', posunMin: 0 } });
+  check('bez zpoždění sedí na západ', h.api.rozvrhMinuta(p, PO_6), 20 * 60 + 15);
+  h.state.zapadDelayMin = 20;
+  check('zpoždění se přičte', h.api.rozvrhMinuta(p, PO_6), 20 * 60 + 35);
+  // Posun u pravidla se počítá k tomu, ne místo toho
+  check('  a posun pravidla se přidá k němu',
+    h.api.rozvrhMinuta(pravidlo({ kdy: { typ: 'zapad', posunMin: -15 } }), PO_6), 20 * 60 + 20);
+  // U východu by se s ním čekalo na světlo, tam nemá co dělat
+  check('u východu se zpoždění nepočítá',
+    h.api.rozvrhMinuta(pravidlo({ kdy: { typ: 'vychod', posunMin: 0 } }), PO_6), 6 * 60 + 30);
+}
+{
+  const h = build();
+  const { out } = await volej(h.routy, 'POST /api/zapad-delay', { minut: 45 });
+  check('zpoždění se dá přenastavit', out.minut, 45);
+  check('  a platí hned', h.state.zapadDelayMin, 45);
+  check('nula projde', (await volej(h.routy, 'POST /api/zapad-delay', { minut: 0 })).kod, 200);
+  check('hodina je maximum', h.api.ZAPAD_DELAY_MAX, 60);
+  check('  víc neprojde', (await volej(h.routy, 'POST /api/zapad-delay', { minut: 65 })).kod, 400);
+  // Po pěti minutách: v appce je výběr, tohle drží i cestu zvenčí
+  check('mezihodnota neprojde', (await volej(h.routy, 'POST /api/zapad-delay', { minut: 7 })).kod, 400);
+  check('záporné taky ne', (await volej(h.routy, 'POST /api/zapad-delay', { minut: -5 })).kod, 400);
+}
+
 nadpis('6d) Odklad kvůli sauně');
 {
   // Po západu se zavře všechno kromě ložnice, když jede sauna. Ložnice se zavře
@@ -336,7 +367,8 @@ nadpis('6f) Předvyplněný rozvrh');
     '06:40 true,true,true,true,true,false,false');
   check('garáž se zavírá ve 23:00 každý den',
     podle('Garáž').kdy.cas + ' ' + podle('Garáž').dny.filter(Boolean).length, '23:00 7');
-  check('po západu je posun dvacet minut', podle('Po západu').kdy.posunMin, 20);
+  // Zpoždění je v nastavení, ne v pravidle — jinak by se měnilo v každém zvlášť
+  check('po západu nemá vlastní posun', podle('Po západu').kdy.posunMin, 0);
   check('  a dveře sjedou do 20 %',
     podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
     'Obývák Dveře:20');

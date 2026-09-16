@@ -204,6 +204,7 @@ const state = {
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
   prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
+  zapadDelayMin: 20, // o kolik po západu slunce jede rozvrh žaluzií
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
   calendar: { days: [], kalendare: [], duty: null, fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
@@ -486,6 +487,7 @@ function snapshot() {
     blindRules,
     blindRulesAt,
     prazdniny: prazdninyPayload(),
+    zapadDelayMin: state.zapadDelayMin,
     relayTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
@@ -3916,6 +3918,11 @@ const ROZVRH_AKCE = ['up', 'down', 'tilt', 'poloha'];
 const ROZVRH_AKCE_CMD = { up: 'up', down: 'down', tilt: 'orientation', poloha: 'closure' };
 const ROZVRH_KDY = ['cas', 'vychod', 'zapad'];
 const ROZVRH_POSUN_MAX = 180;
+// „Západ slunce" v rozvrhu neznamená přesný okamžik západu, ale západ + tohle
+// zpoždění. Venku je ještě dlouho vidět a zatáhnout přesně při západu je brzy.
+// Nastavuje se na stránce Logika automatiky, po pěti minutách do hodiny.
+const ZAPAD_DELAY_MAX = 60;
+const ZAPAD_DELAY_KROK = 5;
 // Kolik kroků unese jedna skupina. Víc než deset žaluzií naráz stejně nemáme.
 const ROZVRH_KROKU_MAX = 10;
 
@@ -3938,11 +3945,11 @@ const ROZVRH_VYCHOZI = [
     krok('Elenka', 'tilt', 50), krok('Miky', 'tilt', 50)] },
   { nazev: 'Garáž', dny: VSE, kdy: { typ: 'cas', cas: '23:00' }, kroky: [
     krok('Garáž', 'down')] },
-  { nazev: 'Po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 20 }, kroky: [
+  { nazev: 'Po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 0 }, kroky: [
     krok('Kuchyň', 'down', 100), krok('Obývák Okno', 'down', 100), krok('Miky', 'down', 100),
     krok('Elenka', 'down', 100), krok('Hosté', 'down', 100), krok('Obývák Dveře', 'poloha', 20)] },
   // Ložnice má vlastní skupinu kvůli odkladu: při sauně se čeká, až dotopí
-  { nazev: 'Ložnice po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 20 },
+  { nazev: 'Ložnice po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 0 },
     odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] }
 ];
 
@@ -3999,12 +4006,36 @@ app.post('/api/prazdniny/restore', (req, res) => {
 function rozvrhMinuta(p, at = Date.now()) {
   if (p.kdy.typ === 'cas') return naMinuty(p.kdy.cas);
   const w = state.weather || {};
-  const zaklad = p.kdy.typ === 'zapad' ? w.sunsetMs : w.sunriseMs;
+  const zapad = p.kdy.typ === 'zapad';
+  const zaklad = zapad ? w.sunsetMs : w.sunriseMs;
   if (typeof zaklad !== 'number') return null;
+  // Společné zpoždění se počítá jen u západu — u východu by se s ním čekalo na světlo
+  const delay = zapad ? (state.zapadDelayMin || 0) : 0;
   const t = pragueTime(zaklad);
-  const m = t.hour * 60 + t.minute + (Number(p.kdy.posunMin) || 0);
+  const m = t.hour * 60 + t.minute + delay + (Number(p.kdy.posunMin) || 0);
   return Math.min(1439, Math.max(0, m));
 }
+
+app.post('/api/zapad-delay', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const minut = Math.round(Number(req.body && req.body.minut));
+  if (!Number.isFinite(minut) || minut < 0 || minut > ZAPAD_DELAY_MAX || minut % ZAPAD_DELAY_KROK) {
+    return res.status(400).json({ error: `Zpoždění musí být 0–${ZAPAD_DELAY_MAX} min po ${ZAPAD_DELAY_KROK} minutách.` });
+  }
+  state.zapadDelayMin = minut;
+  addLog(`Rozvrh žaluzií: západ slunce znamená +${minut} min`);
+  broadcast('zapadDelay', { minut });
+  res.json({ minut });
+});
+
+app.post('/api/zapad-delay/restore', (req, res) => {
+  const minut = Math.round(Number(req.body && req.body.minut));
+  if (Number.isFinite(minut) && minut >= 0 && minut <= ZAPAD_DELAY_MAX && !(minut % ZAPAD_DELAY_KROK)) {
+    state.zapadDelayMin = minut;
+    broadcast('zapadDelay', { minut });
+  }
+  res.json({ ok: true, minut: state.zapadDelayMin });
+});
 
 // Odklad: pravidlo je sice na řadě, ale ještě se nemá provést. Dokud od posledního
 // nátopu sauny neuplynulo zadaných pár minut, tik pravidlo přeskočí a NEZAPÍŠE ho
@@ -7396,6 +7427,7 @@ const STORE_POSTS = [
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
   '/api/prazdniny/restore',
+  '/api/zapad-delay/restore',
   '/api/runtime/restore',
   '/api/wallbox/daytype/restore'
 ];
@@ -7436,6 +7468,7 @@ function storeSnapshot() {
     // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/prazdniny/restore': { datum: state.prazdniny },
+    '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
       dayType: state.wbDayType.manual, until: state.wbDayType.until

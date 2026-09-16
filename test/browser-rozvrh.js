@@ -199,6 +199,14 @@ setTimeout(async () => {
     poslano[0].body.kroky[0].akce + ':' + poslano[0].body.kroky[0].hodnota, 'poloha:20');
 
   // Posun od slunce se vybírá, ne píše — na zeď se to mačká líp
+  // Ve výběru spouštěče je vidět, co „západ slunce" doopravdy znamená
+  renderZapadDelay(20);
+  check('u západu je vidět společné zpoždění',
+    kdy.querySelector('option[value="zapad"]').textContent, 'Západ slunce (+20 min)');
+  renderZapadDelay(0);
+  check('  a při nule se nic nepřipisuje',
+    kdy.querySelector('option[value="zapad"]').textContent, 'Západ slunce');
+  renderZapadDelay(20);
   check('posun je výběr', posun.tagName, 'SELECT');
   check('  s rozumnými hodnotami',
     [...posun.options].map(o => o.value).join(','),

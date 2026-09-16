@@ -63,6 +63,7 @@ function vzorovyStav() {
     poolTemp: { c: 26.4, at: t, bezOd: 0 },
     away: { since: t },
     prazdniny: '2026-09-02',
+    zapadDelayMin: 35,
     history: [{ t, kw: 1.2, soc: 80, pv: 3 }],
     wallboxHistory: [{ t, w: 3400 }],
     boilerHistory: [{ t, b1: 55, b2: 48 }],
@@ -163,6 +164,12 @@ nadpis('3) Ukládání');
     const rozvrh = h.api.storeSnapshot().posts['/api/blinds/schedule/restore'];
     check('rozvrh žaluzií je v záloze', rozvrh.rules.length, 1);
     check('  i s časem poslední změny', rozvrh.savedAt, 1758000000000);
+    // Prázdniny se zaškrtávají večer předem a zpoždění po západu se nastavuje jednou
+    // za rok — nasazení mezitím by obojí smazalo
+    check('prázdniny jsou v záloze taky',
+      h.api.storeSnapshot().posts['/api/prazdniny/restore'].datum, '2026-09-02');
+    check('  a zpoždění po západu s nimi',
+      h.api.storeSnapshot().posts['/api/zapad-delay/restore'].minut, 35);
     h.state.months[0].sauna = 41000;
     check('po změně zase ano', await h.api.storeSave(), true);
   })();
