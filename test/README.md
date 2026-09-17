@@ -18,6 +18,7 @@ node test/tuya.js                     # podpis, token a mapování tepelného č
 node test/cidla.js                    # nástěnná čidla řídí klimatizaci ve svém pokoji
 node test/log.js                      # co do logu patří a co ne, výpadky s úrovní error
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
+node test/zavlaha.js                  # místní protokol modulu Rain Bird LNK (šifrování, povely)
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
 node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí

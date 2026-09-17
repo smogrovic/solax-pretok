@@ -1,2 +1,4 @@
 node_modules/
 .env
+# Heslo k modulu závlahy Rain Bird — zůstává na NASu
+public/nas/zavlaha.config.json
