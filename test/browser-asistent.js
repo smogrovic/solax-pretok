@@ -68,6 +68,41 @@ setTimeout(async () => {
   renderSceny(null);
   check('  a bez seznamu nezbyde žádné', document.querySelectorAll('#asstScenes .asst-scene').length, 0);
 
+  R.push('\\n1c) Dvojice: dveře a prázdniny vedle sebe');
+  // Pátá scéna by v hlavní mřížce zbyla sama na řádku. Patří vedle prázdnin.
+  renderSceny([
+    { key: 'sauna', label: 'Zapni saunu' },
+    { key: 'zhasni', label: 'Zhasni všechna světla' },
+    { key: 'zamkni', label: 'Zamkni dům' },
+    { key: 'sprcha', label: 'Jdu do sprchy' },
+    { key: 'otevri', label: 'Otevři dveře' }
+  ]);
+  check('v hlavní mřížce zůstanou čtyři', document.querySelectorAll('#asstScenes .asst-scene').length, 4);
+  check('  a dveře jsou v dvojici', !!document.querySelector('#asstDvojice [data-scene="otevri"]'), true);
+  const dvojice = [...document.querySelectorAll('#asstDvojice button')];
+  check('dvojice má dvě tlačítka', dvojice.length, 2);
+  check('  a prázdniny jsou druhé', dvojice[1].id, 'prazdninyBtn');
+  const r0 = dvojice[0].getBoundingClientRect(), r1 = dvojice[1].getBoundingClientRect();
+  check('stojí vedle sebe', Math.round(r0.top) === Math.round(r1.top) && r1.left > r0.left, true);
+  check('  a jsou stejně široká', Math.round(r0.width), Math.round(r1.width));
+  // Stejná mřížka jako tlačítka nad tím, ať to drží linku
+  const nahore = document.querySelector('#asstScenes .asst-scene').getBoundingClientRect();
+  check('  a široká jako ta nad nimi', Math.round(r0.width), Math.round(nahore.width));
+  // Když server dveře nenabídne, dvojici tvoří samotné prázdniny
+  renderSceny([{ key: 'zamkni', label: 'Zamkni dům' }]);
+  check('bez dveří ze serveru zbydou v dvojici jen prázdniny',
+    document.querySelectorAll('#asstDvojice button').length, 1);
+
+  R.push('\\n1d) Návrhy pod polem');
+  // „Zhasni všechna světla" a „Zamkni dům" mají vlastní tlačítko hned pod polem,
+  // takže jako návrh jen zabíraly řádek
+  const navrhy = [...document.querySelectorAll('#asstExamples .asst-chip')];
+  check('návrhy jsou dva', navrhy.length, 2);
+  check('  a neopakují tlačítka', navrhy.map(b => b.textContent).join(' | '),
+    'Zapni bojler | Zatáhni žaluzie v ložnici');
+  check('  na jednom řádku',
+    Math.round(navrhy[0].getBoundingClientRect().top), Math.round(navrhy[1].getBoundingClientRect().top));
+
   R.push('\\n2) Pořadí karet');
   const karty = [...slide.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
   const popis = c => (c.querySelector('.asst-log-title, .shelly-label') || {}).textContent
@@ -96,7 +131,7 @@ setTimeout(async () => {
   // Otevřené dveře jsou horší omyl než cokoli jiného, co se odsud dá spustit
   renderSceny([{ key: 'zhasni', label: 'Zhasni všechna světla' }, { key: 'otevri', label: 'Otevři dveře' }]);
   const okno0 = document.getElementById('potvrzOkno');
-  const tlac = k => document.querySelector('#asstScenes [data-scene=\"' + k + '\"]');
+  const tlac = k => document.querySelector('[data-scene=\"' + k + '\"]');
   poslano.length = 0;
   tlac('zhasni').click();
   await pockej();

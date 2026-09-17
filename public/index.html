@@ -1239,12 +1239,12 @@
     font-weight:600;
   }
   .asst-scene:disabled{opacity:0.5;}
+  /* O rozměr se stará mřížka. Šedou/oranžovou si tlačítko nechává — je to
+     přepínač, ne akce, a na tom rozdílu záleží. */
   .prazdniny-btn{
-    width:100%;
-    margin-top:8px;
     border:none;
     border-radius:16px;
-    padding:11px 10px;
+    padding:12px 10px;
     background:rgba(44,62,80,0.06);
     color:var(--grey-text);
     font-size:13px;
@@ -1913,9 +1913,13 @@
         </div>
         <div class="asst-examples" id="asstExamples"></div>
         <div class="asst-scenes" id="asstScenes"></div>
-        <!-- Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne,
-             že zítřek má počítat jako víkend, i když je středa. -->
-        <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
+        <!-- Druhá řada téže mřížky: „Otevři dveře" a prázdniny vedle sebe. Dveře
+             sem patří kvůli rozměru řady, prázdniny proto, že rozvrh žaluzií jede
+             jinak ve všední den a jinak o víkendu — tohle řekne, že zítřek má
+             počítat jako víkend, i když je středa. -->
+        <div class="asst-scenes" id="asstDvojice">
+          <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
+        </div>
       </div>
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
@@ -2783,6 +2787,7 @@
             <li>Přebíjí to ruční zapnutí i bazénové „+24 h". Solinátor si nedoběhnutý čas přenese.</li>
             <li>Do vteřiny vypíná <b>skript v Shelly</b>, appka je pomalejší pojistka.</li>
             <li>Notifikace po <b>2 h</b> topení v kuse, pak připomínka po 6 h.</li>
+            <li><b>Zapni saunu</b> (Asistent): vytáhne <b>žaluzie v ložnici</b>, po západu rozsvítí <b>zahradu dole</b> (ve dne ne). Kamna zatím nespíná.</li>
           </ul>
           <div class="sauna-set">
             <div class="sauna-set-row">
@@ -7536,8 +7541,9 @@ const asstExamples = document.getElementById('asstExamples');
 const asstLog = document.getElementById('asstLog');
 const asstLogCard = document.getElementById('asstLogCard');
 
-// Čtyři krátké návrhy → mřížka 2×2 = přesně dva řádky
-const ASST_EXAMPLES = ['Zapni bojler', 'Zhasni všechna světla', 'Zatáhni žaluzie v ložnici', 'Zamkni dům'];
+// Dva návrhy = jeden řádek. „Zhasni všechna světla" a „Zamkni dům" mají vlastní
+// tlačítko hned pod polem, takže jako návrh jen zabíraly místo.
+const ASST_EXAMPLES = ['Zapni bojler', 'Zatáhni žaluzie v ložnici'];
 
 function renderAssistantLog(entries) {
   if (!asstLog || !asstLogCard) return;
@@ -7570,10 +7576,16 @@ function hideAssistantSlide() {
 // Pevná tlačítka. Seznam chodí ze serveru, takže v appce nemůže být tlačítko na něco,
 // co server neumí — a popisky se nemůžou rozejít s tím, co se doopravdy stane.
 const asstScenesEl = document.getElementById('asstScenes');
+const asstDvojiceEl = document.getElementById('asstDvojice');
+
+// Tyhle scény nepatří do hlavní mřížky, ale do dvojice s prázdninami — jinak by
+// pátá scéna zbyla sama na řádku
+const ASST_PAROVE = ['otevri'];
 
 function renderSceny(sceny) {
   if (!asstScenesEl) return;
   asstScenesEl.textContent = '';
+  for (const b of [...asstDvojiceEl.querySelectorAll('.asst-scene')]) b.remove();
   for (const s of (sceny || [])) {
     if (!s || !s.key || !s.label) continue;
     const btn = document.createElement('button');
@@ -7581,7 +7593,9 @@ function renderSceny(sceny) {
     btn.dataset.scene = s.key;
     btn.textContent = s.label;
     btn.addEventListener('click', () => scenaKlik(s.key, btn));
-    asstScenesEl.appendChild(btn);
+    // Prázdniny zůstávají v dvojici poslední, párová scéna se vejde před ně
+    if (ASST_PAROVE.includes(s.key)) asstDvojiceEl.insertBefore(btn, prazdninyBtnEl);
+    else asstScenesEl.appendChild(btn);
   }
 }
 
@@ -7694,7 +7708,7 @@ function scenaKlik(key, btn) {
 }
 
 async function spustScenu(key, btn) {
-  const vsechna = asstScenesEl ? [...asstScenesEl.querySelectorAll('.asst-scene')] : [];
+  const vsechna = [...document.querySelectorAll('#asstScenes .asst-scene, #asstDvojice .asst-scene')];
   vsechna.forEach(b => { b.disabled = true; });
   asstReply.classList.remove('err');
   asstReply.textContent = '';

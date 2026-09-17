@@ -43,6 +43,9 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('nic nepřetéká do stran', page.scrollWidth <= page.clientWidth + 1, 'true');
   const txt = li.map(e => e.textContent).join(' ');
   check('sauna má pravidlo o jističi', /stejném jističi/.test(txt), 'true');
+  // Tlačítko na Asistentovi dělá víc věcí naráz — ať se nemusí hádat které
+  check('  i co udělá tlačítko Zapni saunu', /žaluzie v ložnici/.test(txt), 'true');
+  check('  včetně zahrady po západu', /zahradu dole/.test(txt) && /ve dne ne/.test(txt), 'true');
   check('wallbox má plán pracovního dne', /GREEN 0:00–4:00 · FAST 4:00–7:00/.test(txt), 'true');
   check('  i víkend', /Víkend o 4 h později/.test(txt), 'true');
   check('  a hysterezi s prahy', /10 min nad 3,5 kW/.test(txt) && /10 min pod 2,5 kW/.test(txt), 'true');
