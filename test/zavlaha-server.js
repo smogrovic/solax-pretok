@@ -18,13 +18,17 @@ const MIN = 60000;
 
 function build() {
   const logy = [];
+  const state = { zavlahaDny: [] };
   const zpravy = [];
   const routy = {};
   const api = new Function(
-    'app', 'requireAuth', 'addLog', 'broadcast',
+    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'pragueDateString',
     CODE + '\n; return { zavlahaZive, zavlahaNazev, zavlahaPayload, zavlahaCisloZony,'
          + ' zavlahaMinuty, zavlahaOcisti, zavlahaZony, zavlahaZarad, zavlahaVyzvedni,'
          + ' zavlahaZmena, zavlahaPrejmenuj, zavlahaSeznam, ZAVLAHA_MINUT_MAX,'
+         + ' zavlahaSkryta, zavlahaSchovej, zavlahaZapisBeh, ZAVLAHA_DNU_MAX,'
+         + ' ZAVLAHA_MEZERA_MAX_MS, ZAVLAHA_SKRYTE_VYCHOZI,'
+         + ' get skryte() { return zavlahaSkryte; }, set skryte(v) { zavlahaSkryte = v; },'
          + ' ZAVLAHA_TICHO_MS, ZAVLAHA_UKOL_PLATI_MS, ZAVLAHA_FRONTA_MAX,'
          + ' ZAVLAHA_NAZVY_VYCHOZI,'
          + ' get fronta() { return zavlahaFronta; }, set fronta(v) { zavlahaFronta = v; },'
@@ -32,12 +36,14 @@ function build() {
          + ' get kdy() { return zavlahaKdy; }, set kdy(v) { zavlahaKdy = v; },'
          + ' get nazvy() { return zavlahaNazvy; } };'
   )(
+    state,
     { get: (c, f) => { routy['GET ' + c] = f; }, post: (c, f) => { routy['POST ' + c] = f; } },
     () => true,
     m => logy.push(m),
-    (udalost, data) => zpravy.push({ udalost, data })
+    (udalost, data) => zpravy.push({ udalost, data }),
+    at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(at === undefined ? Date.now() : at))
   );
-  return { api, logy, zpravy, routy };
+  return { api, state, logy, zpravy, routy };
 }
 
 const volej = (h, cesta, telo) => {
@@ -243,11 +249,11 @@ nadpis('11) Přejmenování přes endpoint');
   const nic = await volej(h, 'POST /api/zavlaha/nazvy', { nazvy: { 99: 'Měsíc' } });
   check('nesmysl se odmítne', nic.kod, 400);
 
-  const obnova = await volej(h, 'POST /api/zavlaha/nazvy/restore', { nazvy: { 2: 'Trávník A' } });
+  const obnova = await volej(h, 'POST /api/zavlaha/zony/restore', { nazvy: { 2: 'Trávník A' } });
   check('obnova projde', obnova.out.ok, true);
   check('a jméno naskočí', h.api.nazvy[2], 'Trávník A');
   // Obnova po nasazení nesmí spadnout na prázdnu — ta chodí, když se nic neuložilo
-  check('prázdná obnova nespadne', (await volej(h, 'POST /api/zavlaha/nazvy/restore', {})).out.ok, true);
+  check('prázdná obnova nespadne', (await volej(h, 'POST /api/zavlaha/zony/restore', {})).out.ok, true);
   check('a jména zůstanou', h.api.nazvy[2], 'Trávník A');
 }
 
@@ -267,6 +273,147 @@ nadpis('12) Co se posílá do appky');
   check('čas hlášení se posílá', p2.kdy > 0, true);
   h.api.zavlahaZarad({ typ: 'stop' });
   check('čekající povel je vidět', h.api.zavlahaPayload().ceka, 1);
+}
+
+nadpis('13) Schování zón');
+{
+  const h = build();
+  // Osmá zóna v ovladači je, ale není do ničeho zapojená
+  check('osmička je schovaná rovnou', h.api.skryte.join(','), '8');
+  check('výchozí seznam není prázdný', h.api.ZAVLAHA_SKRYTE_VYCHOZI.length, 1);
+  check('schovaná se pozná', h.api.zavlahaSkryta(8), true);
+  check('ostatní schované nejsou', h.api.zavlahaSkryta(3), false);
+
+  check('schování projde', h.api.zavlahaSchovej(3, true), true);
+  check('a drží', h.api.zavlahaSkryta(3), true);
+  check('seznam je seřazený', h.api.skryte.join(','), '3,8');
+  check('podruhé už to není změna', h.api.zavlahaSchovej(3, true), false);
+  check('vrácení projde', h.api.zavlahaSchovej(3, false), true);
+  check('a zóna je zpátky', h.api.zavlahaSkryta(3), false);
+  check('vrátit nevrácené není změna', h.api.zavlahaSchovej(3, false), false);
+  check('zóna mimo rozsah se ignoruje', h.api.zavlahaSchovej(99, true), false);
+  check('nesmysl se ignoruje', h.api.zavlahaSchovej('zahrada', true), false);
+  check('schované jsou v payloadu', h.api.zavlahaPayload().skryte.join(','), '8');
+}
+
+nadpis('14) Schovanou zónu nejde pustit');
+{
+  const h = build();
+  await volej(h, 'POST /api/zavlaha/stav', STAV);
+  const schovana = await volej(h, 'POST /api/zavlaha/spust', { zona: 8, minut: 10 });
+  // Bez tohohle by schování zónu jen přestalo kreslit, ale povel by prošel dál
+  check('schovaná zóna se odmítne', schovana.kod, 400);
+  check('a řekne se proč', schovana.out.error, 'Zóna 8 je schovaná.');
+  check('nic se nezařadilo', h.api.fronta.length, 0);
+
+  const ok = await volej(h, 'POST /api/zavlaha/spust', { zona: 3, minut: 10 });
+  check('viditelná projde', ok.out.success, true);
+
+  const endpoint = await volej(h, 'POST /api/zavlaha/skryt', { zona: 8, skryt: false });
+  check('vrácení přes endpoint projde', endpoint.out.success, true);
+  check('a zóna jde pustit', (await volej(h, 'POST /api/zavlaha/spust', { zona: 8, minut: 5 })).out.success, true);
+  check('dvojí vrácení se odmítne', (await volej(h, 'POST /api/zavlaha/skryt', { zona: 8, skryt: false })).kod, 400);
+  check('neznámá zóna se odmítne', (await volej(h, 'POST /api/zavlaha/skryt', { zona: 99, skryt: true })).kod, 400);
+}
+
+nadpis('15) Kolik která zóna běžela');
+{
+  const h = build();
+  const T = Date.UTC(2026, 8, 17, 10, 0);
+  const MIN = 60000;
+
+  // Bez předchozího hlášení není co počítat
+  check('bez hlášení se nic nepřipíše', h.api.zavlahaZapisBeh(T), 0);
+
+  h.api.stav = { model: 'x', zony: [1, 2, 3], bezi: [3], zavlazuje: true, destak: false, odklad: 0 };
+  h.api.kdy = T;
+  check('připíše se uplynulý čas', h.api.zavlahaZapisBeh(T + MIN), MIN);
+  check('a sedne na správnou zónu', h.state.zavlahaDny[0].zony[3], MIN);
+  check('ostatní zóny nic nedostanou', h.state.zavlahaDny[0].zony[1], undefined);
+
+  // Účtuje se zónám z PŘEDCHOZÍHO hlášení — jen o tom období server něco ví
+  h.api.kdy = T + MIN;
+  check('další minuta se přičte', h.api.zavlahaZapisBeh(T + 2 * MIN), MIN);
+  check('a součet sedí', h.state.zavlahaDny[0].zony[3], 2 * MIN);
+
+  // Dlouhá mezera = výpadek mostu nebo restart Renderu. Ten čas nikdo neměřil.
+  h.api.kdy = T;
+  check('dlouhá mezera se zahodí', h.api.zavlahaZapisBeh(T + h.api.ZAVLAHA_MEZERA_MAX_MS + 1), 0);
+  check('a nic nepřibude', h.state.zavlahaDny[0].zony[3], 2 * MIN);
+  check('mezera na hraně ještě projde', h.api.zavlahaZapisBeh(T + h.api.ZAVLAHA_MEZERA_MAX_MS), h.api.ZAVLAHA_MEZERA_MAX_MS);
+
+  // Čas pozpátku (přenastavené hodiny) by jinak součty snížil
+  h.api.kdy = T + MIN;
+  check('čas pozpátku se zahodí', h.api.zavlahaZapisBeh(T), 0);
+
+  const h2 = build();
+  h2.api.stav = { model: 'x', zony: [1, 2], bezi: [], zavlazuje: true, destak: false, odklad: 0 };
+  h2.api.kdy = T;
+  check('když nic neběží, nic se nepíše', h2.api.zavlahaZapisBeh(T + MIN), 0);
+  check('a žádný den nevznikne', h2.state.zavlahaDny.length, 0);
+
+  const h3 = build();
+  h3.api.stav = { model: 'x', zony: [1, 2], bezi: [1, 2], zavlazuje: true, destak: false, odklad: 0 };
+  h3.api.kdy = T;
+  h3.api.zavlahaZapisBeh(T + MIN);
+  check('dvě běžící zóny dostanou obě', [h3.state.zavlahaDny[0].zony[1], h3.state.zavlahaDny[0].zony[2]].join(','),
+    [MIN, MIN].join(','));
+
+  // Osm dní by přerostlo to, co appka ukazuje
+  const h4 = build();
+  for (let i = 0; i < 9; i++) {
+    h4.state.zavlahaDny.push({ d: `2026-09-0${i + 1}`, zony: { 1: MIN } });
+  }
+  h4.api.stav = { model: 'x', zony: [1], bezi: [1], zavlazuje: true, destak: false, odklad: 0 };
+  h4.api.kdy = T;
+  h4.api.zavlahaZapisBeh(T + MIN);
+  check('drží se sedm dní', h4.state.zavlahaDny.length, h4.api.ZAVLAHA_DNU_MAX);
+  check('a zůstanou ty poslední', h4.state.zavlahaDny[h4.api.ZAVLAHA_DNU_MAX - 1].d, '2026-09-17');
+}
+
+nadpis('16) Účtování při hlášení mostu');
+{
+  const h = build();
+  await volej(h, 'POST /api/zavlaha/stav', { ...STAV, bezi: [5] });
+  const kdy = h.api.kdy;
+  h.api.kdy = kdy - 30000;   // jako by minulé hlášení dorazilo před půl minutou
+  await volej(h, 'POST /api/zavlaha/stav', { ...STAV, bezi: [] });
+  const den = h.state.zavlahaDny[0];
+  // Zóna běžela v PŘEDCHOZÍM hlášení, i když v tom novém už neběží
+  check('čas se připsal zóně z minulého hlášení', den.zony[5] >= 30000, true);
+  check('a zóna z nového hlášení nic nedostala', den.zony[1], undefined);
+  check('dny jsou v payloadu', h.api.zavlahaPayload().dny.length, 1);
+}
+
+nadpis('17) Obnova nastavení a časů');
+{
+  const h = build();
+  const obnova = await volej(h, 'POST /api/zavlaha/zony/restore',
+    { nazvy: { 2: 'Trávník A' }, skryte: [3, 5] });
+  check('obnova projde', obnova.out.ok, true);
+  check('jména naskočí', h.api.nazvy[2], 'Trávník A');
+  check('schované naskočí', h.api.skryte.join(','), '3,5');
+  // Obnova musí umět i ODkrýt — jinak by se osmička nedala nikdy natrvalo vrátit
+  check('a osmička se odkryla', h.api.zavlahaSkryta(8), false);
+  check('prázdné tělo nespadne', (await volej(h, 'POST /api/zavlaha/zony/restore', {})).out.ok, true);
+  check('a nic nepřepíše', h.api.skryte.join(','), '3,5');
+
+  const dny = await volej(h, 'POST /api/zavlaha/dny/restore',
+    { dny: [{ d: '2026-09-16', zony: { 1: 600000 } }] });
+  check('obnova dnů projde', dny.out.ok, true);
+  check('a čas naskočí', h.state.zavlahaDny[0].zony[1], 600000);
+
+  // Vyšší hodnota vyhrává: server po restartu začíná od nuly, telefon má nastřádáno
+  await volej(h, 'POST /api/zavlaha/dny/restore', { dny: [{ d: '2026-09-16', zony: { 1: 60000 } }] });
+  check('nižší hodnota nepřepíše vyšší', h.state.zavlahaDny[0].zony[1], 600000);
+  await volej(h, 'POST /api/zavlaha/dny/restore', { dny: [{ d: '2026-09-16', zony: { 1: 900000 } }] });
+  check('vyšší přepíše', h.state.zavlahaDny[0].zony[1], 900000);
+
+  check('obnova bez dnů se odmítne', (await volej(h, 'POST /api/zavlaha/dny/restore', {})).kod, 400);
+  await volej(h, 'POST /api/zavlaha/dny/restore', { dny: [{ d: '2099-01-01', zony: { 1: 60000 } }] });
+  check('budoucí den se ignoruje', h.state.zavlahaDny.length, 1);
+  await volej(h, 'POST /api/zavlaha/dny/restore', { dny: [{ d: '2026-09-15', zony: { 99: 60000, 2: -5 } }] });
+  check('nesmyslné hodnoty se ignorují', h.state.zavlahaDny.length, 1);
 }
 
 konec();

@@ -25,7 +25,7 @@ const HESLO = 'heslo-jen-pro-test';
 const ODPOVEDI = {
   '02': '82000A0201',       // model a verze
   '0300': '8300FF000000',   // zóny 1–8
-  '3F00': 'BF0000000000',   // neběží nic
+  '3F00': 'BF0000000000',   // neběží nic (mění se za běhu, viz běžíZóna)
   '48': 'C801',             // zavlažování zapnuté
   '3E': 'BE01',             // čidlo hlásí déšť
   '36': 'B6000000',         // žádný odklad
@@ -164,6 +164,29 @@ function spustModul() {
   nadpis('5) Přejmenování přežije do appky');
   check('přejmenování projde', (await spat('/api/zavlaha/nazvy', 'POST', { nazvy: { 8: 'Záhon u plotu' } })).status, 200);
   check('a je vidět v appce', (((await snapshot()).zavlaha || {}).nazvy || {})['8'], 'Záhon u plotu');
+
+  nadpis('6) Schovaná zóna');
+  // Osmá zóna není do ničeho zapojená, takže je schovaná rovnou
+  check('osmička je schovaná', (((await snapshot()).zavlaha || {}).skryte || []).join(','), '8');
+  check('a nejde pustit', (await spat('/api/zavlaha/spust', 'POST', { zona: 8, minut: 5 })).status, 400);
+  check('vrácení projde', (await spat('/api/zavlaha/skryt', 'POST', { zona: 8, skryt: false })).status, 200);
+  check('a v appce zmizí ze schovaných', (((await snapshot()).zavlaha || {}).skryte || []).length, 0);
+  check('teď už jde pustit', (await spat('/api/zavlaha/spust', 'POST', { zona: 8, minut: 5 })).status, 200);
+  await spat('/api/zavlaha/stop', 'POST', {});
+  await M.kolo(nastaveni, pamet, () => {});
+
+  nadpis('7) Naměřený čas doteče do appky');
+  // Zóna 2 se rozeběhne a dvě kola po sobě ji most nahlásí jako běžící
+  ODPOVEDI['3F00'] = 'BF0002000000';
+  await M.kolo(nastaveni, pamet, () => {});
+  await pauza(1200);
+  await M.kolo(nastaveni, pamet, () => {});
+  const dny = ((await snapshot()).zavlaha || {}).dny || [];
+  check('vznikl dnešní záznam', dny.length, 1);
+  const zona2 = dny.length ? (dny[0].zony || {})['2'] : 0;
+  check('a zóna 2 má naměřeno přes vteřinu', zona2 >= 1000, true);
+  // Ostatní zóny neběžely, takže nesmí mít nic
+  check('ostatní zóny nic nemají', Object.keys(dny.length ? dny[0].zony : {}).join(','), '2');
 
   fs.rmSync(dir, { recursive: true, force: true });
   uklid();

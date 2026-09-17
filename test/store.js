@@ -34,7 +34,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
 
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
-    'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy',
+    'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
     'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
@@ -45,6 +45,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
        kdy: { typ: 'cas', cas: '06:15' }, cil: 'Ložnice', akce: 'up', naklopeni: null }],
     1758000000000,
     { 1: 'Trávník dole' },
+    [8],
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
@@ -77,6 +78,7 @@ function vzorovyStav() {
     poolDays: [{ d: '2026-08-30', grid: 50, pv: 450 }],
     usageDays: [{ d: '2026-08-30', grid: 4000, pv: 9000 }],
     saunaDays: [{ d: '2026-08-30', wh: 8000, ms: 7200000 }],
+    zavlahaDny: [{ d: '2026-08-30', zony: { 3: 600000 } }],
     months: [{ m: '2026-08', sauna: 40000, pool: 12000, wb: 300000, dum: 500000,
                poolGrid: 4000, poolPv: 8000 }],
     solinator: { date: '2026-08-31', bonusMs: 3600000, boostMs: 0, carryMs: 0, disabledUntil: 0 },
@@ -173,8 +175,11 @@ nadpis('3) Ukládání');
       h.api.storeSnapshot().posts['/api/zapad-delay/restore'].minut, 35);
     // Přejmenované zóny závlahy jsou taky ruční nastavení — po nasazení by se
     // jinak zahrada vrátila k „Zóna 1" až „Zóna 8"
-    check('jména zón závlahy jsou v záloze',
-      h.api.storeSnapshot().posts['/api/zavlaha/nazvy/restore'].nazvy[1], 'Trávník dole');
+    const zavlaha = h.api.storeSnapshot().posts['/api/zavlaha/zony/restore'];
+    check('jména zón závlahy jsou v záloze', zavlaha.nazvy[1], 'Trávník dole');
+    check('  i schované zóny', zavlaha.skryte.join(','), '8');
+    check('  a naměřené časy taky',
+      h.api.storeSnapshot().posts['/api/zavlaha/dny/restore'].dny.length, 1);
     h.state.months[0].sauna = 41000;
     check('po změně zase ano', await h.api.storeSave(), true);
   })();
@@ -324,6 +329,7 @@ function prazdnyStav() {
     away: { since: 0 },
     history: [], wallboxHistory: [], boilerHistory: [], airconHistory: [],
     wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], poolDays: [], saunaDays: [],
+    zavlahaDny: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
     usageDays: [],
     wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,

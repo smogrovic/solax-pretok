@@ -38,9 +38,22 @@ setTimeout(async () => {
   const ZONY = [1, 2, 3, 4, 5, 6, 7, 8];
   const NAZVY = { 1: 'Trávník dole', 2: 'Trávník nahoře A', 7: 'Dopouštění retenčky' };
   const zive = extra => renderZavlaha(Object.assign({
-    zive: true, kdy: Date.now(), ceka: 0, minutMax: 120, nazvy: NAZVY,
+    zive: true, kdy: Date.now(), ceka: 0, minutMax: 120, nazvy: NAZVY, skryte: [], dny: [],
     stav: { model: 'ESP-TM2', zony: ZONY, bezi: [], zavlazuje: true, destak: false, odklad: 0 }
   }, extra || {}));
+  const dnesni = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const vcerejsi = () => {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const chipy = () => [...document.getElementById('zavlahaSchovane').querySelectorAll('.zavlaha-chip')];
+  const karta = id => [...document.getElementById(id).querySelectorAll('.wbsrc-row')]
+    .map(r => [...r.querySelectorAll('.wbsrc-head span')].map(x => x.textContent).join(' = '));
 
   const radky = () => [...document.getElementById('zavlahaZony').querySelectorAll('.zavlaha-radek')];
   const jmena = () => radky().map(r => r.querySelector('.zavlaha-jmeno').textContent);
@@ -51,7 +64,7 @@ setTimeout(async () => {
   const minutEl = document.getElementById('zavlahaMinut');
 
   R.push('1) Bez mostu se nedá nic zmáčknout');
-  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, ceka: 0, minutMax: 120 });
+  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], dny: [], ceka: 0, minutMax: 120 });
   check('stav to přizná', stavEl.textContent, 'most se neozývá');
   check('kontrolka je červená', svetlo.classList.contains('off'), true);
   check('zastavení nejde zmáčknout', stopBtn.disabled, true);
@@ -157,6 +170,76 @@ setTimeout(async () => {
   check('výchozí je deset', Number(VYCHOZI_MINUTY), 10);
   check('nic přes mez', volby.every(m => m <= 120), true);
   check('nejkratší je minuta', Math.min(...volby), 1);
+
+  R.push('\\n7b) Schování zóny');
+  zive({ skryte: [8] });
+  check('schovaná se nekreslí', radky().length, 7);
+  check('  a v seznamu chybí', jmena().includes('Zóna 8'), false);
+  check('dole je chip', chipy().length, 1);
+  check('  se jménem zóny', chipy()[0].textContent, 'Zóna 8');
+  check('nápověda mluví o křížku',
+    document.getElementById('zavlahaHint').textContent.includes('křížkem schováš'), true);
+
+  POSLANO.length = 0;
+  radky()[2].querySelector('.zavlaha-skryt').click();
+  await pockej();
+  check('křížek jde na schování', POSLANO[0].url, '/api/zavlaha/skryt');
+  check('  se správnou zónou', POSLANO[0].telo.zona, 3);
+  check('  a schovat znamená true', POSLANO[0].telo.skryt, true);
+
+  POSLANO.length = 0;
+  chipy()[0].click();
+  await pockej();
+  check('chip zónu vrací', POSLANO[0].telo.skryt, false);
+  check('  a je to ta schovaná', POSLANO[0].telo.zona, 8);
+  check('vracení se na nic neptá', POSLANO.length, 1);
+
+  // Schovat omylem by šlo snadno, křížek je malý
+  POTVRZENO = false;
+  POSLANO.length = 0;
+  radky()[0].querySelector('.zavlaha-skryt').click();
+  await pockej();
+  check('bez potvrzení se neschovává', POSLANO.length, 0);
+  POTVRZENO = true;
+
+  // Rozvrh je v ovladači a ten o schování neví — když schovaná zóna běží, musí být vidět
+  zive({ skryte: [8], stav: { model: 'ESP-TM2', zony: ZONY, bezi: [8], zavlazuje: true, destak: false, odklad: 0 } });
+  check('běžící schovaná je pořád ve stavu', stavEl.textContent, 'Zóna 8');
+
+  zive({ skryte: [8], zive: false, kdy: Date.now() - 600000 });
+  check('bez mostu nejde schovat', radky()[0].querySelector('.zavlaha-skryt').disabled, true);
+  check('  ani vrátit', chipy()[0].disabled, true);
+
+  R.push('\\n7c) Historie běhu');
+  const DNY = [
+    { d: dnesni(), zony: { 1: 600000, 3: 20000 } },
+    { d: vcerejsi(), zony: { 1: 1200000 } }
+  ];
+  zive({ dny: DNY });
+  const dnes = karta('zavlahaDnes');
+  check('dnešní karta má řádek na zónu a součet', dnes.length, 9);
+  check('minuty se sčítají', dnes[0], 'Trávník dole = 10 min');
+  // Krátké ruční puštění nesmí zmizet v zaokrouhlení na nulu
+  check('dvacet vteřin je <1 min', dnes[2], 'Zóna 3 = <1 min');
+  check('zóna, co neběžela, má pomlčku', dnes[1], 'Trávník nahoře A = –');
+  check('dole je součet', dnes[8], 'Celkem = 10 min');
+
+  const tyden = karta('zavlahaTyden');
+  // Včerejšek se počítá jen do sedmidenní karty, ne do dnešní
+  check('týden sečte i včerejšek', tyden[0], 'Trávník dole = 30 min');
+  check('  a součet s ním', tyden[8], 'Celkem = 30 min');
+
+  // Schovaná zóna se ukáže jen tehdy, když nějaký čas má
+  zive({ skryte: [8], dny: DNY });
+  check('schovaná bez času v historii není', karta('zavlahaDnes').length, 8);
+  zive({ skryte: [8], dny: [{ d: dnesni(), zony: { 8: 300000 } }] });
+  check('schovaná s časem se ukáže', karta('zavlahaDnes').some(r => r.startsWith('Zóna 8')), true);
+
+  zive({ dny: [] });
+  check('bez dat je všude pomlčka', karta('zavlahaDnes')[0], 'Trávník dole = –');
+  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], dny: [], ceka: 0, minutMax: 120 });
+  check('bez mostu se řekne, že není z čeho',
+    document.getElementById('zavlahaDnes').textContent.includes('most na NASu se musí ozvat'), true);
 
   R.push('\\n8) Stránka je v menu');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);

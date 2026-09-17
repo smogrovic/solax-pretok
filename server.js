@@ -267,6 +267,7 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  zavlahaDny: [],    // { d, zony: { '3': ms } } — kolik která zóna zalévala (7 dní)
   huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
   heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
@@ -7320,6 +7321,14 @@ const ZAVLAHA_MINUT_MAX = 120;
 const ZAVLAHA_TICHO_MS = 3 * 60 * 1000;      // déle mlčící most bereme jako odpojený
 const ZAVLAHA_UKOL_PLATI_MS = 2 * 60 * 1000; // starší povel se zahodí, ať nepřekvapí
 const ZAVLAHA_FRONTA_MAX = 5;
+const ZAVLAHA_DNU_MAX = 7;
+// Delší mezera mezi hlášeními znamená výpadek mostu nebo restart Renderu. Ten
+// čas nikdo neměřil, takže se do součtů nesmí domyslet — osminásobek intervalu.
+const ZAVLAHA_MEZERA_MAX_MS = 2 * 60 * 1000;
+
+// Osmá zóna v ovladači je, ale není do ničeho zapojená. Schovat jde kterákoli
+// a stejně tak ji vrátit — příště na to nebude potřeba nasazení.
+const ZAVLAHA_SKRYTE_VYCHOZI = [8];
 
 // Zóny podle toho, co doopravdy zalévají. Jde přejmenovat v appce; tohle je jen
 // první nástřel, ať se nezačíná osmi „Zónami N".
@@ -7337,6 +7346,7 @@ let zavlahaStav = null;    // poslední hlášení mostu
 let zavlahaKdy = 0;        // kdy dorazilo
 let zavlahaFronta = [];    // co si most odveze při nejbližším ozvání
 let zavlahaNazvy = { ...ZAVLAHA_NAZVY_VYCHOZI };
+let zavlahaSkryte = [...ZAVLAHA_SKRYTE_VYCHOZI];
 
 function zavlahaZive(at = Date.now()) {
   return zavlahaKdy > 0 && at - zavlahaKdy < ZAVLAHA_TICHO_MS;
@@ -7352,6 +7362,8 @@ function zavlahaPayload() {
     kdy: zavlahaKdy,
     zive: zavlahaZive(),
     nazvy: zavlahaNazvy,
+    skryte: zavlahaSkryte,
+    dny: state.zavlahaDny,
     ceka: zavlahaFronta.length,
     minutMax: ZAVLAHA_MINUT_MAX
   };
@@ -7415,8 +7427,49 @@ function zavlahaVyzvedni(at = Date.now()) {
   return ukoly;
 }
 
+function zavlahaSkryta(zona) {
+  return zavlahaSkryte.includes(zona);
+}
+
+// Schování je jen o tom, co se dá pustit. Kdyby schovaná zóna přesto běžela
+// (rozvrh je v ovladači a ten o našem schování neví), stav i historie ji ukážou
+// dál — appka nesmí tvrdit, že neteče voda, když teče.
+function zavlahaSchovej(vstup, skryt) {
+  const zona = zavlahaCisloZony(vstup);
+  if (zona === null) return false;
+  const uz = zavlahaSkryta(zona);
+  if (uz === !!skryt) return false;
+  zavlahaSkryte = skryt
+    ? [...zavlahaSkryte, zona].sort((a, b) => a - b)
+    : zavlahaSkryte.filter(z => z !== zona);
+  return true;
+}
+
 function zavlahaSeznam(zony) {
   return zony.map(z => zavlahaNazev(z)).join(', ');
+}
+
+// Kolik která zóna běžela. Most hlásí každých pár vteřin, kdo běží; server umí
+// připsat jen uplynulý čas zónám z hlášení PŘEDCHOZÍHO — to je jediné období,
+// o kterém něco ví. Den se bere podle okamžiku hlášení: přes půlnoc spadne na
+// špatnou stranu nanejvýš dvouminutový kus a dělit kvůli tomu interval by
+// přidalo víc složitosti než přesnosti.
+function zavlahaZapisBeh(at = Date.now()) {
+  if (!zavlahaStav || !zavlahaKdy) return 0;
+  const dt = at - zavlahaKdy;
+  if (!(dt > 0) || dt > ZAVLAHA_MEZERA_MAX_MS) return 0;
+  if (!zavlahaStav.bezi.length) return 0;
+  const d = pragueDateString(at);
+  let rec = state.zavlahaDny.find(r => r.d === d);
+  if (!rec) { rec = { d, zony: {} }; state.zavlahaDny.push(rec); }
+  for (const zona of zavlahaStav.bezi) {
+    rec.zony[zona] = (rec.zony[zona] || 0) + dt;
+  }
+  if (state.zavlahaDny.length > ZAVLAHA_DNU_MAX) {
+    state.zavlahaDny.sort((a, b) => a.d.localeCompare(b.d));
+    state.zavlahaDny = state.zavlahaDny.slice(-ZAVLAHA_DNU_MAX);
+  }
+  return dt;
 }
 
 // Most se ozývá po pár vteřinách, takže se do logu smí jen to, co se změnilo.
@@ -7442,8 +7495,10 @@ app.post('/api/zavlaha/stav', (req, res) => {
   if (!stav) return res.status(400).json({ error: 'Chybí seznam zón.' });
   const hlaska = zavlahaZmena(zavlahaStav, stav);
   const bylTicho = !zavlahaZive();
+  const ted = Date.now();
+  zavlahaZapisBeh(ted);   // musí být PŘED přepsáním, počítá se z minulého hlášení
   zavlahaStav = stav;
-  zavlahaKdy = Date.now();
+  zavlahaKdy = ted;
   if (hlaska) addLog(hlaska);
   else if (bylTicho) addLog('Závlaha: most na NASu se zase ozývá');
   const ukoly = zavlahaVyzvedni();
@@ -7457,6 +7512,8 @@ app.post('/api/zavlaha/spust', (req, res) => {
   const minut = zavlahaMinuty(req.body && req.body.minut);
   if (zona === null) return res.status(400).json({ error: 'Neznámá zóna.' });
   if (minut === null) return res.status(400).json({ error: `Minuty musí být 1 až ${ZAVLAHA_MINUT_MAX}.` });
+  // Bez tohohle by schování zónu jen přestalo kreslit, ale povel by prošel dál
+  if (zavlahaSkryta(zona)) return res.status(400).json({ error: `${zavlahaNazev(zona)} je schovaná.` });
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
   zavlahaZarad({ typ: 'spust', zona, minut });
   addLog(`Závlaha: ${zavlahaNazev(zona)} na ${minut} min (ručně)`);
@@ -7490,6 +7547,18 @@ function zavlahaPrejmenuj(vstup) {
   return zmena;
 }
 
+app.post('/api/zavlaha/skryt', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const zona = zavlahaCisloZony(req.body && req.body.zona);
+  if (zona === null) return res.status(400).json({ error: 'Neznámá zóna.' });
+  const skryt = !!(req.body && req.body.skryt);
+  if (!zavlahaSchovej(zona, skryt)) {
+    return res.status(400).json({ error: skryt ? 'Zóna je už schovaná.' : 'Zóna schovaná není.' });
+  }
+  zavlahaPosli();
+  res.json({ success: true, skryte: zavlahaSkryte });
+});
+
 app.post('/api/zavlaha/nazvy', (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!zavlahaPrejmenuj(req.body && req.body.nazvy)) {
@@ -7499,9 +7568,47 @@ app.post('/api/zavlaha/nazvy', (req, res) => {
   res.json({ success: true, nazvy: zavlahaNazvy });
 });
 
-app.post('/api/zavlaha/nazvy/restore', (req, res) => {
-  if (zavlahaPrejmenuj(req.body && req.body.nazvy)) zavlahaPosli();
-  res.json({ ok: true, nazvy: zavlahaNazvy });
+// Jména i schované zóny jsou ruční nastavení. Obnova je bere obojí najednou —
+// je to jedno nastavení zón, jen ve dvou polích.
+app.post('/api/zavlaha/zony/restore', (req, res) => {
+  const telo = req.body || {};
+  let zmena = zavlahaPrejmenuj(telo.nazvy);
+  if (Array.isArray(telo.skryte)) {
+    const chtene = zavlahaZony(telo.skryte);
+    for (const zona of chtene) if (zavlahaSchovej(zona, true)) zmena = true;
+    for (const zona of [...zavlahaSkryte]) {
+      if (!chtene.includes(zona) && zavlahaSchovej(zona, false)) zmena = true;
+    }
+  }
+  if (zmena) zavlahaPosli();
+  res.json({ ok: true, nazvy: zavlahaNazvy, skryte: zavlahaSkryte });
+});
+
+// Obnova naměřených časů po deployi — stejný princip jako u sauny: vyšší
+// hodnota vyhrává. Server po restartu začíná od nuly, telefon má nastřádáno.
+app.post('/api/zavlaha/dny/restore', (req, res) => {
+  const dny = req.body && Array.isArray(req.body.dny) ? req.body.dny : null;
+  if (!dny) return res.status(400).json({ error: 'Chybí dny.' });
+  const dnes = pragueDateString();
+  let zmena = false;
+  for (const inc of dny.slice(-ZAVLAHA_DNU_MAX)) {
+    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
+    if (inc.d > dnes || !inc.zony || typeof inc.zony !== 'object') continue;
+    let rec = state.zavlahaDny.find(r => r.d === inc.d);
+    for (const [klic, hodnota] of Object.entries(inc.zony)) {
+      const zona = zavlahaCisloZony(klic);
+      const ms = Number(hodnota);
+      if (zona === null || !Number.isFinite(ms) || ms <= 0 || ms > 24 * 3600000) continue;
+      if (!rec) { rec = { d: inc.d, zony: {} }; state.zavlahaDny.push(rec); zmena = true; }
+      if (ms > (rec.zony[zona] || 0)) { rec.zony[zona] = ms; zmena = true; }
+    }
+  }
+  if (zmena) {
+    state.zavlahaDny.sort((a, b) => a.d.localeCompare(b.d));
+    state.zavlahaDny = state.zavlahaDny.slice(-ZAVLAHA_DNU_MAX);
+    zavlahaPosli();
+  }
+  res.json({ ok: true, dny: state.zavlahaDny.length });
 });
 
 // ---------- Tlačítka na Asistentovi (scény) a „nejsme doma" ----------
@@ -7715,7 +7822,8 @@ const STORE_POSTS = [
   '/api/blinds/schedule/restore',
   '/api/prazdniny/restore',
   '/api/zapad-delay/restore',
-  '/api/zavlaha/nazvy/restore',
+  '/api/zavlaha/zony/restore',
+  '/api/zavlaha/dny/restore',
   '/api/runtime/restore',
   '/api/wallbox/daytype/restore'
 ];
@@ -7757,7 +7865,8 @@ function storeSnapshot() {
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/prazdniny/restore': { datum: state.prazdniny },
     '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
-    '/api/zavlaha/nazvy/restore': { nazvy: zavlahaNazvy },
+    '/api/zavlaha/zony/restore': { nazvy: zavlahaNazvy, skryte: zavlahaSkryte },
+    '/api/zavlaha/dny/restore': { dny: state.zavlahaDny },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
       dayType: state.wbDayType.manual, until: state.wbDayType.until
