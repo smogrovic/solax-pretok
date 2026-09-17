@@ -25,7 +25,7 @@ setTimeout(() => {
 
   const slepene = [];
   const stranky = Array.from(document.querySelectorAll('.slide'));
-  check('stránek je dvanáct', stranky.length, 12);
+  check('stránek je třináct', stranky.length, 13);
 
   for (const slide of stranky) {
     const karty = Array.from(slide.querySelectorAll('.page > .card')).filter(viditelna);

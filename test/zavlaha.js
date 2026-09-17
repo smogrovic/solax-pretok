@@ -240,6 +240,9 @@ const NASTAVENI = { ip: '10.0.0.5', heslo: HESLO };
   check('a řekne se to, ne spadne', String(chybi.chyba).includes('Založil jsem'), true);
   check('nic se nepřipojuje', chybi.nastaveni, undefined);
   check('hláška vede na složku na NASu', String(chybi.chyba).includes('/volume1/family/scripts/zavlaha'), true);
+  check('a na ten skript, který se pouštěl', String(chybi.chyba).includes('zavlaha-test.js'), true);
+  check('jiný skript se podepíše sám',
+    String(Z.nactiKonfig(path.join(docasna, 'jiny.json'), 'zavlaha-most.js').chyba).includes('zavlaha-most.js'), true);
   check('založený soubor má prázdné heslo', JSON.parse(fs.readFileSync(cesta, 'utf8')).heslo, '');
 
   const prazdny = Z.nactiKonfig(cesta);

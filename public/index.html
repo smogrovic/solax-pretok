@@ -1884,6 +1884,35 @@
     display:none;
   }
   .error-banner.show{display:block;}
+  .zavlaha-hlava{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:4px;}
+  .zavlaha-popis{font-size:12px;color:var(--grey-text);}
+  .zavlaha-hlava select{width:auto;min-width:92px;flex:0 0 auto;}
+  .zavlaha-stop{
+    margin-left:auto;border:none;border-radius:14px;padding:7px 12px;
+    font-size:12px;font-weight:700;background:rgba(229,83,75,0.12);color:var(--red);
+  }
+  .zavlaha-stop:disabled{opacity:0.45;}
+  .zavlaha-zony{width:100%;display:flex;flex-direction:column;}
+  .zavlaha-radek{
+    display:flex;align-items:center;gap:8px;padding:8px 2px;
+    border-bottom:1px solid rgba(44,62,80,0.06);
+  }
+  .zavlaha-radek:last-child{border-bottom:none;}
+  .zavlaha-jmeno{
+    flex:1;min-width:0;text-align:left;border:none;background:none;padding:0;
+    font-size:13px;font-weight:600;color:var(--navy);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .zavlaha-radek.bezi .zavlaha-jmeno{color:var(--green);}
+  .zavlaha-pustit{
+    flex:0 0 auto;border:none;border-radius:14px;padding:7px 12px;
+    font-size:12px;font-weight:700;background:rgba(63,185,80,0.14);color:var(--green);
+  }
+  .zavlaha-radek.bezi .zavlaha-pustit{background:rgba(63,185,80,0.3);}
+  .zavlaha-pustit:disabled{opacity:0.45;}
+  .zavlaha-meta{width:100%;font-size:12px;color:var(--grey-text);display:flex;flex-direction:column;gap:3px;}
+  .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
+  .zavlaha-hint:empty{display:none;}
 </style>
 </head>
 <body>
@@ -2587,6 +2616,39 @@
       <div class="card stats-card">
         <div class="graph-title">Spotřeba bazénu po měsících</div>
         <div class="wbsrc-list" id="poolMonths"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stránka: Závlaha -->
+  <div class="slide" data-title="Závlaha">
+    <div class="page">
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="zavlahaLight"></div>
+            <div class="shelly-label">Závlaha <span class="state" id="zavlahaStav">–</span></div>
+          </div>
+          <div class="zavlaha-meta" id="zavlahaMeta"></div>
+        </div>
+      </div>
+
+      <div class="card lockable">
+        <div class="zavlaha-hlava">
+          <span class="zavlaha-popis">Pustit na</span>
+          <select id="zavlahaMinut"></select>
+          <button class="zavlaha-stop" id="zavlahaStopBtn" type="button">Zastavit vše</button>
+        </div>
+        <div class="zavlaha-zony" id="zavlahaZony"></div>
+        <div class="zavlaha-hint" id="zavlahaHint"></div>
       </div>
     </div>
   </div>
@@ -8430,6 +8492,164 @@ let es = null;
 // Jeden rozbitý render nesmí utnout zbytek snapshotu. Dřív stačila jedna výjimka
 // uprostřed a všechno pod ní se tiše nenačetlo — grafy pak zůstaly prázdné a nebylo
 // podle čeho poznat proč. Data se přiřazují mimo, tady se hlídá jen kreslení.
+// ---------- Závlaha Rain Bird ----------
+// Appka na ovladač nevidí. Všechno jde přes most na NASu, a ten se může
+// kdykoliv ztratit (výpadek sítě, restart NASu). Proto je jeho stav vidět
+// všude a bez něj tlačítka nejdou zmáčknout — povel by jinak tiše zmizel
+// ve frontě a člověk by u zahrady čekal na vodu, která nepřijde.
+const zavlahaLightEl = document.getElementById('zavlahaLight');
+const zavlahaStavEl = document.getElementById('zavlahaStav');
+const zavlahaMetaEl = document.getElementById('zavlahaMeta');
+const zavlahaZonyEl = document.getElementById('zavlahaZony');
+const zavlahaMinutEl = document.getElementById('zavlahaMinut');
+const zavlahaStopBtnEl = document.getElementById('zavlahaStopBtn');
+const zavlahaHintEl = document.getElementById('zavlahaHint');
+
+const ZAVLAHA_MINUTY = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+const ZAVLAHA_MINUT_VYCHOZI = 10;
+let zavlahaData = { stav: null, kdy: 0, zive: false, nazvy: {}, ceka: 0, minutMax: 120 };
+
+function zavlahaJmeno(zona) {
+  return (zavlahaData.nazvy && zavlahaData.nazvy[zona]) || ('Zóna ' + zona);
+}
+
+function zavlahaZvoleneMinuty() {
+  const zvoleno = Number(zavlahaMinutEl && zavlahaMinutEl.value);
+  return Number.isInteger(zvoleno) && zvoleno > 0 ? zvoleno : ZAVLAHA_MINUT_VYCHOZI;
+}
+
+function zavlahaNaplnMinuty() {
+  if (!zavlahaMinutEl || zavlahaMinutEl.options.length) return;
+  for (const m of ZAVLAHA_MINUTY) {
+    if (m > (zavlahaData.minutMax || 120)) continue;
+    const o = document.createElement('option');
+    o.value = String(m);
+    o.textContent = m + ' min';
+    if (m === ZAVLAHA_MINUT_VYCHOZI) o.selected = true;
+    zavlahaMinutEl.appendChild(o);
+  }
+}
+
+function zavlahaMetaRadky() {
+  const stav = zavlahaData.stav;
+  if (!zavlahaData.zive || !stav) {
+    return [zavlahaData.kdy
+      ? 'Most na NASu mlčí od ' + logCas(zavlahaData.kdy)
+      : 'Most na NASu se zatím neozval.'];
+  }
+  const radky = [`Ovladač ${stav.model || '?'}, zón ${(stav.zony || []).length}`];
+  radky.push('Zavlažování ' + (stav.zavlazuje ? 'zapnuté' : 'vypnuté')
+    + ' · dešťové čidlo ' + (stav.destak ? 'hlásí déšť' : 'suché'));
+  if (stav.odklad) radky.push(`Odklad kvůli dešti: ${stav.odklad} ${stav.odklad === 1 ? 'den' : 'dnů'}`);
+  radky.push('Naposledy ' + logCas(zavlahaData.kdy));
+  return radky;
+}
+
+function renderZavlaha(d) {
+  if (d) zavlahaData = { ...zavlahaData, ...d };
+  zavlahaNaplnMinuty();
+  const stav = zavlahaData.stav;
+  const zive = !!zavlahaData.zive;
+  const bezi = (stav && stav.bezi) || [];
+
+  if (zavlahaLightEl) {
+    zavlahaLightEl.classList.toggle('on', zive && bezi.length > 0);
+    zavlahaLightEl.classList.toggle('off', !zive);
+  }
+  if (zavlahaStavEl) {
+    zavlahaStavEl.textContent = !zive ? 'most se neozývá'
+      : bezi.length ? bezi.map(zavlahaJmeno).join(', ')
+      : 'nic neběží';
+  }
+  if (zavlahaMetaEl) {
+    zavlahaMetaEl.textContent = '';
+    for (const text of zavlahaMetaRadky()) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      zavlahaMetaEl.appendChild(div);
+    }
+  }
+  if (zavlahaStopBtnEl) zavlahaStopBtnEl.disabled = !zive;
+  if (zavlahaMinutEl) zavlahaMinutEl.disabled = !zive;
+
+  if (zavlahaZonyEl) {
+    zavlahaZonyEl.textContent = '';
+    const zony = (stav && stav.zony) || [];
+    for (const zona of zony) {
+      const radek = document.createElement('div');
+      radek.className = 'zavlaha-radek' + (bezi.includes(zona) ? ' bezi' : '');
+      radek.dataset.zona = String(zona);
+
+      const jmeno = document.createElement('button');
+      jmeno.type = 'button';
+      jmeno.className = 'zavlaha-jmeno';
+      jmeno.textContent = zavlahaJmeno(zona);
+      jmeno.addEventListener('click', () => zavlahaPrejmenuj(zona));
+      radek.appendChild(jmeno);
+
+      const pustit = document.createElement('button');
+      pustit.type = 'button';
+      pustit.className = 'zavlaha-pustit';
+      pustit.textContent = bezi.includes(zona) ? 'běží' : '▶';
+      pustit.disabled = !zive;
+      pustit.addEventListener('click', () => zavlahaSpust(zona, pustit));
+      radek.appendChild(pustit);
+
+      zavlahaZonyEl.appendChild(radek);
+    }
+  }
+  if (zavlahaHintEl) {
+    zavlahaHintEl.textContent = !zive
+      ? 'Most běží na NASu (zavlaha-most.js). Dokud se neozve, appka závlahu jen neví — ovladač Rain Bird jede podle svého rozvrhu dál.'
+      : zavlahaData.ceka
+        ? 'Povel čeká, než si pro něj most přijde.'
+        : 'Klepnutím na jméno zóny ji přejmenuješ. Rozvrh zůstává v ovladači Rain Bird.';
+  }
+}
+
+async function zavlahaPosli(cesta, telo, btn, chybaText) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(cesta, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(telo)
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || chybaText);
+    errorEl.classList.remove('show');
+    return data;
+  } catch (err) {
+    errorEl.textContent = 'Závlaha: ' + err.message;
+    errorEl.classList.add('show');
+    return null;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function zavlahaSpust(zona, btn) {
+  const minut = zavlahaZvoleneMinuty();
+  if (!confirm(`Pustit ${zavlahaJmeno(zona)} na ${minut} min?`)) return;
+  await zavlahaPosli('/api/zavlaha/spust', { zona, minut }, btn, 'Zónu se nepodařilo pustit.');
+}
+
+async function zavlahaStop() {
+  if (!confirm('Zastavit celou závlahu?')) return;
+  await zavlahaPosli('/api/zavlaha/stop', {}, zavlahaStopBtnEl, 'Závlahu se nepodařilo zastavit.');
+}
+
+async function zavlahaPrejmenuj(zona) {
+  const jmeno = prompt(`Jak se jmenuje zóna ${zona}?`, zavlahaJmeno(zona));
+  if (jmeno === null) return;
+  const data = await zavlahaPosli('/api/zavlaha/nazvy', { nazvy: { [zona]: jmeno } }, null,
+    'Zónu se nepodařilo přejmenovat.');
+  if (data && data.nazvy) renderZavlaha({ nazvy: data.nazvy });
+}
+
+if (zavlahaStopBtnEl) zavlahaStopBtnEl.addEventListener('click', zavlahaStop);
+
 function bezpecne(fn) {
   try { fn(); } catch (err) { console.error('render:', err); }
 }
@@ -8637,6 +8857,7 @@ function applySnapshot(snap) {
   maybeRestoreBoilerHistoryToServer(serverBoiler, localBoiler);
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
+  bezpecne(() => renderZavlaha(snap.zavlaha));
   bezpecne(() => renderPrazdniny(snap.prazdniny));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
@@ -8938,6 +9159,7 @@ function connectStream() {
     renderBlindTimers();
     saveTimersLocal();
   });
+  es.addEventListener('zavlaha', e => { renderZavlaha(JSON.parse(e.data).zavlaha); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('blindRules', e => {

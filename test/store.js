@@ -34,7 +34,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
 
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
-    'airconTimers', 'blindRules', 'blindRulesAt',
+    'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
     'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
@@ -44,6 +44,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     [{ id: 1, zapnuto: true, dny: [true, true, true, true, true, false, false],
        kdy: { typ: 'cas', cas: '06:15' }, cil: 'Ložnice', akce: 'up', naklopeni: null }],
     1758000000000,
+    { 1: 'Trávník dole' },
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
@@ -170,6 +171,10 @@ nadpis('3) Ukládání');
       h.api.storeSnapshot().posts['/api/prazdniny/restore'].datum, '2026-09-02');
     check('  a zpoždění po západu s nimi',
       h.api.storeSnapshot().posts['/api/zapad-delay/restore'].minut, 35);
+    // Přejmenované zóny závlahy jsou taky ruční nastavení — po nasazení by se
+    // jinak zahrada vrátila k „Zóna 1" až „Zóna 8"
+    check('jména zón závlahy jsou v záloze',
+      h.api.storeSnapshot().posts['/api/zavlaha/nazvy/restore'].nazvy[1], 'Trávník dole');
     h.state.months[0].sauna = 41000;
     check('po změně zase ano', await h.api.storeSave(), true);
   })();

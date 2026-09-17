@@ -19,9 +19,12 @@ node test/cidla.js                    # nástěnná čidla řídí klimatizaci v
 node test/log.js                      # co do logu patří a co ne, výpadky s úrovní error
 node test/store.js                    # záloha do Upstash (balení, whitelist, pojistky)
 node test/zavlaha.js                  # místní protokol modulu Rain Bird LNK (šifrování, povely)
+node test/zavlaha-most.js             # most na NASu: spínací povely, kolo, ochrana proti nesmyslům
+node test/zavlaha-server.js           # závlaha v appce: fronta povelů, stáří hlášení, jména zón
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
 node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí
+node test/runtime-zavlaha.js          # falešný modul ↔ most ↔ ostrý server: povel projde celým řetězem
 ./test/browser-run.sh test/browser-snapshot.js # ostrá applySnapshot: všechny série dojedou
 ./test/browser-run.sh test/browser-sauna.js    # stránka Sauna v headless Chromiu
 ./test/browser-run.sh test/browser-bazen.js    # karta tepelného čerpadla na stránce Bazén
@@ -33,6 +36,7 @@ node test/runtime-rele.js             # ostrý server: relé zmizí, účtován�
 ./test/browser-run.sh test/browser-wallbox.js  # přepínač, nápověda a ruční režimy wallboxu
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
 ./test/browser-run.sh test/browser-zaloha.js   # řádek o záloze na stránce Log
+./test/browser-run.sh test/browser-zavlaha.js  # stránka Závlaha: zóny, mlčící most, potvrzení
 ./test/browser-run.sh test/browser-log.js      # log a karta výpadků („10:00–nyní")
 ./test/browser-run.sh test/browser-mezery.js   # žádné dvě karty se na sebe nelepí
 ./test/browser-run.sh test/browser-smoke.js    # celá appka se načte a vykreslí bez chyby

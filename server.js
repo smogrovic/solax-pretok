@@ -512,6 +512,7 @@ function snapshot() {
     ...awayPayload(),
     store: storePayload(),
     nukiEnabled,
+    zavlaha: zavlahaPayload(),
     pushEnabled,
     lockEnabled,
     sensors: state.sensors,
@@ -7298,6 +7299,211 @@ app.post('/api/nuki/lock', async (req, res) => {
   }
 });
 
+// ---------- Závlaha Rain Bird (most na NASu) ----------
+// Ovladač ESP-TM2 mluví jen po domácí síti a jen šifrovaně, takže appka na
+// Renderu na něj nevidí. Prostředníkem je skript na NASu (public/nas/zavlaha-most.js).
+// Spojení navazuje VŽDYCKY on: nic se doma neotevírá do internetu a heslo k závlaze
+// zůstává na NASu.
+//
+// Jedno volání dělá obojí — most pošle, jak to doma vypadá, a rovnou si odveze,
+// co se má udělat. Fronta je proto krátká a povel v ní nesmí zestárnout: kdyby
+// si most došel pro půl hodiny starý povel, pustil by zónu, na kterou už nikdo
+// nečeká. Když se most delší dobu neozve, appka to přizná místo toho, aby
+// ukazovala starý stav jako živý.
+//
+// Rozvrh závlahy zůstává v ovladači Rain Bird. Ten jede i bez NASu a bez Renderu,
+// a to je u zavlažování to podstatnější — appka umí stav ukázat a ručně přihodit
+// jednu zónu navíc.
+
+const ZAVLAHA_ZON_MAX = 32;
+const ZAVLAHA_MINUT_MAX = 120;
+const ZAVLAHA_TICHO_MS = 3 * 60 * 1000;      // déle mlčící most bereme jako odpojený
+const ZAVLAHA_UKOL_PLATI_MS = 2 * 60 * 1000; // starší povel se zahodí, ať nepřekvapí
+const ZAVLAHA_FRONTA_MAX = 5;
+
+// Zóny podle toho, co doopravdy zalévají. Jde přejmenovat v appce; tohle je jen
+// první nástřel, ať se nezačíná osmi „Zónami N".
+const ZAVLAHA_NAZVY_VYCHOZI = {
+  1: 'Trávník dole',
+  2: 'Trávník nahoře A',
+  3: 'Trávník nahoře B',
+  4: 'Trávník vzadu',
+  5: 'Kapka záhon zahrada',
+  6: 'Kapka záhon před domem',
+  7: 'Dopouštění retenčky'
+};
+
+let zavlahaStav = null;    // poslední hlášení mostu
+let zavlahaKdy = 0;        // kdy dorazilo
+let zavlahaFronta = [];    // co si most odveze při nejbližším ozvání
+let zavlahaNazvy = { ...ZAVLAHA_NAZVY_VYCHOZI };
+
+function zavlahaZive(at = Date.now()) {
+  return zavlahaKdy > 0 && at - zavlahaKdy < ZAVLAHA_TICHO_MS;
+}
+
+function zavlahaNazev(zona) {
+  return zavlahaNazvy[zona] || `Zóna ${zona}`;
+}
+
+function zavlahaPayload() {
+  return {
+    stav: zavlahaStav,
+    kdy: zavlahaKdy,
+    zive: zavlahaZive(),
+    nazvy: zavlahaNazvy,
+    ceka: zavlahaFronta.length,
+    minutMax: ZAVLAHA_MINUT_MAX
+  };
+}
+
+function zavlahaPosli() {
+  broadcast('zavlaha', { zavlaha: zavlahaPayload() });
+}
+
+function zavlahaCisloZony(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= ZAVLAHA_ZON_MAX ? n : null;
+}
+
+function zavlahaMinuty(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= ZAVLAHA_MINUT_MAX ? n : null;
+}
+
+// Z hlášení mostu se bere jen to, čemu rozumíme, a v rozsahu, který dává smysl.
+// Bez seznamu zón není stav k ničemu — to není hlášení, to je šum.
+function zavlahaOcisti(t) {
+  if (!t || typeof t !== 'object') return null;
+  const zony = zavlahaZony(t.zony);
+  if (!zony.length) return null;
+  const odklad = Number(t.odklad);
+  return {
+    model: typeof t.model === 'string' ? t.model.slice(0, 40) : '',
+    zony,
+    bezi: zavlahaZony(t.bezi),
+    zavlazuje: !!t.zavlazuje,
+    destak: !!t.destak,
+    odklad: Number.isInteger(odklad) && odklad >= 0 && odklad <= 14 ? odklad : 0
+  };
+}
+
+function zavlahaZony(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const x of v) {
+    const n = zavlahaCisloZony(x);
+    if (n !== null && !out.includes(n)) out.push(n);
+  }
+  return out.sort((a, b) => a - b).slice(0, ZAVLAHA_ZON_MAX);
+}
+
+// Stop ruší i to, co ještě čeká ve frontě. Jinak by se hned po zastavení rozjela
+// zóna, kterou si člověk objednal o vteřinu dřív, a vypadalo by to, že stop nefunguje.
+function zavlahaZarad(ukol) {
+  if (ukol.typ === 'stop') zavlahaFronta = [];
+  zavlahaFronta.push({ ...ukol, at: Date.now() });
+  if (zavlahaFronta.length > ZAVLAHA_FRONTA_MAX) {
+    zavlahaFronta = zavlahaFronta.slice(-ZAVLAHA_FRONTA_MAX);
+  }
+  zavlahaPosli();
+}
+
+function zavlahaVyzvedni(at = Date.now()) {
+  const ukoly = zavlahaFronta.filter(u => at - u.at < ZAVLAHA_UKOL_PLATI_MS);
+  zavlahaFronta = [];
+  return ukoly;
+}
+
+function zavlahaSeznam(zony) {
+  return zony.map(z => zavlahaNazev(z)).join(', ');
+}
+
+// Most se ozývá po pár vteřinách, takže se do logu smí jen to, co se změnilo.
+function zavlahaZmena(stary, novy) {
+  if (!stary) return `Závlaha: most na NASu se ozval (${novy.model || 'ovladač'}, zón ${novy.zony.length})`;
+  const predtim = stary.bezi.join(','), ted = novy.bezi.join(',');
+  if (predtim !== ted) {
+    return novy.bezi.length ? `Závlaha: běží ${zavlahaSeznam(novy.bezi)}` : 'Závlaha: doběhlo';
+  }
+  if (stary.destak !== novy.destak) {
+    return novy.destak ? 'Závlaha: dešťové čidlo hlásí déšť' : 'Závlaha: dešťové čidlo je suché';
+  }
+  if (stary.zavlazuje !== novy.zavlazuje) {
+    return novy.zavlazuje ? 'Závlaha: zavlažování zapnuto' : 'Závlaha: zavlažování vypnuto';
+  }
+  return '';
+}
+
+// Most se hlásí sem: pošle stav, odveze si úkoly. Zámek ovládání se tu neuplatňuje —
+// je to hlášení stroje z domácí sítě, stejně jako /api/sauna/active ze Shelly.
+app.post('/api/zavlaha/stav', (req, res) => {
+  const stav = zavlahaOcisti(req.body);
+  if (!stav) return res.status(400).json({ error: 'Chybí seznam zón.' });
+  const hlaska = zavlahaZmena(zavlahaStav, stav);
+  const bylTicho = !zavlahaZive();
+  zavlahaStav = stav;
+  zavlahaKdy = Date.now();
+  if (hlaska) addLog(hlaska);
+  else if (bylTicho) addLog('Závlaha: most na NASu se zase ozývá');
+  const ukoly = zavlahaVyzvedni();
+  zavlahaPosli();
+  res.json({ ok: true, ukoly });
+});
+
+app.post('/api/zavlaha/spust', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const zona = zavlahaCisloZony(req.body && req.body.zona);
+  const minut = zavlahaMinuty(req.body && req.body.minut);
+  if (zona === null) return res.status(400).json({ error: 'Neznámá zóna.' });
+  if (minut === null) return res.status(400).json({ error: `Minuty musí být 1 až ${ZAVLAHA_MINUT_MAX}.` });
+  if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
+  zavlahaZarad({ typ: 'spust', zona, minut });
+  addLog(`Závlaha: ${zavlahaNazev(zona)} na ${minut} min (ručně)`);
+  res.json({ success: true, message: `${zavlahaNazev(zona)}: pouštím na ${minut} min.` });
+});
+
+app.post('/api/zavlaha/stop', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
+  zavlahaZarad({ typ: 'stop' });
+  addLog('Závlaha: zastavit všechno (ručně)');
+  res.json({ success: true, message: 'Zastavuji závlahu.' });
+});
+
+// Přejmenování zón. Prázdné jméno zónu vrátí na „Zóna N", ne že by ji smazalo.
+function zavlahaPrejmenuj(vstup) {
+  if (!vstup || typeof vstup !== 'object') return false;
+  let zmena = false;
+  for (const [klic, hodnota] of Object.entries(vstup)) {
+    const zona = zavlahaCisloZony(klic);
+    if (zona === null) continue;
+    const jmeno = String(hodnota == null ? '' : hodnota).trim().slice(0, 30);
+    if (jmeno) {
+      if (zavlahaNazvy[zona] !== jmeno) zmena = true;
+      zavlahaNazvy[zona] = jmeno;
+    } else if (zavlahaNazvy[zona] !== undefined) {
+      delete zavlahaNazvy[zona];
+      zmena = true;
+    }
+  }
+  return zmena;
+}
+
+app.post('/api/zavlaha/nazvy', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!zavlahaPrejmenuj(req.body && req.body.nazvy)) {
+    return res.status(400).json({ error: 'Nic k přejmenování.' });
+  }
+  zavlahaPosli();
+  res.json({ success: true, nazvy: zavlahaNazvy });
+});
+
+app.post('/api/zavlaha/nazvy/restore', (req, res) => {
+  if (zavlahaPrejmenuj(req.body && req.body.nazvy)) zavlahaPosli();
+  res.json({ ok: true, nazvy: zavlahaNazvy });
+});
+
 // ---------- Tlačítka na Asistentovi (scény) a „nejsme doma" ----------
 // Čtyři pevná tlačítka pod polem na instrukce. Schválně NEJDOU přes jazykový model:
 // jsou to pokaždé tytéž kroky, takže je lepší, když je dělá kód — spolehlivě,
@@ -7509,6 +7715,7 @@ const STORE_POSTS = [
   '/api/blinds/schedule/restore',
   '/api/prazdniny/restore',
   '/api/zapad-delay/restore',
+  '/api/zavlaha/nazvy/restore',
   '/api/runtime/restore',
   '/api/wallbox/daytype/restore'
 ];
@@ -7550,6 +7757,7 @@ function storeSnapshot() {
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/prazdniny/restore': { datum: state.prazdniny },
     '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
+    '/api/zavlaha/nazvy/restore': { nazvy: zavlahaNazvy },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
       dayType: state.wbDayType.manual, until: state.wbDayType.until
