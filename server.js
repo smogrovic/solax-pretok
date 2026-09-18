@@ -268,6 +268,7 @@ const state = {
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   zavlahaDny: [],    // { d, zony: { '3': ms } } — kolik která zóna zalévala (7 dní)
+  sekacka: { stin: null, kdy: 0, potiz: null },  // poslední stav z cloudu Anthbotu
   huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
   heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
@@ -514,6 +515,7 @@ function snapshot() {
     store: storePayload(),
     nukiEnabled,
     zavlaha: zavlahaPayload(),
+    sekacka: sekackaPayload(),
     pushEnabled,
     lockEnabled,
     sensors: state.sensors,
@@ -7737,6 +7739,436 @@ app.post('/api/zavlaha/dny/restore', (req, res) => {
   res.json({ ok: true, dny: state.zavlahaDny.length });
 });
 
+// ---------- Sekačka Anthbot (cloud) ----------
+// Anthbot nemá oficiální API; tvar je odkoukaný z komunitní integrace do Home
+// Assistantu (vincentjanv/anthbot_genie_ha). Na rozdíl od závlahy vede všechno
+// přes cloud, takže Render dosáhne na sekačku sám — žádný most na NASu.
+//
+// Cesta ke stavu má čtyři kroky a každý může vypršet zvlášť:
+//   heslo → bearer token → seznam sekaček → dočasné AWS klíče → podepsané
+//   čtení „shadow" z AWS IoT
+// Token i klíče se drží v paměti a obnovují, až když je potřeba. Po nasazení
+// se všechno vybuduje znovu; je to pár dotazů a stojí to za to, aby se
+// nemuselo řešit ukládání přihlašovacích údajů jinam než do proměnných.
+//
+// Kdyby podpis SigV4 neseděl, AWS odpoví 403 bez jediného slova vysvětlení.
+// Proto ho sada prohání zveřejněnými vzorovými příklady od AWS — viz test/sekacka.js.
+
+const ANTHBOT_EMAIL = process.env.ANTHBOT_EMAIL;
+const ANTHBOT_HESLO = process.env.ANTHBOT_HESLO;
+const ANTHBOT_AREA = process.env.ANTHBOT_AREA_CODE || '420';
+const anthbotEnabled = !!(ANTHBOT_EMAIL && ANTHBOT_HESLO);
+
+const ANTHBOT_HOST = 'api.anthbot.com';
+const ANTHBOT_UA = 'LdMower/1581 CFNetwork/3860.400.51 Darwin/25.3.0';
+const ANTHBOT_AWS_UA = 'aws-sdk-js/3.1025.0';
+const ANTHBOT_SLUZBA = 'iotdata';
+const ANTHBOT_CEKANI_MS = 20000;
+const ANTHBOT_TIK_MS = 60000;          // jak často se čte stav
+const ANTHBOT_KLICE_REZERVA_MS = 300000; // klíče se obnoví pět minut před vypršením
+
+// Stav, který sekačka hlásí. Čísla jsou pořadí v seznamu, jak ho posílá appka.
+const ANTHBOT_STAVY_PORADI = [
+  'idle', 'pause', 'charge', 'sleep', 'ota', 'position', 'globalmowing',
+  'zonemowing', 'pointmowing', 'mapping', 'backtodock', 'resume_point',
+  'shutdown', 'remotectrl', 'factory', 'sleep', 'camera_cleaning',
+  'gototarget', 'bordermowing', 'regionmowing', 'nestmowing'
+];
+
+const ANTHBOT_STAVY_CESKY = {
+  idle: 'stojí', pause: 'pauza', charge: 'nabíjí se', sleep: 'spí',
+  ota: 'aktualizuje se', position: 'hledá polohu', globalmowing: 'seká',
+  zonemowing: 'seká zónu', pointmowing: 'seká místo', mapping: 'mapuje',
+  backtodock: 'vrací se do doku', resume_point: 'navazuje', shutdown: 'vypnutá',
+  remotectrl: 'ruční řízení', factory: 'servisní režim',
+  camera_cleaning: 'čistí kameru', gototarget: 'jede na místo',
+  bordermowing: 'seká okraj', regionmowing: 'seká oblast', nestmowing: 'seká u doku'
+};
+
+// Povely, které appka posílá na servisní shadow. Víc jich zatím nepotřebujeme.
+const ANTHBOT_POVELY = {
+  sekat: { cmd: 'mow_start', popis: 'začít sekat' },
+  stop: { cmd: 'stop_all_tasks', popis: 'zastavit' },
+  dok: { cmd: 'charge_start', popis: 'poslat do doku' }
+};
+
+let anthbotToken = null;
+let anthbotStroj = null;     // { sn, jmeno, model }
+let anthbotKlice = null;     // dočasné AWS klíče + kdy vyprší
+
+// ---------- Podpis SigV4 ----------
+
+function anthbotHmac(klic, text) {
+  return crypto.createHmac('sha256', klic).update(text, 'utf8').digest();
+}
+
+function anthbotOtisk(text) {
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+// Klíč se odvozuje ve čtyřech krocích a na pořadí záleží: datum, region,
+// služba, závěrečná konstanta. Prohození kteréhokoli z nich dá jiný podpis.
+function anthbotPodpisovyKlic(tajny, den, region, sluzba = ANTHBOT_SLUZBA) {
+  const kDatum = anthbotHmac(`AWS4${tajny}`, den);
+  const kRegion = anthbotHmac(kDatum, region);
+  const kSluzba = anthbotHmac(kRegion, sluzba);
+  return anthbotHmac(kSluzba, 'aws4_request');
+}
+
+// Kódování podle AWS: co není v `bezpecne`, jde na %XX velkými písmeny.
+function anthbotKoduj(text, bezpecne = '-._~/') {
+  let out = '';
+  for (const bajt of Buffer.from(String(text), 'utf8')) {
+    const znak = String.fromCharCode(bajt);
+    out += (/[0-9A-Za-z]/.test(znak) || bezpecne.includes(znak))
+      ? znak : '%' + bajt.toString(16).toUpperCase().padStart(2, '0');
+  }
+  return out;
+}
+
+// Hlavičky se do podpisu dávají malými písmeny, seřazené a se smrsknutými
+// mezerami. Jiné pořadí = jiný podpis = 403.
+function anthbotKanonickeHlavicky(hlavicky) {
+  const male = {};
+  for (const [klic, hodnota] of Object.entries(hlavicky)) {
+    male[klic.toLowerCase()] = String(hodnota).trim().split(/\s+/).join(' ');
+  }
+  const klice = Object.keys(male).sort();
+  return {
+    kanonicke: klice.map(k => `${k}:${male[k]}\n`).join(''),
+    podepsane: klice.join(';')
+  };
+}
+
+function anthbotAutorizace({ klicId, tajny, region, den, amzDatum, metoda, cesta, dotaz, hlavicky, otiskTela, sluzba = ANTHBOT_SLUZBA }) {
+  const { kanonicke, podepsane } = anthbotKanonickeHlavicky(hlavicky);
+  const pozadavek = [metoda, cesta, dotaz, kanonicke, podepsane, otiskTela].join('\n');
+  const rozsah = `${den}/${region}/${sluzba}/aws4_request`;
+  const kPodpisu = ['AWS4-HMAC-SHA256', amzDatum, rozsah, anthbotOtisk(pozadavek)].join('\n');
+  const podpis = crypto.createHmac('sha256', anthbotPodpisovyKlic(tajny, den, region, sluzba))
+    .update(kPodpisu, 'utf8').digest('hex');
+  return `AWS4-HMAC-SHA256 Credential=${klicId}/${rozsah}, SignedHeaders=${podepsane}, Signature=${podpis}`;
+}
+
+function anthbotCas(kdy = new Date()) {
+  const amz = kdy.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  return { amz, den: amz.slice(0, 8) };
+}
+
+// ---------- Cloud Anthbotu ----------
+
+// Všechny endpointy odpovídají obálkou { code, data }. Nula znamená v pořádku;
+// cokoliv jiného je odmítnutí a nemá smysl číst data.
+async function anthbotCloud(cesta, { token, metoda = 'GET', telo, dotaz } = {}) {
+  const url = new URL(`https://${ANTHBOT_HOST}${cesta}`);
+  for (const [k, v] of Object.entries(dotaz || {})) url.searchParams.set(k, v);
+  const hlavicky = {
+    Accept: 'application/json, text/plain, */*',
+    version: 'v2',
+    language: 'en',
+    'User-Agent': ANTHBOT_UA
+  };
+  if (token) hlavicky.Authorization = token;
+  if (telo) hlavicky['content-type'] = 'application/json';
+  const res = await fetch(url, {
+    method: metoda,
+    headers: hlavicky,
+    body: telo ? JSON.stringify(telo) : undefined,
+    signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS)
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${cesta}: HTTP ${res.status} — ${text.slice(0, 160)}`);
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`${cesta}: odpověď není JSON`);
+  }
+  if (!json || json.code !== 0) {
+    throw new Error(`${cesta}: cloud odmítl (code ${json && json.code}${json && json.msg ? ', ' + json.msg : ''})`);
+  }
+  return json.data;
+}
+
+// Ověřovací token, na kterém některé endpointy trvají: otisk sériáku s časem
+// a ten čas za ním, ať se stejný požadavek nedá donekonečna přehrávat.
+function anthbotOverovaciToken(sn, cas) {
+  const razitko = String(cas === undefined ? Math.floor(Date.now() / 1000) : cas);
+  return crypto.createHash('md5').update(`${sn}${razitko}`, 'utf8').digest('hex') + razitko;
+}
+
+async function anthbotPrihlas() {
+  const data = await anthbotCloud('/api/v1/login', {
+    metoda: 'POST',
+    telo: { username: ANTHBOT_EMAIL, password: ANTHBOT_HESLO, areaCode: ANTHBOT_AREA }
+  });
+  if (!data || typeof data.access_token !== 'string' || !data.access_token) {
+    throw new Error('přihlášení prošlo, ale nepřišel token');
+  }
+  anthbotToken = `Bearer ${data.access_token}`;
+  return anthbotToken;
+}
+
+function anthbotZeSeznamu(data) {
+  if (!Array.isArray(data)) return null;
+  for (const p of data) {
+    if (p && typeof p.sn === 'string' && p.sn) {
+      return {
+        sn: p.sn,
+        jmeno: (typeof p.alias === 'string' && p.alias) ? p.alias : p.sn,
+        model: p.category_id === undefined || p.category_id === null ? '' : String(p.category_id)
+      };
+    }
+  }
+  return null;
+}
+
+async function anthbotNajdiStroj(token) {
+  const stroj = anthbotZeSeznamu(await anthbotCloud('/api/v1/device/bind/list', { token }));
+  if (!stroj) throw new Error('na účtu není žádná sekačka');
+  return stroj;
+}
+
+async function anthbotNoveKlice(token, sn) {
+  const data = await anthbotCloud('/api/v1/device/v2/iot/sts/arn', {
+    token, metoda: 'POST',
+    telo: { sn, verification_token: anthbotOverovaciToken(sn) }
+  });
+  const chybi = ['access_key_id', 'secret_access_key', 'session_token', 'region_name', 'endpoint']
+    .filter(k => typeof (data || {})[k] !== 'string' || !data[k]);
+  if (chybi.length) throw new Error(`dočasné klíče neobsahují: ${chybi.join(', ')}`);
+  // Vypršení chodí v sekundách; necháváme si rezervu, ať se netrefíme do hrany
+  const doKdy = Number(data.expiration) > 0 ? Number(data.expiration) * 1000 : Date.now() + 3600000;
+  return {
+    klicId: data.access_key_id,
+    tajny: data.secret_access_key,
+    relace: data.session_token,
+    region: data.region_name,
+    endpoint: String(data.endpoint).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+    doKdy
+  };
+}
+
+function anthbotKliceStare(at = Date.now()) {
+  return !anthbotKlice || at > anthbotKlice.doKdy - ANTHBOT_KLICE_REZERVA_MS;
+}
+
+// Jeden průchod celou cestou. `znovu` znamená, že se zahodí všechno uložené —
+// používá se, když cloud řekne, že token nebo klíče už neplatí.
+async function anthbotPriprav(znovu = false) {
+  if (znovu) { anthbotToken = null; anthbotStroj = null; anthbotKlice = null; }
+  if (!anthbotToken) await anthbotPrihlas();
+  if (!anthbotStroj) anthbotStroj = await anthbotNajdiStroj(anthbotToken);
+  if (anthbotKliceStare()) anthbotKlice = await anthbotNoveKlice(anthbotToken, anthbotStroj.sn);
+  return { token: anthbotToken, stroj: anthbotStroj, klice: anthbotKlice };
+}
+
+// ---------- Čtení stavu z AWS IoT ----------
+
+function anthbotPodepsanyDotaz(klice, sn, jmenoStinu, kdy = new Date()) {
+  const cesta = `/things/${anthbotKoduj(sn, '-._~')}/shadow`;
+  const dotaz = `name=${anthbotKoduj(jmenoStinu, '-._~')}`;
+  const otiskTela = anthbotOtisk('');
+  const { amz, den } = anthbotCas(kdy);
+  const kPodpisu = {
+    host: klice.endpoint,
+    'x-amz-content-sha256': otiskTela,
+    'x-amz-date': amz,
+    'x-amz-security-token': klice.relace,
+    'x-amz-user-agent': ANTHBOT_AWS_UA
+  };
+  const podpis = anthbotAutorizace({
+    klicId: klice.klicId, tajny: klice.tajny, region: klice.region, den, amzDatum: amz,
+    metoda: 'GET', cesta: anthbotKoduj(cesta), dotaz, hlavicky: kPodpisu, otiskTela
+  });
+  return {
+    url: `https://${klice.endpoint}${cesta}?${dotaz}`,
+    hlavicky: { ...kPodpisu, Accept: '*/*', 'User-Agent': ANTHBOT_AWS_UA, Authorization: podpis }
+  };
+}
+
+async function anthbotStin(klice, sn, jmenoStinu = 'property') {
+  const { url, hlavicky } = anthbotPodepsanyDotaz(klice, sn, jmenoStinu);
+  const res = await fetch(url, { headers: hlavicky, signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS) });
+  const text = await res.text();
+  if (!res.ok) {
+    const chyba = new Error(`stav: HTTP ${res.status} — ${text.slice(0, 160)}`);
+    chyba.status = res.status;
+    throw chyba;
+  }
+  const json = JSON.parse(text);
+  return (json.state && json.state.reported) || {};
+}
+
+// ---------- Povely ----------
+
+// Povel se publikuje na servisní shadow. Appka přitom kanonickou cestu skládá
+// po svém, a na to je AWS citlivé — proto se zkouší tři tvary za sebou, jak to
+// dělá i komunitní integrace. Když projde první, na další nedojde.
+function anthbotPodepsanyPovel(klice, sn, cmd, data, varianta, kdy = new Date()) {
+  const topic = `$aws/things/${sn}/shadow/name/service/update`;
+  const telo = JSON.stringify({ state: { desired: { cmd, data } } });
+  const otiskTela = anthbotOtisk(telo);
+  const { amz, den } = anthbotCas(kdy);
+  const cestaKodovana = '/topics/' + anthbotKoduj(topic, '-._~');
+  const cestaSyra = `/topics/${topic}`;
+  const cesta = varianta === 'syra' ? cestaSyra : cestaKodovana;
+  // „dvojité" = cesta se pro podpis zakóduje ještě jednou (z % je %25),
+  // „prima" = do podpisu jde tak, jak se posílá
+  const kanonicka = varianta === 'prima' ? cestaKodovana : anthbotKoduj(cesta);
+  const kPodpisu = {
+    host: klice.endpoint,
+    'content-length': String(Buffer.byteLength(telo)),
+    'content-type': 'application/octet-stream',
+    'x-amz-content-sha256': otiskTela,
+    'x-amz-date': amz,
+    'x-amz-security-token': klice.relace,
+    'x-amz-user-agent': ANTHBOT_AWS_UA
+  };
+  const podpis = anthbotAutorizace({
+    klicId: klice.klicId, tajny: klice.tajny, region: klice.region, den, amzDatum: amz,
+    metoda: 'POST', cesta: kanonicka, dotaz: '', hlavicky: kPodpisu, otiskTela
+  });
+  return {
+    url: `https://${klice.endpoint}${cesta}`,
+    telo,
+    hlavicky: {
+      ...kPodpisu, Accept: '*/*', 'Content-Type': 'application/octet-stream',
+      'Content-Length': String(Buffer.byteLength(telo)),
+      'User-Agent': ANTHBOT_AWS_UA, Authorization: podpis
+    }
+  };
+}
+
+const ANTHBOT_VARIANTY = ['dvojita', 'prima', 'syra'];
+
+async function anthbotPosliPovel(klice, sn, cmd, data = 1) {
+  let posledni = '';
+  for (const varianta of ANTHBOT_VARIANTY) {
+    const p = anthbotPodepsanyPovel(klice, sn, cmd, data, varianta);
+    const res = await fetch(p.url, {
+      method: 'POST', headers: p.hlavicky, body: p.telo,
+      signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS)
+    });
+    if (res.ok) return varianta;
+    posledni = `HTTP ${res.status} (${varianta})`;
+    // 403 znamená, že se netrefil podpis — má smysl zkusit jiný tvar cesty.
+    // Cokoliv jiného je odmítnutí od AWS a opakování nepomůže.
+    if (res.status !== 403) break;
+  }
+  throw new Error(`povel ${cmd} neprošel: ${posledni}`);
+}
+
+// ---------- Čtení hodnot ze stavu ----------
+
+// Pole chodí buď jako holá hodnota, nebo zabalená v { value: … }
+function anthbotHodnota(pole) {
+  if (pole && typeof pole === 'object' && !Array.isArray(pole) && 'value' in pole) return pole.value;
+  return pole;
+}
+
+function anthbotCislo(hodnota) {
+  const n = Number(anthbotHodnota(hodnota));
+  return Number.isFinite(n) ? n : null;
+}
+
+function anthbotStavZeStinu(stin) {
+  for (const klic of ['robot_sta', 'mode']) {
+    const hodnota = anthbotHodnota(stin[klic]);
+    if (typeof hodnota === 'string' && hodnota) return hodnota.toLowerCase();
+    if (Number.isInteger(hodnota)) {
+      return ANTHBOT_STAVY_PORADI[hodnota] || String(hodnota);
+    }
+  }
+  return null;
+}
+
+function anthbotPrectiStin(stin) {
+  const s = stin || {};
+  const vnorene = (klic, pole) => (s[klic] && typeof s[klic] === 'object' ? s[klic][pole] : undefined);
+  const stav = anthbotStavZeStinu(s);
+  const vyska = vnorene('param_set', 'cutter_height');
+  return {
+    stav,
+    popis: stav ? (ANTHBOT_STAVY_CESKY[stav] || stav) : null,
+    baterie: anthbotCislo(s.elec),
+    chyba: anthbotCislo(s.error) || 0,
+    vyska: vyska === undefined ? anthbotCislo(vnorene('mow_remote', 'cutter_height')) : Number(vyska),
+    plocha: anthbotCislo(s.mowing_area_new),
+    minuty: anthbotCislo(s.mowing_time_new),
+    plochaCelkem: anthbotCislo(s.mowing_area),
+    minutyCelkem: anthbotCislo(s.mowing_time) === null ? null : Math.round(anthbotCislo(s.mowing_time) / 60),
+    rtk: vnorene('rtk', 'state'),
+    ip: vnorene('net_config', 'ip'),
+    hlasitost: anthbotCislo(s.volume)
+  };
+}
+
+// Jestli se jména polí u M5 trefila, se odsud ověřit nedá. Do appky proto jde
+// i syrový stav — když něco chybí, je to na stránce vidět a dá se to doplnit
+// bez dalšího kolečka přes SSH.
+function sekackaPayload() {
+  return {
+    zapnuto: anthbotEnabled,
+    jmeno: anthbotStroj ? anthbotStroj.jmeno : '',
+    model: anthbotStroj ? anthbotStroj.model : '',
+    kdy: state.sekacka.kdy,
+    // `chyba` je chybový kód od sekačky, `potiz` problém se spojením — dvě různé věci
+    potiz: state.sekacka.potiz,
+    ...anthbotPrectiStin(state.sekacka.stin),
+    syrove: state.sekacka.stin
+  };
+}
+
+function sekackaPosli() {
+  broadcast('sekacka', { sekacka: sekackaPayload() });
+}
+
+async function sekackaNacti(znovu = false) {
+  if (!anthbotEnabled) return;
+  try {
+    const { stroj, klice } = await anthbotPriprav(znovu);
+    const stin = await anthbotStin(klice, stroj.sn);
+    const drive = anthbotStavZeStinu(state.sekacka.stin || {});
+    state.sekacka.stin = stin;
+    state.sekacka.kdy = Date.now();
+    state.sekacka.potiz = null;
+    const ted = anthbotStavZeStinu(stin);
+    if (ted && ted !== drive) {
+      addLog(`Sekačka: ${ANTHBOT_STAVY_CESKY[ted] || ted}`);
+    }
+    sekackaPosli();
+  } catch (err) {
+    // 401 i 403 znamenají „přihlaš se znovu"; jednou to zkusíme, pak to přiznáme
+    if (!znovu && /40[13]|cloud odmítl/.test(err.message)) return sekackaNacti(true);
+    state.sekacka.potiz = err.message;
+    sekackaPosli();
+  }
+}
+
+app.post('/api/sekacka/povel', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!anthbotEnabled) return res.status(503).json({ error: 'Sekačka není nastavená (chybí ANTHBOT_EMAIL a ANTHBOT_HESLO).' });
+  const volba = ANTHBOT_POVELY[req.body && req.body.co];
+  if (!volba) return res.status(400).json({ error: 'Neznámý povel.' });
+  try {
+    const { stroj, klice } = await anthbotPriprav();
+    await anthbotPosliPovel(klice, stroj.sn, volba.cmd);
+    addLog(`Sekačka: ${volba.popis} (ručně)`);
+    // Stav se čte hned, ať se na stránce nekouká na starou hodnotu
+    sekackaNacti().catch(() => {});
+    res.json({ success: true, message: `Sekačka: ${volba.popis}.` });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/sekacka/obnov', async (req, res) => {
+  if (!anthbotEnabled) return res.status(503).json({ error: 'Sekačka není nastavená.' });
+  await sekackaNacti(true);
+  res.json({ ok: true, sekacka: sekackaPayload() });
+});
+
 // ---------- Tlačítka na Asistentovi (scény) a „nejsme doma" ----------
 // Čtyři pevná tlačítka pod polem na instrukce. Schválně NEJDOU přes jazykový model:
 // jsou to pokaždé tytéž kroky, takže je lepší, když je dělá kód — spolehlivě,
@@ -8220,6 +8652,8 @@ const server = app.listen(PORT, async () => {
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
   scheduleEvery(zavlahaPlanHlidej, ZAVLAHA_PLAN_TIK_MS, ZAVLAHA_PLAN_TIK_MS);
+  if (anthbotEnabled) scheduleEvery(() => sekackaNacti().catch(() => {}), ANTHBOT_TIK_MS, 5000);
+  else console.log('Sekačka Anthbot vypnutá (chybí ANTHBOT_EMAIL / ANTHBOT_HESLO).');
   storeStart();
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);

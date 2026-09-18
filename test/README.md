@@ -22,6 +22,7 @@ node test/zavlaha.js                  # místní protokol modulu Rain Bird LNK (
 node test/zavlaha-most.js             # most na NASu: spínací povely, kolo, ochrana proti nesmyslům
 node test/zavlaha-server.js           # závlaha v appce: fronta povelů, stáří hlášení, jména zón
 node test/sekacka.js                  # sekačka Anthbot: podpis SigV4 proti vzoru AWS, přihlášení
+node test/sekacka-server.js           # sekačka v appce: cloud Anthbotu, obnova klíčů, povely
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
 node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí
@@ -38,6 +39,7 @@ node test/runtime-zavlaha.js          # falešný modul ↔ most ↔ ostrý serv
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
 ./test/browser-run.sh test/browser-zaloha.js   # řádek o záloze na stránce Log
 ./test/browser-run.sh test/browser-zavlaha.js  # stránka Závlaha: zóny, mlčící most, potvrzení
+./test/browser-run.sh test/browser-uklid.js    # stránka Úklid: sekačka, mlčící cloud, syrová hlášení
 ./test/browser-run.sh test/browser-log.js      # log a karta výpadků („10:00–nyní")
 ./test/browser-run.sh test/browser-mezery.js   # žádné dvě karty se na sebe nelepí
 ./test/browser-run.sh test/browser-smoke.js    # celá appka se načte a vykreslí bez chyby

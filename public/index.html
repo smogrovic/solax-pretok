@@ -1939,6 +1939,22 @@
   .zavlaha-chip:disabled{opacity:0.45;}
   .zavlaha-bar{background:var(--green);}
   .zavlaha-meta{width:100%;font-size:12px;color:var(--grey-text);display:flex;flex-direction:column;gap:3px;}
+  .sek-tlacitka{width:100%;display:flex;gap:8px;}
+  .sek-btn{
+    flex:1;border:none;border-radius:16px;padding:11px 8px;
+    font-size:13px;font-weight:700;background:rgba(44,62,80,0.07);color:var(--navy);
+  }
+  .sek-btn.hlavni{background:var(--green);color:#fff;}
+  .sek-btn.stop{background:rgba(229,83,75,0.12);color:var(--red);}
+  .sek-btn:disabled{opacity:0.45;}
+  .sek-baterie{font-size:26px;font-weight:700;color:var(--navy);margin-top:6px;}
+  .sek-syrove{
+    width:100%;font-size:11px;color:var(--grey-text);
+    display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto;
+  }
+  .sek-syrove div{display:flex;justify-content:space-between;gap:10px;}
+  .sek-syrove b{font-weight:600;color:var(--navy);flex-shrink:0;}
+  .sek-syrove span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
 </style>
@@ -2691,6 +2707,45 @@
       <div class="card stats-card">
         <div class="graph-title">Posledních 7 dní</div>
         <div class="wbsrc-list" id="zavlahaTyden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stránka: Úklid -->
+  <div class="slide" data-title="Úklid">
+    <div class="page">
+      <div class="card lock-panel">
+        <div class="lock-icon">🔒</div>
+        <div class="lock-text">Ovládání je zamčené</div>
+        <button class="faceid-btn">Odemknout Face ID</button>
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
+        <button class="unlock-btn">Odemknout</button>
+        <div class="lock-error"></div>
+      </div>
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="sekLight"></div>
+            <div class="shelly-label">Sekačka <span class="state" id="sekStav">–</span></div>
+          </div>
+          <div class="sek-baterie" id="sekBaterie">– %</div>
+          <div class="zavlaha-meta" id="sekMeta"></div>
+        </div>
+      </div>
+
+      <div class="card lockable">
+        <div class="sek-tlacitka">
+          <button class="sek-btn hlavni" id="sekSekatBtn" type="button">Sekat</button>
+          <button class="sek-btn stop" id="sekStopBtn" type="button">Zastavit</button>
+          <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
+        </div>
+        <div class="zavlaha-hint" id="sekHint"></div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Co sekačka hlásí</div>
+        <div class="sek-syrove" id="sekSyrove"></div>
+        <div class="wbsrc-note">Syrová hlášení z cloudu. Je to tu proto, že jména polí u M5 nejsou nikde popsaná — podle tohohle se dolaďuje, co appka ukazuje nahoře.</div>
       </div>
     </div>
   </div>
@@ -8882,6 +8937,127 @@ async function zavlahaPrejmenuj(zona) {
 if (zavlahaStopBtnEl) zavlahaStopBtnEl.addEventListener('click', zavlahaStop);
 if (zavlahaSerieBtnEl) zavlahaSerieBtnEl.addEventListener('click', zavlahaSerie);
 
+// ---------- Sekačka Anthbot ----------
+// Stav chodí z cloudu přes server. Jména polí u M5 nejsou nikde popsaná, takže
+// se do appky posílá i syrové hlášení — co appka nahoře neumí pojmenovat, je
+// aspoň vidět dole a dá se to doladit bez hádání.
+const sekLightEl = document.getElementById('sekLight');
+const sekStavEl = document.getElementById('sekStav');
+const sekBaterieEl = document.getElementById('sekBaterie');
+const sekMetaEl = document.getElementById('sekMeta');
+const sekSyroveEl = document.getElementById('sekSyrove');
+const sekHintEl = document.getElementById('sekHint');
+const sekSekatBtnEl = document.getElementById('sekSekatBtn');
+const sekStopBtnEl = document.getElementById('sekStopBtn');
+const sekDokBtnEl = document.getElementById('sekDokBtn');
+
+// Stavy, při kterých sekačka doopravdy jezdí — podle nich svítí kontrolka
+const SEK_JEDE = ['globalmowing', 'zonemowing', 'pointmowing', 'bordermowing',
+  'regionmowing', 'nestmowing', 'backtodock', 'gototarget', 'position', 'mapping'];
+
+let sekackaData = { zapnuto: false, kdy: 0, potiz: null, syrove: null };
+
+function sekackaZive() {
+  return !!(sekackaData.zapnuto && sekackaData.kdy && !sekackaData.potiz);
+}
+
+function sekackaMetaRadky() {
+  const d = sekackaData;
+  if (!d.zapnuto) return ['Sekačka není nastavená — chybí přihlášení k Anthbotu v Renderu.'];
+  if (d.potiz) return [`Cloud Anthbotu se neozval: ${d.potiz}`];
+  if (!d.kdy) return ['Zatím nic nepřišlo — první čtení proběhne do minuty.'];
+  const r = [];
+  if (d.jmeno) r.push(`${d.jmeno}${d.model ? ` (kategorie ${d.model})` : ''}`);
+  if (d.chyba) r.push(`Chyba č. ${d.chyba}`);
+  if (d.vyska !== null && d.vyska !== undefined) r.push(`Výška sečení: ${d.vyska} mm`);
+  if (d.plocha) r.push(`Tenhle záběr: ${d.plocha} m²${d.minuty ? `, ${d.minuty} min` : ''}`);
+  if (d.plochaCelkem) r.push(`Celkem: ${d.plochaCelkem} m²${d.minutyCelkem ? `, ${d.minutyCelkem} min` : ''}`);
+  if (d.rtk !== undefined && d.rtk !== null) r.push(`RTK: ${d.rtk}`);
+  r.push('Naposledy ' + logCas(d.kdy));
+  return r;
+}
+
+function renderSekacka(d) {
+  if (d) sekackaData = { ...sekackaData, ...d };
+  const zive = sekackaZive();
+  const jede = zive && SEK_JEDE.includes(sekackaData.stav);
+
+  if (sekLightEl) {
+    sekLightEl.classList.toggle('on', jede);
+    sekLightEl.classList.toggle('off', !!sekackaData.potiz || (sekackaData.zapnuto && !!sekackaData.chyba));
+  }
+  if (sekStavEl) {
+    sekStavEl.textContent = !sekackaData.zapnuto ? 'nenastavená'
+      : sekackaData.potiz ? 'neozývá se'
+      : (sekackaData.popis || '–');
+  }
+  if (sekBaterieEl) {
+    sekBaterieEl.textContent = (zive && sekackaData.baterie !== null && sekackaData.baterie !== undefined)
+      ? `${sekackaData.baterie} %` : '– %';
+  }
+  if (sekMetaEl) {
+    sekMetaEl.textContent = '';
+    for (const text of sekackaMetaRadky()) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      sekMetaEl.appendChild(div);
+    }
+  }
+  for (const btn of [sekSekatBtnEl, sekStopBtnEl, sekDokBtnEl]) {
+    if (btn) btn.disabled = !zive;
+  }
+  if (sekHintEl) {
+    sekHintEl.textContent = zive
+      ? 'Sekačka jede podle svého rozvrhu v appce Anthbot. Tohle je ruční zásah navíc.'
+      : 'Dokud se cloud Anthbotu neozve, ovládat nejde — povel by spadl do prázdna.';
+  }
+  if (sekSyroveEl) {
+    sekSyroveEl.textContent = '';
+    const syrove = sekackaData.syrove;
+    if (!syrove || !Object.keys(syrove).length) {
+      const prazdno = document.createElement('div');
+      prazdno.textContent = 'Zatím nic.';
+      sekSyroveEl.appendChild(prazdno);
+    } else {
+      for (const klic of Object.keys(syrove).sort()) {
+        const radek = document.createElement('div');
+        const jmeno = document.createElement('b');
+        jmeno.textContent = klic;
+        const hodnota = document.createElement('span');
+        const v = syrove[klic];
+        hodnota.textContent = (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
+        radek.appendChild(jmeno);
+        radek.appendChild(hodnota);
+        sekSyroveEl.appendChild(radek);
+      }
+    }
+  }
+}
+
+async function sekackaPovel(co, popis, btn) {
+  if (!confirm(`Sekačka: ${popis}?`)) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/sekacka/povel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ co })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Povel se nepodařilo poslat.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Sekačka: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+if (sekSekatBtnEl) sekSekatBtnEl.addEventListener('click', () => sekackaPovel('sekat', 'začít sekat', sekSekatBtnEl));
+if (sekStopBtnEl) sekStopBtnEl.addEventListener('click', () => sekackaPovel('stop', 'zastavit', sekStopBtnEl));
+if (sekDokBtnEl) sekDokBtnEl.addEventListener('click', () => sekackaPovel('dok', 'poslat do doku', sekDokBtnEl));
+
 function bezpecne(fn) {
   try { fn(); } catch (err) { console.error('render:', err); }
 }
@@ -9090,6 +9266,7 @@ function applySnapshot(snap) {
   blindTimersData = snap.blindTimers || [];
   bezpecne(renderBlindTimers);
   bezpecne(() => renderZavlaha(snap.zavlaha));
+  bezpecne(() => renderSekacka(snap.sekacka));
   bezpecne(() => renderPrazdniny(snap.prazdniny));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
@@ -9392,6 +9569,7 @@ function connectStream() {
     saveTimersLocal();
   });
   es.addEventListener('zavlaha', e => { renderZavlaha(JSON.parse(e.data).zavlaha); });
+  es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('blindRules', e => {
