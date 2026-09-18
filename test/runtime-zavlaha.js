@@ -30,6 +30,8 @@ const ODPOVEDI = {
   '3E': 'BE01',             // čidlo hlásí déšť
   '36': 'B6000000',         // žádný odklad
   '3900030A': '0139',       // pusť zónu 3 na 10 min → potvrzeno
+  '39000101': '0139',       // pusť zónu 1 na 1 min → potvrzeno
+  '39000401': '0139',       // pusť zónu 4 na 1 min → potvrzeno
   '40': '0140'              // zastav → potvrzeno
 };
 
@@ -187,6 +189,33 @@ function spustModul() {
   check('a zóna 2 má naměřeno přes vteřinu', zona2 >= 1000, true);
   // Ostatní zóny neběžely, takže nesmí mít nic
   check('ostatní zóny nic nemají', Object.keys(dny.length ? dny[0].zony : {}).join(','), '2');
+
+  // Co tenhle oddíl NEDOKÁŽE: dočkat se druhého kroku. Ten přijde na řadu až po
+  // minutě běhu a tolik se v sadě čekat nedá — posun řady prověřuje
+  // test/zavlaha-server.js s podstrčeným časem. Tady jde o švy: že se řada
+  // objedná, zařadí a první zóna doopravdy dorazí k modulu.
+  nadpis('8) Řada zón naostro');
+  // Nic nesmí běžet, ať se řada posune podle rozjezdu, ne podle běžící zóny
+  ODPOVEDI['3F00'] = 'BF0000000000';
+  await M.kolo(nastaveni, pamet, () => {});
+  const rada = await spat('/api/zavlaha/serie', 'POST',
+    { kroky: [{ zona: 1, minut: 1 }, { zona: 4, minut: 1 }] });
+  check('appka řadu přijme', rada.status, 200);
+  check('  a ví o dvou krocích', JSON.parse(rada.body).plan.kroky.length, 2);
+
+  videno.length = 0;
+  await M.kolo(nastaveni, pamet, () => {});
+  check('k modulu dorazila první zóna', videno.includes('39000101'), true);
+  check('  a druhá zatím ne', videno.includes('39000401'), false);
+
+  // Krok je hotový, až uplyne jeho čas — minuta je na sadu moc, tak se
+  // plánu posune začátek do minulosti přes zastavení a nové spuštění
+  const plan = ((await snapshot()).zavlaha || {}).plan;
+  check('plán ukazuje první krok', plan && plan.index, 0);
+  check('  a jméno zóny sedí', plan && plan.zona, 1);
+
+  check('stopka řadu zruší', (await spat('/api/zavlaha/stop', 'POST', {})).status, 200);
+  check('  a plán zmizí i v appce', ((await snapshot()).zavlaha || {}).plan, null);
 
   fs.rmSync(dir, { recursive: true, force: true });
   uklid();

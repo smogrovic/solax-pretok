@@ -7330,6 +7330,18 @@ const ZAVLAHA_MEZERA_MAX_MS = 2 * 60 * 1000;
 // a stejně tak ji vrátit — příště na to nebude potřeba nasazení.
 const ZAVLAHA_SKRYTE_VYCHOZI = [8];
 
+// Řada zón: pustí se jedna, po doběhnutí další. Ovladač umí povel „zařaď zónu
+// do fronty" (0x4B), jenže jestli ho ESP-TM2 sní, se odsud neověří — kdyby ne,
+// tiše by se zalila jen první zóna. Řadu proto drží server: je to testovatelné
+// a předvídatelné, jen to potřebuje živý most.
+const ZAVLAHA_SERIE_MAX = 12;           // kroků v jedné řadě
+const ZAVLAHA_SERIE_MINUT_MAX = 360;    // součet minut, ať se nedá spustit půldenní zálivka
+// Most se ozývá po patnácti vteřinách a ovladač chvíli trvá, než ventil otevře.
+// Bez tohohle odkladu by řada usoudila „zóna neběží, je hotovo" dřív, než se
+// vůbec stihla rozběhnout, a proletěla by všemi zónami za pár vteřin.
+const ZAVLAHA_ROZJEZD_MS = 90 * 1000;
+const ZAVLAHA_PLAN_TIK_MS = 60 * 1000;
+
 // Zóny podle toho, co doopravdy zalévají. Jde přejmenovat v appce; tohle je jen
 // první nástřel, ať se nezačíná osmi „Zónami N".
 const ZAVLAHA_NAZVY_VYCHOZI = {
@@ -7347,6 +7359,8 @@ let zavlahaKdy = 0;        // kdy dorazilo
 let zavlahaFronta = [];    // co si most odveze při nejbližším ozvání
 let zavlahaNazvy = { ...ZAVLAHA_NAZVY_VYCHOZI };
 let zavlahaSkryte = [...ZAVLAHA_SKRYTE_VYCHOZI];
+let zavlahaVolbaMinut = {};   // zóna → kolik minut se u ní posílalo naposledy
+let zavlahaPlan = null;       // rozjetá řada: { kroky, index, zacatek, doKdy }
 
 function zavlahaZive(at = Date.now()) {
   return zavlahaKdy > 0 && at - zavlahaKdy < ZAVLAHA_TICHO_MS;
@@ -7363,6 +7377,8 @@ function zavlahaPayload() {
     zive: zavlahaZive(),
     nazvy: zavlahaNazvy,
     skryte: zavlahaSkryte,
+    minuty: zavlahaVolbaMinut,
+    plan: zavlahaPlanPayload(),
     dny: state.zavlahaDny,
     ceka: zavlahaFronta.length,
     minutMax: ZAVLAHA_MINUT_MAX
@@ -7488,6 +7504,90 @@ function zavlahaZmena(stary, novy) {
   return '';
 }
 
+function zavlahaPlanPayload(at = Date.now()) {
+  if (!zavlahaPlan) return null;
+  const krok = zavlahaPlan.kroky[zavlahaPlan.index];
+  return {
+    kroky: zavlahaPlan.kroky,
+    index: zavlahaPlan.index,
+    zona: krok.zona,
+    minut: krok.minut,
+    doKdy: zavlahaPlan.doKdy,
+    zbyva: Math.max(0, zavlahaPlan.doKdy - at)
+  };
+}
+
+// Kroky z appky: pořadí se zachovává, protože v něm je smysl (napřed trávník,
+// pak kapka). Zóna se smí opakovat, jen se hlídá délka celé řady.
+function zavlahaKroky(vstup) {
+  if (!Array.isArray(vstup) || !vstup.length) return { chyba: 'Chybí zóny.' };
+  if (vstup.length > ZAVLAHA_SERIE_MAX) return { chyba: `Najednou jde spustit nejvýš ${ZAVLAHA_SERIE_MAX} zón.` };
+  const kroky = [];
+  let celkem = 0;
+  for (const k of vstup) {
+    const zona = zavlahaCisloZony(k && k.zona);
+    const minut = zavlahaMinuty(k && k.minut);
+    if (zona === null) return { chyba: 'Neznámá zóna.' };
+    if (minut === null) return { chyba: `Minuty musí být 1 až ${ZAVLAHA_MINUT_MAX}.` };
+    if (zavlahaSkryta(zona)) return { chyba: `${zavlahaNazev(zona)} je schovaná.` };
+    kroky.push({ zona, minut });
+    celkem += minut;
+  }
+  if (celkem > ZAVLAHA_SERIE_MINUT_MAX) {
+    return { chyba: `Celá řada smí trvat nejvýš ${ZAVLAHA_SERIE_MINUT_MAX} min, tahle má ${celkem}.` };
+  }
+  return { kroky, celkem };
+}
+
+function zavlahaZapamatujMinuty(kroky) {
+  for (const k of kroky) zavlahaVolbaMinut[k.zona] = k.minut;
+}
+
+function zavlahaPlanKrok(at) {
+  const krok = zavlahaPlan.kroky[zavlahaPlan.index];
+  zavlahaPlan.zacatek = at;
+  zavlahaPlan.doKdy = at + krok.minut * 60000;
+  zavlahaZarad({ typ: 'spust', zona: krok.zona, minut: krok.minut });
+  return krok;
+}
+
+function zavlahaPlanStart(kroky, at = Date.now()) {
+  zavlahaPlan = { kroky, index: 0, zacatek: at, doKdy: at };
+  return zavlahaPlanKrok(at);
+}
+
+function zavlahaPlanZrus(duvod) {
+  if (!zavlahaPlan) return '';
+  zavlahaPlan = null;
+  return duvod;
+}
+
+// Posun řady. Krok je hotový, když uplynul jeho čas, nebo když zóna neběží
+// a od jejího spuštění je víc než rozjezdový odklad.
+function zavlahaPlanTik(at = Date.now()) {
+  if (!zavlahaPlan) return '';
+  const krok = zavlahaPlan.kroky[zavlahaPlan.index];
+  const bezi = !!(zavlahaStav && zavlahaStav.bezi.includes(krok.zona));
+  const hotovo = at >= zavlahaPlan.doKdy || (!bezi && at - zavlahaPlan.zacatek > ZAVLAHA_ROZJEZD_MS);
+  if (!hotovo) return '';
+  if (zavlahaPlan.index + 1 >= zavlahaPlan.kroky.length) {
+    zavlahaPlan = null;
+    return 'Závlaha: řada dozalévala';
+  }
+  zavlahaPlan.index++;
+  const dalsi = zavlahaPlanKrok(at);
+  return `Závlaha: řada pokračuje — ${zavlahaNazev(dalsi.zona)} na ${dalsi.minut} min`;
+}
+
+// Bez mostu se nedá nic spustit a řada, která by se probrala za dvě hodiny,
+// by zalévala v noci. Radši ji zrušit a říct to.
+function zavlahaPlanHlidej() {
+  if (!zavlahaPlan || zavlahaZive()) return;
+  addLog('Závlaha: most se neozývá — řada zrušena', 'error');
+  zavlahaPlanZrus('ticho');
+  zavlahaPosli();
+}
+
 // Most se hlásí sem: pošle stav, odveze si úkoly. Zámek ovládání se tu neuplatňuje —
 // je to hlášení stroje z domácí sítě, stejně jako /api/sauna/active ze Shelly.
 app.post('/api/zavlaha/stav', (req, res) => {
@@ -7501,6 +7601,8 @@ app.post('/api/zavlaha/stav', (req, res) => {
   zavlahaKdy = ted;
   if (hlaska) addLog(hlaska);
   else if (bylTicho) addLog('Závlaha: most na NASu se zase ozývá');
+  const posun = zavlahaPlanTik(ted);
+  if (posun) addLog(posun);
   const ukoly = zavlahaVyzvedni();
   zavlahaPosli();
   res.json({ ok: true, ukoly });
@@ -7515,16 +7617,32 @@ app.post('/api/zavlaha/spust', (req, res) => {
   // Bez tohohle by schování zónu jen přestalo kreslit, ale povel by prošel dál
   if (zavlahaSkryta(zona)) return res.status(400).json({ error: `${zavlahaNazev(zona)} je schovaná.` });
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
+  zavlahaZapamatujMinuty([{ zona, minut }]);
   zavlahaZarad({ typ: 'spust', zona, minut });
   addLog(`Závlaha: ${zavlahaNazev(zona)} na ${minut} min (ručně)`);
   res.json({ success: true, message: `${zavlahaNazev(zona)}: pouštím na ${minut} min.` });
+});
+
+app.post('/api/zavlaha/serie', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { kroky, celkem, chyba } = zavlahaKroky(req.body && req.body.kroky);
+  if (chyba) return res.status(400).json({ error: chyba });
+  if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
+  zavlahaZapamatujMinuty(kroky);
+  const prvni = zavlahaPlanStart(kroky);
+  addLog(`Závlaha: řada ${kroky.length} zón na ${celkem} min — začíná ${zavlahaNazev(prvni.zona)}`);
+  res.json({
+    success: true,
+    message: `Řada běží: ${zavlahaSeznam(kroky.map(k => k.zona))}.`,
+    plan: zavlahaPlanPayload()
+  });
 });
 
 app.post('/api/zavlaha/stop', (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
   zavlahaZarad({ typ: 'stop' });
-  addLog('Závlaha: zastavit všechno (ručně)');
+  addLog(zavlahaPlanZrus('Závlaha: řada zrušena (ručně)') || 'Závlaha: zastavit všechno (ručně)');
   res.json({ success: true, message: 'Zastavuji závlahu.' });
 });
 
@@ -7580,8 +7698,16 @@ app.post('/api/zavlaha/zony/restore', (req, res) => {
       if (!chtene.includes(zona) && zavlahaSchovej(zona, false)) zmena = true;
     }
   }
+  if (telo.minuty && typeof telo.minuty === 'object') {
+    for (const [klic, hodnota] of Object.entries(telo.minuty)) {
+      const zona = zavlahaCisloZony(klic);
+      const minut = zavlahaMinuty(hodnota);
+      if (zona === null || minut === null) continue;
+      if (zavlahaVolbaMinut[zona] !== minut) { zavlahaVolbaMinut[zona] = minut; zmena = true; }
+    }
+  }
   if (zmena) zavlahaPosli();
-  res.json({ ok: true, nazvy: zavlahaNazvy, skryte: zavlahaSkryte });
+  res.json({ ok: true, nazvy: zavlahaNazvy, skryte: zavlahaSkryte, minuty: zavlahaVolbaMinut });
 });
 
 // Obnova naměřených časů po deployi — stejný princip jako u sauny: vyšší
@@ -7865,7 +7991,7 @@ function storeSnapshot() {
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/prazdniny/restore': { datum: state.prazdniny },
     '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
-    '/api/zavlaha/zony/restore': { nazvy: zavlahaNazvy, skryte: zavlahaSkryte },
+    '/api/zavlaha/zony/restore': { nazvy: zavlahaNazvy, skryte: zavlahaSkryte, minuty: zavlahaVolbaMinut },
     '/api/zavlaha/dny/restore': { dny: state.zavlahaDny },
     '/api/runtime/restore': { date: rt.date, ms: rt.ms, wh: rt.wh, yesterday: rt.yesterday },
     '/api/wallbox/daytype/restore': {
@@ -8093,6 +8219,7 @@ const server = app.listen(PORT, async () => {
   // Až po obnově: kdyby se nasadilo dřív, záloha by ho jen přepsala a při prvním
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
+  scheduleEvery(zavlahaPlanHlidej, ZAVLAHA_PLAN_TIK_MS, ZAVLAHA_PLAN_TIK_MS);
   storeStart();
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);

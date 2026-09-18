@@ -34,7 +34,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
 
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
-    'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte',
+    'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
     'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
@@ -46,6 +46,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     1758000000000,
     { 1: 'Trávník dole' },
     [8],
+    { 1: 20 },
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
@@ -178,6 +179,7 @@ nadpis('3) Ukládání');
     const zavlaha = h.api.storeSnapshot().posts['/api/zavlaha/zony/restore'];
     check('jména zón závlahy jsou v záloze', zavlaha.nazvy[1], 'Trávník dole');
     check('  i schované zóny', zavlaha.skryte.join(','), '8');
+    check('  i navolené minuty', zavlaha.minuty[1], 20);
     check('  a naměřené časy taky',
       h.api.storeSnapshot().posts['/api/zavlaha/dny/restore'].dny.length, 1);
     h.state.months[0].sauna = 41000;

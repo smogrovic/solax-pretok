@@ -1910,6 +1910,20 @@
   }
   .zavlaha-radek.bezi .zavlaha-pustit{background:rgba(63,185,80,0.3);}
   .zavlaha-pustit:disabled{opacity:0.45;}
+  .zavlaha-radek select{
+    width:auto;min-width:66px;flex:0 0 auto;padding:4px 6px;font-size:12px;
+  }
+  .zavlaha-serie{width:100%;display:flex;align-items:center;gap:8px;margin-top:10px;}
+  .zavlaha-serie-btn{
+    flex:1;border:none;border-radius:16px;padding:10px 12px;
+    font-size:13px;font-weight:700;background:var(--green);color:#fff;
+  }
+  .zavlaha-serie-btn:disabled{background:rgba(44,62,80,0.12);color:var(--grey-text);}
+  .zavlaha-beh{
+    width:100%;margin-top:8px;padding:8px 10px;border-radius:12px;
+    background:rgba(63,185,80,0.12);font-size:12px;font-weight:600;color:var(--navy);
+  }
+  .zavlaha-beh[hidden]{display:none;}
   .zavlaha-skryt{
     width:26px;height:26px;border-radius:50%;border:none;flex-shrink:0;
     background:rgba(44,62,80,0.08);color:var(--grey-text);font-size:13px;font-weight:700;
@@ -2657,11 +2671,14 @@
 
       <div class="card lockable">
         <div class="zavlaha-hlava">
-          <span class="zavlaha-popis">Pustit na</span>
-          <select id="zavlahaMinut"></select>
+          <span class="zavlaha-popis">U každé zóny vyber minuty a pusť je za sebou</span>
           <button class="zavlaha-stop" id="zavlahaStopBtn" type="button">Zastavit vše</button>
         </div>
         <div class="zavlaha-zony" id="zavlahaZony"></div>
+        <div class="zavlaha-beh" id="zavlahaBeh" hidden></div>
+        <div class="zavlaha-serie">
+          <button class="zavlaha-serie-btn" id="zavlahaSerieBtn" type="button">Spustit řadu</button>
+        </div>
         <div class="zavlaha-schovane" id="zavlahaSchovane"></div>
         <div class="zavlaha-hint" id="zavlahaHint"></div>
       </div>
@@ -8526,7 +8543,8 @@ const zavlahaLightEl = document.getElementById('zavlahaLight');
 const zavlahaStavEl = document.getElementById('zavlahaStav');
 const zavlahaMetaEl = document.getElementById('zavlahaMeta');
 const zavlahaZonyEl = document.getElementById('zavlahaZony');
-const zavlahaMinutEl = document.getElementById('zavlahaMinut');
+const zavlahaSerieBtnEl = document.getElementById('zavlahaSerieBtn');
+const zavlahaBehEl = document.getElementById('zavlahaBeh');
 const zavlahaStopBtnEl = document.getElementById('zavlahaStopBtn');
 const zavlahaHintEl = document.getElementById('zavlahaHint');
 const zavlahaSchovaneEl = document.getElementById('zavlahaSchovane');
@@ -8534,28 +8552,78 @@ const zavlahaDnesEl = document.getElementById('zavlahaDnes');
 const zavlahaTydenEl = document.getElementById('zavlahaTyden');
 
 const ZAVLAHA_MINUTY = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
-const ZAVLAHA_MINUT_VYCHOZI = 10;
+// Kolik minut je u které zóny navolené. Drží se tady, ne v DOM, aby překreslení
+// po hlášení mostu (chodí po patnácti vteřinách) nesmazalo rozdělanou volbu.
+const zavlahaVolba = {};
 const ZAVLAHA_TYDEN_DNU = 7;
-let zavlahaData = { stav: null, kdy: 0, zive: false, nazvy: {}, skryte: [], dny: [], ceka: 0, minutMax: 120 };
+let zavlahaData = { stav: null, kdy: 0, zive: false, nazvy: {}, skryte: [], minuty: {}, plan: null, dny: [], ceka: 0, minutMax: 120 };
 
 function zavlahaJmeno(zona) {
   return (zavlahaData.nazvy && zavlahaData.nazvy[zona]) || ('Zóna ' + zona);
 }
 
-function zavlahaZvoleneMinuty() {
-  const zvoleno = Number(zavlahaMinutEl && zavlahaMinutEl.value);
-  return Number.isInteger(zvoleno) && zvoleno > 0 ? zvoleno : ZAVLAHA_MINUT_VYCHOZI;
+// Co je u zóny navoleno: buď to, co člověk zrovna přepnul, nebo to, co se u ní
+// posílalo naposledy. Nula znamená „do řady nepatří".
+function zavlahaZvoleneMinuty(zona) {
+  if (zavlahaVolba[zona] !== undefined) return zavlahaVolba[zona];
+  const ulozene = Number((zavlahaData.minuty || {})[zona]);
+  return Number.isInteger(ulozene) && ulozene > 0 ? ulozene : 0;
 }
 
-function zavlahaNaplnMinuty() {
-  if (!zavlahaMinutEl || zavlahaMinutEl.options.length) return;
+function zavlahaVyberMinut(zona, zive) {
+  const sel = document.createElement('select');
+  sel.disabled = !zive;
+  const zvoleno = zavlahaZvoleneMinuty(zona);
+  const pridej = (hodnota, popis) => {
+    const o = document.createElement('option');
+    o.value = String(hodnota);
+    o.textContent = popis;
+    if (hodnota === zvoleno) o.selected = true;
+    sel.appendChild(o);
+  };
+  pridej(0, '–');
   for (const m of ZAVLAHA_MINUTY) {
     if (m > (zavlahaData.minutMax || 120)) continue;
-    const o = document.createElement('option');
-    o.value = String(m);
-    o.textContent = m + ' min';
-    if (m === ZAVLAHA_MINUT_VYCHOZI) o.selected = true;
-    zavlahaMinutEl.appendChild(o);
+    pridej(m, m + ' min');
+  }
+  sel.addEventListener('change', () => {
+    zavlahaVolba[zona] = Number(sel.value) || 0;
+    zavlahaRenderSerie();
+  });
+  return sel;
+}
+
+// Kroky řady v pořadí, v jakém jsou zóny v seznamu — to pořadí dává smysl
+// (napřed trávník, pak kapková závlaha) a člověk ho vidí před sebou.
+function zavlahaKrokyRady() {
+  const stav = zavlahaData.stav;
+  const skryte = zavlahaData.skryte || [];
+  const kroky = [];
+  for (const zona of ((stav && stav.zony) || [])) {
+    if (skryte.includes(zona)) continue;
+    const minut = zavlahaZvoleneMinuty(zona);
+    if (minut > 0) kroky.push({ zona, minut });
+  }
+  return kroky;
+}
+
+function zavlahaRenderSerie() {
+  const kroky = zavlahaKrokyRady();
+  const celkem = kroky.reduce((s, k) => s + k.minut, 0);
+  if (zavlahaSerieBtnEl) {
+    zavlahaSerieBtnEl.disabled = !zavlahaData.zive || !kroky.length;
+    zavlahaSerieBtnEl.textContent = kroky.length
+      ? `Spustit řadu — ${kroky.length} ${kroky.length === 1 ? 'zóna' : (kroky.length < 5 ? 'zóny' : 'zón')} · ${celkem} min`
+      : 'Spustit řadu';
+  }
+  if (zavlahaBehEl) {
+    const plan = zavlahaData.plan;
+    zavlahaBehEl.hidden = !plan;
+    if (plan) {
+      const zbyva = Math.max(0, Math.round((plan.zbyva || 0) / 60000));
+      zavlahaBehEl.textContent = `Řada běží: ${plan.index + 1}/${plan.kroky.length}`
+        + ` · ${zavlahaJmeno(plan.zona)} · zbývá ${zbyva} min`;
+    }
   }
 }
 
@@ -8657,7 +8725,6 @@ function zavlahaHistorieKarta(el, soucty) {
 
 function renderZavlaha(d) {
   if (d) zavlahaData = { ...zavlahaData, ...d };
-  zavlahaNaplnMinuty();
   const stav = zavlahaData.stav;
   const zive = !!zavlahaData.zive;
   const bezi = (stav && stav.bezi) || [];
@@ -8681,7 +8748,6 @@ function renderZavlaha(d) {
     }
   }
   if (zavlahaStopBtnEl) zavlahaStopBtnEl.disabled = !zive;
-  if (zavlahaMinutEl) zavlahaMinutEl.disabled = !zive;
 
   if (zavlahaZonyEl) {
     zavlahaZonyEl.textContent = '';
@@ -8697,6 +8763,8 @@ function renderZavlaha(d) {
       jmeno.textContent = zavlahaJmeno(zona);
       jmeno.addEventListener('click', () => zavlahaPrejmenuj(zona));
       radek.appendChild(jmeno);
+
+      radek.appendChild(zavlahaVyberMinut(zona, zive));
 
       const pustit = document.createElement('button');
       pustit.type = 'button';
@@ -8738,6 +8806,7 @@ function renderZavlaha(d) {
     }
   }
 
+  zavlahaRenderSerie();
   zavlahaHistorieKarta(zavlahaDnesEl, zavlahaSoucty(1));
   zavlahaHistorieKarta(zavlahaTydenEl, zavlahaSoucty(ZAVLAHA_TYDEN_DNU));
   if (zavlahaHintEl) {
@@ -8745,7 +8814,7 @@ function renderZavlaha(d) {
       ? 'Most běží na NASu (zavlaha-most.js). Dokud se neozve, appka závlahu jen neví — ovladač Rain Bird jede podle svého rozvrhu dál.'
       : zavlahaData.ceka
         ? 'Povel čeká, než si pro něj most přijde.'
-        : 'Klepnutím na jméno zóny ji přejmenuješ, křížkem schováš. Rozvrh zůstává v ovladači Rain Bird.';
+        : 'Zóny s vybranými minutami se zalijí jedna po druhé. Klepnutím na jméno zónu přejmenuješ, křížkem schováš.';
   }
 }
 
@@ -8772,9 +8841,23 @@ async function zavlahaPosli(cesta, telo, btn, chybaText) {
 }
 
 async function zavlahaSpust(zona, btn) {
-  const minut = zavlahaZvoleneMinuty();
+  const minut = zavlahaZvoleneMinuty(zona);
+  if (!minut) {
+    errorEl.textContent = `Závlaha: u zóny ${zavlahaJmeno(zona)} nejsou vybrané minuty.`;
+    errorEl.classList.add('show');
+    return;
+  }
   if (!confirm(`Pustit ${zavlahaJmeno(zona)} na ${minut} min?`)) return;
   await zavlahaPosli('/api/zavlaha/spust', { zona, minut }, btn, 'Zónu se nepodařilo pustit.');
+}
+
+async function zavlahaSerie() {
+  const kroky = zavlahaKrokyRady();
+  if (!kroky.length) return;
+  const celkem = kroky.reduce((s, k) => s + k.minut, 0);
+  const seznam = kroky.map(k => `${zavlahaJmeno(k.zona)} ${k.minut} min`).join('\n');
+  if (!confirm(`Zalévat postupně (celkem ${celkem} min)?\n\n${seznam}`)) return;
+  await zavlahaPosli('/api/zavlaha/serie', { kroky }, zavlahaSerieBtnEl, 'Řadu se nepodařilo spustit.');
 }
 
 async function zavlahaStop() {
@@ -8797,6 +8880,7 @@ async function zavlahaPrejmenuj(zona) {
 }
 
 if (zavlahaStopBtnEl) zavlahaStopBtnEl.addEventListener('click', zavlahaStop);
+if (zavlahaSerieBtnEl) zavlahaSerieBtnEl.addEventListener('click', zavlahaSerie);
 
 function bezpecne(fn) {
   try { fn(); } catch (err) { console.error('render:', err); }

@@ -22,11 +22,15 @@ function build() {
   const zpravy = [];
   const routy = {};
   const api = new Function(
-    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'pragueDateString',
+    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'pragueDateString', 'scheduleEvery',
     CODE + '\n; return { zavlahaZive, zavlahaNazev, zavlahaPayload, zavlahaCisloZony,'
          + ' zavlahaMinuty, zavlahaOcisti, zavlahaZony, zavlahaZarad, zavlahaVyzvedni,'
          + ' zavlahaZmena, zavlahaPrejmenuj, zavlahaSeznam, ZAVLAHA_MINUT_MAX,'
          + ' zavlahaSkryta, zavlahaSchovej, zavlahaZapisBeh, ZAVLAHA_DNU_MAX,'
+         + ' zavlahaKroky, zavlahaPlanStart, zavlahaPlanTik, zavlahaPlanHlidej,'
+         + ' zavlahaPlanPayload, ZAVLAHA_SERIE_MAX, ZAVLAHA_SERIE_MINUT_MAX, ZAVLAHA_ROZJEZD_MS,'
+         + ' get plan() { return zavlahaPlan; }, set plan(v) { zavlahaPlan = v; },'
+         + ' get volba() { return zavlahaVolbaMinut; },'
          + ' ZAVLAHA_MEZERA_MAX_MS, ZAVLAHA_SKRYTE_VYCHOZI,'
          + ' get skryte() { return zavlahaSkryte; }, set skryte(v) { zavlahaSkryte = v; },'
          + ' ZAVLAHA_TICHO_MS, ZAVLAHA_UKOL_PLATI_MS, ZAVLAHA_FRONTA_MAX,'
@@ -39,9 +43,10 @@ function build() {
     state,
     { get: (c, f) => { routy['GET ' + c] = f; }, post: (c, f) => { routy['POST ' + c] = f; } },
     () => true,
-    m => logy.push(m),
+    (m, level) => logy.push((level === 'error' ? 'CHYBA ' : '') + m),
     (udalost, data) => zpravy.push({ udalost, data }),
-    at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(at === undefined ? Date.now() : at))
+    at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(at === undefined ? Date.now() : at)),
+    () => {}
   );
   return { api, state, logy, zpravy, routy };
 }
@@ -414,6 +419,137 @@ nadpis('17) Obnova nastavení a časů');
   check('budoucí den se ignoruje', h.state.zavlahaDny.length, 1);
   await volej(h, 'POST /api/zavlaha/dny/restore', { dny: [{ d: '2026-09-15', zony: { 99: 60000, 2: -5 } }] });
   check('nesmyslné hodnoty se ignorují', h.state.zavlahaDny.length, 1);
+}
+
+nadpis('18) Kroky řady');
+{
+  const h = build();
+  check('prázdná řada se odmítne', h.api.zavlahaKroky([]).chyba, 'Chybí zóny.');
+  check('nepole se odmítne', h.api.zavlahaKroky('1,2').chyba, 'Chybí zóny.');
+  check('platná řada projde', h.api.zavlahaKroky([{ zona: 1, minut: 10 }]).kroky.length, 1);
+  check('  a spočítá se součet', h.api.zavlahaKroky([{ zona: 1, minut: 10 }, { zona: 2, minut: 5 }]).celkem, 15);
+  // Pořadí je to, co přišlo z appky — v něm je smysl
+  check('pořadí zůstává', h.api.zavlahaKroky([{ zona: 3, minut: 1 }, { zona: 1, minut: 1 }])
+    .kroky.map(k => k.zona).join(','), '3,1');
+  check('stejná zóna dvakrát projde', h.api.zavlahaKroky([{ zona: 1, minut: 1 }, { zona: 1, minut: 2 }]).kroky.length, 2);
+  check('neznámá zóna se odmítne', h.api.zavlahaKroky([{ zona: 99, minut: 5 }]).chyba, 'Neznámá zóna.');
+  check('schovaná zóna se odmítne', h.api.zavlahaKroky([{ zona: 8, minut: 5 }]).chyba, 'Zóna 8 je schovaná.');
+  check('nesmyslné minuty se odmítnou', h.api.zavlahaKroky([{ zona: 1, minut: 0 }]).chyba.includes('Minuty'), true);
+
+  const moc = Array.from({ length: h.api.ZAVLAHA_SERIE_MAX + 1 }, () => ({ zona: 1, minut: 1 }));
+  check('moc kroků se odmítne', h.api.zavlahaKroky(moc).chyba.includes(String(h.api.ZAVLAHA_SERIE_MAX)), true);
+  // Půldenní zálivka je skoro jistě překlep, ne záměr
+  const dlouha = Array.from({ length: 5 }, () => ({ zona: 1, minut: 120 }));
+  check('moc minut se odmítne', h.api.zavlahaKroky(dlouha).chyba.includes(String(h.api.ZAVLAHA_SERIE_MINUT_MAX)), true);
+}
+
+nadpis('19) Řada krok za krokem');
+{
+  const h = build();
+  const T = 5000000;
+  const MIN = 60000;
+  const KROKY = [{ zona: 1, minut: 10 }, { zona: 3, minut: 5 }, { zona: 5, minut: 2 }];
+
+  h.api.zavlahaPlanStart(KROKY, T);
+  check('první krok se zařadí', h.api.fronta.length, 1);
+  check('  a je to první zóna', h.api.fronta[0].zona, 1);
+  check('  na svoje minuty', h.api.fronta[0].minut, 10);
+  check('plán ví, kde je', h.api.zavlahaPlanPayload(T).index, 0);
+  check('  a kolik zbývá', h.api.zavlahaPlanPayload(T).zbyva, 10 * MIN);
+
+  // Dokud zóna běží, řada čeká
+  h.api.stav = { model: 'x', zony: [1, 3, 5], bezi: [1], zavlazuje: true, destak: false, odklad: 0 };
+  check('běžící zóna řadu nepustí dál', h.api.zavlahaPlanTik(T + 5 * MIN), '');
+  check('  a plán zůstává na prvním', h.api.plan.index, 0);
+
+  // Rozjezdový odklad: hned po povelu zóna ještě neběží, to není důvod přeskočit
+  const h2 = build();
+  h2.api.zavlahaPlanStart(KROKY, T);
+  h2.api.stav = { model: 'x', zony: [1, 3, 5], bezi: [], zavlazuje: true, destak: false, odklad: 0 };
+  check('těsně po startu se nepřeskakuje', h2.api.zavlahaPlanTik(T + 10000), '');
+  check('  ani na hraně odkladu', h2.api.zavlahaPlanTik(T + h2.api.ZAVLAHA_ROZJEZD_MS), '');
+  check('po odkladu se pozná, že zóna nejede',
+    h2.api.zavlahaPlanTik(T + h2.api.ZAVLAHA_ROZJEZD_MS + 1).includes('Trávník nahoře B'), true);
+  check('  a řada jde dál', h2.api.plan.index, 1);
+  check('  a zařadí se druhá zóna', h2.api.fronta[h2.api.fronta.length - 1].zona, 3);
+
+  // Uplynulý čas kroku řadu posune i tehdy, když zóna pořád běží
+  check('po uplynutí času se jde dál',
+    h2.api.zavlahaPlanTik(T + h2.api.ZAVLAHA_ROZJEZD_MS + 1 + 5 * MIN).includes('Kapka záhon zahrada'), true);
+  check('  a je to poslední krok', h2.api.plan.index, 2);
+  const konecHlaska = h2.api.zavlahaPlanTik(T + 999 * MIN);
+  check('poslední krok řadu ukončí', konecHlaska, 'Závlaha: řada dozalévala');
+  check('  a plán zmizí', h2.api.plan, null);
+  check('bez plánu se nic neděje', h2.api.zavlahaPlanTik(T + 1000 * MIN), '');
+}
+
+nadpis('20) Řada přes endpoint');
+{
+  const h = build();
+  const bezMostu = await volej(h, 'POST /api/zavlaha/serie', { kroky: [{ zona: 1, minut: 5 }] });
+  check('bez mostu se řada nespustí', bezMostu.kod, 503);
+  check('  a plán nevznikne', h.api.plan, null);
+
+  await volej(h, 'POST /api/zavlaha/stav', STAV);
+  const ok = await volej(h, 'POST /api/zavlaha/serie',
+    { kroky: [{ zona: 1, minut: 10 }, { zona: 3, minut: 5 }] });
+  check('s mostem projde', ok.out.success, true);
+  check('  a řekne, co poběží', ok.out.message, 'Řada běží: Trávník dole, Trávník nahoře B.');
+  check('  a vrátí plán', ok.out.plan.kroky.length, 2);
+  check('zařadil se první krok', h.api.fronta[0].zona, 1);
+  check('do logu se to zapsalo', h.logy[h.logy.length - 1].includes('řada 2 zón na 15 min'), true);
+  // Minuty se pamatují, ať se příště nemusí klikat znovu
+  check('minuty se zapamatovaly', `${h.api.volba[1]},${h.api.volba[3]}`, '10,5');
+  check('  a jdou do appky', h.api.zavlahaPayload().minuty[1], 10);
+  check('plán je v payloadu', h.api.zavlahaPayload().plan.index, 0);
+
+  // Zastavit znamená zastavit, ne „zastav a za chvíli pusť další zónu"
+  const stop = await volej(h, 'POST /api/zavlaha/stop', {});
+  check('stopka řadu zruší', h.api.plan, null);
+  check('  a řekne to', h.logy[h.logy.length - 1], 'Závlaha: řada zrušena (ručně)');
+  check('  a odpoví', stop.out.success, true);
+
+  // Jedna zóna ručně si taky pamatuje minuty
+  await volej(h, 'POST /api/zavlaha/spust', { zona: 5, minut: 30 });
+  check('ruční puštění si minuty pamatuje', h.api.volba[5], 30);
+
+  // Řadu posouvá hlášení mostu — nic jiného v appce netiká tak často.
+  // Bez tohohle zapojení by plán vznikl a zůstal stát na prvním kroku.
+  const h3 = build();
+  await volej(h3, 'POST /api/zavlaha/stav', STAV);
+  await volej(h3, 'POST /api/zavlaha/serie', { kroky: [{ zona: 1, minut: 10 }, { zona: 3, minut: 5 }] });
+  h3.api.plan.doKdy = Date.now() - 1000;   // jako by první krok právě dozaléval
+  h3.api.fronta = [];
+  const hlaseni = await volej(h3, 'POST /api/zavlaha/stav', STAV);
+  check('hlášení mostu řadu posune', h3.api.plan.index, 1);
+  // Další zóna se mostu předá rovnou v odpovědi, ne až za patnáct vteřin
+  check('  a most si hned odveze další zónu', hlaseni.out.ukoly[0].zona, 3);
+  check('  a zapíše to do logu', h3.logy[h3.logy.length - 1].includes('řada pokračuje'), true);
+}
+
+nadpis('21) Mlčící most řadu zruší');
+{
+  const h = build();
+  await volej(h, 'POST /api/zavlaha/stav', STAV);
+  await volej(h, 'POST /api/zavlaha/serie', { kroky: [{ zona: 1, minut: 10 }, { zona: 3, minut: 5 }] });
+  h.api.zavlahaPlanHlidej();
+  check('dokud most hlásí, plán běží', h.api.plan === null, false);
+  // Řada, která by se probrala za dvě hodiny, by zalévala v noci
+  h.api.kdy = Date.now() - 2 * h.api.ZAVLAHA_TICHO_MS;
+  h.api.zavlahaPlanHlidej();
+  check('mlčící most plán zruší', h.api.plan, null);
+  check('  a zapíše se to jako chyba', h.logy[h.logy.length - 1].startsWith('CHYBA'), true);
+  check('bez plánu hlídač nic nedělá', h.api.zavlahaPlanHlidej(), undefined);
+}
+
+nadpis('22) Obnova volby minut');
+{
+  const h = build();
+  const obnova = await volej(h, 'POST /api/zavlaha/zony/restore', { minuty: { 2: 25, 99: 5, 3: 0 } });
+  check('obnova projde', obnova.out.ok, true);
+  check('platná volba naskočí', h.api.volba[2], 25);
+  check('neznámá zóna se ignoruje', h.api.volba[99], undefined);
+  check('nesmyslné minuty se ignorují', h.api.volba[3], undefined);
 }
 
 konec();

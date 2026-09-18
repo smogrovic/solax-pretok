@@ -38,7 +38,7 @@ setTimeout(async () => {
   const ZONY = [1, 2, 3, 4, 5, 6, 7, 8];
   const NAZVY = { 1: 'Trávník dole', 2: 'Trávník nahoře A', 7: 'Dopouštění retenčky' };
   const zive = extra => renderZavlaha(Object.assign({
-    zive: true, kdy: Date.now(), ceka: 0, minutMax: 120, nazvy: NAZVY, skryte: [], dny: [],
+    zive: true, kdy: Date.now(), ceka: 0, minutMax: 120, nazvy: NAZVY, skryte: [], minuty: {}, plan: null, dny: [],
     stav: { model: 'ESP-TM2', zony: ZONY, bezi: [], zavlazuje: true, destak: false, odklad: 0 }
   }, extra || {}));
   const dnesni = () => {
@@ -61,19 +61,27 @@ setTimeout(async () => {
   const metaEl = document.getElementById('zavlahaMeta');
   const svetlo = document.getElementById('zavlahaLight');
   const stopBtn = document.getElementById('zavlahaStopBtn');
-  const minutEl = document.getElementById('zavlahaMinut');
+  const serieBtn = document.getElementById('zavlahaSerieBtn');
+  const behEl = document.getElementById('zavlahaBeh');
+  const vybery = () => radky().map(r => r.querySelector('select'));
+  // Navolené minuty appka drží v paměti, ať je překreslení nesmaže. Mezi oddíly
+  // sady se ale musí zapomenout, jinak by se výběry sčítaly přes celý běh.
+  const vycisti = () => { for (const k of Object.keys(zavlahaVolba)) delete zavlahaVolba[k]; };
+  const nastav = (i, minut) => {
+    const sel = vybery()[i];
+    sel.value = String(minut);
+    sel.dispatchEvent(new Event('change'));
+  };
 
   R.push('1) Bez mostu se nedá nic zmáčknout');
-  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], dny: [], ceka: 0, minutMax: 120 });
+  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], minuty: {}, plan: null, dny: [], ceka: 0, minutMax: 120 });
   check('stav to přizná', stavEl.textContent, 'most se neozývá');
   check('kontrolka je červená', svetlo.classList.contains('off'), true);
   check('zastavení nejde zmáčknout', stopBtn.disabled, true);
-  check('minuty nejdou přepnout', minutEl.disabled, true);
+  check('řada nejde spustit', serieBtn.disabled, true);
   check('žádné zóny se nekreslí', radky().length, 0);
   check('řekne se, kde most běží',
     document.getElementById('zavlahaHint').textContent.includes('zavlaha-most.js'), true);
-  // Výběr minut se plní jednou; jaký byl na začátku, se pozná jen teď
-  const VYCHOZI_MINUTY = minutEl.value;
 
   R.push('\\n2) Zóny se berou z hlášení mostu');
   zive();
@@ -96,6 +104,7 @@ setTimeout(async () => {
   zive({ zive: false, kdy: Date.now() - 600000 });
   check('zóny se pořád kreslí', radky().length, 8);
   check('ale pustit nejdou', radky().every(r => r.querySelector('.zavlaha-pustit').disabled), true);
+  check('ani vybrat minuty', vybery().every(v => v.disabled), true);
   check('ani zastavit', stopBtn.disabled, true);
   check('stav to přizná', stavEl.textContent, 'most se neozývá');
   check('a řekne se odkdy', metaEl.textContent.includes('mlčí od'), true);
@@ -117,20 +126,28 @@ setTimeout(async () => {
   zive({ stav: { model: 'ESP-TM2', zony: ZONY, bezi: [1, 2], zavlazuje: true, destak: false, odklad: 0 } });
   check('dvě běžící zóny se vypíšou', stavEl.textContent, 'Trávník dole, Trávník nahoře A');
 
-  R.push('\\n4) Puštění zóny');
+  R.push('\\n4) Puštění jedné zóny');
   zive();
   POSLANO.length = 0;
-  minutEl.value = '20';
+  nastav(3, 20);
   radky()[3].querySelector('.zavlaha-pustit').click();
   await pockej();
   check('jde to na správnou adresu', POSLANO[0].url, '/api/zavlaha/spust');
   check('se správnou zónou', POSLANO[0].telo.zona, 4);
-  check('  a správnými minutami', POSLANO[0].telo.minut, 20);
+  // Minuty si každá zóna nese svoje, ne jedny společné pro všechny
+  check('  a minutami z jejího řádku', POSLANO[0].telo.minut, 20);
   check('  a s klíčem od zámku', POSLANO[0].token !== undefined, true);
+
+  POSLANO.length = 0;
+  radky()[1].querySelector('.zavlaha-pustit').click();
+  await pockej();
+  check('zóna bez minut se nepustí', POSLANO.length, 0);
+  check('  a řekne se proč', errorEl.textContent.includes('nejsou vybrané minuty'), true);
 
   // Zahrada se nemá rozjet jen proto, že někdo omylem ťukl do seznamu
   POTVRZENO = false;
   POSLANO.length = 0;
+  nastav(0, 5);
   radky()[0].querySelector('.zavlaha-pustit').click();
   await pockej();
   check('bez potvrzení se nic nepošle', POSLANO.length, 0);
@@ -164,12 +181,69 @@ setTimeout(async () => {
   check('zrušené okénko nic nepošle', POSLANO.length, 0);
   ZADANO = 'Nové jméno';
 
-  R.push('\\n7) Výběr minut');
-  const volby = [...minutEl.options].map(o => Number(o.value));
+  R.push('\\n7) Řada zón');
+  vycisti();
+  zive();
+  const volby = [...vybery()[0].options].map(o => Number(o.value));
   check('minuty jsou na výběr', volby.length > 3, true);
-  check('výchozí je deset', Number(VYCHOZI_MINUTY), 10);
+  check('první volba je pomlčka', vybery()[0].options[0].textContent, '–');
   check('nic přes mez', volby.every(m => m <= 120), true);
-  check('nejkratší je minuta', Math.min(...volby), 1);
+  check('nejkratší je minuta', Math.min(...volby.filter(m => m > 0)), 1);
+  check('bez vybraných minut nejde řadu spustit', serieBtn.disabled, true);
+
+  nastav(0, 10);
+  nastav(2, 5);
+  check('tlačítko řekne, co se stane', serieBtn.textContent, 'Spustit řadu — 2 zóny · 15 min');
+  check('  a jde zmáčknout', serieBtn.disabled, false);
+
+  POSLANO.length = 0;
+  serieBtn.click();
+  await pockej();
+  check('jde to na řadu', POSLANO[0].url, '/api/zavlaha/serie');
+  check('posílají se jen vybrané zóny', POSLANO[0].telo.kroky.length, 2);
+  // Pořadí je to ze seznamu — v něm je smysl a člověk ho má před sebou
+  check('  v pořadí ze seznamu', POSLANO[0].telo.kroky.map(k => k.zona).join(','), '1,3');
+  check('  s vlastními minutami', POSLANO[0].telo.kroky.map(k => k.minut).join(','), '10,5');
+
+  // Pomlčka zónu z řady vyhodí
+  nastav(0, 0);
+  check('pomlčka zónu vyřadí', serieBtn.textContent, 'Spustit řadu — 1 zóna · 5 min');
+  POSLANO.length = 0;
+  serieBtn.click();
+  await pockej();
+  check('a neposílá se', POSLANO[0].telo.kroky.map(k => k.zona).join(','), '3');
+
+  POTVRZENO = false;
+  POSLANO.length = 0;
+  serieBtn.click();
+  await pockej();
+  check('bez potvrzení se řada nespustí', POSLANO.length, 0);
+  POTVRZENO = true;
+
+  // Schovaná zóna si pamatuje minuty z doby, kdy schovaná nebyla. Kdyby se
+  // dostala do řady, server by celou řadu odmítl a nešlo by spustit nic.
+  vycisti();
+  zive({ skryte: [3], minuty: { 1: 10, 3: 5 } });
+  check('schovaná zóna se do řady nepočítá', serieBtn.textContent, 'Spustit řadu — 1 zóna · 10 min');
+  POSLANO.length = 0;
+  serieBtn.click();
+  await pockej();
+  check('  ani se neposílá', POSLANO[0].telo.kroky.map(k => k.zona).join(','), '1');
+
+  R.push('\\n7d) Běžící řada a paměť minut');
+  check('bez řady se průběh neukazuje', behEl.hidden, true);
+  zive({ plan: { kroky: [{ zona: 1, minut: 10 }, { zona: 3, minut: 5 }], index: 1, zona: 3, minut: 5, zbyva: 240000 } });
+  check('průběh je vidět', behEl.hidden, false);
+  check('  a ví, kolikátá zóna běží', behEl.textContent.includes('2/2'), true);
+  check('  která to je', behEl.textContent.includes('Zóna 3'), true);
+  check('  a kolik zbývá', behEl.textContent.includes('zbývá 4 min'), true);
+
+  // Minuty z posledního běhu se předvyplní, ať se nemusí klikat znovu
+  vycisti();
+  zive({ minuty: { 1: 30, 3: 15 } });
+  check('předvyplní se poslední volba', vybery()[0].value, '30');
+  check('  i u druhé zóny', vybery()[2].value, '15');
+  check('  a nevybrané zůstanou prázdné', vybery()[1].value, '0');
 
   R.push('\\n7b) Schování zóny');
   zive({ skryte: [8] });
@@ -237,7 +311,7 @@ setTimeout(async () => {
 
   zive({ dny: [] });
   check('bez dat je všude pomlčka', karta('zavlahaDnes')[0], 'Trávník dole = –');
-  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], dny: [], ceka: 0, minutMax: 120 });
+  renderZavlaha({ zive: false, kdy: 0, stav: null, nazvy: {}, skryte: [], minuty: {}, plan: null, dny: [], ceka: 0, minutMax: 120 });
   check('bez mostu se řekne, že není z čeho',
     document.getElementById('zavlahaDnes').textContent.includes('most na NASu se musí ozvat'), true);
 
