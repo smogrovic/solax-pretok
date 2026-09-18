@@ -4,3 +4,5 @@ node_modules/
 public/nas/zavlaha.config.json
 # Heslo k účtu Anthbot (sekačka) — zůstává u člověka doma
 public/nas/uklid.config.json
+# Heslo k účtu Xiaomi (vysavač) — zůstává u člověka doma
+public/nas/vysavac.config.json
