@@ -1955,6 +1955,11 @@
   .sek-syrove div{display:flex;justify-content:space-between;gap:10px;}
   .sek-syrove b{font-weight:600;color:var(--navy);flex-shrink:0;}
   .sek-syrove span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .sek-syrove div.otevreno span{overflow:visible;white-space:normal;word-break:break-all;text-align:right;}
+  .sek-odkaz{
+    width:100%;display:block;margin-top:8px;font-size:11px;
+    color:var(--green);font-weight:600;text-decoration:none;
+  }
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
 </style>
@@ -2745,7 +2750,8 @@
       <div class="card stats-card">
         <div class="graph-title">Co sekačka hlásí</div>
         <div class="sek-syrove" id="sekSyrove"></div>
-        <div class="wbsrc-note">Syrová hlášení z cloudu. Je to tu proto, že jména polí u M5 nejsou nikde popsaná — podle tohohle se dolaďuje, co appka ukazuje nahoře.</div>
+        <a class="sek-odkaz" id="sekSyroveOdkaz" href="/api/sekacka/syrove" target="_blank" rel="noopener">Otevřít celé hlášení →</a>
+        <div class="wbsrc-note">Syrová hlášení z cloudu. Je to tu proto, že jména polí u M5 nejsou nikde popsaná — podle tohohle se dolaďuje, co appka ukazuje nahoře. Klepnutím na řádek se dlouhá hodnota rozbalí celá.</div>
       </div>
     </div>
   </div>
@@ -8961,6 +8967,14 @@ function sekackaZive() {
   return !!(sekackaData.zapnuto && sekackaData.kdy && !sekackaData.potiz);
 }
 
+// Spojení s cloudem a sekačka na příjmu jsou dvě různé věci. Cloud odpoví
+// i o vypnuté sekačce — jen vydá poslední známý stav. Povel by se v takovém
+// případě uložil do fronty a sekačka by ho provedla, až se probudí, klidně
+// v noci. Proto se offline ovládat nedá.
+function sekackaNaPrijmu() {
+  return sekackaZive() && sekackaData.online !== false;
+}
+
 function sekackaMetaRadky() {
   const d = sekackaData;
   if (!d.zapnuto) return ['Sekačka není nastavená — chybí přihlášení k Anthbotu v Renderu.'];
@@ -8968,11 +8982,19 @@ function sekackaMetaRadky() {
   if (!d.kdy) return ['Zatím nic nepřišlo — první čtení proběhne do minuty.'];
   const r = [];
   if (d.jmeno) r.push(`${d.jmeno}${d.model ? ` (kategorie ${d.model})` : ''}`);
-  if (d.chyba) r.push(`Chyba č. ${d.chyba}`);
+  if (d.online === false) r.push('Sekačka není na příjmu — hodnoty níž jsou poslední známé, ne aktuální.');
+  // Co ta čísla znamenají, se nikde dohledat nedá, tak se nepřekládají
+  if (d.chyba) r.push(`Chyba č. ${d.chyba} (kód přímo od sekačky)`);
+  if (d.udalost) r.push(`Událost č. ${d.udalost}`);
   if (d.vyska !== null && d.vyska !== undefined) r.push(`Výška sečení: ${d.vyska} mm`);
+  if (d.travnik) r.push(`Trávník: ${d.travnik} m²`);
+  if (d.zony && d.zony.length) r.push(`Aktivní zóny: ${d.zony.join(', ')}`);
+  if (d.kos !== null && d.kos !== undefined) r.push(`Koš na trávu: ${d.kos ? 'nasazený' : 'sundaný'}`);
   if (d.plocha) r.push(`Tenhle záběr: ${d.plocha} m²${d.minuty ? `, ${d.minuty} min` : ''}`);
   if (d.plochaCelkem) r.push(`Celkem: ${d.plochaCelkem} m²${d.minutyCelkem ? `, ${d.minutyCelkem} min` : ''}`);
   if (d.rtk !== undefined && d.rtk !== null) r.push(`RTK: ${d.rtk}`);
+  if (d.sit) r.push(`Síť: ${d.sit}`);
+  if (d.firmware) r.push(`Firmware: ${d.firmware}`);
   r.push('Naposledy ' + logCas(d.kdy));
   return r;
 }
@@ -8980,15 +9002,19 @@ function sekackaMetaRadky() {
 function renderSekacka(d) {
   if (d) sekackaData = { ...sekackaData, ...d };
   const zive = sekackaZive();
-  const jede = zive && SEK_JEDE.includes(sekackaData.stav);
+  const naPrijmu = sekackaNaPrijmu();
+  const jede = naPrijmu && SEK_JEDE.includes(sekackaData.stav);
+  const odpojena = zive && sekackaData.online === false;
 
   if (sekLightEl) {
     sekLightEl.classList.toggle('on', jede);
-    sekLightEl.classList.toggle('off', !!sekackaData.potiz || (sekackaData.zapnuto && !!sekackaData.chyba));
+    sekLightEl.classList.toggle('off',
+      !!sekackaData.potiz || odpojena || (sekackaData.zapnuto && !!sekackaData.chyba));
   }
   if (sekStavEl) {
     sekStavEl.textContent = !sekackaData.zapnuto ? 'nenastavená'
       : sekackaData.potiz ? 'neozývá se'
+      : odpojena ? 'offline'
       : (sekackaData.popis || '–');
   }
   if (sekBaterieEl) {
@@ -9004,12 +9030,14 @@ function renderSekacka(d) {
     }
   }
   for (const btn of [sekSekatBtnEl, sekStopBtnEl, sekDokBtnEl]) {
-    if (btn) btn.disabled = !zive;
+    if (btn) btn.disabled = !naPrijmu;
   }
   if (sekHintEl) {
-    sekHintEl.textContent = zive
+    sekHintEl.textContent = naPrijmu
       ? 'Sekačka jede podle svého rozvrhu v appce Anthbot. Tohle je ruční zásah navíc.'
-      : 'Dokud se cloud Anthbotu neozve, ovládat nejde — povel by spadl do prázdna.';
+      : odpojena
+        ? 'Sekačka není na příjmu. Povel by se schoval do fronty a provedla by ho, až se probudí — klidně v noci. Proto ovládat nejde.'
+        : 'Dokud se cloud Anthbotu neozve, ovládat nejde — povel by spadl do prázdna.';
   }
   if (sekSyroveEl) {
     sekSyroveEl.textContent = '';
@@ -9028,6 +9056,9 @@ function renderSekacka(d) {
         hodnota.textContent = (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
         radek.appendChild(jmeno);
         radek.appendChild(hodnota);
+        // Obrys pozemku je dlouhý na několik obrazovek. Na jeden řádek se
+        // nevejde a oříznutý je k ničemu — klepnutím se rozbalí celý.
+        radek.addEventListener('click', () => radek.classList.toggle('otevreno'));
         sekSyroveEl.appendChild(radek);
       }
     }

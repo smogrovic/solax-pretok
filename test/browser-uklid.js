@@ -38,7 +38,8 @@ setTimeout(async () => {
     zapnuto: true, kdy: Date.now(), potiz: null, jmeno: 'Zahrada', model: '5',
     stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0, vyska: 45,
     plocha: 120, minuty: 18, plochaCelkem: 900, minutyCelkem: 120, rtk: 4,
-    syrove: SYROVE
+    online: true, udalost: 0, travnik: 297, kos: 1, zony: [102, 101],
+    firmware: '1.2.3', sit: 'wifi', syrove: SYROVE
   }, extra || {}));
 
   const stavEl = document.getElementById('sekStav');
@@ -70,6 +71,19 @@ setTimeout(async () => {
   check('výška sečení taky', metaEl.textContent.includes('45 mm'), true);
   check('  i záběr', metaEl.textContent.includes('120 m²'), true);
   check('  i celkem', metaEl.textContent.includes('900 m²'), true);
+  check('velikost trávníku', metaEl.textContent.includes('Trávník: 297 m²'), true);
+  check('aktivní zóny', metaEl.textContent.includes('102, 101'), true);
+  check('koš na trávu', metaEl.textContent.includes('nasazený'), true);
+  check('  a sundaný, když není', (() => { zive({ kos: 0 });
+    return metaEl.textContent.includes('sundaný'); })(), true);
+  check('firmware', metaEl.textContent.includes('1.2.3'), true);
+  check('síť', metaEl.textContent.includes('wifi'), true);
+  // Prázdná pole se nemají ukazovat jako pomlčky — radši ať řádek není
+  zive({ travnik: null, zony: null, kos: null, firmware: null, sit: null, udalost: 0 });
+  check('bez dat žádný prázdný řádek', metaEl.textContent.includes('Trávník'), false);
+  check('  ani zóny', metaEl.textContent.includes('Aktivní zóny'), false);
+  check('  ani koš', metaEl.textContent.includes('Koš'), false);
+  check('  a karta nespadne', stavEl.textContent, 'seká');
 
   R.push('\\n3) V doku a s chybou');
   zive({ stav: 'charge', popis: 'nabíjí se' });
@@ -80,7 +94,35 @@ setTimeout(async () => {
   check('chybový kód se ukáže', metaEl.textContent.includes('Chyba č. 12'), true);
   check('  a kontrolka zčervená', svetlo.classList.contains('off'), true);
 
-  R.push('\\n4) Cloud se neozývá');
+  R.push('\\n4) Sekačka není na příjmu');
+  // Cloud odpoví i o vypnuté sekačce — jen vydá poslední známý stav.
+  // Kdyby to appka neřekla, ukazovala by stará čísla jako aktuální.
+  zive({ online: false, stav: 'shutdown', popis: 'vypnutá', baterie: 57, chyba: 2133, udalost: 1045 });
+  check('stav to přizná', stavEl.textContent, 'offline');
+  check('kontrolka je červená', svetlo.classList.contains('off'), true);
+  check('  a nesvítí zeleně', svetlo.classList.contains('on'), false);
+  check('řekne se, že jsou hodnoty staré', metaEl.textContent.includes('poslední známé'), true);
+  check('  ale pořád jsou vidět', batEl.textContent, '57 %');
+  check('chybový kód se ukáže', metaEl.textContent.includes('Chyba č. 2133'), true);
+  check('  i událost', metaEl.textContent.includes('Událost č. 1045'), true);
+  // Povel by se schoval do fronty a sekačka by ho provedla, až se probudí —
+  // klidně ve tři ráno. To je horší než nic.
+  check('tlačítka zhasnou', [sekat, stop, dok].every(b => b.disabled), true);
+  POSLANO.length = 0;
+  sekat.click();
+  await pockej();
+  check('klik nic nepošle', POSLANO.length, 0);
+  check('a vysvětlí se proč', document.getElementById('sekHint').textContent.includes('fronty'), true);
+  // Nejčastější případ: sekačka jela a spojení se ztratilo. Poslední známý
+  // stav je „seká" — kontrolka ale nesmí tvrdit, že jede právě teď.
+  zive({ online: false, stav: 'globalmowing', popis: 'seká' });
+  check('poslední stav byl jízda, ale kontrolka nesvítí', svetlo.classList.contains('on'), false);
+  check('  a stav pořád říká offline', stavEl.textContent, 'offline');
+  zive({ online: true, stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0, udalost: 0 });
+  check('když se probudí, tlačítka ožijí', [sekat, stop, dok].every(b => b.disabled), false);
+  check('  a stav je zase režim', stavEl.textContent, 'seká');
+
+  R.push('\\n5) Cloud se neozývá');
   zive({ potiz: 'stav: HTTP 500 — rozbité' });
   check('stav to přizná', stavEl.textContent, 'neozývá se');
   check('kontrolka je červená', svetlo.classList.contains('off'), true);
@@ -92,7 +134,7 @@ setTimeout(async () => {
   await pockej();
   check('klik do prázdna nic nepošle', POSLANO.length, 0);
 
-  R.push('\\n5) Povely');
+  R.push('\\n6) Povely');
   zive();
   POSLANO.length = 0;
   sekat.click();
@@ -117,7 +159,7 @@ setTimeout(async () => {
   check('bez potvrzení se nic nepošle', POSLANO.length, 0);
   POTVRZENO = true;
 
-  R.push('\\n6) Syrové hlášení');
+  R.push('\\n7) Syrové hlášení');
   zive();
   const radky = radkySyrove();
   check('vypisují se všechna pole', radky.length, Object.keys(SYROVE).length);
@@ -125,8 +167,18 @@ setTimeout(async () => {
   // Tohle je jediný způsob, jak se zjistí, co M5 doopravdy hlásí
   check('  i ta, co appka neumí pojmenovat', radky.some(r => r.startsWith('volume')), true);
   check('vnořená hodnota se vypíše celá', radky.some(r => r.includes('{"cutter_height":45}')), true);
+  // Obrys pozemku je dlouhý na několik obrazovek. Oříznutý je k ničemu,
+  // klepnutím se musí rozbalit celý.
+  const radekEl = syroveEl.querySelector('div');
+  check('řádek je zabalený', radekEl.classList.contains('otevreno'), false);
+  radekEl.click();
+  check('klepnutím se rozbalí', radekEl.classList.contains('otevreno'), true);
+  radekEl.click();
+  check('  a druhým klepnutím zabalí', radekEl.classList.contains('otevreno'), false);
+  const odkaz = document.getElementById('sekSyroveOdkaz');
+  check('odkaz na celý stín tam je', odkaz.getAttribute('href'), '/api/sekacka/syrove');
 
-  R.push('\\n7) Stránka je v menu');
+  R.push('\\n8) Stránka je v menu');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);
   check('Úklid je mezi stránkami', tituly.includes('Úklid'), true);
   const slide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Úklid');

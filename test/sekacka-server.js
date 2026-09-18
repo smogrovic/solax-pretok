@@ -165,6 +165,35 @@ nadpis('3) Čtení stavu ze stínu');
   // Celkový čas chodí v sekundách, v appce se ukazují minuty
   check('celkový čas se přepočte na minuty', p.minutyCelkem, 120);
   check('RTK', p.rtk, 4);
+  // Co M5 doopravdy hlásí — podle prvního ostrého čtení. `robot_sta`,
+  // `mowing_area_new` ani `mowing_time_new` u něj vůbec nejsou, zato chodí
+  // spousta jiného, co se dřív zahazovalo.
+  const m5 = h.api.anthbotPrectiStin({
+    mode: { value: 'shutdown' }, online: { value: 0 }, elec: { value: 57 },
+    error: { value: 2133 }, event: { value: 1045 },
+    map: { map_area: 297, area_id: 3 }, active_area: { id: [102, 101] },
+    grass_state: { grass_bag_in_position: 1 }, fw_version: { value: '1.2.3' },
+    net_state: { value: 'wifi' }, mowing_area: { value: 900 }
+  });
+  check('odpojená sekačka se pozná', m5.online, false);
+  check('  a stav chodí z mode', m5.stav, 'shutdown');
+  check('velikost trávníku z map.map_area', m5.travnik, 297);
+  check('aktivní zóny', JSON.stringify(m5.zony), '[102,101]');
+  check('koš na trávu', m5.kos, 1);
+  check('událost se nese dál', m5.udalost, 1045);
+  // Co číslo 2133 znamená, není nikde popsané — nepřekládá se, jen se ukáže
+  check('chybový kód zůstane číslem', m5.chyba, 2133);
+  check('firmware', m5.firmware, '1.2.3');
+  check('síť', m5.sit, 'wifi');
+  check('sekačka na příjmu', h.api.anthbotPrectiStin({ online: { value: 1 } }).online, true);
+  check('bez pole online se nic nepředstírá', h.api.anthbotPrectiStin({}).online, null);
+  check('síť ze záložního pole', h.api.anthbotPrectiStin({ net_config: { type: '4G' } }).sit, '4G');
+  // Firmware chodí u některých modelů jako celý objekt — ten se nahoru nehodí,
+  // je vidět dole v syrovém hlášení
+  check('firmware jako objekt se nevypisuje',
+    h.api.anthbotPrectiStin({ fw_version: { main: '1', mcu: '2' } }).firmware, null);
+  check('chybějící pole nic neshodí', h.api.anthbotPrectiStin({ map: null, active_area: 5 }).travnik, null);
+  check('  a zóny, co nejsou pole, se zahodí', h.api.anthbotPrectiStin({ active_area: { id: 7 } }).zony, null);
   check('prázdný stín nespadne', h.api.anthbotPrectiStin(null).baterie, null);
   check('  a stav je nic', h.api.anthbotPrectiStin(null).popis, null);
   check('výška z mow_remote, když param_set chybí',
@@ -290,6 +319,10 @@ nadpis('8) Načtení stavu');
   // Syrový stav jde do appky schválně: jména polí u M5 nejsou popsaná
   check('  i syrový stav', typeof p.syrove, 'object');
   check('  a je zapnutá', p.zapnuto, true);
+  // Odpojená sekačka musí být poznat až v appce — jinak by tam svítila
+  // baterie a stav, jako by platily teď
+  h.state.sekacka.stin = { ...h.state.sekacka.stin, online: { value: 0 } };
+  check('  offline propadne až do payloadu', h.api.sekackaPayload().online, false);
 }
 
 nadpis('9) Když cloud nespolupracuje');
@@ -349,6 +382,16 @@ nadpis('10) Endpointy');
   const obnova = await volej(h, 'POST /api/sekacka/obnov', {});
   check('obnova projde', obnova.out.ok, true);
   check('  a vrátí stav', obnova.out.sekacka.baterie, 87);
+
+  // Obrys pozemku a stopa sekačky jsou na kartě oříznuté. Přes tenhle endpoint
+  // jde celý stín otevřít a poslat — bez něj se mapa dolaďovat nedá.
+  const syrove = await volej(h, 'GET /api/sekacka/syrove', null);
+  check('syrové hlášení vrátí celý stín', syrove.out.stin.elec.value, 87);
+  check('  i s časem čtení', syrove.out.kdy > 0, true);
+  const prazdna = build();
+  const nic = await volej(prazdna, 'GET /api/sekacka/syrove', null);
+  check('prázdný stín taky projde', nic.kod, 200);
+  check('  a přizná, že nic není', nic.out.stin, null);
 }
 
 nadpis('11) Bez přihlašovacích údajů');

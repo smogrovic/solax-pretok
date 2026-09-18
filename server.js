@@ -8072,6 +8072,16 @@ function anthbotCislo(hodnota) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Firmware a síť chodí u každého modelu trochu jinak — někdy jako text, někdy
+// jako číslo, někdy jako celý objekt. Objekt se sem nehodí, ten je vidět dole
+// v syrovém hlášení; nahoře má smysl jen to, co jde přečíst na jeden pohled.
+function anthbotText(hodnota) {
+  const v = anthbotHodnota(hodnota);
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return null;
+}
+
 function anthbotStavZeStinu(stin) {
   for (const klic of ['robot_sta', 'mode']) {
     const hodnota = anthbotHodnota(stin[klic]);
@@ -8088,17 +8098,28 @@ function anthbotPrectiStin(stin) {
   const vnorene = (klic, pole) => (s[klic] && typeof s[klic] === 'object' ? s[klic][pole] : undefined);
   const stav = anthbotStavZeStinu(s);
   const vyska = vnorene('param_set', 'cutter_height');
+  // `online` je nadřazené všemu ostatnímu: když sekačka není na příjmu, jsou
+  // všechny hodnoty poslední známé, ne aktuální — a to musí být vidět.
+  const online = anthbotCislo(s.online);
+  const zony = vnorene('active_area', 'id');
   return {
     stav,
     popis: stav ? (ANTHBOT_STAVY_CESKY[stav] || stav) : null,
+    online: online === null ? null : online !== 0,
     baterie: anthbotCislo(s.elec),
     chyba: anthbotCislo(s.error) || 0,
+    udalost: anthbotCislo(s.event) || 0,
+    travnik: anthbotCislo(vnorene('map', 'map_area')),
+    kos: anthbotCislo(vnorene('grass_state', 'grass_bag_in_position')),
+    zony: Array.isArray(zony) ? zony : null,
     vyska: vyska === undefined ? anthbotCislo(vnorene('mow_remote', 'cutter_height')) : Number(vyska),
     plocha: anthbotCislo(s.mowing_area_new),
     minuty: anthbotCislo(s.mowing_time_new),
     plochaCelkem: anthbotCislo(s.mowing_area),
     minutyCelkem: anthbotCislo(s.mowing_time) === null ? null : Math.round(anthbotCislo(s.mowing_time) / 60),
     rtk: vnorene('rtk', 'state'),
+    firmware: anthbotText(s.fw_version),
+    sit: anthbotText(s.net_state) || anthbotText(vnorene('net_config', 'type')),
     ip: vnorene('net_config', 'ip'),
     hlasitost: anthbotCislo(s.volume)
   };
@@ -8137,6 +8158,13 @@ async function sekackaNacti(znovu = false) {
     if (ted && ted !== drive) {
       addLog(`Sekačka: ${ANTHBOT_STAVY_CESKY[ted] || ted}`);
     }
+    // Odpojení je zpráva sama o sobě — příkazy se k sekačce nedostanou
+    const bylaOnline = anthbotCislo((state.sekacka.__drive || {}).online);
+    const jeOnline = anthbotCislo(stin.online);
+    if (bylaOnline !== null && jeOnline !== null && (bylaOnline !== 0) !== (jeOnline !== 0)) {
+      addLog(jeOnline ? 'Sekačka: zase na příjmu' : 'Sekačka: odpojila se');
+    }
+    state.sekacka.__drive = { online: stin.online };
     sekackaPosli();
   } catch (err) {
     // 401 i 403 znamenají „přihlaš se znovu"; jednou to zkusíme, pak to přiznáme
@@ -8161,6 +8189,16 @@ app.post('/api/sekacka/povel', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+});
+
+// Celý stín, ať se dá poslat dál. V kartě se dlouhé hodnoty ořezávají a
+// `region_area` s `map` — tedy podklad pro mapu — se přes screenshot nepřenesou.
+app.get('/api/sekacka/syrove', (req, res) => {
+  res.json({
+    kdy: state.sekacka.kdy,
+    potiz: state.sekacka.potiz,
+    stin: state.sekacka.stin
+  });
 });
 
 app.post('/api/sekacka/obnov', async (req, res) => {
