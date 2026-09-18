@@ -1948,18 +1948,40 @@
   .sek-btn.stop{background:rgba(229,83,75,0.12);color:var(--red);}
   .sek-btn:disabled{opacity:0.45;}
   .sek-baterie{font-size:26px;font-weight:700;color:var(--navy);margin-top:6px;}
-  .sek-syrove{
-    width:100%;font-size:11px;color:var(--grey-text);
-    display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto;
+  .sek-mapa-btn{
+    align-self:flex-start;margin-top:8px;border:none;background:none;padding:0;
+    font-family:inherit;font-size:12px;font-weight:700;color:var(--green);
   }
-  .sek-syrove div{display:flex;justify-content:space-between;gap:10px;}
-  .sek-syrove b{font-weight:600;color:var(--navy);flex-shrink:0;}
-  .sek-syrove span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .sek-syrove div.otevreno span{overflow:visible;white-space:normal;word-break:break-all;text-align:right;}
-  .sek-odkaz{
-    width:100%;display:block;margin-top:8px;font-size:11px;
-    color:var(--green);font-weight:600;text-decoration:none;
+  /* Mapa přes celou obrazovku. Stojí mimo pás stránek, aby ji na iPadu
+     neuřízl sloupec — stejně jako potvrzovací okno u žaluzií. */
+  .sek-mapa{
+    position:fixed;inset:0;z-index:60;
+    display:flex;flex-direction:column;
+    background:rgba(20,30,40,0.55);
+    padding:max(16px, env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
   }
+  .sek-mapa[hidden]{display:none;}
+  .sek-mapa-box{
+    margin:auto;width:100%;max-width:640px;
+    background:var(--card);border-radius:20px;padding:14px;
+    box-shadow:0 8px 30px rgba(20,30,40,0.25);
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .sek-mapa-hlava{display:flex;align-items:center;justify-content:space-between;}
+  .sek-mapa-hlava b{font-size:15px;font-weight:800;color:var(--navy);}
+  .sek-mapa-zavri{
+    border:none;background:rgba(44,62,80,0.08);color:var(--grey-text);
+    width:30px;height:30px;border-radius:15px;font-size:15px;font-family:inherit;
+  }
+  #sekMapaPlatno{width:100%;display:block;border-radius:14px;background:rgba(44,62,80,0.04);}
+  #sekMapaPlatno[hidden]{display:none;}
+  .sek-mapa-popis{font-size:12px;color:var(--grey-text);}
+  .sek-mapa-popis:empty{display:none;}
+  /* Když se mapa poskládat nedá, musí být poznat proč — a co poslat dál */
+  .sek-mapa-potiz{font-size:11px;color:var(--grey-text);line-height:1.6;}
+  .sek-mapa-potiz:empty{display:none;}
+  .sek-mapa-potiz code{font-family:inherit;font-weight:700;color:var(--navy);}
+  .sek-mapa-potiz a{color:var(--green);font-weight:700;text-decoration:none;}
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
 </style>
@@ -2735,6 +2757,7 @@
           </div>
           <div class="sek-baterie" id="sekBaterie">– %</div>
           <div class="zavlaha-meta" id="sekMeta"></div>
+          <button class="sek-mapa-btn" id="sekMapaBtn" type="button">Mapa →</button>
         </div>
       </div>
 
@@ -2745,13 +2768,6 @@
           <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
         </div>
         <div class="zavlaha-hint" id="sekHint"></div>
-      </div>
-
-      <div class="card stats-card">
-        <div class="graph-title">Co sekačka hlásí</div>
-        <div class="sek-syrove" id="sekSyrove"></div>
-        <a class="sek-odkaz" id="sekSyroveOdkaz" href="/api/sekacka/syrove" target="_blank" rel="noopener">Otevřít celé hlášení →</a>
-        <div class="wbsrc-note">Syrová hlášení z cloudu. Je to tu proto, že jména polí u M5 nejsou nikde popsaná — podle tohohle se dolaďuje, co appka ukazuje nahoře. Klepnutím na řádek se dlouhá hodnota rozbalí celá.</div>
       </div>
     </div>
   </div>
@@ -3111,6 +3127,19 @@
   <div class="kal-pata">
     <button class="kal-obnov" id="kalObnov" type="button">Aktualizovat</button>
     <div class="kal-meta" id="kalMeta"></div>
+  </div>
+</div>
+
+<!-- Mapa sekačky. Taky mimo pás stránek — překrývá celou obrazovku. -->
+<div class="sek-mapa" id="sekMapaBack" hidden>
+  <div class="sek-mapa-box">
+    <div class="sek-mapa-hlava">
+      <b>Mapa sekačky</b>
+      <button class="sek-mapa-zavri" id="sekMapaZavri" type="button">✕</button>
+    </div>
+    <canvas id="sekMapaPlatno"></canvas>
+    <div class="sek-mapa-popis" id="sekMapaPopis"></div>
+    <div class="sek-mapa-potiz" id="sekMapaPotiz"></div>
   </div>
 </div>
 
@@ -8951,8 +8980,13 @@ const sekLightEl = document.getElementById('sekLight');
 const sekStavEl = document.getElementById('sekStav');
 const sekBaterieEl = document.getElementById('sekBaterie');
 const sekMetaEl = document.getElementById('sekMeta');
-const sekSyroveEl = document.getElementById('sekSyrove');
 const sekHintEl = document.getElementById('sekHint');
+const sekMapaBtnEl = document.getElementById('sekMapaBtn');
+const sekMapaBackEl = document.getElementById('sekMapaBack');
+const sekMapaZavriEl = document.getElementById('sekMapaZavri');
+const sekMapaPlatnoEl = document.getElementById('sekMapaPlatno');
+const sekMapaPopisEl = document.getElementById('sekMapaPopis');
+const sekMapaPotizEl = document.getElementById('sekMapaPotiz');
 const sekSekatBtnEl = document.getElementById('sekSekatBtn');
 const sekStopBtnEl = document.getElementById('sekStopBtn');
 const sekDokBtnEl = document.getElementById('sekDokBtn');
@@ -8980,21 +9014,16 @@ function sekackaMetaRadky() {
   if (!d.zapnuto) return ['Sekačka není nastavená — chybí přihlášení k Anthbotu v Renderu.'];
   if (d.potiz) return [`Cloud Anthbotu se neozval: ${d.potiz}`];
   if (!d.kdy) return ['Zatím nic nepřišlo — první čtení proběhne do minuty.'];
+  // Ukazuje se jen to, na co se člověk dívá pokaždé. Dvě hlášky navíc tu jsou
+  // schválně: „není na příjmu" a chybový kód nejsou údaje, ale stavy —
+  // objeví se, jen když něco není v pořádku, a zrovna ty se schovávat nemají.
   const r = [];
-  if (d.jmeno) r.push(`${d.jmeno}${d.model ? ` (kategorie ${d.model})` : ''}`);
   if (d.online === false) r.push('Sekačka není na příjmu — hodnoty níž jsou poslední známé, ne aktuální.');
-  // Co ta čísla znamenají, se nikde dohledat nedá, tak se nepřekládají
+  // Co to číslo znamená, se nikde dohledat nedá, tak se nepřekládá
   if (d.chyba) r.push(`Chyba č. ${d.chyba} (kód přímo od sekačky)`);
-  if (d.udalost) r.push(`Událost č. ${d.udalost}`);
   if (d.vyska !== null && d.vyska !== undefined) r.push(`Výška sečení: ${d.vyska} mm`);
   if (d.travnik) r.push(`Trávník: ${d.travnik} m²`);
-  if (d.zony && d.zony.length) r.push(`Aktivní zóny: ${d.zony.join(', ')}`);
-  if (d.kos !== null && d.kos !== undefined) r.push(`Koš na trávu: ${d.kos ? 'nasazený' : 'sundaný'}`);
-  if (d.plocha) r.push(`Tenhle záběr: ${d.plocha} m²${d.minuty ? `, ${d.minuty} min` : ''}`);
   if (d.plochaCelkem) r.push(`Celkem: ${d.plochaCelkem} m²${d.minutyCelkem ? `, ${d.minutyCelkem} min` : ''}`);
-  if (d.rtk !== undefined && d.rtk !== null) r.push(`RTK: ${d.rtk}`);
-  if (d.sit) r.push(`Síť: ${d.sit}`);
-  if (d.firmware) r.push(`Firmware: ${d.firmware}`);
   r.push('Naposledy ' + logCas(d.kdy));
   return r;
 }
@@ -9039,30 +9068,7 @@ function renderSekacka(d) {
         ? 'Sekačka není na příjmu. Povel by se schoval do fronty a provedla by ho, až se probudí — klidně v noci. Proto ovládat nejde.'
         : 'Dokud se cloud Anthbotu neozve, ovládat nejde — povel by spadl do prázdna.';
   }
-  if (sekSyroveEl) {
-    sekSyroveEl.textContent = '';
-    const syrove = sekackaData.syrove;
-    if (!syrove || !Object.keys(syrove).length) {
-      const prazdno = document.createElement('div');
-      prazdno.textContent = 'Zatím nic.';
-      sekSyroveEl.appendChild(prazdno);
-    } else {
-      for (const klic of Object.keys(syrove).sort()) {
-        const radek = document.createElement('div');
-        const jmeno = document.createElement('b');
-        jmeno.textContent = klic;
-        const hodnota = document.createElement('span');
-        const v = syrove[klic];
-        hodnota.textContent = (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
-        radek.appendChild(jmeno);
-        radek.appendChild(hodnota);
-        // Obrys pozemku je dlouhý na několik obrazovek. Na jeden řádek se
-        // nevejde a oříznutý je k ničemu — klepnutím se rozbalí celý.
-        radek.addEventListener('click', () => radek.classList.toggle('otevreno'));
-        sekSyroveEl.appendChild(radek);
-      }
-    }
-  }
+  if (sekMapaBackEl && !sekMapaBackEl.hidden) sekackaKresliMapu();
 }
 
 async function sekackaPovel(co, popis, btn) {
@@ -9084,6 +9090,162 @@ async function sekackaPovel(co, popis, btn) {
   }
   if (btn) btn.disabled = false;
 }
+
+// ---------- Mapa sekačky ----------
+// Tvar bodů, které M5 posílá, není nikde popsaný a v komunitní integraci se
+// mapa vůbec nekreslí — není odkud opsat. Čtení je proto schválně tolerantní:
+// zvládne několik možných zápisů a když se netrefí, vrátí prázdno a mapa to
+// přizná, místo aby kreslila nesmysl.
+const SEK_MAPA_OKRAJ = 12;
+
+function sekackaCislo(v) {
+  const n = typeof v === 'string' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
+}
+
+function sekackaBody(surovina) {
+  let v = surovina;
+  if (v && typeof v === 'object' && !Array.isArray(v) && 'value' in v) v = v.value;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
+  if (v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.points)) v = v.points;
+  if (!Array.isArray(v) || !v.length) return [];
+
+  // Plochý seznam čísel: bere se po dvojicích, lichý zbytek se zahodí
+  if (v.every(p => sekackaCislo(p) !== null)) {
+    const body = [];
+    for (let i = 0; i + 1 < v.length; i += 2) body.push({ x: sekackaCislo(v[i]), y: sekackaCislo(v[i + 1]) });
+    return body;
+  }
+
+  const body = [];
+  for (const p of v) {
+    if (Array.isArray(p)) {
+      const x = sekackaCislo(p[0]), y = sekackaCislo(p[1]);
+      if (x !== null && y !== null) body.push({ x, y });
+    } else if (p && typeof p === 'object') {
+      const x = sekackaCislo(p.x ?? p.px ?? p.lon ?? p.lng ?? p.longitude);
+      const y = sekackaCislo(p.y ?? p.py ?? p.lat ?? p.latitude);
+      if (x !== null && y !== null) body.push({ x, y });
+    }
+  }
+  return body;
+}
+
+// Co ze stínu vypadá jako mapa. Kdyby to sekačka posílala pod jiným jménem,
+// vypíše se to dole v hlášce — podle toho se pozná, kam sáhnout.
+function sekackaMapaZdroje() {
+  const s = sekackaData.syrove || {};
+  return {
+    obrys: sekackaBody(s.region_area) ,
+    stopa: sekackaBody(s.curpath)
+  };
+}
+
+function sekackaKresliMapu() {
+  if (!sekMapaPlatnoEl) return null;
+  const { obrys, stopa } = sekackaMapaZdroje();
+
+  if (sekMapaPopisEl) {
+    const casti = [];
+    if (sekackaData.travnik) casti.push(`Trávník ${sekackaData.travnik} m²`);
+    if (sekackaData.kdy) casti.push('naposledy ' + logCas(sekackaData.kdy));
+    sekMapaPopisEl.textContent = casti.join(' · ');
+  }
+
+  // Dva body nejsou pozemek. Radši se přizná, že to nejde, než aby se kreslila
+  // čára a tvářila se jako mapa.
+  if (obrys.length < 3) {
+    sekMapaPlatnoEl.hidden = true;
+    if (sekMapaPotizEl) {
+      sekMapaPotizEl.textContent = '';
+      const veta = document.createElement('div');
+      veta.textContent = 'Mapu z toho zatím poskládat neumím — nevím, v jakém tvaru sekačka posílá body.';
+      sekMapaPotizEl.appendChild(veta);
+      const syrove = sekackaData.syrove || {};
+      const klice = Object.keys(syrove).sort();
+      const seznam = document.createElement('div');
+      if (klice.length) {
+        seznam.textContent = 'Ve stínu je: ' + klice
+          .map(k => `${k} (${JSON.stringify(syrove[k] ?? null).length} zn.)`).join(', ');
+      } else {
+        seznam.textContent = 'Ze sekačky zatím nic nepřišlo.';
+      }
+      sekMapaPotizEl.appendChild(seznam);
+      const odkaz = document.createElement('a');
+      odkaz.href = '/api/sekacka/syrove';
+      odkaz.target = '_blank';
+      odkaz.rel = 'noopener';
+      odkaz.textContent = 'Otevřít celé hlášení →';
+      sekMapaPotizEl.appendChild(odkaz);
+    }
+    return null;
+  }
+
+  if (sekMapaPotizEl) sekMapaPotizEl.textContent = '';
+  sekMapaPlatnoEl.hidden = false;
+
+  const vsechny = obrys.concat(stopa);
+  const minX = Math.min(...vsechny.map(p => p.x));
+  const maxX = Math.max(...vsechny.map(p => p.x));
+  const minY = Math.min(...vsechny.map(p => p.y));
+  const maxY = Math.max(...vsechny.map(p => p.y));
+  const sirkaDat = Math.max(maxX - minX, 1e-9);
+  const vyskaDat = Math.max(maxY - minY, 1e-9);
+
+  const w = sekMapaPlatnoEl.clientWidth || 320;
+  // Plátno drží poměr pozemku, ať zahrada nevypadá nastojato ani rozpláclá
+  const h = Math.round(Math.min(Math.max((w - 2 * SEK_MAPA_OKRAJ) * (vyskaDat / sirkaDat)
+    + 2 * SEK_MAPA_OKRAJ, 160), (window.innerHeight || 600) * 0.55));
+  sekMapaPlatnoEl.style.height = h + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  sekMapaPlatnoEl.width = w * dpr;
+  sekMapaPlatnoEl.height = h * dpr;
+  const ctx = sekMapaPlatnoEl.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const k = Math.min((w - 2 * SEK_MAPA_OKRAJ) / sirkaDat, (h - 2 * SEK_MAPA_OKRAJ) / vyskaDat);
+  const posunX = (w - sirkaDat * k) / 2;
+  const posunY = (h - vyskaDat * k) / 2;
+  // Sekačka měří nahoru, plátno dolů — bez překlopení by byla zahrada vzhůru nohama
+  const naPlatno = p => ({ x: posunX + (p.x - minX) * k, y: posunY + (maxY - p.y) * k });
+
+  const obrysP = obrys.map(naPlatno);
+  const stopaP = stopa.map(naPlatno);
+
+  ctx.beginPath();
+  obrysP.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(39,174,96,0.16)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(39,174,96,0.9)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  if (stopaP.length > 1) {
+    ctx.beginPath();
+    stopaP.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.strokeStyle = 'rgba(44,62,80,0.55)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  return { obrys: obrysP, stopa: stopaP, w, h };
+}
+
+function sekackaMapaOtevri() {
+  if (!sekMapaBackEl) return;
+  sekMapaBackEl.hidden = false;
+  sekackaKresliMapu();
+}
+
+function sekackaMapaZavri() {
+  if (sekMapaBackEl) sekMapaBackEl.hidden = true;
+}
+
+if (sekMapaBtnEl) sekMapaBtnEl.addEventListener('click', sekackaMapaOtevri);
+if (sekMapaZavriEl) sekMapaZavriEl.addEventListener('click', sekackaMapaZavri);
+if (sekMapaBackEl) sekMapaBackEl.addEventListener('click', e => { if (e.target === sekMapaBackEl) sekackaMapaZavri(); });
 
 if (sekSekatBtnEl) sekSekatBtnEl.addEventListener('click', () => sekackaPovel('sekat', 'začít sekat', sekSekatBtnEl));
 if (sekStopBtnEl) sekStopBtnEl.addEventListener('click', () => sekackaPovel('stop', 'zastavit', sekStopBtnEl));

@@ -8072,16 +8072,6 @@ function anthbotCislo(hodnota) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Firmware a síť chodí u každého modelu trochu jinak — někdy jako text, někdy
-// jako číslo, někdy jako celý objekt. Objekt se sem nehodí, ten je vidět dole
-// v syrovém hlášení; nahoře má smysl jen to, co jde přečíst na jeden pohled.
-function anthbotText(hodnota) {
-  const v = anthbotHodnota(hodnota);
-  if (typeof v === 'string') return v.trim() || null;
-  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-  return null;
-}
-
 function anthbotStavZeStinu(stin) {
   for (const klic of ['robot_sta', 'mode']) {
     const hodnota = anthbotHodnota(stin[klic]);
@@ -8101,27 +8091,19 @@ function anthbotPrectiStin(stin) {
   // `online` je nadřazené všemu ostatnímu: když sekačka není na příjmu, jsou
   // všechny hodnoty poslední známé, ne aktuální — a to musí být vidět.
   const online = anthbotCislo(s.online);
-  const zony = vnorene('active_area', 'id');
+  // Pole se vybírají jen ta, která stránka doopravdy ukazuje. Zbytek stínu
+  // jde do appky celý v `syrove` — mapa si z něj bere svoje. Držet vedle toho
+  // polovinu polí zvlášť by znamenalo mrtvá pole, která vypadají živě.
   return {
     stav,
     popis: stav ? (ANTHBOT_STAVY_CESKY[stav] || stav) : null,
     online: online === null ? null : online !== 0,
     baterie: anthbotCislo(s.elec),
     chyba: anthbotCislo(s.error) || 0,
-    udalost: anthbotCislo(s.event) || 0,
     travnik: anthbotCislo(vnorene('map', 'map_area')),
-    kos: anthbotCislo(vnorene('grass_state', 'grass_bag_in_position')),
-    zony: Array.isArray(zony) ? zony : null,
     vyska: vyska === undefined ? anthbotCislo(vnorene('mow_remote', 'cutter_height')) : Number(vyska),
-    plocha: anthbotCislo(s.mowing_area_new),
-    minuty: anthbotCislo(s.mowing_time_new),
     plochaCelkem: anthbotCislo(s.mowing_area),
-    minutyCelkem: anthbotCislo(s.mowing_time) === null ? null : Math.round(anthbotCislo(s.mowing_time) / 60),
-    rtk: vnorene('rtk', 'state'),
-    firmware: anthbotText(s.fw_version),
-    sit: anthbotText(s.net_state) || anthbotText(vnorene('net_config', 'type')),
-    ip: vnorene('net_config', 'ip'),
-    hlasitost: anthbotCislo(s.volume)
+    minutyCelkem: anthbotCislo(s.mowing_time) === null ? null : Math.round(anthbotCislo(s.mowing_time) / 60)
   };
 }
 

@@ -5,8 +5,11 @@
 //    neozve, musí tlačítka zhasnout, jinak člověk mačká do prázdna.
 //  * Chybový kód od sekačky a problém se spojením jsou dvě různé věci a nesmí
 //    se na stránce slít do jedné.
-//  * Jména polí u M5 nejsou nikde popsaná, takže se syrové hlášení vypisuje.
-//    Kdyby přestalo, nebylo by podle čeho appku dolaďovat.
+//  * Horní box má zůstat krátký. Každé číslo navíc se čte na úkor těch
+//    čtyř, na která se člověk dívá doopravdy.
+//  * Tvar bodů, které sekačka posílá, není nikde popsaný. Když se netrefí,
+//    musí to mapa přiznat — nakreslená čára ze špatně přečtených čísel by
+//    vypadala jako mapa a nešlo by poznat, že je to nesmysl.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -30,27 +33,31 @@ const pockej = () => new Promise(r => setTimeout(r, 20));
 
 setTimeout(async () => {
  try {
+  // Čtverec 10 × 10 s useknutým rohem, ať je poznat, kam která strana patří
+  const OBRYS = [[0, 0], [10, 0], [10, 6], [6, 10], [0, 10]];
   const SYROVE = {
-    elec: { value: 87 }, robot_sta: { value: 'globalmowing' }, error: { value: 0 },
-    param_set: { cutter_height: 45 }, mowing_area_new: { value: 120 }, volume: 60
+    elec: { value: 87 }, mode: { value: 'globalmowing' }, error: { value: 0 },
+    map: { map_area: 297 }, region_area: { points: OBRYS },
+    curpath: [[1, 1], [9, 9]], volume: 60
   };
   const zive = extra => renderSekacka(Object.assign({
-    zapnuto: true, kdy: Date.now(), potiz: null, jmeno: 'Zahrada', model: '5',
+    zapnuto: true, kdy: Date.now(), potiz: null,
     stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0, vyska: 45,
-    plocha: 120, minuty: 18, plochaCelkem: 900, minutyCelkem: 120, rtk: 4,
-    online: true, udalost: 0, travnik: 297, kos: 1, zony: [102, 101],
-    firmware: '1.2.3', sit: 'wifi', syrove: SYROVE
+    plochaCelkem: 900, minutyCelkem: 120, online: true, travnik: 297,
+    syrove: SYROVE
   }, extra || {}));
 
   const stavEl = document.getElementById('sekStav');
   const batEl = document.getElementById('sekBaterie');
   const metaEl = document.getElementById('sekMeta');
   const svetlo = document.getElementById('sekLight');
-  const syroveEl = document.getElementById('sekSyrove');
   const sekat = document.getElementById('sekSekatBtn');
   const stop = document.getElementById('sekStopBtn');
   const dok = document.getElementById('sekDokBtn');
-  const radkySyrove = () => [...syroveEl.querySelectorAll('div')].map(d => d.textContent);
+  const mapaBtn = document.getElementById('sekMapaBtn');
+  const mapaBack = document.getElementById('sekMapaBack');
+  const platno = document.getElementById('sekMapaPlatno');
+  const potizEl = document.getElementById('sekMapaPotiz');
 
   R.push('1) Bez nastavení');
   renderSekacka({ zapnuto: false, kdy: 0, potiz: null, syrove: null });
@@ -58,7 +65,7 @@ setTimeout(async () => {
   check('tlačítka nejdou', [sekat, stop, dok].every(b => b.disabled), true);
   check('řekne se, co chybí', metaEl.textContent.includes('Renderu'), true);
   check('baterie je prázdná', batEl.textContent, '– %');
-  check('syrové hlášení je prázdné', radkySyrove()[0], 'Zatím nic.');
+  check('karta se syrovým hlášením je pryč', document.getElementById('sekSyrove'), 'null');
 
   R.push('\\n2) Sekačka seká');
   zive();
@@ -67,22 +74,20 @@ setTimeout(async () => {
   check('  a není červená', svetlo.classList.contains('off'), false);
   check('baterie v procentech', batEl.textContent, '87 %');
   check('tlačítka jdou mačkat', [sekat, stop, dok].every(b => b.disabled), false);
-  check('jméno sekačky je vidět', metaEl.textContent.includes('Zahrada'), true);
-  check('výška sečení taky', metaEl.textContent.includes('45 mm'), true);
-  check('  i záběr', metaEl.textContent.includes('120 m²'), true);
+  check('výška sečení je vidět', metaEl.textContent.includes('45 mm'), true);
+  check('  i trávník', metaEl.textContent.includes('Trávník: 297 m²'), true);
   check('  i celkem', metaEl.textContent.includes('900 m²'), true);
-  check('velikost trávníku', metaEl.textContent.includes('Trávník: 297 m²'), true);
-  check('aktivní zóny', metaEl.textContent.includes('102, 101'), true);
-  check('koš na trávu', metaEl.textContent.includes('nasazený'), true);
-  check('  a sundaný, když není', (() => { zive({ kos: 0 });
-    return metaEl.textContent.includes('sundaný'); })(), true);
-  check('firmware', metaEl.textContent.includes('1.2.3'), true);
-  check('síť', metaEl.textContent.includes('wifi'), true);
+  check('  i kdy to přišlo', metaEl.textContent.includes('Naposledy'), true);
+  // Box má být krátký. Tohle všechno se z něj vyhodilo schválně — kdyby se to
+  // vrátilo zadem, sada si toho všimne.
+  const VYHOZENE = ['Zahrada', 'RTK', 'Síť', 'Firmware', 'Aktivní zóny', 'Koš', 'Tenhle záběr', 'Událost'];
+  check('nic navíc tam není',
+    VYHOZENE.filter(t => metaEl.textContent.includes(t)).join(', ') || 'nic', 'nic');
+  check('řádky jsou právě čtyři', metaEl.querySelectorAll('div').length, 4);
   // Prázdná pole se nemají ukazovat jako pomlčky — radši ať řádek není
-  zive({ travnik: null, zony: null, kos: null, firmware: null, sit: null, udalost: 0 });
+  zive({ travnik: null, plochaCelkem: null });
   check('bez dat žádný prázdný řádek', metaEl.textContent.includes('Trávník'), false);
-  check('  ani zóny', metaEl.textContent.includes('Aktivní zóny'), false);
-  check('  ani koš', metaEl.textContent.includes('Koš'), false);
+  check('  ani celkem', metaEl.textContent.includes('Celkem'), false);
   check('  a karta nespadne', stavEl.textContent, 'seká');
 
   R.push('\\n3) V doku a s chybou');
@@ -97,14 +102,13 @@ setTimeout(async () => {
   R.push('\\n4) Sekačka není na příjmu');
   // Cloud odpoví i o vypnuté sekačce — jen vydá poslední známý stav.
   // Kdyby to appka neřekla, ukazovala by stará čísla jako aktuální.
-  zive({ online: false, stav: 'shutdown', popis: 'vypnutá', baterie: 57, chyba: 2133, udalost: 1045 });
+  zive({ online: false, stav: 'shutdown', popis: 'vypnutá', baterie: 57, chyba: 2133 });
   check('stav to přizná', stavEl.textContent, 'offline');
   check('kontrolka je červená', svetlo.classList.contains('off'), true);
   check('  a nesvítí zeleně', svetlo.classList.contains('on'), false);
   check('řekne se, že jsou hodnoty staré', metaEl.textContent.includes('poslední známé'), true);
   check('  ale pořád jsou vidět', batEl.textContent, '57 %');
   check('chybový kód se ukáže', metaEl.textContent.includes('Chyba č. 2133'), true);
-  check('  i událost', metaEl.textContent.includes('Událost č. 1045'), true);
   // Povel by se schoval do fronty a sekačka by ho provedla, až se probudí —
   // klidně ve tři ráno. To je horší než nic.
   check('tlačítka zhasnou', [sekat, stop, dok].every(b => b.disabled), true);
@@ -118,7 +122,7 @@ setTimeout(async () => {
   zive({ online: false, stav: 'globalmowing', popis: 'seká' });
   check('poslední stav byl jízda, ale kontrolka nesvítí', svetlo.classList.contains('on'), false);
   check('  a stav pořád říká offline', stavEl.textContent, 'offline');
-  zive({ online: true, stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0, udalost: 0 });
+  zive({ online: true, stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0 });
   check('když se probudí, tlačítka ožijí', [sekat, stop, dok].every(b => b.disabled), false);
   check('  a stav je zase režim', stavEl.textContent, 'seká');
 
@@ -159,24 +163,65 @@ setTimeout(async () => {
   check('bez potvrzení se nic nepošle', POSLANO.length, 0);
   POTVRZENO = true;
 
-  R.push('\\n7) Syrové hlášení');
+  R.push('\\n7) Mapa');
   zive();
-  const radky = radkySyrove();
-  check('vypisují se všechna pole', radky.length, Object.keys(SYROVE).length);
-  check('  seřazená podle jména', radky[0].startsWith('elec'), true);
-  // Tohle je jediný způsob, jak se zjistí, co M5 doopravdy hlásí
-  check('  i ta, co appka neumí pojmenovat', radky.some(r => r.startsWith('volume')), true);
-  check('vnořená hodnota se vypíše celá', radky.some(r => r.includes('{"cutter_height":45}')), true);
-  // Obrys pozemku je dlouhý na několik obrazovek. Oříznutý je k ničemu,
-  // klepnutím se musí rozbalit celý.
-  const radekEl = syroveEl.querySelector('div');
-  check('řádek je zabalený', radekEl.classList.contains('otevreno'), false);
-  radekEl.click();
-  check('klepnutím se rozbalí', radekEl.classList.contains('otevreno'), true);
-  radekEl.click();
-  check('  a druhým klepnutím zabalí', radekEl.classList.contains('otevreno'), false);
-  const odkaz = document.getElementById('sekSyroveOdkaz');
-  check('odkaz na celý stín tam je', odkaz.getAttribute('href'), '/api/sekacka/syrove');
+  check('mapa je zavřená', mapaBack.hidden, true);
+  mapaBtn.click();
+  check('proklik ji otevře', mapaBack.hidden, false);
+  check('  a plátno je vidět', platno.hidden, false);
+  check('  bez hlášky o potížích', potizEl.textContent, '');
+  check('popisek říká, jak velký je trávník',
+    document.getElementById('sekMapaPopis').textContent.includes('297 m²'), true);
+
+  // Prázdné plátno by prošlo jako mapa. Tohle je jediná kontrola, která pozná,
+  // že se doopravdy něco nakreslilo.
+  const ctx = platno.getContext('2d');
+  const px = ctx.getImageData(0, 0, platno.width, platno.height).data;
+  let barevnych = 0;
+  for (let i = 3; i < px.length; i += 4) if (px[i]) barevnych++;
+  check('doopravdy se kreslilo', barevnych > 100, true);
+
+  const m = sekackaKresliMapu();
+  check('obrys má všechny body', m.obrys.length, OBRYS.length);
+  check('žádný bod mimo plátno',
+    m.obrys.every(p => p.x >= 0 && p.x <= m.w && p.y >= 0 && p.y <= m.h), true);
+  // Sekačka měří nahoru, plátno dolů. Bez překlopení by byla zahrada vzhůru nohama.
+  check('Y je překlopené', m.obrys[0].y > m.obrys[2].y, true);
+  check('  a X ne', m.obrys[0].x < m.obrys[1].x, true);
+  check('mapa se vejde na šířku', Math.round(Math.max(...m.obrys.map(p => p.x)) <= m.w), 1);
+
+  document.getElementById('sekMapaZavri').click();
+  check('křížek zavírá', mapaBack.hidden, true);
+  mapaBtn.click();
+  mapaBack.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  check('klepnutí vedle taky', mapaBack.hidden, true);
+
+  R.push('\\n7b) Když se mapa poskládat nedá');
+  zive({ syrove: { region_area: { points: 'nesmysl' }, elec: { value: 87 } } });
+  mapaBtn.click();
+  check('plátno se schová', platno.hidden, true);
+  check('a řekne se to narovinu', potizEl.textContent.includes('poskládat neumím'), true);
+  check('  s výpisem, co ve stínu je', potizEl.textContent.includes('region_area'), true);
+  check('  a odkazem na celé hlášení',
+    potizEl.querySelector('a').getAttribute('href'), '/api/sekacka/syrove');
+  document.getElementById('sekMapaZavri').click();
+
+  R.push('\\n7c) Čtení bodů');
+  check('pole dvojic', JSON.stringify(sekackaBody([[1, 2], [3, 4]])), '[{"x":1,"y":2},{"x":3,"y":4}]');
+  check('pole objektů', JSON.stringify(sekackaBody([{ x: 1, y: 2 }])), '[{"x":1,"y":2}]');
+  check('  i pod jinými jmény', JSON.stringify(sekackaBody([{ lon: 1, lat: 2 }])), '[{"x":1,"y":2}]');
+  check('plochý seznam po dvojicích',
+    JSON.stringify(sekackaBody([1, 2, 3, 4])), '[{"x":1,"y":2},{"x":3,"y":4}]');
+  check('  a lichý zbytek se zahodí', sekackaBody([1, 2, 3]).length, 1);
+  check('zabalené v textu', JSON.stringify(sekackaBody('[[1,2]]')), '[{"x":1,"y":2}]');
+  check('zabalené ve value', JSON.stringify(sekackaBody({ value: [[1, 2]] })), '[{"x":1,"y":2}]');
+  check('v points', JSON.stringify(sekackaBody({ points: [[1, 2]] })), '[{"x":1,"y":2}]');
+  // Radši nic než dohadovat se s daty, kterým nerozumím
+  check('rozbitý text je prázdno', sekackaBody('{a').length, 0);
+  check('slova jsou prázdno', sekackaBody(['a', 'b']).length, 0);
+  check('prázdno je prázdno', sekackaBody(null).length, 0);
+  check('objekt bez bodů je prázdno', sekackaBody({ a: 1 }).length, 0);
+  check('body bez čísel se zahodí', sekackaBody([{ x: 1 }, { x: 2, y: 3 }]).length, 1);
 
   R.push('\\n8) Stránka je v menu');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);
