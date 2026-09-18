@@ -310,8 +310,9 @@ nadpis('8) Načtení stavu');
   const p = h.api.sekackaPayload();
   check('payload má baterii', p.baterie, 87);
   check('  i jméno sekačky', p.jmeno, 'Zahrada');
-  // Syrový stav jde do appky schválně: jména polí u M5 nejsou popsaná
-  check('  i syrový stav', typeof p.syrove, 'object');
+  // Celý stín se do appky netahá — je na to endpoint. Obrys pozemku po drátě
+  // při každém čtení, když ho nikdo nekreslí, je čistá režie navíc.
+  check('  ale ne celý stín', 'syrove' in p, false);
   check('  a je zapnutá', p.zapnuto, true);
   // Odpojená sekačka musí být poznat až v appce — jinak by tam svítila
   // baterie a stav, jako by platily teď

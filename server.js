@@ -8091,9 +8091,9 @@ function anthbotPrectiStin(stin) {
   // `online` je nadřazené všemu ostatnímu: když sekačka není na příjmu, jsou
   // všechny hodnoty poslední známé, ne aktuální — a to musí být vidět.
   const online = anthbotCislo(s.online);
-  // Pole se vybírají jen ta, která stránka doopravdy ukazuje. Zbytek stínu
-  // jde do appky celý v `syrove` — mapa si z něj bere svoje. Držet vedle toho
-  // polovinu polí zvlášť by znamenalo mrtvá pole, která vypadají živě.
+  // Pole se vybírají jen ta, která stránka doopravdy ukazuje. Na zbytek stínu
+  // je endpoint `/api/sekacka/syrove` — posílat ho do appky při každém čtení
+  // by znamenalo tahat obrys pozemku po drátě pro nic.
   return {
     stav,
     popis: stav ? (ANTHBOT_STAVY_CESKY[stav] || stav) : null,
@@ -8107,9 +8107,8 @@ function anthbotPrectiStin(stin) {
   };
 }
 
-// Jestli se jména polí u M5 trefila, se odsud ověřit nedá. Do appky proto jde
-// i syrový stav — když něco chybí, je to na stránce vidět a dá se to doplnit
-// bez dalšího kolečka přes SSH.
+// Do appky jde jen to, co stránka ukazuje. Celý stín je k mání zvlášť na
+// `/api/sekacka/syrove` — tam se chodí, když je potřeba něco doladit.
 function sekackaPayload() {
   return {
     zapnuto: anthbotEnabled,
@@ -8118,8 +8117,7 @@ function sekackaPayload() {
     kdy: state.sekacka.kdy,
     // `chyba` je chybový kód od sekačky, `potiz` problém se spojením — dvě různé věci
     potiz: state.sekacka.potiz,
-    ...anthbotPrectiStin(state.sekacka.stin),
-    syrove: state.sekacka.stin
+    ...anthbotPrectiStin(state.sekacka.stin)
   };
 }
 

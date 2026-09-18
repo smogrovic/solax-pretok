@@ -38,6 +38,13 @@ setTimeout(() => {
   }
   check('žádné dvě karty se nedotýkají', slepene.join(' | ') || 'žádné', 'žádné');
 
+  // Všechny stránky mají začínat u horního okraje stejně. Dřív se kratší
+  // stránka svisle vystředila a při listování horní box poskakoval.
+  const odsazeni = stranky.map(sl => Math.round(
+    sl.querySelector('.page').getBoundingClientRect().top - sl.getBoundingClientRect().top));
+  check('horní box sedí na všech stránkách stejně', [...new Set(odsazeni)].join(', '), String(odsazeni[0]));
+  check('  a drží se u horního okraje', odsazeni[0] < 40, true);
+
   // Konkrétně to, co bylo rozbité: dvě obyčejné karty za sebou na saune
   const sauna = stranky.find(s => s.dataset.title === 'Sauna');
   const saunaKarty = Array.from(sauna.querySelectorAll('.page > .card')).filter(viditelna);

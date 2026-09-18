@@ -7,9 +7,8 @@
 //    se na stránce slít do jedné.
 //  * Horní box má zůstat krátký. Každé číslo navíc se čte na úkor těch
 //    čtyř, na která se člověk dívá doopravdy.
-//  * Tvar bodů, které sekačka posílá, není nikde popsaný. Když se netrefí,
-//    musí to mapa přiznat — nakreslená čára ze špatně přečtených čísel by
-//    vypadala jako mapa a nešlo by poznat, že je to nesmysl.
+//  * Prázdná pole nesmí vyrobit prázdný řádek — radši ať tam ten řádek není
+//    než aby na stránce svítila pomlčka.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -33,18 +32,10 @@ const pockej = () => new Promise(r => setTimeout(r, 20));
 
 setTimeout(async () => {
  try {
-  // Čtverec 10 × 10 s useknutým rohem, ať je poznat, kam která strana patří
-  const OBRYS = [[0, 0], [10, 0], [10, 6], [6, 10], [0, 10]];
-  const SYROVE = {
-    elec: { value: 87 }, mode: { value: 'globalmowing' }, error: { value: 0 },
-    map: { map_area: 297 }, region_area: { points: OBRYS },
-    curpath: [[1, 1], [9, 9]], volume: 60
-  };
   const zive = extra => renderSekacka(Object.assign({
     zapnuto: true, kdy: Date.now(), potiz: null,
     stav: 'globalmowing', popis: 'seká', baterie: 87, chyba: 0, vyska: 45,
-    plochaCelkem: 900, minutyCelkem: 120, online: true, travnik: 297,
-    syrove: SYROVE
+    plochaCelkem: 900, minutyCelkem: 120, online: true, travnik: 297
   }, extra || {}));
 
   const stavEl = document.getElementById('sekStav');
@@ -54,13 +45,9 @@ setTimeout(async () => {
   const sekat = document.getElementById('sekSekatBtn');
   const stop = document.getElementById('sekStopBtn');
   const dok = document.getElementById('sekDokBtn');
-  const mapaBtn = document.getElementById('sekMapaBtn');
-  const mapaBack = document.getElementById('sekMapaBack');
-  const platno = document.getElementById('sekMapaPlatno');
-  const potizEl = document.getElementById('sekMapaPotiz');
 
   R.push('1) Bez nastavení');
-  renderSekacka({ zapnuto: false, kdy: 0, potiz: null, syrove: null });
+  renderSekacka({ zapnuto: false, kdy: 0, potiz: null });
   check('stav to přizná', stavEl.textContent, 'nenastavená');
   check('tlačítka nejdou', [sekat, stop, dok].every(b => b.disabled), true);
   check('řekne se, co chybí', metaEl.textContent.includes('Renderu'), true);
@@ -163,67 +150,7 @@ setTimeout(async () => {
   check('bez potvrzení se nic nepošle', POSLANO.length, 0);
   POTVRZENO = true;
 
-  R.push('\\n7) Mapa');
-  zive();
-  check('mapa je zavřená', mapaBack.hidden, true);
-  mapaBtn.click();
-  check('proklik ji otevře', mapaBack.hidden, false);
-  check('  a plátno je vidět', platno.hidden, false);
-  check('  bez hlášky o potížích', potizEl.textContent, '');
-  check('popisek říká, jak velký je trávník',
-    document.getElementById('sekMapaPopis').textContent.includes('297 m²'), true);
-
-  // Prázdné plátno by prošlo jako mapa. Tohle je jediná kontrola, která pozná,
-  // že se doopravdy něco nakreslilo.
-  const ctx = platno.getContext('2d');
-  const px = ctx.getImageData(0, 0, platno.width, platno.height).data;
-  let barevnych = 0;
-  for (let i = 3; i < px.length; i += 4) if (px[i]) barevnych++;
-  check('doopravdy se kreslilo', barevnych > 100, true);
-
-  const m = sekackaKresliMapu();
-  check('obrys má všechny body', m.obrys.length, OBRYS.length);
-  check('žádný bod mimo plátno',
-    m.obrys.every(p => p.x >= 0 && p.x <= m.w && p.y >= 0 && p.y <= m.h), true);
-  // Sekačka měří nahoru, plátno dolů. Bez překlopení by byla zahrada vzhůru nohama.
-  check('Y je překlopené', m.obrys[0].y > m.obrys[2].y, true);
-  check('  a X ne', m.obrys[0].x < m.obrys[1].x, true);
-  check('mapa se vejde na šířku', Math.round(Math.max(...m.obrys.map(p => p.x)) <= m.w), 1);
-
-  document.getElementById('sekMapaZavri').click();
-  check('křížek zavírá', mapaBack.hidden, true);
-  mapaBtn.click();
-  mapaBack.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  check('klepnutí vedle taky', mapaBack.hidden, true);
-
-  R.push('\\n7b) Když se mapa poskládat nedá');
-  zive({ syrove: { region_area: { points: 'nesmysl' }, elec: { value: 87 } } });
-  mapaBtn.click();
-  check('plátno se schová', platno.hidden, true);
-  check('a řekne se to narovinu', potizEl.textContent.includes('poskládat neumím'), true);
-  check('  s výpisem, co ve stínu je', potizEl.textContent.includes('region_area'), true);
-  check('  a odkazem na celé hlášení',
-    potizEl.querySelector('a').getAttribute('href'), '/api/sekacka/syrove');
-  document.getElementById('sekMapaZavri').click();
-
-  R.push('\\n7c) Čtení bodů');
-  check('pole dvojic', JSON.stringify(sekackaBody([[1, 2], [3, 4]])), '[{"x":1,"y":2},{"x":3,"y":4}]');
-  check('pole objektů', JSON.stringify(sekackaBody([{ x: 1, y: 2 }])), '[{"x":1,"y":2}]');
-  check('  i pod jinými jmény', JSON.stringify(sekackaBody([{ lon: 1, lat: 2 }])), '[{"x":1,"y":2}]');
-  check('plochý seznam po dvojicích',
-    JSON.stringify(sekackaBody([1, 2, 3, 4])), '[{"x":1,"y":2},{"x":3,"y":4}]');
-  check('  a lichý zbytek se zahodí', sekackaBody([1, 2, 3]).length, 1);
-  check('zabalené v textu', JSON.stringify(sekackaBody('[[1,2]]')), '[{"x":1,"y":2}]');
-  check('zabalené ve value', JSON.stringify(sekackaBody({ value: [[1, 2]] })), '[{"x":1,"y":2}]');
-  check('v points', JSON.stringify(sekackaBody({ points: [[1, 2]] })), '[{"x":1,"y":2}]');
-  // Radši nic než dohadovat se s daty, kterým nerozumím
-  check('rozbitý text je prázdno', sekackaBody('{a').length, 0);
-  check('slova jsou prázdno', sekackaBody(['a', 'b']).length, 0);
-  check('prázdno je prázdno', sekackaBody(null).length, 0);
-  check('objekt bez bodů je prázdno', sekackaBody({ a: 1 }).length, 0);
-  check('body bez čísel se zahodí', sekackaBody([{ x: 1 }, { x: 2, y: 3 }]).length, 1);
-
-  R.push('\\n8) Stránka je v menu');
+  R.push('\\n7) Stránka je v menu');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);
   check('Úklid je mezi stránkami', tituly.includes('Úklid'), true);
   const slide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Úklid');

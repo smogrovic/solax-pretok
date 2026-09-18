@@ -317,11 +317,9 @@
     display:flex;
     flex-direction:column;
     align-items:center;
-    margin:auto;
-  }
-  .page.top{
-    margin-top:0;
-    margin-bottom:auto;
+    /* Nahoru, ne na střed: kratší stránka se dřív svisle vystředila a horní
+       box na ní seděl jinde než na sousedce. Při listování to poskakovalo. */
+    margin:0 auto auto;
   }
   .topbar{
     text-align:center;
@@ -1948,40 +1946,6 @@
   .sek-btn.stop{background:rgba(229,83,75,0.12);color:var(--red);}
   .sek-btn:disabled{opacity:0.45;}
   .sek-baterie{font-size:26px;font-weight:700;color:var(--navy);margin-top:6px;}
-  .sek-mapa-btn{
-    align-self:flex-start;margin-top:8px;border:none;background:none;padding:0;
-    font-family:inherit;font-size:12px;font-weight:700;color:var(--green);
-  }
-  /* Mapa přes celou obrazovku. Stojí mimo pás stránek, aby ji na iPadu
-     neuřízl sloupec — stejně jako potvrzovací okno u žaluzií. */
-  .sek-mapa{
-    position:fixed;inset:0;z-index:60;
-    display:flex;flex-direction:column;
-    background:rgba(20,30,40,0.55);
-    padding:max(16px, env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
-  }
-  .sek-mapa[hidden]{display:none;}
-  .sek-mapa-box{
-    margin:auto;width:100%;max-width:640px;
-    background:var(--card);border-radius:20px;padding:14px;
-    box-shadow:0 8px 30px rgba(20,30,40,0.25);
-    display:flex;flex-direction:column;gap:8px;
-  }
-  .sek-mapa-hlava{display:flex;align-items:center;justify-content:space-between;}
-  .sek-mapa-hlava b{font-size:15px;font-weight:800;color:var(--navy);}
-  .sek-mapa-zavri{
-    border:none;background:rgba(44,62,80,0.08);color:var(--grey-text);
-    width:30px;height:30px;border-radius:15px;font-size:15px;font-family:inherit;
-  }
-  #sekMapaPlatno{width:100%;display:block;border-radius:14px;background:rgba(44,62,80,0.04);}
-  #sekMapaPlatno[hidden]{display:none;}
-  .sek-mapa-popis{font-size:12px;color:var(--grey-text);}
-  .sek-mapa-popis:empty{display:none;}
-  /* Když se mapa poskládat nedá, musí být poznat proč — a co poslat dál */
-  .sek-mapa-potiz{font-size:11px;color:var(--grey-text);line-height:1.6;}
-  .sek-mapa-potiz:empty{display:none;}
-  .sek-mapa-potiz code{font-family:inherit;font-weight:700;color:var(--navy);}
-  .sek-mapa-potiz a{color:var(--green);font-weight:700;text-decoration:none;}
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
 </style>
@@ -2530,7 +2494,7 @@
 
   <!-- Stránka: Wallbox -->
   <div class="slide" data-title="Wallbox">
-    <div class="page top">
+    <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -2691,6 +2655,74 @@
     </div>
   </div>
 
+  <!-- Stránka: Sauna -->
+  <div class="slide" data-title="Sauna" id="saunaSlide">
+    <div class="page">
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="saunaLight"></div>
+            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
+          </div>
+          <div class="sauna-power" id="saunaPower">– kW</div>
+          <div class="manual-hold" id="saunaHint"></div>
+          <div class="sauna-meta" id="saunaMeta"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="huumLight"></div>
+            <div class="shelly-label">Kamna HUUM <span class="state" id="huumState">–</span></div>
+          </div>
+          <div class="boilers-card huum-temps">
+            <div class="boiler-cell">
+              <div class="boiler-name">Teplota</div>
+              <div class="boiler-temp" id="huumTemp">– °C</div>
+            </div>
+            <div class="boiler-sep"></div>
+            <div class="boiler-cell">
+              <div class="boiler-name">Cíl</div>
+              <div class="boiler-temp" id="huumTarget">– °C</div>
+            </div>
+          </div>
+          <div class="manual-hold" id="huumHint"></div>
+        </div>
+      </div>
+
+      <div class="card stats-card" id="huumStatusCard">
+        <div class="graph-title">Stav jednotky</div>
+        <div class="stat-row" data-huum="door"><span>Dveře</span><span class="stat-val" id="huumDoor">–</span></div>
+        <div class="stat-row" data-huum="end"><span>Topí do</span><span class="stat-val" id="huumEnd">–</span></div>
+        <div class="stat-row" data-huum="left"><span>Zbývá</span><span class="stat-val" id="huumLeft">–</span></div>
+        <div class="stat-row" data-huum="humidity"><span>Vlhkost</span><span class="stat-val" id="huumHumidity">–</span></div>
+        <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
+        <div class="stat-row" data-huum="steamer"><span>Parní vyvíječ</span><span class="stat-val" id="huumSteamer">–</span></div>
+        <div class="stat-row" data-huum="name"><span>Název sauny</span><span class="stat-val" id="huumName">–</span></div>
+      </div>
+
+      <div class="card stats-card" id="huumLimitsCard">
+        <div class="graph-title">Meze jednotky</div>
+        <div class="stat-row" data-huum="lTemp"><span>Teplota</span><span class="stat-val" id="huumLimTemp">–</span></div>
+        <div class="stat-row" data-huum="lHeat"><span>Doba topení</span><span class="stat-val" id="huumLimHeat">–</span></div>
+        <div class="stat-row" data-huum="lTimer"><span>Časovač</span><span class="stat-val" id="huumLimTimer">–</span></div>
+        <div class="stat-row" data-huum="lLock"><span>Dětský zámek</span><span class="stat-val" id="huumLimLock">–</span></div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Spotřeba za 7 dní</div>
+        <div class="mesic-total" id="saunaTotal">– kWh</div>
+        <div class="wbsrc-note">Sauna visí na stejném jističi jako bazén a solinátor. Když topí, appka je vypne a nechá vypnuté ještě 30 min po dotopení — jistič to jinak nemusí unést. Pro rychlé vypnutí to samé hlídá i skript přímo v Shelly.</div>
+      </div>
+
+      <div class="card stats-card">
+        <div class="graph-title">Spotřeba po měsících</div>
+        <div class="wbsrc-list" id="saunaMonths"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stránka: Závlaha -->
   <div class="slide" data-title="Závlaha">
     <div class="page">
@@ -2757,7 +2789,6 @@
           </div>
           <div class="sek-baterie" id="sekBaterie">– %</div>
           <div class="zavlaha-meta" id="sekMeta"></div>
-          <button class="sek-mapa-btn" id="sekMapaBtn" type="button">Mapa →</button>
         </div>
       </div>
 
@@ -2768,74 +2799,6 @@
           <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
         </div>
         <div class="zavlaha-hint" id="sekHint"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Stránka: Sauna -->
-  <div class="slide" data-title="Sauna" id="saunaSlide">
-    <div class="page">
-      <div class="card">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="saunaLight"></div>
-            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
-          </div>
-          <div class="sauna-power" id="saunaPower">– kW</div>
-          <div class="manual-hold" id="saunaHint"></div>
-          <div class="sauna-meta" id="saunaMeta"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="huumLight"></div>
-            <div class="shelly-label">Kamna HUUM <span class="state" id="huumState">–</span></div>
-          </div>
-          <div class="boilers-card huum-temps">
-            <div class="boiler-cell">
-              <div class="boiler-name">Teplota</div>
-              <div class="boiler-temp" id="huumTemp">– °C</div>
-            </div>
-            <div class="boiler-sep"></div>
-            <div class="boiler-cell">
-              <div class="boiler-name">Cíl</div>
-              <div class="boiler-temp" id="huumTarget">– °C</div>
-            </div>
-          </div>
-          <div class="manual-hold" id="huumHint"></div>
-        </div>
-      </div>
-
-      <div class="card stats-card" id="huumStatusCard">
-        <div class="graph-title">Stav jednotky</div>
-        <div class="stat-row" data-huum="door"><span>Dveře</span><span class="stat-val" id="huumDoor">–</span></div>
-        <div class="stat-row" data-huum="end"><span>Topí do</span><span class="stat-val" id="huumEnd">–</span></div>
-        <div class="stat-row" data-huum="left"><span>Zbývá</span><span class="stat-val" id="huumLeft">–</span></div>
-        <div class="stat-row" data-huum="humidity"><span>Vlhkost</span><span class="stat-val" id="huumHumidity">–</span></div>
-        <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
-        <div class="stat-row" data-huum="steamer"><span>Parní vyvíječ</span><span class="stat-val" id="huumSteamer">–</span></div>
-        <div class="stat-row" data-huum="name"><span>Název sauny</span><span class="stat-val" id="huumName">–</span></div>
-      </div>
-
-      <div class="card stats-card" id="huumLimitsCard">
-        <div class="graph-title">Meze jednotky</div>
-        <div class="stat-row" data-huum="lTemp"><span>Teplota</span><span class="stat-val" id="huumLimTemp">–</span></div>
-        <div class="stat-row" data-huum="lHeat"><span>Doba topení</span><span class="stat-val" id="huumLimHeat">–</span></div>
-        <div class="stat-row" data-huum="lTimer"><span>Časovač</span><span class="stat-val" id="huumLimTimer">–</span></div>
-        <div class="stat-row" data-huum="lLock"><span>Dětský zámek</span><span class="stat-val" id="huumLimLock">–</span></div>
-      </div>
-
-      <div class="card stats-card">
-        <div class="graph-title">Spotřeba za 7 dní</div>
-        <div class="mesic-total" id="saunaTotal">– kWh</div>
-        <div class="wbsrc-note">Sauna visí na stejném jističi jako bazén a solinátor. Když topí, appka je vypne a nechá vypnuté ještě 30 min po dotopení — jistič to jinak nemusí unést. Pro rychlé vypnutí to samé hlídá i skript přímo v Shelly.</div>
-      </div>
-
-      <div class="card stats-card">
-        <div class="graph-title">Spotřeba po měsících</div>
-        <div class="wbsrc-list" id="saunaMonths"></div>
       </div>
     </div>
   </div>
@@ -2930,7 +2893,7 @@
 
   <!-- Stránka: Logika automatiky -->
   <div class="slide" data-title="Logika automatiky">
-    <div class="page top">
+    <div class="page">
       <div class="card logic-card">
         <div class="logic-sec">
           <div class="logic-h">Obecné</div>
@@ -3127,19 +3090,6 @@
   <div class="kal-pata">
     <button class="kal-obnov" id="kalObnov" type="button">Aktualizovat</button>
     <div class="kal-meta" id="kalMeta"></div>
-  </div>
-</div>
-
-<!-- Mapa sekačky. Taky mimo pás stránek — překrývá celou obrazovku. -->
-<div class="sek-mapa" id="sekMapaBack" hidden>
-  <div class="sek-mapa-box">
-    <div class="sek-mapa-hlava">
-      <b>Mapa sekačky</b>
-      <button class="sek-mapa-zavri" id="sekMapaZavri" type="button">✕</button>
-    </div>
-    <canvas id="sekMapaPlatno"></canvas>
-    <div class="sek-mapa-popis" id="sekMapaPopis"></div>
-    <div class="sek-mapa-potiz" id="sekMapaPotiz"></div>
   </div>
 </div>
 
@@ -8973,20 +8923,13 @@ if (zavlahaStopBtnEl) zavlahaStopBtnEl.addEventListener('click', zavlahaStop);
 if (zavlahaSerieBtnEl) zavlahaSerieBtnEl.addEventListener('click', zavlahaSerie);
 
 // ---------- Sekačka Anthbot ----------
-// Stav chodí z cloudu přes server. Jména polí u M5 nejsou nikde popsaná, takže
-// se do appky posílá i syrové hlášení — co appka nahoře neumí pojmenovat, je
-// aspoň vidět dole a dá se to doladit bez hádání.
+// Stav chodí z cloudu přes server. Ukazuje se jen to, na co se člověk dívá
+// pokaždé; zbytek stínu je k mání na /api/sekacka/syrove, když je co ladit.
 const sekLightEl = document.getElementById('sekLight');
 const sekStavEl = document.getElementById('sekStav');
 const sekBaterieEl = document.getElementById('sekBaterie');
 const sekMetaEl = document.getElementById('sekMeta');
 const sekHintEl = document.getElementById('sekHint');
-const sekMapaBtnEl = document.getElementById('sekMapaBtn');
-const sekMapaBackEl = document.getElementById('sekMapaBack');
-const sekMapaZavriEl = document.getElementById('sekMapaZavri');
-const sekMapaPlatnoEl = document.getElementById('sekMapaPlatno');
-const sekMapaPopisEl = document.getElementById('sekMapaPopis');
-const sekMapaPotizEl = document.getElementById('sekMapaPotiz');
 const sekSekatBtnEl = document.getElementById('sekSekatBtn');
 const sekStopBtnEl = document.getElementById('sekStopBtn');
 const sekDokBtnEl = document.getElementById('sekDokBtn');
@@ -8995,7 +8938,7 @@ const sekDokBtnEl = document.getElementById('sekDokBtn');
 const SEK_JEDE = ['globalmowing', 'zonemowing', 'pointmowing', 'bordermowing',
   'regionmowing', 'nestmowing', 'backtodock', 'gototarget', 'position', 'mapping'];
 
-let sekackaData = { zapnuto: false, kdy: 0, potiz: null, syrove: null };
+let sekackaData = { zapnuto: false, kdy: 0, potiz: null };
 
 function sekackaZive() {
   return !!(sekackaData.zapnuto && sekackaData.kdy && !sekackaData.potiz);
@@ -9068,7 +9011,6 @@ function renderSekacka(d) {
         ? 'Sekačka není na příjmu. Povel by se schoval do fronty a provedla by ho, až se probudí — klidně v noci. Proto ovládat nejde.'
         : 'Dokud se cloud Anthbotu neozve, ovládat nejde — povel by spadl do prázdna.';
   }
-  if (sekMapaBackEl && !sekMapaBackEl.hidden) sekackaKresliMapu();
 }
 
 async function sekackaPovel(co, popis, btn) {
@@ -9090,162 +9032,6 @@ async function sekackaPovel(co, popis, btn) {
   }
   if (btn) btn.disabled = false;
 }
-
-// ---------- Mapa sekačky ----------
-// Tvar bodů, které M5 posílá, není nikde popsaný a v komunitní integraci se
-// mapa vůbec nekreslí — není odkud opsat. Čtení je proto schválně tolerantní:
-// zvládne několik možných zápisů a když se netrefí, vrátí prázdno a mapa to
-// přizná, místo aby kreslila nesmysl.
-const SEK_MAPA_OKRAJ = 12;
-
-function sekackaCislo(v) {
-  const n = typeof v === 'string' ? Number(v) : v;
-  return typeof n === 'number' && Number.isFinite(n) ? n : null;
-}
-
-function sekackaBody(surovina) {
-  let v = surovina;
-  if (v && typeof v === 'object' && !Array.isArray(v) && 'value' in v) v = v.value;
-  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
-  if (v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.points)) v = v.points;
-  if (!Array.isArray(v) || !v.length) return [];
-
-  // Plochý seznam čísel: bere se po dvojicích, lichý zbytek se zahodí
-  if (v.every(p => sekackaCislo(p) !== null)) {
-    const body = [];
-    for (let i = 0; i + 1 < v.length; i += 2) body.push({ x: sekackaCislo(v[i]), y: sekackaCislo(v[i + 1]) });
-    return body;
-  }
-
-  const body = [];
-  for (const p of v) {
-    if (Array.isArray(p)) {
-      const x = sekackaCislo(p[0]), y = sekackaCislo(p[1]);
-      if (x !== null && y !== null) body.push({ x, y });
-    } else if (p && typeof p === 'object') {
-      const x = sekackaCislo(p.x ?? p.px ?? p.lon ?? p.lng ?? p.longitude);
-      const y = sekackaCislo(p.y ?? p.py ?? p.lat ?? p.latitude);
-      if (x !== null && y !== null) body.push({ x, y });
-    }
-  }
-  return body;
-}
-
-// Co ze stínu vypadá jako mapa. Kdyby to sekačka posílala pod jiným jménem,
-// vypíše se to dole v hlášce — podle toho se pozná, kam sáhnout.
-function sekackaMapaZdroje() {
-  const s = sekackaData.syrove || {};
-  return {
-    obrys: sekackaBody(s.region_area) ,
-    stopa: sekackaBody(s.curpath)
-  };
-}
-
-function sekackaKresliMapu() {
-  if (!sekMapaPlatnoEl) return null;
-  const { obrys, stopa } = sekackaMapaZdroje();
-
-  if (sekMapaPopisEl) {
-    const casti = [];
-    if (sekackaData.travnik) casti.push(`Trávník ${sekackaData.travnik} m²`);
-    if (sekackaData.kdy) casti.push('naposledy ' + logCas(sekackaData.kdy));
-    sekMapaPopisEl.textContent = casti.join(' · ');
-  }
-
-  // Dva body nejsou pozemek. Radši se přizná, že to nejde, než aby se kreslila
-  // čára a tvářila se jako mapa.
-  if (obrys.length < 3) {
-    sekMapaPlatnoEl.hidden = true;
-    if (sekMapaPotizEl) {
-      sekMapaPotizEl.textContent = '';
-      const veta = document.createElement('div');
-      veta.textContent = 'Mapu z toho zatím poskládat neumím — nevím, v jakém tvaru sekačka posílá body.';
-      sekMapaPotizEl.appendChild(veta);
-      const syrove = sekackaData.syrove || {};
-      const klice = Object.keys(syrove).sort();
-      const seznam = document.createElement('div');
-      if (klice.length) {
-        seznam.textContent = 'Ve stínu je: ' + klice
-          .map(k => `${k} (${JSON.stringify(syrove[k] ?? null).length} zn.)`).join(', ');
-      } else {
-        seznam.textContent = 'Ze sekačky zatím nic nepřišlo.';
-      }
-      sekMapaPotizEl.appendChild(seznam);
-      const odkaz = document.createElement('a');
-      odkaz.href = '/api/sekacka/syrove';
-      odkaz.target = '_blank';
-      odkaz.rel = 'noopener';
-      odkaz.textContent = 'Otevřít celé hlášení →';
-      sekMapaPotizEl.appendChild(odkaz);
-    }
-    return null;
-  }
-
-  if (sekMapaPotizEl) sekMapaPotizEl.textContent = '';
-  sekMapaPlatnoEl.hidden = false;
-
-  const vsechny = obrys.concat(stopa);
-  const minX = Math.min(...vsechny.map(p => p.x));
-  const maxX = Math.max(...vsechny.map(p => p.x));
-  const minY = Math.min(...vsechny.map(p => p.y));
-  const maxY = Math.max(...vsechny.map(p => p.y));
-  const sirkaDat = Math.max(maxX - minX, 1e-9);
-  const vyskaDat = Math.max(maxY - minY, 1e-9);
-
-  const w = sekMapaPlatnoEl.clientWidth || 320;
-  // Plátno drží poměr pozemku, ať zahrada nevypadá nastojato ani rozpláclá
-  const h = Math.round(Math.min(Math.max((w - 2 * SEK_MAPA_OKRAJ) * (vyskaDat / sirkaDat)
-    + 2 * SEK_MAPA_OKRAJ, 160), (window.innerHeight || 600) * 0.55));
-  sekMapaPlatnoEl.style.height = h + 'px';
-  const dpr = window.devicePixelRatio || 1;
-  sekMapaPlatnoEl.width = w * dpr;
-  sekMapaPlatnoEl.height = h * dpr;
-  const ctx = sekMapaPlatnoEl.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-
-  const k = Math.min((w - 2 * SEK_MAPA_OKRAJ) / sirkaDat, (h - 2 * SEK_MAPA_OKRAJ) / vyskaDat);
-  const posunX = (w - sirkaDat * k) / 2;
-  const posunY = (h - vyskaDat * k) / 2;
-  // Sekačka měří nahoru, plátno dolů — bez překlopení by byla zahrada vzhůru nohama
-  const naPlatno = p => ({ x: posunX + (p.x - minX) * k, y: posunY + (maxY - p.y) * k });
-
-  const obrysP = obrys.map(naPlatno);
-  const stopaP = stopa.map(naPlatno);
-
-  ctx.beginPath();
-  obrysP.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(39,174,96,0.16)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(39,174,96,0.9)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  if (stopaP.length > 1) {
-    ctx.beginPath();
-    stopaP.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    ctx.strokeStyle = 'rgba(44,62,80,0.55)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-
-  return { obrys: obrysP, stopa: stopaP, w, h };
-}
-
-function sekackaMapaOtevri() {
-  if (!sekMapaBackEl) return;
-  sekMapaBackEl.hidden = false;
-  sekackaKresliMapu();
-}
-
-function sekackaMapaZavri() {
-  if (sekMapaBackEl) sekMapaBackEl.hidden = true;
-}
-
-if (sekMapaBtnEl) sekMapaBtnEl.addEventListener('click', sekackaMapaOtevri);
-if (sekMapaZavriEl) sekMapaZavriEl.addEventListener('click', sekackaMapaZavri);
-if (sekMapaBackEl) sekMapaBackEl.addEventListener('click', e => { if (e.target === sekMapaBackEl) sekackaMapaZavri(); });
 
 if (sekSekatBtnEl) sekSekatBtnEl.addEventListener('click', () => sekackaPovel('sekat', 'začít sekat', sekSekatBtnEl));
 if (sekStopBtnEl) sekStopBtnEl.addEventListener('click', () => sekackaPovel('stop', 'zastavit', sekStopBtnEl));
