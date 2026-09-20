@@ -32,14 +32,16 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
   const routy = {};
   const state = { sekacka: { stin: null, kdy: 0, potiz: null } };
   const casovace = [];
+  const cekani = [];
   const api = new Function(
-    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'crypto', 'fetch', 'process', 'scheduleEvery',
+    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'crypto', 'fetch', 'process', 'scheduleEvery', 'delay',
     CODE + '\n; return { anthbotEnabled, anthbotPodpisovyKlic, anthbotKoduj, anthbotOtisk,'
          + ' anthbotKanonickeHlavicky, anthbotAutorizace, anthbotCas, anthbotOverovaciToken,'
          + ' anthbotZeSeznamu, anthbotHodnota, anthbotCislo, anthbotStavZeStinu, anthbotPrectiStin,'
          + ' anthbotPodepsanyDotaz, anthbotPodepsanyPovel, anthbotPosliPovel, anthbotPriprav,'
          + ' anthbotStin, anthbotKliceStare, sekackaNacti, sekackaPayload,'
          + ' ANTHBOT_STAVY_PORADI, ANTHBOT_STAVY_CESKY, ANTHBOT_POVELY, ANTHBOT_VARIANTY,'
+         + ' anthbotTeloPovelu, anthbotOverStav, anthbotSit, ANTHBOT_TVARY, ANTHBOT_OVERENI_MS,'
          + ' ANTHBOT_KLICE_REZERVA_MS, ANTHBOT_AREA,'
          + ' get token() { return anthbotToken; }, set token(v) { anthbotToken = v; },'
          + ' get stroj() { return anthbotStroj; }, set stroj(v) { anthbotStroj = v; },'
@@ -53,9 +55,12 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
     require('crypto'),
     (...a) => globalThis.fetch(...a),
     { env: { ANTHBOT_EMAIL: email, ANTHBOT_HESLO: heslo } },
-    (fn, ms) => casovace.push({ fn, ms })
+    (fn, ms) => casovace.push({ fn, ms }),
+    // Ověřování povelu čeká osm vteřin naostro. V sadě se čekat nemá — zajímá
+    // nás, KOLIKRÁT se čte a co z toho vyjde, ne jak dlouho to trvá.
+    ms => { cekani.push(ms); return Promise.resolve(); }
   );
-  return { api, state, logy, zpravy, routy, casovace };
+  return { api, state, logy, zpravy, routy, casovace, cekani };
 }
 
 const volej = (h, cesta, telo) => {
@@ -229,8 +234,33 @@ nadpis('6) Povel');
   const p = h.api.anthbotPodepsanyPovel(KLICE, SN, 'mow_start', 1, 'dvojita', new Date('2026-09-18T07:05:09Z'));
   check('tělo je desired s povelem', p.telo, '{"state":{"desired":{"cmd":"mow_start","data":1}}}');
   check('adresa míří na servisní shadow', p.url.includes('%24aws%2Fthings%2FM5TEST123%2Fshadow%2Fname%2Fservice%2Fupdate'), true);
-  check('posílá se octet-stream', p.hlavicky['Content-Type'], 'application/octet-stream');
+  check('posílá se octet-stream', p.hlavicky['content-type'], 'application/octet-stream');
   check('délka těla je podepsaná', p.hlavicky.Authorization.includes('content-length'), true);
+
+  // TOHLE je ta chyba, kvůli které nešel poslat jediný povel. `content-type` se
+  // dřív přidával dvakrát — jednou malými písmeny do podpisu, podruhé velkými
+  // mezi odesílané. V JS dva klíče, na drátě jedna hlavička: fetch je spojil
+  // čárkou a AWS pak porovnávalo jinou hodnotu, než jaká šla do podpisu.
+  const klice = Object.keys(p.hlavicky).map(k => k.toLowerCase());
+  check('žádná hlavička dvakrát',
+    klice.filter((k, i) => klice.indexOf(k) !== i).join(', ') || 'žádná', 'žádná');
+  // A co se podepsalo, to se taky musí odeslat — jinak je podpis k ničemu
+  const podepsane = p.hlavicky.Authorization.match(/SignedHeaders=([^,]+)/)[1].split(';');
+  // Nestačí, že klíč v objektu je — musí nést hodnotu. Prázdná podepsaná
+  // hlavička je pro AWS totéž jako chybějící: podpis nesedí.
+  const odeslane = new Headers(p.hlavicky);
+  check('  a všechno podepsané se odesílá i s hodnotou',
+    podepsane.filter(k => k !== 'host' && !odeslane.get(k)).join(', ') || 'všechno', 'všechno');
+  // `fetch` hlavičky spojuje, takže duplicitu pozná až Headers — ne oko
+  const hlavicky = new Headers(p.hlavicky);
+  check('  a ani po složení se nic nezdvojí',
+    hlavicky.get('content-type'), 'application/octet-stream');
+
+  // Který tvar dat sekačka chce, se dopředu poznat nedá — `category_id` je číslo
+  check('zabalený tvar dat', JSON.stringify(h.api.anthbotTeloPovelu('mow_start', 1, 'zabaleny')),
+    '{"mow_start":1}');
+  check('holý tvar dat', h.api.anthbotTeloPovelu('mow_start', 1, 'holy'), 1);
+  check('tvary jsou dva a zabalený první', h.api.ANTHBOT_TVARY.join(','), 'zabaleny,holy');
   // Tři tvary cesty proto, že appka kanonizuje jinak než SDK a AWS je na to citlivé
   check('variant je na výběr víc', h.api.ANTHBOT_VARIANTY.length, 3);
   const syra = h.api.anthbotPodepsanyPovel(KLICE, SN, 'mow_start', 1, 'syra', new Date('2026-09-18T07:05:09Z'));
@@ -363,8 +393,10 @@ nadpis('10) Endpointy');
   podstrc(CESTA_CELA);
   const ok = await volej(h, 'POST /api/sekacka/povel', { co: 'sekat' });
   check('povel projde', ok.out.success, true);
-  check('  a řekne, co dělá', ok.out.message, 'Sekačka: začít sekat.');
-  check('do logu se to zapsalo', h.logy.some(l => l.includes('začít sekat (ručně)')), true);
+  // Hláška nese stav, který sekačka opravdu hlásí — ne jen „odesláno"
+  check('  a řekne, co se stalo', ok.out.message, 'Sekačka: začít sekat — seká.');
+  check('do logu se to zapsalo', h.logy.some(l => l.includes('začít sekat (ručně')), true);
+  check('  i s tím, který tvar zabral', h.logy.some(l => l.includes('tvar zabaleny')), true);
 
   const neznamy = await volej(h, 'POST /api/sekacka/povel', { co: 'leť' });
   check('neznámý povel se odmítne', neznamy.kod, 400);
@@ -387,6 +419,82 @@ nadpis('10) Endpointy');
   const nic = await volej(prazdna, 'GET /api/sekacka/syrove', null);
   check('prázdný stín taky projde', nic.kod, 200);
   check('  a přizná, že nic není', nic.out.stin, null);
+}
+
+nadpis('10b) Povel se ověřuje, nehlásí se naslepo');
+// Publikace na shadow vrátí 200, jakmile ji AWS přijme. To znamená „zpráva je
+// ve frontě", ne „sekačka to udělala" — a přesně z toho vzniklo „nereaguje".
+{
+  // a) sekačka se nehne ani po obou tvarech
+  const h = build();
+  const videno = podstrc({
+    ...CESTA_CELA,
+    aws: () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+      state: { reported: { elec: { value: 87 }, mode: { value: 'charge' } } } }) })
+  });
+  h.state.sekacka.stin = { mode: { value: 'charge' } };
+  const nic = await volej(h, 'POST /api/sekacka/povel', { co: 'sekat' });
+  check('neověřený povel se nehlásí jako úspěch', nic.out.success, undefined);
+  check('  a vrátí se chyba', nic.kod, 502);
+  check('  která to řekne narovinu', nic.out.error.includes('nehnula'), true);
+  check('  a přizná, že zkusila oba tvary', nic.out.error.includes('zabaleny, holy'), true);
+  check('do logu jde, že se nehnula', h.logy.some(l => l.startsWith('CHYBA') && l.includes('nehnula')), true);
+
+  // Zkusily se oba tvary, a u „sekat" ještě app_state napřed
+  const povely = videno.filter(v => v.cesta.includes('/topics/'))
+    .map(v => v.telo.state.desired);
+  check('appka se napřed ohlásí u kormidla', povely[0].cmd, 'app_state');
+  check('zabalený tvar jde první', JSON.stringify(povely[1].data), '{"mow_start":1}');
+  check('  a holý až potom', povely[2].data, 1);
+  check('víc už se nezkouší', povely.length, 3);
+
+  // b) první tvar zabere → druhý se neposílá
+  const h2 = build();
+  const videno2 = podstrc(CESTA_CELA);
+  h2.state.sekacka.stin = { mode: { value: 'charge' } };
+  const jede = await volej(h2, 'POST /api/sekacka/povel', { co: 'sekat' });
+  check('když stav naskočí, je to úspěch', jede.out.success, true);
+  const povely2 = videno2.filter(v => v.cesta.includes('/topics/'))
+    .map(v => v.telo.state.desired);
+  check('  a druhý tvar se už neposílá', povely2.length, 2);
+  check('  a stav v appce se rovnou obnoví', h2.state.sekacka.stin.robot_sta.value, 'globalmowing');
+
+  // c) app_state patří jen k rozjezdu — do doku se nikdo hlásit nemusí
+  const h3 = build();
+  const videno3 = podstrc(CESTA_CELA);
+  await volej(h3, 'POST /api/sekacka/povel', { co: 'dok' });
+  const cmdy = videno3.filter(v => v.cesta.includes('/topics/'))
+    .map(v => v.telo.state.desired.cmd);
+  check('u doku se app_state neposílá', cmdy.includes('app_state'), false);
+  check('  a jde rovnou charge_start', cmdy[0], 'charge_start');
+}
+
+nadpis('10c) Síťová chyba řekne, kde spadla');
+// „fetch failed" je v Node holé selhání spojení — ani slovo o tom, který krok
+// a který server to byl. Skutečný důvod leží v `cause`.
+{
+  const h = build();
+  const sit = h.api.anthbotSit;
+  const pad = (nastav) => sit('přihlášení (api.anthbot.com)', async () => {
+    const e = new TypeError('fetch failed');
+    Object.assign(e, nastav);
+    throw e;
+  }).then(() => 'nespadlo', e => e.message);
+
+  check('doplní se krok i server', await pad({ cause: { code: 'ENOTFOUND' } }),
+    'přihlášení (api.anthbot.com): spojení selhalo — ENOTFOUND');
+  check('  i jiný kód', (await pad({ cause: { code: 'ECONNREFUSED' } })).includes('ECONNREFUSED'), true);
+  check('bez kódu se aspoň ví kde', await pad({}), 'přihlášení (api.anthbot.com): spojení selhalo');
+  check('vypršení času se pojmenuje jinak',
+    await pad({ name: 'TimeoutError' }), 'přihlášení (api.anthbot.com): nestihlo se to včas');
+  // HTTP chybu už někdo pojmenoval — ta se nesmí přepsat na „spojení selhalo"
+  const httpChyba = await sit('čtení stavu', async () => {
+    const e = new Error('stav: HTTP 403 — nope');
+    e.status = 403;
+    throw e;
+  }).then(() => 'nespadlo', e => e.message);
+  check('hotová HTTP hláška se nepřepisuje', httpChyba, 'stav: HTTP 403 — nope');
+  check('  a když nic nespadne, projde výsledek', await sit('x', async () => 42), 42);
 }
 
 nadpis('11) Bez přihlašovacích údajů');

@@ -9041,6 +9041,9 @@ async function sekackaPovel(co, popis, btn) {
     const data = await res.json();
     if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
     if (!res.ok) throw new Error(data.error || 'Povel se nepodařilo poslat.');
+    // Server povel ověřuje na stavu sekačky, takže hláška nese, co se OPRAVDU
+    // stalo. Zahodit ji by znamenalo nechat člověka hádat, jestli se něco hnulo.
+    if (sekHintEl && data.message) sekHintEl.textContent = data.message;
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Sekačka: ' + err.message;

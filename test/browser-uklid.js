@@ -21,10 +21,11 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno.padEnd(52) + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 const POSLANO = [];
+let ODPOVED = { ok: true, status: 200, telo: { success: true, message: 'Sekačka: začít sekat — seká.' } };
 window.fetch = async (url, opts) => {
   POSLANO.push({ url: String(url), telo: opts && opts.body ? JSON.parse(opts.body) : null,
                  token: opts && opts.headers ? opts.headers['X-Auth-Token'] : undefined });
-  return { ok: true, status: 200, json: async () => ({ success: true }) };
+  return { ok: ODPOVED.ok, status: ODPOVED.status, json: async () => ODPOVED.telo };
 };
 let POTVRZENO = true;
 window.confirm = () => POTVRZENO;
@@ -149,6 +150,25 @@ setTimeout(async () => {
   await pockej();
   check('bez potvrzení se nic nepošle', POSLANO.length, 0);
   POTVRZENO = true;
+
+  R.push('\\n6b) Co povel udělal, je vidět');
+  // Server povel ověřuje na stavu sekačky. Bez téhle hlášky by „odeslal jsem to,
+  // ale sekačka se nehnula" vypadalo stejně jako „jede" — a přesně tak vznikl
+  // dojem, že appka na tlačítka nereaguje.
+  const hint = document.getElementById('sekHint');
+  zive();
+  ODPOVED = { ok: true, status: 200, telo: { success: true, message: 'Sekačka: začít sekat — seká.' } };
+  sekat.click();
+  await pockej();
+  check('úspěch řekne, co se stalo', hint.textContent, 'Sekačka: začít sekat — seká.');
+
+  ODPOVED = { ok: false, status: 502, telo: { error: 'Povel odešel, ale sekačka se do osmi vteřin nehnula. Je probuzená?' } };
+  sekat.click();
+  await pockej();
+  const chyba = document.getElementById('errorBanner');
+  check('neúspěch se přizná', /nehnula/.test(chyba.textContent), true);
+  check('  a je vidět', chyba.classList.contains('show'), true);
+  ODPOVED = { ok: true, status: 200, telo: { success: true, message: 'ok' } };
 
   R.push('\\n7) Stránka je v menu');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);

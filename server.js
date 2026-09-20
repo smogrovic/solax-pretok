@@ -7777,6 +7777,9 @@ const ANTHBOT_SLUZBA = 'iotdata';
 const ANTHBOT_CEKANI_MS = 20000;
 const ANTHBOT_TIK_MS = 60000;          // jak často se čte stav
 const ANTHBOT_KLICE_REZERVA_MS = 300000; // klíče se obnoví pět minut před vypršením
+// Jak dlouho se po povelu čeká na změnu stavu, než se to vzdá. Dohromady do
+// osmi vteřin — déle by tlačítko vypadalo zaseknuté.
+const ANTHBOT_OVERENI_MS = [2500, 5500];
 
 // Stav, který sekačka hlásí. Čísla jsou pořadí v seznamu, jak ho posílá appka.
 const ANTHBOT_STAVY_PORADI = [
@@ -7870,6 +7873,23 @@ function anthbotCas(kdy = new Date()) {
 
 // Všechny endpointy odpovídají obálkou { code, data }. Nula znamená v pořádku;
 // cokoliv jiného je odmítnutí a nemá smysl číst data.
+// `fetch` při selhání spojení vyhodí holé „fetch failed" — ani slovo o tom,
+// který krok a který server to byl. Skutečný důvod (ENOTFOUND, ECONNREFUSED,
+// ETIMEDOUT) leží v `cause`. Bez tohohle se z hlášky nedá poznat, jestli spadlo
+// přihlášení, obnova klíčů, nebo publikace povelu.
+async function anthbotSit(kde, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err && err.status !== undefined) throw err;          // HTTP chybu už někdo pojmenoval
+    const kod = err && err.cause && (err.cause.code || err.cause.message);
+    const duvod = err && err.name === 'TimeoutError'
+      ? 'nestihlo se to včas'
+      : `spojení selhalo${kod ? ` — ${kod}` : ''}`;
+    throw new Error(`${kde}: ${duvod}`);
+  }
+}
+
 async function anthbotCloud(cesta, { token, metoda = 'GET', telo, dotaz } = {}) {
   const url = new URL(`https://${ANTHBOT_HOST}${cesta}`);
   for (const [k, v] of Object.entries(dotaz || {})) url.searchParams.set(k, v);
@@ -7881,12 +7901,12 @@ async function anthbotCloud(cesta, { token, metoda = 'GET', telo, dotaz } = {}) 
   };
   if (token) hlavicky.Authorization = token;
   if (telo) hlavicky['content-type'] = 'application/json';
-  const res = await fetch(url, {
+  const res = await anthbotSit(`${cesta} (${ANTHBOT_HOST})`, () => fetch(url, {
     method: metoda,
     headers: hlavicky,
     body: telo ? JSON.stringify(telo) : undefined,
     signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS)
-  });
+  }));
   const text = await res.text();
   if (!res.ok) throw new Error(`${cesta}: HTTP ${res.status} — ${text.slice(0, 160)}`);
   let json;
@@ -8000,7 +8020,8 @@ function anthbotPodepsanyDotaz(klice, sn, jmenoStinu, kdy = new Date()) {
 
 async function anthbotStin(klice, sn, jmenoStinu = 'property') {
   const { url, hlavicky } = anthbotPodepsanyDotaz(klice, sn, jmenoStinu);
-  const res = await fetch(url, { headers: hlavicky, signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS) });
+  const res = await anthbotSit(`čtení stavu (${klice.endpoint})`,
+    () => fetch(url, { headers: hlavicky, signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS) }));
   const text = await res.text();
   if (!res.ok) {
     const chyba = new Error(`stav: HTTP ${res.status} — ${text.slice(0, 160)}`);
@@ -8016,6 +8037,16 @@ async function anthbotStin(klice, sn, jmenoStinu = 'property') {
 // Povel se publikuje na servisní shadow. Appka přitom kanonickou cestu skládá
 // po svém, a na to je AWS citlivé — proto se zkouší tři tvary za sebou, jak to
 // dělá i komunitní integrace. Když projde první, na další nedojde.
+// M5 chce podle komunitní integrace data zabalená do objektu („damit der Mäher
+// reagiert"), starší Genie 600 holou hodnotu. Který tvar platí pro tuhle sekačku,
+// se dopředu poznat nedá — `category_id` je číslo, ne jméno modelu. Proto se
+// tvar předává a endpoint si ho ověří na stínu.
+function anthbotTeloPovelu(cmd, hodnota, tvar) {
+  return tvar === 'holy' ? hodnota : { [cmd]: hodnota };
+}
+
+const ANTHBOT_TVARY = ['zabaleny', 'holy'];
+
 function anthbotPodepsanyPovel(klice, sn, cmd, data, varianta, kdy = new Date()) {
   const topic = `$aws/things/${sn}/shadow/name/service/update`;
   const telo = JSON.stringify({ state: { desired: { cmd, data } } });
@@ -8040,14 +8071,14 @@ function anthbotPodepsanyPovel(klice, sn, cmd, data, varianta, kdy = new Date())
     klicId: klice.klicId, tajny: klice.tajny, region: klice.region, den, amzDatum: amz,
     metoda: 'POST', cesta: kanonicka, dotaz: '', hlavicky: kPodpisu, otiskTela
   });
+  // Odesílá se PŘESNĚ to, co se podepsalo. Dřív se `content-type` a
+  // `content-length` přidávaly ještě jednou velkými písmeny; v JS jsou to jiné
+  // klíče, ale na drátě jedna hlavička — fetch je spojil čárkou a AWS pak
+  // porovnávalo jinou hodnotu, než jaká šla do podpisu. Odtud 403 na každý povel.
   return {
     url: `https://${klice.endpoint}${cesta}`,
     telo,
-    hlavicky: {
-      ...kPodpisu, Accept: '*/*', 'Content-Type': 'application/octet-stream',
-      'Content-Length': String(Buffer.byteLength(telo)),
-      'User-Agent': ANTHBOT_AWS_UA, Authorization: podpis
-    }
+    hlavicky: { ...kPodpisu, Accept: '*/*', 'User-Agent': ANTHBOT_AWS_UA, Authorization: podpis }
   };
 }
 
@@ -8057,10 +8088,10 @@ async function anthbotPosliPovel(klice, sn, cmd, data = 1) {
   let posledni = '';
   for (const varianta of ANTHBOT_VARIANTY) {
     const p = anthbotPodepsanyPovel(klice, sn, cmd, data, varianta);
-    const res = await fetch(p.url, {
+    const res = await anthbotSit(`povel ${cmd} (${klice.endpoint})`, () => fetch(p.url, {
       method: 'POST', headers: p.hlavicky, body: p.telo,
       signal: AbortSignal.timeout(ANTHBOT_CEKANI_MS)
-    });
+    }));
     if (res.ok) return varianta;
     posledni = `HTTP ${res.status} (${varianta})`;
     // 403 znamená, že se netrefil podpis — má smysl zkusit jiný tvar cesty.
@@ -8068,6 +8099,23 @@ async function anthbotPosliPovel(klice, sn, cmd, data = 1) {
     if (res.status !== 403) break;
   }
   throw new Error(`povel ${cmd} neprošel: ${posledni}`);
+}
+
+// Publikace na shadow vrátí 200, jakmile ji AWS přijme — to je „zpráva je ve
+// frontě", ne „sekačka to udělala". Jestli se něco stalo, se pozná jedině
+// z toho, že se změní stav. Proto se po povelu dvakrát přečte stín.
+async function anthbotOverStav(klice, sn, predtim) {
+  for (const cekej of ANTHBOT_OVERENI_MS) {
+    await delay(cekej);
+    try {
+      const stin = await anthbotStin(klice, sn);
+      const stav = anthbotStavZeStinu(stin);
+      if (stav && stav !== predtim) return { stin, stav };
+    } catch {
+      // Neúspěšné čtení není důkaz, že povel selhal — zkusí se ještě jednou
+    }
+  }
+  return null;
 }
 
 // ---------- Čtení hodnot ze stavu ----------
@@ -8172,11 +8220,43 @@ app.post('/api/sekacka/povel', async (req, res) => {
   if (!volba) return res.status(400).json({ error: 'Neznámý povel.' });
   try {
     const { stroj, klice } = await anthbotPriprav();
-    await anthbotPosliPovel(klice, stroj.sn, volba.cmd);
-    addLog(`Sekačka: ${volba.popis} (ručně)`);
-    // Stav se čte hned, ať se na stránce nekouká na starou hodnotu
-    sekackaNacti().catch(() => {});
-    res.json({ success: true, message: `Sekačka: ${volba.popis}.` });
+    const predtim = anthbotStavZeStinu(state.sekacka.stin || {});
+
+    // Appka výrobce před rozjezdem ohlásí, že je u kormidla. Bez toho sekačka
+    // `mow_start` podle komunitní integrace ignoruje.
+    if (volba.cmd === 'mow_start') {
+      await anthbotPosliPovel(klice, stroj.sn, 'app_state',
+        anthbotTeloPovelu('app_state', 1, 'zabaleny'));
+    }
+
+    let zabralo = null;
+    for (const tvar of ANTHBOT_TVARY) {
+      await anthbotPosliPovel(klice, stroj.sn, volba.cmd,
+        anthbotTeloPovelu(volba.cmd, 1, tvar));
+      const zmena = await anthbotOverStav(klice, stroj.sn, predtim);
+      if (zmena) {
+        state.sekacka.stin = zmena.stin;
+        state.sekacka.kdy = Date.now();
+        state.sekacka.potiz = null;
+        sekackaPosli();
+        zabralo = { tvar, stav: zmena.stav };
+        break;
+      }
+    }
+
+    if (!zabralo) {
+      // Publikace prošla, ale sekačka se nehnula. Tvrdit „hotovo" by bylo
+      // pohodlné a nepravdivé — přesně tohle vypadá jako „nereaguje".
+      addLog(`Sekačka: ${volba.popis} — povel odešel, ale sekačka se nehnula`, 'error');
+      sekackaNacti().catch(() => {});
+      return res.status(502).json({
+        error: `Povel odešel, ale sekačka se do osmi vteřin nehnula (zkusil jsem oba tvary: ${ANTHBOT_TVARY.join(', ')}). Je probuzená?`
+      });
+    }
+
+    addLog(`Sekačka: ${volba.popis} (ručně, tvar ${zabralo.tvar})`);
+    const popisStavu = ANTHBOT_STAVY_CESKY[zabralo.stav] || zabralo.stav;
+    res.json({ success: true, message: `Sekačka: ${volba.popis} — ${popisStavu}.` });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
