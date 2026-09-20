@@ -143,6 +143,20 @@
   .kal-nazev{color:var(--grey-text);flex:1;min-width:0;}
   .kal-celodenni .kal-nazev{font-weight:600;}
   .kal-nic{color:var(--muted);font-size:12px;}
+  /* Když se pracovní rozpis nestáhne, sloupec vypadá úplně stejně jako volný
+     týden. Tenhle řádek je jediné, co ty dva stavy od sebe odliší. */
+  .kal-duty{
+    background:rgba(229,83,75,0.10);
+    border-radius:14px;
+    padding:9px 12px;
+    margin-bottom:10px;
+    font-size:12px;
+    line-height:1.5;
+    color:var(--red);
+  }
+  .kal-duty:empty{display:none;}
+  .kal-duty b{font-weight:700;}
+  .kal-duty span{display:block;color:var(--grey-text);font-size:11px;margin-top:2px;}
   .kal-diag-btn{
     border:none;
     border-radius:14px;
@@ -3075,6 +3089,8 @@
        Tlačítko ukáže syrové odpovědi z CalDAVu, ať se nehádá naslepo. -->
   <button class="kal-diag-btn" id="kalDiagBtn" hidden>Diagnostika napojení</button>
   <pre class="kal-diag" id="kalDiag" hidden></pre>
+  <!-- Hlášení o pracovním rozpisu. Prázdné se neukazuje. -->
+  <div class="kal-duty" id="kalDuty"></div>
   <!-- Široký displej: jeden den, sloupec = kalendář, svisle 00:00–24:00.
        Telefon zůstává u seznamu dnů pod sebou — pět sloupců po 24 h by tam bylo
        nečitelné. O tom, co se ukáže, rozhoduje CSS, ne detekce zařízení. -->
@@ -9806,6 +9822,7 @@ function updateDots() {
 const kalPanelEl = document.getElementById('kalPanel');
 const kalDnyEl = document.getElementById('kalDny');
 const kalMetaEl = document.getElementById('kalMeta');
+const kalDutyEl = document.getElementById('kalDuty');
 let kalData = null;
 const KAL_DNY_CZ = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota'];
 
@@ -10071,6 +10088,20 @@ function renderKalendar(data) {
       : d.error ? d.error
       : d.fetchedAt ? 'Načteno v ' + fmtSolTime(new Date(d.fetchedAt).getTime())
       : 'Čeká se na první stažení z iCloudu.';
+  }
+  if (kalDutyEl) {
+    // Jen když se rozpis nenačetl. Když `duty` chybí úplně, není nastavený
+    // a trvalá cedule „nemáš pracovní rozpis" by byla jen šum pro toho,
+    // kdo ho nechce.
+    kalDutyEl.textContent = '';
+    if (d.duty && d.duty.error) {
+      const veta = document.createElement('b');
+      veta.textContent = `Služby se nenačetly: ${d.duty.error}`;
+      const rada = document.createElement('span');
+      rada.textContent = 'Nejspíš přestal platit odkaz na DutyLog — vyměň ho v Renderu v proměnné DUTY_ICS_URL.';
+      kalDutyEl.appendChild(veta);
+      kalDutyEl.appendChild(rada);
+    }
   }
   if (kalDiagBtn) kalDiagBtn.hidden = !d.enabled || (!d.error && (d.days || []).length > 0);
   renderKalDen();

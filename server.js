@@ -7141,6 +7141,12 @@ function kalZacatek(at = Date.now()) {
 // stačí stáhnout a přečíst týmž kódem jako iCloud. Výpadek nesmí shodit zbytek:
 // když DutyLog neodpoví, kalendář se ukáže bez služeb.
 let dutyChyba = null;
+// Kolik služeb rozpis naposledy přinesl a kdy se to povedlo. Stará adresa umí
+// vracet i HTTP 200 s prázdným kalendářem — tehdy žádná chyba není a odlišit to
+// jde jen podle počtu. Poplach se z toho ale nedělá: prázdný týden je normální
+// stav (dovolená) a vymyšlená hláška „asi je to rozbité" by byla horší než mlčet.
+let dutyUdalosti = 0;
+let dutyKdy = 0;
 async function kalStahniDuty(od, doKdy, kal) {
   if (!DUTY_ICS_URL) return [];
   try {
@@ -7150,7 +7156,10 @@ async function kalStahniDuty(od, doKdy, kal) {
     dutyChyba = null;
     // Značka jde odsud, ne z volajícího: v Lukášově sloupci jedou dva zdroje vedle
     // sebe a appka potřebuje vědět, který je který, aby létání nakreslila modře.
-    return kalUdalosti([text], od, doKdy, { ...kal, zdroj: 'duty' });
+    const udalosti = kalUdalosti([text], od, doKdy, { ...kal, zdroj: 'duty' });
+    dutyUdalosti = udalosti.length;
+    dutyKdy = Date.now();
+    return udalosti;
   } catch (err) {
     dutyChyba = err.message;
     return [];
@@ -7192,7 +7201,9 @@ async function pollKalendar() {
     state.calendar = {
       days: kalDoDnu(vse, od),
       kalendare: kalendare.map(k => ({ nazev: k.nazev, barva: k.barva })),
-      duty: DUTY_ICS_URL ? { kalendar: cil.nazev, error: dutyChyba } : null,
+      duty: DUTY_ICS_URL
+        ? { kalendar: cil.nazev, error: dutyChyba, udalosti: dutyUdalosti, kdy: dutyKdy }
+        : null,
       fetchedAt: new Date().toISOString(),
       error: null
     };

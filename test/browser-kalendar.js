@@ -235,6 +235,26 @@ setTimeout(async () => {
   // Poslední známý týden zůstane — výpadek iCloudu nemá vygumovat obrazovku
   check('  a dny zůstanou vykreslené', document.querySelectorAll('#kalDny .kal-den').length, 7);
 
+  R.push('\\n4b) Když se nestahuje pracovní rozpis');
+  // Sloupec bez služeb vypadá úplně stejně jako volný týden. Tenhle řádek je
+  // jediné, co ty dva stavy odliší — a přesně proto si stará adresa v Renderu
+  // mohla několik dní nikoho nevšimnout.
+  const dutyEl = document.getElementById('kalDuty');
+  const zakladKal = { enabled: true, dnu: 7, days: dny(7), fetchedAt: new Date().toISOString(), error: null };
+  renderKalendar({ ...zakladKal, duty: { kalendar: 'Lukáš', error: 'HTTP 403', udalosti: 0, kdy: 0 } });
+  check('výpadek rozpisu je vidět', /nenačetly/.test(dutyEl.textContent), true);
+  check('  i s důvodem', /HTTP 403/.test(dutyEl.textContent), true);
+  check('  a poradí, kam sáhnout', /DUTY_ICS_URL/.test(dutyEl.textContent), true);
+  check('  a dny zůstanou', document.querySelectorAll('#kalDny .kal-den').length, 7);
+
+  // Cedule, která nejde pryč, je horší než žádná
+  renderKalendar({ ...zakladKal, duty: { kalendar: 'Lukáš', error: null, udalosti: 3, kdy: Date.now() } });
+  check('když rozpis jede, řádek zmizí', dutyEl.textContent, '');
+  renderKalendar({ ...zakladKal, duty: null });
+  check('bez nastaveného rozpisu taky nic', dutyEl.textContent, '');
+  renderKalendar({ ...zakladKal });
+  check('  ani když o rozpisu nic nepřišlo', dutyEl.textContent, '');
+
   R.push('\\n5) Diagnostika napojení');
   // Ladit napojení jde jen naostro (přihlašovací údaje jsou na serveru), takže
   // tlačítko musí být po ruce právě tehdy, když je co ladit — a jinak nepřekážet.

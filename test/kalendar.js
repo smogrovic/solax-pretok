@@ -14,9 +14,12 @@ const DEN = 86400000, H = 3600000, MIN = 60000;
 const CODE = between('// ---------- Kalendář z iCloudu (CalDAV) ----------',
                      '// ---------- Nuki zámek ----------');
 
-function build({ odpovedi = [], duty = '' } = {}) {
+function build({ odpovedi = [], duty = '', icloud = false } = {}) {
   // Odkaz na pracovní rozpis čte kód z prostředí (je to klíč, do repozitáře nepatří)
   process.env.DUTY_ICS_URL = duty;
+  // Bez údajů k iCloudu se poller ani nerozjede — pro jeho zkoušení se zapnou
+  process.env.ICLOUD_APPLE_ID = icloud ? 'nekdo@icloud.com' : '';
+  process.env.ICLOUD_APP_PASSWORD = icloud ? 'abcd-efgh-ijkl-mnop' : '';
   const state = { calendar: { days: [], fetchedAt: null, error: null } };
   const dotazy = [];
   const routy = {};
@@ -25,7 +28,7 @@ function build({ odpovedi = [], duty = '' } = {}) {
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
          + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev,'
-         + ' kalSerad, kalStahniDuty, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS };'
+         + ' kalSerad, kalStahniDuty, pollKalendar, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS };'
   )(
     state,
     { get: (cesta, fn) => { routy['GET ' + cesta] = fn; },
@@ -428,6 +431,65 @@ nadpis('6d) Zapojení v polleru');
   check('  a pošle appce seznam sloupců', /kalendare: kalendare\.map/.test(POLLER), true);
 }
 
+nadpis('6e) Výpadek rozpisu je vidět v appce');
+// Stará adresa feedu vracela chybu, kalendář ji spolkl a Lukášův sloupec vypadal
+// úplně stejně jako volný týden. Tahle část hlídá, že se chyba dostane až do appky.
+{
+  const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
+    + `<current-user-principal xmlns="DAV:"><href xmlns="DAV:">/1/principal/</href></current-user-principal>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const HOME = `<multistatus xmlns="DAV:"><response><href>/1/principal/</href><propstat><prop>`
+    + `<calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">`
+    + `<href xmlns="DAV:">https://p1-caldav.icloud.com/1/calendars/</href></calendar-home-set>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const SEZNAM = `<multistatus xmlns="DAV:"><response><href>/1/calendars/lukas/</href><propstat><prop>`
+    + `<displayname>Lukáš</displayname><resourcetype><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>`
+    + `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"><comp name="VEVENT"/></supported-calendar-component-set>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const PRAZDNO = `<multistatus xmlns="DAV:"></multistatus>`;
+  const dnes = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const FEED = `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:d1\r\nSUMMARY:OK123 PRG-FCO\r\n`
+    + `DTSTART:${dnes}T050000Z\r\nDTEND:${dnes}T133000Z\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+  const objev = [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM }];
+
+  // Nejdřív výpadek, pak úspěch — a obojí na TÉŽE instanci. Kdyby se zkoušely
+  // dvě zvlášť, „po úspěchu chyba zmizí" by prošlo i bez mazání: nová instance
+  // stejně začíná s prázdnou chybou.
+  const h = build({
+    icloud: true, duty: 'https://dutylog/feed',
+    odpovedi: [...objev, { body: PRAZDNO }, { ok: false, status: 403 },
+               { body: PRAZDNO }, { body: FEED }]
+  });
+  return h.api.pollKalendar().then(() => {
+    const p = h.api.calendarPayload();
+    check('chyba rozpisu se dostane do appky', p.duty && p.duty.error, 'HTTP 403');
+    check('  ale zbytek kalendáře stojí', p.error, null);
+    check('  a dny se poskládaly', p.days.length, 7);
+    check('  a ví se, do kterého sloupce patří', p.duty && p.duty.kalendar, 'Lukáš');
+
+    // Cedule, která nejde pryč, je horší než žádná
+    return h.api.pollKalendar().then(() => {
+      const q = h.api.calendarPayload();
+      check('po úspěchu chyba zmizí', q.duty && q.duty.error, null);
+      check('  a spočítá se, kolik služeb přišlo', q.duty && q.duty.udalosti, 1);
+      check('  a zapamatuje se kdy', !!(q.duty && q.duty.kdy > 0), true);
+      check('  a služba je v Lukášově sloupci',
+        q.days.some(d => d.udalosti.some(u => u.zdroj === 'duty')), true);
+
+      // Bez odkazu není co hlásit — trvalá cedule „nemáš rozpis" by byla šum
+      const bez = build({ icloud: true, duty: '', odpovedi: [...objev, { body: PRAZDNO }] });
+      return bez.api.pollKalendar().then(() => {
+        check('bez odkazu se rozpis vůbec nezmiňuje', bez.api.calendarPayload().duty, null);
+      });
+    });
+  }).catch(err => {
+    // Bez tohohle sada při rozbitém polleru umře bez verdiktu a vypadá to,
+    // jako by se nic nestalo
+    check('oddíl doběhl bez výjimky', err.message, '(nic)');
+  }).then(dalsiE);
+}
+function dalsiE() {
+
 nadpis('7) Bez přihlašovacích údajů');
 {
   const h = build();
@@ -437,6 +499,7 @@ nadpis('7) Bez přihlašovacích údajů');
 }
 
 konec();
+}
 }
 }
 }
