@@ -2453,7 +2453,7 @@
   </div>
 
   <!-- Stránka: Ovládání -->
-  <div class="slide" data-title="Ovládání" data-rezim="full">
+  <div class="slide" data-title="Ovládání">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2463,7 +2463,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable">
+      <div class="card lockable jen-full">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="shellyLight"></div>
@@ -2480,7 +2480,7 @@
 
       <!-- Oběhové čerpadlo: jen ruční ON, konec si hlídá auto-off v relé (15 min).
            OFF tlačítko tu schválně není. -->
-      <div class="card lockable" id="obehCard">
+      <div class="card lockable jen-full" id="obehCard">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="obehLight"></div>
@@ -2516,7 +2516,7 @@
               <button class="power-btn off-btn" id="lightNahoreOffBtn">OFF</button>
             </div>
           </div>
-          <div class="light-cell">
+          <div class="light-cell jen-full">
             <div class="shelly-row">
               <div class="traffic-light" id="lightBazenLight"></div>
               <div class="shelly-label">Světlo bazén</div>
@@ -2526,7 +2526,7 @@
               <button class="power-btn off-btn" id="lightBazenOffBtn">OFF</button>
             </div>
           </div>
-          <div class="light-cell">
+          <div class="light-cell jen-full">
             <div class="shelly-row">
               <div class="traffic-light" id="lightNocniLight"></div>
               <div class="shelly-label">Noční světla</div>
@@ -2539,12 +2539,12 @@
         </div>
       </div>
 
-      <div class="card lockable" id="nukiCard">
+      <div class="card lockable jen-full" id="nukiCard">
         <button class="home-btn home-btn-sm" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
         <div class="home-msg" id="homeMsg"></div>
       </div>
 
-      <div class="card lockable timer-card">
+      <div class="card lockable timer-card jen-full">
         <div class="graph-title">Časovač</div>
         <select id="relayTimerDevice" class="timer-select"></select>
         <div class="timer-form-row">
@@ -2832,7 +2832,7 @@
         <div class="zavlaha-hint" id="zavlahaHint"></div>
       </div>
 
-      <button class="sbal-btn" data-sbal="zavlaha" type="button" aria-expanded="false">Kolik toho uteklo<i>▾</i></button>
+      <button class="sbal-btn" data-sbal="zavlaha" type="button" aria-expanded="false">Přehled zavlažování<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="zavlaha">
         <div class="graph-title">Kolik dnes běželo</div>
         <div class="wbsrc-list" id="zavlahaDnes"></div>
@@ -2907,7 +2907,8 @@
         </div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="prehled" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="prehled">
         <div class="graph-title">Dnes</div>
         <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
         <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
@@ -2918,7 +2919,7 @@
         <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaToday">– kWh</span></div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card" data-sbal-obsah="prehled">
         <div class="graph-title">Posledních 7 dní</div>
         <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
         <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
@@ -3337,6 +3338,9 @@ function pouzijRezim(novy) {
   // Až když nějaké žaluzie jsou. Prázdné vykreslení při startu by schovalo
   // druhou stránku dřív, než data vůbec dorazí.
   bezpecne(() => { if (blinds.length) renderBlinds(); });
+  // Nabídka v časovači se řídí režimem taky — bez tohohle by v dětském režimu
+  // zůstala ta z full, tedy cizí žaluzie
+  bezpecne(() => { if (blinds.length) renderBlindTimerDevices(); });
   bezpecne(renderTempAuto);
   bezpecne(rezimRenderTlacitka);
   bezpecne(rezimRenderRozvrh);
@@ -5571,8 +5575,17 @@ function renderBlinds() {
   // druhá je schovaná
   const jenPokoj = rezimPokoj();
   if (jenPokoj) {
-    rooms = rooms.filter(g => normalizeName(g.room).includes(jenPokoj));
-    for (const g of rooms) g.page = 1;
+    // Kromě vlastního pokoje zůstanou spínače z TaHomy — světla na terase
+    // a u pergoly. Jsou to světla, ne žaluzie, a dětem je nemá smysl brát.
+    const jeho = g => normalizeName(g.room).includes(jenPokoj);
+    // `some`, ne `every`: terasa má vedle světla i žaluzii pergoly, takže by
+    // s `every` vypadl celý box i se světlem
+    rooms = rooms.filter(g => jeho(g) || g.items.some(b => b.type === 'switch'));
+    for (const g of rooms) {
+      g.page = 1;
+      if (!jeho(g)) g.items = g.items.filter(b => b.type === 'switch');
+    }
+    rooms = rooms.filter(g => g.items.length);
   }
 
   const slide2Exists = !!document.getElementById('blindsSlide2');
@@ -5626,6 +5639,17 @@ const TIMER_GROUPED_ROOMS = ['miky', 'elenka'];
 const TIMER_EXCLUDED_ROOMS = ['terasa', 'garaz'];
 
 function blindTimerOptions(page) {
+  // V dětském režimu jsou v seznamu jen ty dvě žaluzie z jeho pokoje. Filtr podle
+  // stránky tu nepomůže: Miky i Elenka patří na druhou stránku, ta je v dětském
+  // režimu schovaná a jejich pokoj se kreslí na první — seznam by pak nabízel
+  // obývák a kuchyň, tedy cizí žaluzie.
+  const jenPokoj = rezimPokoj();
+  if (jenPokoj) {
+    return blinds
+      .filter(b => b.type === 'cover'
+        && (normalizeName(b.room).includes(jenPokoj) || normalizeName(b.label).includes(jenPokoj)))
+      .map(b => ({ value: b.deviceURL, label: b.label }));
+  }
   // Stejné řazení místností jako na stránkách s ovládáním
   const roomsMap = new Map();
   for (const b of blinds) {

@@ -80,8 +80,14 @@ setTimeout(() => {
   // dívá jednou za měsíc. Výchozí stav je proto zavřeno.
   const klice = [...document.querySelectorAll('.sbal-btn[data-sbal]')].map(b => b.dataset.sbal);
   check('tlačítka jsou na všech stránkách, kde mají být',
-    // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha
-    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, sauna, zavlaha');
+    // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Přehled
+    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, sauna, zavlaha, prehled');
+  // Na Přehledu jdou pod jedno tlačítko oba boxy — dnešek i týden
+  check('Přehled sbalí oba boxy',
+    document.querySelectorAll('[data-sbal-obsah="prehled"]').length, 2);
+  check('  a u závlahy je srozumitelný název',
+    document.querySelector('.sbal-btn[data-sbal="zavlaha"]').textContent.trim(),
+    'Přehled zavlažování▾');
   for (const k of klice) { try { localStorage.removeItem('sbaleno:' + k); } catch {} }
   sbalPripoj();
   const obsah = k => [...document.querySelectorAll('[data-sbal-obsah="' + k + '"]')];

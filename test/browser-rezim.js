@@ -41,7 +41,11 @@ setTimeout(async () => {
     zaluzie('Miky Okno', 'Miky'),
     zaluzie('Miky dveře', 'Miky'),
     zaluzie('Elenka Okno', 'Elenka'),
-    zaluzie('Elenka Dveře', 'Elenka')
+    zaluzie('Elenka Dveře', 'Elenka'),
+    // Terasa má vedle žaluzie pergoly i světlo — to je spínač z TaHomy
+    zaluzie('Pergola', 'Terasa'),
+    { deviceURL: 'io://SvetlaTerasa', label: 'Světla terasa', room: 'Terasa',
+      type: 'switch', onState: false }
   ];
   rozvrhData = [
     { id: 1, nazev: 'Ráno', zapnuto: true, dny: [true,true,true,true,true,false,false],
@@ -71,16 +75,26 @@ setTimeout(async () => {
   check('  a po rozbalení jde nastavovat', vidim(document.getElementById('rozvrhCard')), true);
   check('  jeho náhled se neukazuje', vidim(document.getElementById('rozvrhPrehled')), false);
   check('bazén jde spínat', vidim(document.getElementById('poolOnBtn')), true);
+  check('na Ovládání je oběhové čerpadlo', vidim(document.getElementById('obehOnBtn')), true);
+  check('  i zámek domu', vidim(document.getElementById('nukiLockBtn')), true);
 
   R.push('\\n2) Mikyho režim');
   pouzijRezim('miky');
-  check('zbydou čtyři záložky', zalozky().join(' · '), 'Asistent · Žaluzie · Bazén · Logika automatiky');
+  check('zbydou čtyři záložky', zalozky().join(' · '),
+    'Asistent · Žaluzie · Ovládání · Bazén · Logika automatiky');
   // Asistent umí zapnout bojler i odemknout dům — do dětské ruky nepatří
   check('pole pro asistenta zmizí', vidim(document.getElementById('asstInput')), false);
   check('  i scénáře', vidim(document.getElementById('asstScenes')), false);
   check('  i jezdec automatiky', vidim(document.getElementById('autoModeSlider')), false);
   check('bazén už nejde spínat', vidim(document.getElementById('poolOnBtn')), false);
   check('  ale světlo ano', vidim(document.getElementById('lightBazenOnBtn2')), true);
+  // Ovládání se dětem vrátilo, ale jen se světly zahrady — ne s čerpadlem,
+  // zámkem domu ani časovačem relé
+  check('světla zahrady jsou zpátky', vidim(document.getElementById('lightDoleOnBtn')), true);
+  check('  obě', vidim(document.getElementById('lightNahoreOnBtn')), true);
+  check('  ale noční světla ne', vidim(document.getElementById('lightNocniOnBtn')), false);
+  check('  ani oběhové čerpadlo', vidim(document.getElementById('obehOnBtn')), false);
+  check('  ani zámek domu', vidim(document.getElementById('nukiLockBtn')), false);
   check('  a teplota vody taky', !!document.getElementById('hpTemp'), true);
   // I rozbalený zůstane v dětském režimu schovaný — tam ho neschovává sbalení,
   // ale režim
@@ -92,7 +106,20 @@ setTimeout(async () => {
   check('tlačítka jsou tři', detiBtns().join(' | '),
     'Zatáhnout žaluzie | Otevřít žaluzie | Otevřít žaluzie dveří');
   const boxy = () => [...document.querySelectorAll('#blindsList1 .blind-room-title')].map(t => t.textContent);
-  check('na stránce žaluzií je jen Mikyho pokoj', boxy().join(' | '), 'Miky');
+  // Vedle vlastního pokoje zbydou světla z TaHomy (terasa, pergola) — jsou to
+  // světla, ne žaluzie, a dětem je nemá smysl brát
+  check('na stránce žaluzií je jeho pokoj a světla', boxy().join(' | '), 'Terasa | Miky');
+  const terasa = [...document.querySelectorAll('#blindsList1 .blind-room')]
+    .find(b => b.textContent.includes('Terasa'));
+  check('  a z terasy jen to světlo', /Světla terasa/.test(terasa.textContent), true);
+  check('  ne žaluzie pergoly', /Pergola/.test(terasa.textContent), false);
+
+  // Časovač nabízel žaluzie z DRUHÉ stránky: Miky i Elenka patří na stránku dvě,
+  // ta je schovaná, a jejich pokoj se kreslí na první
+  const casovac = [...document.querySelectorAll('#blindsList1')].length
+    ? [...document.querySelectorAll('.blind-timer-card')].find(c => c.getClientRects().length) : null;
+  const nabidka = () => [...casovac.querySelectorAll('.bt-device option')].map(o => o.textContent);
+  check('v časovači jsou jen jeho dvě žaluzie', nabidka().join(' | '), 'Miky Okno | Miky dveře');
   check('teplotní automatika je jen pro Mikyho',
     [...document.querySelectorAll('#tempAutoList .tempauto-name')].map(e => e.textContent).join(' | '), 'Miky');
   check('  a obývák tam není', vidim(document.getElementById('tempAutoListOwn')), true);
@@ -130,7 +157,10 @@ setTimeout(async () => {
 
   R.push('\\n4) Elenka nevidí Mikyho a naopak');
   pouzijRezim('elenka');
-  check('na stránce žaluzií je jen Elenčin pokoj', boxy().join(' | '), 'Elenka');
+  check('na stránce žaluzií je Elenčin pokoj a světla', boxy().join(' | '), 'Terasa | Elenka');
+  check('  a v časovači jsou Elenčiny žaluzie',
+    [...document.querySelectorAll('.blind-timer-card')].find(c => c.getClientRects().length)
+      .querySelectorAll('.bt-device option').length, 2);
   POSLANO.length = 0;
   document.querySelectorAll('#detiTlacitka .deti-btn')[2].click();
   await pockej();
