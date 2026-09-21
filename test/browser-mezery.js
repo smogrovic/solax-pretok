@@ -46,7 +46,10 @@ setTimeout(() => {
   check('horní box sedí na všech stránkách stejně', [...new Set(odsazeni)].join(', '), String(odsazeni[0]));
   check('  a drží se u horního okraje', odsazeni[0] < 40, true);
 
-  // Konkrétně to, co bylo rozbité: dvě obyčejné karty za sebou na saune
+  // Konkrétně to, co bylo rozbité: dvě obyčejné karty za sebou na saune.
+  // Sbalené přehledy se rozbalí, ať se mezera mezi nimi dá změřit — o to tu jde,
+  // ne o to, jestli jsou zrovna otevřené.
+  for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) sbalNastav(btn.dataset.sbal, false);
   const sauna = stranky.find(s => s.dataset.title === 'Sauna');
   const saunaKarty = Array.from(sauna.querySelectorAll('.page > .card')).filter(viditelna);
   check('sauna má šest karet', saunaKarty.length, 6);
@@ -71,6 +74,39 @@ setTimeout(() => {
   const log = stranky.find(s => s.dataset.title === 'Log');
   check('jediná karta na Logu nemá okraj navíc',
     mezera(log.querySelector('.page > .card')), 0);
+
+  R.push('\\nSbalené přehledy');
+  // Půlka stránek byla dlouhá na tři obrazovky kvůli číslům, na která se člověk
+  // dívá jednou za měsíc. Výchozí stav je proto zavřeno.
+  const klice = [...document.querySelectorAll('.sbal-btn[data-sbal]')].map(b => b.dataset.sbal);
+  check('tlačítka jsou na všech stránkách, kde mají být',
+    // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha
+    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, sauna, zavlaha');
+  for (const k of klice) { try { localStorage.removeItem('sbaleno:' + k); } catch {} }
+  sbalPripoj();
+  const obsah = k => [...document.querySelectorAll('[data-sbal-obsah="' + k + '"]')];
+  check('bez volby je všechno sbalené',
+    klice.filter(k => obsah(k).some(el => !el.hidden)).join(', ') || 'nic', 'nic');
+  sbalNastav('fve', false);
+  check('rozbalení ukáže obě karty naráz', obsah('fve').filter(el => !el.hidden).length, 2);
+  check('  a tlačítko to dá najevo',
+    document.querySelector('.sbal-btn[data-sbal="fve"]').classList.contains('otevreno'), true);
+  check('  a sousedi zůstanou sbalení', obsah('wallbox').some(el => !el.hidden), false);
+  check('volba se pamatuje', localStorage.getItem('sbaleno:fve'), 'ne');
+  sbalPripoj();
+  check('  a přežije nové načtení', obsah('fve').filter(el => !el.hidden).length, 2);
+  sbalNastav('fve', true);
+  check('zavření zase schová', obsah('fve').some(el => !el.hidden), false);
+
+  // Sauna jediná neměla rozpis po dnech, i když ho ostatní stránky mají
+  saunaDaysData = [{ d: new Date().toISOString().slice(0, 10), wh: 8000, ms: 0 }];
+  renderSaunaDays();
+  const saunaRadky = document.querySelectorAll('#saunaDnyList .wbsrc-row');
+  check('sauna má rozpis po dnech', saunaRadky.length, 8);
+  // Sauna nemá dělení síť/FVE — dokreslit jí pruh by znamenalo tvrdit něco, co nevíme
+  check('  ale bez pruhu síť/FVE',
+    document.querySelectorAll('#saunaDnyList .wbsrc-bar').length, 0);
+  check('  a je v něm i spotřeba', /8,0 kWh/.test(document.getElementById('saunaDnyList').textContent), true);
 
   R.push('\\nTelefon: jedna stránka přes celou obrazovku');
   const wrap = document.getElementById('sliderWrap');

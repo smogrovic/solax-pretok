@@ -64,8 +64,12 @@ setTimeout(async () => {
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
   check('pole pro asistenta je vidět', vidim(document.getElementById('asstInput')), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
-  check('rozvrh jde nastavovat', vidim(document.getElementById('rozvrhCard')), true);
-  check('  a jeho náhled se neukazuje', vidim(document.getElementById('rozvrhPrehled')), false);
+  // Rozvrh je ve full sbalený pod tlačítkem — jde k němu, jen se na něj musí ťuknout
+  check('tlačítko na rozvrh je vidět',
+    vidim(document.querySelector('.sbal-btn[data-sbal="rozvrh"]')), true);
+  sbalNastav('rozvrh', false);
+  check('  a po rozbalení jde nastavovat', vidim(document.getElementById('rozvrhCard')), true);
+  check('  jeho náhled se neukazuje', vidim(document.getElementById('rozvrhPrehled')), false);
   check('bazén jde spínat', vidim(document.getElementById('poolOnBtn')), true);
 
   R.push('\\n2) Mikyho režim');
@@ -78,7 +82,11 @@ setTimeout(async () => {
   check('bazén už nejde spínat', vidim(document.getElementById('poolOnBtn')), false);
   check('  ale světlo ano', vidim(document.getElementById('lightBazenOnBtn2')), true);
   check('  a teplota vody taky', !!document.getElementById('hpTemp'), true);
+  // I rozbalený zůstane v dětském režimu schovaný — tam ho neschovává sbalení,
+  // ale režim
   check('rozvrh nejde nastavovat', vidim(document.getElementById('rozvrhCard')), false);
+  check('  ani tlačítko k němu',
+    vidim(document.querySelector('.sbal-btn[data-sbal="rozvrh"]')), false);
   check('  jen se ukáže', vidim(document.getElementById('rozvrhPrehled')), true);
 
   check('tlačítka jsou tři', detiBtns().join(' | '),

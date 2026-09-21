@@ -1985,6 +1985,17 @@
   }
   .deti-btn:disabled{opacity:0.45;}
   .rozvrh-prehled{width:100%;font-size:12px;color:var(--grey-text);display:flex;flex-direction:column;gap:5px;}
+  /* Sbalené přehledy. Půlka stránek byla dlouhá na tři obrazovky kvůli číslům,
+     na která se člověk dívá jednou za měsíc. Výchozí stav je zavřeno. */
+  .sbal-btn{
+    width:100%;margin-top:12px;border:none;border-radius:16px;padding:11px 14px;
+    font-family:inherit;font-size:13px;font-weight:700;
+    background:rgba(44,62,80,0.06);color:var(--grey-text);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .sbal-btn i{font-style:normal;font-size:11px;transition:transform 0.15s;}
+  .sbal-btn.otevreno i{transform:rotate(180deg);}
+  .card[hidden]{display:none;}
   .rozvrh-prehled b{color:var(--navy);font-weight:600;}
 </style>
 </head>
@@ -2224,13 +2235,14 @@
         <div class="timeline-legend" id="boilerLegend"></div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="fve" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="fve">
         <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
         <div class="wbsrc-list" id="usageSrcList"></div>
         <div class="wbsrc-note">Barák kromě auta a bazénu: dům, oba bojlery a sauna. Ze sítě se nejdřív započítá auto (karta na Wallboxu), pak bazén (karta na Bazénu) a sem jde zbytek — všechny tři dohromady dají celý odběr ze sítě.</div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card" data-sbal-obsah="fve">
         <div class="graph-title">Spotřeba domu po měsících</div>
         <div class="wbsrc-list" id="dumMonths"></div>
       </div>
@@ -2258,7 +2270,8 @@
         </div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="klima" type="button" aria-expanded="false">Teplota v pokojích<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="klima">
         <div class="graph-title">Teplota v pokojích (12 h)</div>
         <canvas id="airconChart"></canvas>
         <div class="timeline-legend" id="airconChartLegend"></div>
@@ -2330,7 +2343,8 @@
         <div class="rozvrh-prehled" id="rozvrhPrehled"></div>
       </div>
 
-      <div class="card lockable timer-card jen-full" id="rozvrhCard">
+      <button class="sbal-btn jen-full" data-sbal="rozvrh" type="button" aria-expanded="false">Rozvrh<i>▾</i></button>
+      <div class="card lockable timer-card jen-full" id="rozvrhCard" data-sbal-obsah="rozvrh">
         <div class="graph-title">Rozvrh žaluzií</div>
         <div class="rozvrh-dny" id="rozvrhDny"></div>
         <div class="rozvrh-rychle">
@@ -2595,13 +2609,14 @@
         <div class="timeline-legend" id="wbModeLegend"></div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="wallbox" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="wallbox">
         <div class="graph-title">Odkud auto bralo (7 dní)</div>
         <div class="wbsrc-list" id="wbSrcList"></div>
         <div class="wbsrc-note">Odhad ze vzorků po 2 min: ze sítě se počítá to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE (i když zrovna teklo z baterky).</div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card" data-sbal-obsah="wallbox">
         <div class="graph-title">Spotřeba po měsících</div>
         <div class="wbsrc-list" id="wbMonths"></div>
       </div>
@@ -2687,7 +2702,8 @@
           </div>
         </div>
       </div>
-      <div class="card stats-card jen-full">
+      <button class="sbal-btn jen-full" data-sbal="bazen" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
+      <div class="card stats-card jen-full" data-sbal-obsah="bazen">
         <div class="graph-title">Odkud bazén bral (7 dní)</div>
         <div class="wbsrc-list" id="poolSrcList"></div>
         <div class="wbsrc-note">Ze sítě se nejdřív započítá auto, pak bazén a nakonec zbytek domu — všechny tři karty dohromady dají celý odběr ze sítě.</div>
@@ -2698,7 +2714,7 @@
         <div id="solinatorCalc"></div>
       </div>
 
-      <div class="card stats-card jen-full">
+      <div class="card stats-card jen-full" data-sbal-obsah="bazen">
         <div class="graph-title">Spotřeba bazénu po měsících</div>
         <div class="wbsrc-list" id="poolMonths"></div>
       </div>
@@ -2760,13 +2776,15 @@
         <div class="stat-row" data-huum="lLock"><span>Dětský zámek</span><span class="stat-val" id="huumLimLock">–</span></div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="sauna" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="sauna">
         <div class="graph-title">Spotřeba za 7 dní</div>
         <div class="mesic-total" id="saunaTotal">– kWh</div>
+        <div class="wbsrc-list" id="saunaDnyList"></div>
         <div class="wbsrc-note">Sauna visí na stejném jističi jako bazén a solinátor. Když topí, appka je vypne a nechá vypnuté ještě 30 min po dotopení — jistič to jinak nemusí unést. Pro rychlé vypnutí to samé hlídá i skript přímo v Shelly.</div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card" data-sbal-obsah="sauna">
         <div class="graph-title">Spotřeba po měsících</div>
         <div class="wbsrc-list" id="saunaMonths"></div>
       </div>
@@ -2808,12 +2826,13 @@
         <div class="zavlaha-hint" id="zavlahaHint"></div>
       </div>
 
-      <div class="card stats-card">
+      <button class="sbal-btn" data-sbal="zavlaha" type="button" aria-expanded="false">Kolik toho uteklo<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="zavlaha">
         <div class="graph-title">Kolik dnes běželo</div>
         <div class="wbsrc-list" id="zavlahaDnes"></div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card" data-sbal-obsah="zavlaha">
         <div class="graph-title">Posledních 7 dní</div>
         <div class="wbsrc-list" id="zavlahaTyden"></div>
       </div>
@@ -3178,6 +3197,31 @@ const poolValueEl = document.getElementById('poolValue');
 const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
+
+// ---------- Sbalené přehledy ----------
+// Tlačítko schová skupinu karet. Stav se pamatuje v telefonu zvlášť pro každou
+// skupinu; výchozí je zavřeno, protože o to celé jde — zkrátit stránky.
+function sbalStav(klic) {
+  try { return localStorage.getItem('sbaleno:' + klic) !== 'ne'; } catch { return true; }
+}
+
+function sbalNastav(klic, sbaleno) {
+  try { localStorage.setItem('sbaleno:' + klic, sbaleno ? 'ano' : 'ne'); } catch {}
+  for (const el of document.querySelectorAll(`[data-sbal-obsah="${klic}"]`)) el.hidden = sbaleno;
+  const btn = document.querySelector(`.sbal-btn[data-sbal="${klic}"]`);
+  if (btn) {
+    btn.classList.toggle('otevreno', !sbaleno);
+    btn.setAttribute('aria-expanded', String(!sbaleno));
+  }
+}
+
+function sbalPripoj() {
+  for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) {
+    const klic = btn.dataset.sbal;
+    sbalNastav(klic, sbalStav(klic));
+    btn.addEventListener('click', () => sbalNastav(klic, !sbalStav(klic)));
+  }
+}
 
 // ---------- Dětský režim ----------
 // Appka jde dětem do mobilu a mají vidět jen svůj pokoj. Drží se to NA ZAŘÍZENÍ,
@@ -7138,6 +7182,9 @@ function wbSrcDenNadpis(dateStr) {
 
 // Karta „odkud to šlo": den po dni pruh ze sítě / z FVE a součet pod tím.
 // Sdílí ji wallbox i spotřeba baráku — liší se jen data a dvě hlášky.
+// `texty.bezRozpadu` = jen den a součet, žádný pruh síť/FVE. Sauna dělení nemá:
+// sedí uvnitř „domu" a vlastní místo v řetězu dělení odběru ze sítě nedostala.
+// Nakreslit jí pruh „všechno z FVE" by bylo pohodlné a nepravdivé.
 function renderSrcKarta(el, dnyData, texty) {
   if (!el) return;
   const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
@@ -7165,7 +7212,9 @@ function renderSrcKarta(el, dnyData, texty) {
     head.appendChild(den);
     head.appendChild(soucet);
     row.appendChild(head);
-    if (total > 0) {
+    if (total > 0 && texty.bezRozpadu) {
+      // nic dalšího — číslo mluví samo
+    } else if (total > 0) {
       const bar = document.createElement('div');
       bar.className = 'wbsrc-bar';
       const g = document.createElement('i');
@@ -7712,6 +7761,8 @@ if (saunaSaveBtn) {
   });
 }
 
+const saunaDnyListEl = document.getElementById('saunaDnyList');
+
 function renderSaunaDays() {
   if (!saunaTotalEl) return;
   let celkem = 0;
@@ -7724,6 +7775,9 @@ function renderSaunaDays() {
     celkem += (rec && rec.wh) || 0;
   }
   saunaTotalEl.textContent = (celkem / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  // Rozpis po dnech mají ostatní stránky taky — sauna na něj jediná neměla kartu
+  renderSrcKarta(saunaDnyListEl, (saunaDaysData || []).map(r => ({ d: r.d, grid: 0, pv: r.wh || 0 })),
+    { prazdno: 'netopilo se', prazdnoCelkem: 'zatím se netopilo', bezRozpadu: true });
 }
 
 // Denní spotřeba se zálohuje v telefonu — server po deployi začíná od nuly
@@ -10526,6 +10580,7 @@ function rebuildDots() {
 
 sliderWrap.addEventListener('scroll', updateDots, { passive: true });
 window.addEventListener('resize', updateDots);
+sbalPripoj();
 // Režim se nasadí hned při startu — jinak by dítěti na okamžik probliklo všechno
 pouzijRezim();
 
