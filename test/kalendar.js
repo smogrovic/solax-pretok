@@ -447,9 +447,15 @@ nadpis('6e) Výpadek rozpisu je vidět v appce');
     + `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"><comp name="VEVENT"/></supported-calendar-component-set>`
     + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
   const PRAZDNO = `<multistatus xmlns="DAV:"></multistatus>`;
-  const dnes = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  // Služba se schválně neodvozuje z dnešního DATA: `toISOString` dává den v UTC,
+  // ale okno kalendáře začíná o pražské půlnoci. Po 22:00 našeho času se ty dva
+  // dny rozejdou, služba spadne před začátek okna a sada selže — což se taky
+  // stalo. Dvě hodiny od teď jsou uvnitř okna vždycky.
+  const utc = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const zacatek = utc(Date.now() + 2 * 3600000);
+  const konecS = utc(Date.now() + 6 * 3600000);
   const FEED = `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:d1\r\nSUMMARY:OK123 PRG-FCO\r\n`
-    + `DTSTART:${dnes}T050000Z\r\nDTEND:${dnes}T133000Z\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+    + `DTSTART:${zacatek}\r\nDTEND:${konecS}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
   const objev = [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM }];
 
   // Nejdřív výpadek, pak úspěch — a obojí na TÉŽE instanci. Kdyby se zkoušely

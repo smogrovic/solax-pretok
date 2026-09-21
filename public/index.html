@@ -2894,14 +2894,14 @@
       </div>
 
       <div class="card stats-card">
-        <div class="graph-title">Včera</div>
+        <div class="graph-title">Posledních 7 dní</div>
         <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
         <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
         <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
         <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolYest">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Yest">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Yest">– kWh</span></div>
+        <div class="stat-row"><span>Ohřev vody miko TČ</span><span class="stat-val" id="statBojleryTyden">– kWh</span></div>
         <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaYest">– kWh</span></div>
+        <div class="wbsrc-note" id="tydenNote"></div>
       </div>
 
       <div class="card stats-card">
@@ -4122,6 +4122,8 @@ const statFeedinTodayEl = document.getElementById('statFeedinToday');
 const statImportTodayEl = document.getElementById('statImportToday');
 const statPoolTodayEl = document.getElementById('statPoolToday');
 const statSaunaTodayEl = document.getElementById('statSaunaToday');
+const statBojleryTydenEl = document.getElementById('statBojleryTyden');
+const tydenNoteEl = document.getElementById('tydenNote');
 const statB1TodayEl = document.getElementById('statB1Today');
 const statB2TodayEl = document.getElementById('statB2Today');
 const statFeedinYestEl = document.getElementById('statFeedinYest');
@@ -4129,8 +4131,6 @@ const statImportYestEl = document.getElementById('statImportYest');
 const statPoolYestEl = document.getElementById('statPoolYest');
 const statSaunaYestEl = document.getElementById('statSaunaYest');
 const wbYestEl = document.getElementById('wbYest');
-const statB1YestEl = document.getElementById('statB1Yest');
-const statB2YestEl = document.getElementById('statB2Yest');
 const autoLight = document.getElementById('autoLight');
 const autoStateEl = document.getElementById('autoState');
 const autoModeSliderEl = document.getElementById('autoModeSlider');
@@ -4193,21 +4193,54 @@ function renderStats() {
   renderSolinator(); // rozpočet solinátoru se počítá z téže doby běhu
 }
 
-// Box "Včera" — kompletní údaje z předchozího dne (snapshot na serveru)
+// Box "Posledních 7 dní". Počítá se z UZAVŘENÝCH dnů — dnešek se do součtu
+// nebere. Míchat hotový den s rozběhnutým by znamenalo, že každý řádek mluví
+// o jinak dlouhé době: řady wallboxu a bazénu dnešek mají, řada sítě a bojlerů
+// ho dostane až o půlnoci.
+const TYDEN_DNU = 7;
+
+function tydenKlice() {
+  const out = [];
+  for (let i = 1; i <= TYDEN_DNU; i++) out.push(denKlic(i));
+  return out;
+}
+
+// Součet přes uzavřené dny + kolik jich doopravdy bylo k dispozici
+function tydenSoucet(dny, hodnota) {
+  const klice = new Set(tydenKlice());
+  let wh = 0, kolik = 0;
+  for (const r of dny || []) {
+    if (!r || !klice.has(r.d)) continue;
+    wh += hodnota(r);
+    kolik++;
+  }
+  return { wh, kolik };
+}
+
 function renderYesterday() {
-  const y = runtimeData && runtimeData.yesterday;
-  const w = (y && y.wh) || {};
-  const m = (y && y.ms) || {};
-  const set = (el, v) => { if (el) el.textContent = y ? v : '– kWh'; };
-  set(statFeedinYestEl, fmtWhKwh(w.feed));
-  set(statImportYestEl, fmtWhKwh(w.import));
-  set(wbYestEl, fmtWhKwh(w.wb));
-  set(statB1YestEl, fmtWhKwh(w.b1));
-  set(statB2YestEl, fmtWhKwh(w.b2));
-  // Bazén a sauna nejdou z včerejšího snapshotu, ale ze svých denních řad — ty
-  // přežijí i deploy, protože se zálohují a vrací z telefonu
-  if (statPoolYestEl) statPoolYestEl.textContent = denKwh(poolDaysData, 1);
-  if (statSaunaYestEl) statSaunaYestEl.textContent = denKwh(saunaDaysData, 1);
+  const zeSite = tydenSoucet(siteDnyData, r => (Number(r.feed) || 0));
+  const doSite = tydenSoucet(siteDnyData, r => (Number(r.imp) || 0));
+  const bojlery = tydenSoucet(siteDnyData, r => (Number(r.b1) || 0) + (Number(r.b2) || 0));
+  const auto = tydenSoucet(wbDaysData, r => (Number(r.grid) || 0) + (Number(r.pv) || 0));
+  const bazen = tydenSoucet(poolDaysData, r => (Number(r.grid) || 0) + (Number(r.pv) || 0));
+  const sauna = tydenSoucet(saunaDaysData, r => (Number(r.wh) || 0));
+  const set = (el, v) => { if (el) el.textContent = v.kolik ? fmtWhKwh(v.wh) : '– kWh'; };
+  set(statFeedinYestEl, zeSite);
+  set(statImportYestEl, doSite);
+  set(wbYestEl, auto);
+  set(statPoolYestEl, bazen);
+  set(statBojleryTydenEl, bojlery);
+  set(statSaunaYestEl, sauna);
+  // Řada sítě a bojlerů se plní až od nasazení, takže první týden je neúplná.
+  // Ať to nevypadá jako celý týden, když je to jeden den.
+  if (tydenNoteEl) {
+    const dnu = Math.max(zeSite.kolik, bojlery.kolik, auto.kolik, bazen.kolik, sauna.kolik);
+    tydenNoteEl.textContent = dnu >= TYDEN_DNU
+      ? 'Sedm uzavřených dnů, dnešek se nepočítá.'
+      : dnu === 0
+        ? 'Zatím není z čeho počítat — první den se uzavře o půlnoci.'
+        : `Zatím jen ${dnu} ${dnu === 1 ? 'uzavřený den' : dnu < 5 ? 'uzavřené dny' : 'uzavřených dnů'} — řada se plní od nasazení.`;
+  }
 }
 
 // Jezdec má čtyři polohy, ale skládá se ze DVOU nezávislých věcí: režimu automatiky
@@ -7013,6 +7046,9 @@ const WB_SRC_DNU = 7;
 let wbDaysData = [];
 let poolDaysData = [];
 let usageDaysData = [];
+// Přetok, odběr ze sítě a oba bojlery po dnech. Na rozdíl od ostatních řad
+// nemá dělení síť/FVE — jsou to čtyři samostatná čísla za uzavřený den.
+let siteDnyData = [];
 
 // Tři řady (auto, bazén, dům) se zálohují i obnovují úplně stejně
 const dnySave = (klic, data) => { try { localStorage.setItem(klic, JSON.stringify(data)); } catch {} };
@@ -7039,6 +7075,41 @@ function mergeWbDays(a, b) {
 }
 
 function saveUsageDaysLocal() { dnySave('usageDays', usageDaysData); }
+function saveSiteDnyLocal() { dnySave('siteDny', siteDnyData); }
+function loadSiteDnyLocal() { return dnyLoad('siteDny'); }
+
+// Sloučení po dnech: bere se vyšší hodnota z každé strany. Server po deployi
+// začíná na nule, telefon má poslední známý stav — a zpátky se nikdy nejde.
+function mergeSiteDny(serverDny, localDny) {
+  const mapa = new Map();
+  for (const r of [...(localDny || []), ...(serverDny || [])]) {
+    if (!r || typeof r.d !== 'string') continue;
+    const cur = mapa.get(r.d) || { d: r.d, feed: 0, imp: 0, b1: 0, b2: 0 };
+    for (const k of ['feed', 'imp', 'b1', 'b2']) {
+      const v = Number(r[k]) || 0;
+      if (v > cur[k]) cur[k] = v;
+    }
+    mapa.set(r.d, cur);
+  }
+  return [...mapa.values()].sort((a, b) => a.d.localeCompare(b.d)).slice(-7);
+}
+
+// Vlastní obnova: maybeRestoreDny porovnává grid/pv, tahle řada je má jiné
+async function maybeRestoreSiteDny(serverDny, localDny) {
+  if (!localDny || !localDny.length) return;
+  const srv = new Map((serverDny || []).map(r => [r.d, r]));
+  const treba = localDny.some(r => {
+    const s = srv.get(r.d);
+    return !s || ['feed', 'imp', 'b1', 'b2'].some(k => (Number(r[k]) || 0) > (Number(s[k]) || 0));
+  });
+  if (!treba) return;
+  try {
+    await fetch('/api/site-dny/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteDny: localDny })
+    });
+  } catch {}
+}
 function loadUsageDaysLocal() { return dnyLoad('usageDays'); }
 
 // Server po nasazení začíná den od nuly, telefon má nastřádaný celý — když je v něm
@@ -9399,6 +9470,12 @@ function applySnapshot(snap) {
   bezpecne(renderPoolSrc);
   savePoolDaysLocal();
   maybeRestoreDny('/api/pool-days/restore', 'poolDays', serverPoolDays, localPoolDays);
+  // Síť a bojlery po dnech — jediný zdroj sedmidenního boxu na Přehledu
+  const serverSiteDny = snap.siteDny || [];
+  const localSiteDny = loadSiteDnyLocal();
+  siteDnyData = mergeSiteDny(serverSiteDny, localSiteDny);
+  saveSiteDnyLocal();
+  maybeRestoreSiteDny(serverSiteDny, localSiteDny);
   // Odkud šla spotřeba baráku (kromě auta a bazénu)
   const serverUsageDays = snap.usageDays || [];
   const localUsageDays = loadUsageDaysLocal();
@@ -9724,6 +9801,11 @@ function connectStream() {
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
+  es.addEventListener('siteDny', e => {
+    siteDnyData = mergeSiteDny(JSON.parse(e.data).siteDny || [], siteDnyData);
+    saveSiteDnyLocal();
+    bezpecne(renderYesterday);
+  });
   es.addEventListener('blindRules', e => {
     const d = JSON.parse(e.data);
     renderRozvrh({ rules: d.rules || [], savedAt: d.savedAt });

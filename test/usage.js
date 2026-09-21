@@ -6,6 +6,8 @@ const { check, nadpis, konec } = suite('spotřeba');
 
 const CODE_DNY = between('// ---------- Odkud co bralo', '// ---------- Sauna ----------');
 const CODE_PICK = between('// Špička kbelíku', 'const LOG_MAX_AGE_MS');
+// Denní řada sítě a bojlerů: jediné místo, odkud se bere sedmidenní box na Přehledu
+const CODE_SITE = between('function emptyWh()', '// ---------- REST endpointy');
 const CODE_THIN = between('const THIN_AFTER_MS', '// Špička kbelíku');
 
 function build(den = '2026-08-31') {
@@ -193,6 +195,50 @@ nadpis('5) Mrtvá řada odběru okruhů je pryč');
   check('  a endpoint pro obnovu nemá', /usage-history\/restore/.test(zdroj), false);
   // Denní rozpad na síť a FVE je jiná řada a zůstat musí
   check('denní rozpad spotřeby domu zůstal', /function recordUsageDay/.test(zdroj), true);
+}
+
+nadpis('9) Denní řada sítě a bojlerů');
+{
+  // Přetok, odběr a bojlery se dosud držely jen za dnešek a včerejšek. Sedmidenní
+  // box na Přehledu z toho nešel poskládat, tak se uzavřený den odkládá stranou.
+  let dnes = '2026-09-01';
+  const state = { siteDny: [], runtime: { date: '', ms: {}, wh: null, lastTs: Date.now(), yesterday: null } };
+  // Strop je deklarovaný nahoře v server.js, mimo vyjmutý blok
+  const SITE_DNY_MAX = Number(LINES.find(l => l.startsWith('const SITE_DNY_MAX')).match(/(\d+)/)[1]);
+  const api = new Function('state', 'pragueDateString', 'SITE_DNY_MAX',
+    CODE_SITE + '\n; return { zapisSiteDen, emptyWh };'
+  )(state, () => dnes, SITE_DNY_MAX);
+  api.SITE_DNY_MAX = SITE_DNY_MAX;
+
+  api.zapisSiteDen('2026-09-01', { feed: 1000, import: 2000, wb: 5, b1: 1500, b2: 500 });
+  check('den se uloží', JSON.stringify(state.siteDny[0]),
+    '{"d":"2026-09-01","feed":1000,"imp":2000,"b1":1500,"b2":500}');
+  // `wb` se schválně nebere — wallbox má vlastní řadu a dvě pravdy o jednom čísle
+  // se dřív nebo později rozejdou
+  check('  a wallbox se sem netahá', 'wb' in state.siteDny[0], false);
+
+  // Restart těsně po půlnoci nesmí založit den dvakrát
+  api.zapisSiteDen('2026-09-01', { feed: 1200, import: 2000, b1: 1500, b2: 500 });
+  check('stejný den se nezaloží dvakrát', state.siteDny.length, 1);
+  check('  a přepíše se novější hodnotou', state.siteDny[0].feed, 1200);
+
+  for (let i = 2; i <= 12; i++) api.zapisSiteDen('2026-09-' + String(i).padStart(2, '0'), { feed: i });
+  check('drží se jen sedm dnů', state.siteDny.length, api.SITE_DNY_MAX);
+  check('  a to ty poslední', state.siteDny[0].d, '2026-09-06');
+  check('  a nejnovější je na konci', state.siteDny[state.siteDny.length - 1].d, '2026-09-12');
+  // Dny chodí v pořadí, ale po obnově z telefonu můžou přijít pomíchané —
+  // a strop pak ořízne ty nesprávné
+  state.siteDny = [];
+  for (const d of ['2026-09-05', '2026-09-01', '2026-09-03']) api.zapisSiteDen(d, { feed: 1 });
+  check('  seřazené i když přijdou pomíchané',
+    state.siteDny.map(r => r.d).join(','), '2026-09-01,2026-09-03,2026-09-05');
+
+  const predtim = state.siteDny.length;
+  api.zapisSiteDen('2026-09-20', null);
+  api.zapisSiteDen(null, { feed: 1 });
+  check('chybějící data nic nezaloží', state.siteDny.length, predtim);
+  check('prázdné hodnoty jsou nuly, ne undefined',
+    JSON.stringify(api.emptyWh()), '{"feed":0,"import":0,"wb":0,"b1":0,"b2":0}');
 }
 
 konec();

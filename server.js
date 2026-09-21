@@ -75,6 +75,7 @@ const SAUNA_HOLD_MIN = Number(process.env.SAUNA_HOLD_MIN) || 30; // držet vypnu
 const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení notifikace
 const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
 const SAUNA_DAYS_MAX = 7;
+const SITE_DNY_MAX = 7;
 
 const LIGHT_ZAHRADA_DOLE_ID   = process.env.LIGHT_ZAHRADA_DOLE_ID   || '34b7dacb5f6c';
 const LIGHT_ZAHRADA_NAHORE_ID = process.env.LIGHT_ZAHRADA_NAHORE_ID || '34b7daca6dc8';
@@ -267,6 +268,11 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
+  // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
+  // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
+  // z nich nešel poskládat.
+  siteDny: [],
   zavlahaDny: [],    // { d, zony: { '3': ms } } — kolik která zóna zalévala (7 dní)
   sekacka: { stin: null, kdy: 0, potiz: null },  // poslední stav z cloudu Anthbotu
   huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
@@ -479,6 +485,7 @@ function snapshot() {
     huum: huumPayload(),
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
+    siteDny: state.siteDny,
     months: state.months,
     timeline: state.timeline,
     // Rozvrh čerpadla jde do appky odsud, ať se popisek v kartě nemůže rozejít
@@ -1072,6 +1079,19 @@ function recordMonthSplit(kus, w, gridW, dtH) {
 }
 
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
+
+// Uzavřený den se odloží do denní řady. Volá se jen při přetočení přes půlnoc,
+// takže se přepisuje nanejvýš jednou za den — ale `find` tam je schválně,
+// aby opakované volání (restart těsně po půlnoci) nezaložilo den dvakrát.
+function zapisSiteDen(d, wh) {
+  if (!d || !wh) return;
+  const zaznam = { d, feed: wh.feed || 0, imp: wh.import || 0, b1: wh.b1 || 0, b2: wh.b2 || 0 };
+  const i = state.siteDny.findIndex(r => r.d === d);
+  if (i >= 0) state.siteDny[i] = zaznam;
+  else state.siteDny.push(zaznam);
+  state.siteDny.sort((a, b) => a.d.localeCompare(b.d));
+  state.siteDny = state.siteDny.slice(-SITE_DNY_MAX);
+}
 function runtimePayload() {
   return { date: state.runtime.date, ms: state.runtime.ms, wh: state.runtime.wh, yesterday: state.runtime.yesterday };
 }
@@ -1082,7 +1102,10 @@ function updateRuntimes() {
   const now = Date.now();
   const dt = Math.min(now - state.runtime.lastTs, 10 * 60 * 1000);
   if (state.runtime.date !== today) {
-    if (state.runtime.date) state.runtime.yesterday = { ms: state.runtime.ms, wh: state.runtime.wh };
+    if (state.runtime.date) {
+      state.runtime.yesterday = { ms: state.runtime.ms, wh: state.runtime.wh };
+      zapisSiteDen(state.runtime.date, state.runtime.wh);
+    }
     // Po půlnoci začíná den od nuly doopravdy — na dopočet z telefonu se nečeká
     if (state.runtime.date) runtimeCatchupDone = true;
     state.runtime.date = today;
@@ -1707,6 +1730,32 @@ app.post('/api/sauna-days/restore', (req, res) => {
     broadcast('saunaDays', { saunaDays: state.saunaDays });
   }
   res.json({ ok: true, days: state.saunaDays.length });
+});
+
+// Obnova denní řady sítě a bojlerů po deployi — stejný princip jako u sauny
+app.post('/api/site-dny/restore', (req, res) => {
+  const dny = req.body && Array.isArray(req.body.siteDny) ? req.body.siteDny : null;
+  if (!dny) return res.status(400).json({ error: 'Chybí siteDny.' });
+  const dnes = pragueDateString();
+  const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= 500000 ? v : null);
+  let zmena = false;
+  for (const inc of dny.slice(-SITE_DNY_MAX)) {
+    if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
+    // Dnešek se neobnovuje — ten se pořád načítá a z telefonu by přišel starší
+    if (inc.d >= dnes) continue;
+    let rec = state.siteDny.find(r => r.d === inc.d);
+    if (!rec) { rec = { d: inc.d, feed: 0, imp: 0, b1: 0, b2: 0 }; state.siteDny.push(rec); zmena = true; }
+    for (const k of ['feed', 'imp', 'b1', 'b2']) {
+      const v = num(inc[k]);
+      if (v !== null && v > rec[k]) { rec[k] = v; zmena = true; }
+    }
+  }
+  if (zmena) {
+    state.siteDny.sort((a, b) => a.d.localeCompare(b.d));
+    state.siteDny = state.siteDny.slice(-SITE_DNY_MAX);
+    broadcast('siteDny', { siteDny: state.siteDny });
+  }
+  res.json({ ok: true, dny: state.siteDny.length });
 });
 
 // Obnova časové osy po restartu/deployi — sloučení segmentů z telefonu
@@ -8483,6 +8532,7 @@ const STORE_POSTS = [
   '/api/pool-days/restore',
   '/api/usage-days/restore',
   '/api/sauna-days/restore',
+  '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
   '/api/timers/restore',
@@ -8523,6 +8573,7 @@ function storeSnapshot() {
     '/api/pool-days/restore': { poolDays: state.poolDays },
     '/api/usage-days/restore': { usageDays: state.usageDays },
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
+    '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
     '/api/timers/restore': {
