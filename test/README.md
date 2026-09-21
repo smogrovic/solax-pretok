@@ -40,6 +40,7 @@ node test/runtime-zavlaha.js          # falešný modul ↔ most ↔ ostrý serv
 ./test/browser-run.sh test/browser-mesice.js   # pořadí stránek, karty měsíců, graf FVE
 ./test/browser-run.sh test/browser-zaloha.js   # řádek o záloze na stránce Log
 ./test/browser-run.sh test/browser-zavlaha.js  # stránka Závlaha: zóny, mlčící most, potvrzení
+./test/browser-run.sh test/browser-rezim.js    # dětský režim: co vidí Miky a Elenka, cesta zpátky
 ./test/browser-run.sh test/browser-uklid.js    # stránka Úklid: sekačka, mlčící cloud, syrová hlášení
 ./test/browser-run.sh test/browser-log.js      # log a karta výpadků („10:00–nyní")
 ./test/browser-run.sh test/browser-mezery.js   # žádné dvě karty se na sebe nelepí

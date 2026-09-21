@@ -1962,6 +1962,30 @@
   .sek-baterie{font-size:26px;font-weight:700;color:var(--navy);margin-top:6px;}
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
+  /* Dětský režim. Appka jde dětem do mobilu a mají vidět jen svůj pokoj.
+     Je to plot, ne zámek: schovává se v prohlížeči, takže kdo umí otevřít
+     vývojářské nástroje, se dostane dál. Na děti, co appku jen používají,
+     to stačí — na nic víc se tím nespoléhá. */
+  .slide[hidden]{display:none;}
+  body[data-rezim="miky"] .jen-full,
+  body[data-rezim="elenka"] .jen-full{display:none !important;}
+  body[data-rezim="full"] .jen-deti{display:none !important;}
+  .rezim-karta{width:100%;display:flex;flex-direction:column;gap:8px;}
+  .rezim-btns{display:flex;gap:8px;width:100%;}
+  .rezim-btn{
+    flex:1;border:none;border-radius:14px;padding:11px 8px;font-family:inherit;
+    font-size:13px;font-weight:700;background:rgba(44,62,80,0.07);color:var(--navy);
+  }
+  .rezim-btn.aktivni{background:var(--orange);color:#fff;}
+  .rezim-hint{font-size:11px;color:var(--muted);line-height:1.5;}
+  .deti-tlacitka{width:100%;display:flex;flex-direction:column;gap:8px;}
+  .deti-btn{
+    width:100%;border:none;border-radius:16px;padding:14px 10px;font-family:inherit;
+    font-size:14px;font-weight:700;background:rgba(44,62,80,0.07);color:var(--navy);
+  }
+  .deti-btn:disabled{opacity:0.45;}
+  .rozvrh-prehled{width:100%;font-size:12px;color:var(--grey-text);display:flex;flex-direction:column;gap:5px;}
+  .rozvrh-prehled b{color:var(--navy);font-weight:600;}
 </style>
 </head>
 <body>
@@ -1983,7 +2007,12 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable asszistant-card">
+      <!-- Dětský režim: místo celé stránky tři tlačítka na žaluzie v jednom pokoji -->
+      <div class="card lockable jen-deti">
+        <div class="asst-log-title" id="detiNadpis">Žaluzie</div>
+        <div class="deti-tlacitka" id="detiTlacitka"></div>
+      </div>
+      <div class="card lockable asszistant-card jen-full">
         <div class="asst-reply" id="asstReply"></div>
         <div class="asst-row">
           <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
@@ -2002,7 +2031,7 @@
       <div class="card lockable tempauto-card" id="tempAutoCard">
         <div class="asst-log-title">Teplotní automatika</div>
         <div class="tempauto-list" id="tempAutoListOwn"></div>
-        <div class="tempauto-thr">
+        <div class="tempauto-thr jen-full">
           <div class="tempauto-thr-row">
             <span class="tempauto-thr-label" id="tempAutoLabelObyvak">Obývák — zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnValObyvak">22 °C</span>
@@ -2011,7 +2040,7 @@
           <div class="tempauto-thr-hint" id="tempAutoOffHintObyvak"></div>
         </div>
         <div class="tempauto-list" id="tempAutoList"></div>
-        <div class="tempauto-thr">
+        <div class="tempauto-thr jen-full">
           <div class="tempauto-thr-row">
             <span class="tempauto-thr-label" id="tempAutoLabel">Ostatní pokoje — zapnout při</span>
             <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
@@ -2021,7 +2050,7 @@
         </div>
       </div>
 
-      <div class="card lockable" style="margin-top:12px">
+      <div class="card lockable jen-full" style="margin-top:12px">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="autoLight"></div>
@@ -2052,7 +2081,7 @@
   </div>
 
   <!-- Stránka: FVE -->
-  <div class="slide slide-stats" data-title="FVE">
+  <div class="slide slide-stats" data-title="FVE" data-rezim="full">
     <div class="page">
       <div class="error-banner" id="errorBanner"></div>
       <div class="card">
@@ -2213,7 +2242,7 @@
     </div>
   </div>
   <!-- Stránka: Klima -->
-  <div class="slide" data-title="Klima">
+  <div class="slide" data-title="Klima" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2294,7 +2323,14 @@
       <!-- Rozvrh: opakovaná pravidla místo scénářů v TaHomě. Je jen na první
            stránce žaluzií — pravidla míří na jména, ne na stránky, takže druhá
            karta by ukazovala totéž dvakrát. -->
-      <div class="card lockable timer-card" id="rozvrhCard">
+      <!-- Dětský režim: rozvrh jen ke čtení. Pravidla míří na celý dům, ne na
+           jeden pokoj, takže nastavovat je jde dál jen ve full. -->
+      <div class="card stats-card jen-deti">
+        <div class="graph-title">Rozvrh žaluzií</div>
+        <div class="rozvrh-prehled" id="rozvrhPrehled"></div>
+      </div>
+
+      <div class="card lockable timer-card jen-full" id="rozvrhCard">
         <div class="graph-title">Rozvrh žaluzií</div>
         <div class="rozvrh-dny" id="rozvrhDny"></div>
         <div class="rozvrh-rychle">
@@ -2360,7 +2396,7 @@
   </div>
 
   <!-- Stránka: Žaluzie 2 -->
-  <div class="slide" id="blindsSlide2" data-title="Žaluzie 2">
+  <div class="slide" id="blindsSlide2" data-title="Žaluzie 2" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2397,7 +2433,7 @@
   </div>
 
   <!-- Stránka: Ovládání -->
-  <div class="slide" data-title="Ovládání">
+  <div class="slide" data-title="Ovládání" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2507,7 +2543,7 @@
   </div>
 
   <!-- Stránka: Wallbox -->
-  <div class="slide" data-title="Wallbox">
+  <div class="slide" data-title="Wallbox" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2594,7 +2630,7 @@
         </div>
       </div>
 
-      <div class="card pool-card lockable">
+      <div class="card pool-card lockable jen-full">
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="poolLight"></div>
@@ -2651,18 +2687,18 @@
           </div>
         </div>
       </div>
-      <div class="card stats-card">
+      <div class="card stats-card jen-full">
         <div class="graph-title">Odkud bazén bral (7 dní)</div>
         <div class="wbsrc-list" id="poolSrcList"></div>
         <div class="wbsrc-note">Ze sítě se nejdřív započítá auto, pak bazén a nakonec zbytek domu — všechny tři karty dohromady dají celý odběr ze sítě.</div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card jen-full">
         <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
         <div id="solinatorCalc"></div>
       </div>
 
-      <div class="card stats-card">
+      <div class="card stats-card jen-full">
         <div class="graph-title">Spotřeba bazénu po měsících</div>
         <div class="wbsrc-list" id="poolMonths"></div>
       </div>
@@ -2670,7 +2706,7 @@
   </div>
 
   <!-- Stránka: Sauna -->
-  <div class="slide" data-title="Sauna" id="saunaSlide">
+  <div class="slide" data-title="Sauna" id="saunaSlide" data-rezim="full">
     <div class="page">
       <div class="card">
         <div class="device-block last">
@@ -2738,7 +2774,7 @@
   </div>
 
   <!-- Stránka: Závlaha -->
-  <div class="slide" data-title="Závlaha">
+  <div class="slide" data-title="Závlaha" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2785,7 +2821,7 @@
   </div>
 
   <!-- Stránka: Úklid -->
-  <div class="slide" data-title="Úklid">
+  <div class="slide" data-title="Úklid" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2818,7 +2854,7 @@
   </div>
 
   <!-- Stránka: Přehled -->
-  <div class="slide" data-title="Přehled">
+  <div class="slide" data-title="Přehled" data-rezim="full">
     <div class="page">
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
@@ -2879,7 +2915,7 @@
   </div>
 
   <!-- Stránka: Log -->
-  <div class="slide" data-title="Log">
+  <div class="slide" data-title="Log" data-rezim="full">
     <div class="page">
       <div class="card log-card">
         <div class="log-list" id="logList">
@@ -2908,8 +2944,17 @@
   <!-- Stránka: Logika automatiky -->
   <div class="slide" data-title="Logika automatiky">
     <div class="page">
+      <!-- Přepínač je vidět ve všech režimech — jinak by z dětského nebyla cesta zpět -->
+      <div class="card">
+        <div class="rezim-karta">
+          <div class="asst-log-title">Režim aplikace</div>
+          <div class="rezim-btns" id="rezimBtns"></div>
+          <div class="rezim-hint" id="rezimHint"></div>
+        </div>
+      </div>
+
       <div class="card logic-card">
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
             <li>Hlavní přepínač (Asistent): <b>vypnuto · zapnuto · zima</b>.</li>
@@ -2918,7 +2963,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Zima</div>
           <ul class="logic-list">
             <li><b>Bazén i solinátor spí</b>, dluh se nedělá. <b>Bojler 1</b> topí z přebytku i bez bazénu.</li>
@@ -2927,7 +2972,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
             <li>Okno <b>8:00</b> → hodina před západem. <b>Zapne</b> 2× přebytek nad <b>1850 W</b>, <b>vypne</b> 3× pod <b>−200 W</b> (po 30 min běhu).</li>
@@ -2937,7 +2982,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Sauna</div>
           <ul class="logic-list">
             <li>Sauna, bazén a solinátor visí na <b>stejném jističi</b>.</li>
@@ -2964,7 +3009,7 @@
 
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Oběhové čerpadlo</div>
           <ul class="logic-list">
             <li id="obehPlan">Rozvrh se načítá…</li>
@@ -2972,7 +3017,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Bojler 1 (TČ)</div>
           <ul class="logic-list">
             <li>Okno <b>10:00</b> → hodina před západem, a jen <b>když běží bazén</b> (v zimě i bez něj).</li>
@@ -2981,7 +3026,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
             <li><b>Cíl</b> = 1 h + 1 h nad 20 °C + 1 h nad 25 °C, nejvýš <b>3 h</b>. Rozhoduje nejvyšší předpovídaná teplota dne.</li>
@@ -2992,7 +3037,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
             <li><b>Pracovní den</b>: GREEN 0:00–4:00 · FAST 4:00–7:00 · pak podle přebytku. <b>Víkend</b> o 4 h později.</li>
@@ -3003,7 +3048,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Klimatizace (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
             <li>Zapíná se <b>per pokoj přepínačem</b>; hlavní vypínač automatiky se jich netýká.</li>
@@ -3017,7 +3062,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Ruční zásah vs. automatika</div>
           <ul class="logic-list">
             <li>Ruční ON i OFF bojleru, bazénu a solinátoru má <b>30 min přednost</b>, pak převezme automatika.</li>
@@ -3026,14 +3071,14 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Priorita auta</div>
           <ul class="logic-list">
             <li>Bazén a bojler dostanou jen přebytek <b>nad autem</b>; rezerva (až 3,4 kW) se drží, jen když se auto rozjíždí.</li>
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Korekce podle předpovědi</div>
           <ul class="logic-list">
             <li><b>Volný přebytek</b> = (odhad výroby − vyrobeno) − (co chybí do plné baterie, 11,6 kWh).</li>
@@ -3043,7 +3088,7 @@
           </ul>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
             <li>„Západ slunce" v rozvrhu znamená <b>západ + tohle zpoždění</b> — venku je ještě dlouho vidět.</li>
@@ -3060,7 +3105,7 @@
           <button class="rozvrh-krok-btn" id="rozvrhVychoziLogika" type="button">Nahrát doporučený rozvrh</button>
         </div>
 
-        <div class="logic-sec">
+        <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Data, notifikace, časovače</div>
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
@@ -3133,6 +3178,89 @@ const poolValueEl = document.getElementById('poolValue');
 const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
+
+// ---------- Dětský režim ----------
+// Appka jde dětem do mobilu a mají vidět jen svůj pokoj. Drží se to NA ZAŘÍZENÍ,
+// ne na serveru — jinak by přepnutí na jednom mobilu zhaslo appku všem ostatním.
+//
+// Je to plot, ne zámek. Schovává se v prohlížeči a `authToken` po odemčení
+// v telefonu zůstává, takže dítě s odemčeným mobilem ovládne to, co vidí.
+// Proti dětem, co appku jen používají, to stačí; na víc se tím nespoléhá.
+const REZIMY = {
+  full:   { jmeno: 'Full' },
+  miky:   { jmeno: 'Miky',   pokoj: 'miky',   popis: 'Mikyho pokoj' },
+  elenka: { jmeno: 'Elenka', pokoj: 'elenka', popis: 'Elenčin pokoj' }
+};
+
+function rezimNacti() {
+  try {
+    const v = localStorage.getItem('rezimApky');
+    return REZIMY[v] ? v : 'full';
+  } catch { return 'full'; }
+}
+
+let rezimApky = rezimNacti();
+const rezimPokoj = () => REZIMY[rezimApky].pokoj || null;
+
+function pouzijRezim(novy) {
+  if (novy && REZIMY[novy]) {
+    rezimApky = novy;
+    try { localStorage.setItem('rezimApky', novy); } catch {}
+  }
+  document.body.dataset.rezim = rezimApky;
+  for (const slide of sliderWrap.querySelectorAll('.slide')) {
+    const povolene = (slide.dataset.rezim || '').trim();
+    slide.hidden = !!povolene && !povolene.split(/\s+/).includes(rezimApky);
+  }
+  for (const sec of document.querySelectorAll('.logic-sec[data-rezim]')) {
+    sec.hidden = !sec.dataset.rezim.split(/\s+/).includes(rezimApky);
+  }
+  rezimRenderPrepinac();
+  bezpecne(rebuildDots);
+  // Až když nějaké žaluzie jsou. Prázdné vykreslení při startu by schovalo
+  // druhou stránku dřív, než data vůbec dorazí.
+  bezpecne(() => { if (blinds.length) renderBlinds(); });
+  bezpecne(renderTempAuto);
+  bezpecne(rezimRenderTlacitka);
+  bezpecne(rezimRenderRozvrh);
+  sliderWrap.scrollTo({ left: 0 });
+}
+
+const rezimBtnsEl = document.getElementById('rezimBtns');
+const rezimHintEl = document.getElementById('rezimHint');
+
+function rezimRenderPrepinac() {
+  if (!rezimBtnsEl) return;
+  rezimBtnsEl.textContent = '';
+  for (const [klic, def] of Object.entries(REZIMY)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rezim-btn' + (klic === rezimApky ? ' aktivni' : '');
+    b.dataset.rezim = klic;
+    b.textContent = def.jmeno;
+    b.addEventListener('click', () => rezimZeptej(klic));
+    rezimBtnsEl.appendChild(b);
+  }
+  if (rezimHintEl) {
+    rezimHintEl.textContent = rezimApky === 'full'
+      ? 'Full ukazuje celou appku. Miky a Elenka nechají jen ten jeden pokoj — pro mobil do dětské ruky.'
+      : `Zapnutý je ${REZIMY[rezimApky].popis}. Zpátky na Full se dostaneš tímhle přepínačem.`;
+  }
+}
+
+function rezimZeptej(klic) {
+  if (klic === rezimApky) return;
+  const def = REZIMY[klic];
+  potvrzZeptej(
+    klic === 'full' ? 'Přepnout na plnou appku?' : `Přepnout na ${def.popis}?`,
+    klic === 'full'
+      ? 'Vrátí se všechny stránky a celé ovládání domu.'
+      : `Zůstane jen ${def.popis}: žaluzie, teplotní automatika, teplota bazénu a světlo. Zbytek appky zmizí.`,
+    () => pouzijRezim(klic),
+    20
+  );
+}
+
 const btn = document.getElementById('refreshBtn');
 const btnLabel = document.getElementById('refreshLabel');
 
@@ -4152,13 +4280,17 @@ const potvrzTextEl = document.getElementById('potvrzText');
 const potvrzAnoEl = document.getElementById('potvrzAno');
 const potvrzZpetEl = document.getElementById('potvrzZpet');
 let potvrzAkce = null;
+// Co udělat při zamítnutí. Výchozí je vrátit jezdec automatiky tam, kde byl —
+// jenže okno používá i přepínač režimu a tomu do jezdce nic není.
+let potvrzZpetAkce = null;
 let potvrzDoKdy = 0;
 let potvrzTimer = null;
 
 function potvrzCeka() { return !!potvrzAkce; }
 
-function potvrzZeptej(nadpis, text, akce, sekundy) {
+function potvrzZeptej(nadpis, text, akce, sekundy, zpet) {
   potvrzAkce = akce;
+  potvrzZpetAkce = zpet || renderAutoSlider;
   potvrzDoKdy = Date.now() + (sekundy ? sekundy * 1000 : POTVRZ_MS);
   if (potvrzNadpisEl) potvrzNadpisEl.textContent = nadpis;
   if (potvrzTextEl) potvrzTextEl.textContent = text;
@@ -4182,8 +4314,10 @@ function potvrzKonec(potvrzeno) {
   clearInterval(potvrzTimer);
   potvrzTimer = null;
   if (potvrzOknoEl) potvrzOknoEl.hidden = true;
+  const zpet = potvrzZpetAkce;
+  potvrzZpetAkce = null;
   if (potvrzeno && akce) akce();
-  else renderAutoSlider();          // nepotvrzeno: jezdec zpátky tam, kde byl
+  else if (zpet) zpet();
 }
 
 if (potvrzAnoEl) potvrzAnoEl.addEventListener('click', () => potvrzKonec(true));
@@ -5249,12 +5383,18 @@ function renderBlindRow(b) {
   return wrap;
 }
 
-function hideBlindsSlide2() {
+// Dřív se druhá stránka z DOM mazala. To je nevratné: stačilo, aby se žaluzie
+// jednou vykreslily prázdné (třeba při startu, než dorazí data), a stránka už
+// se nevrátila ani po načtení. Od té doby se jen schovává.
+function zobrazBlindsSlide2(ukaz) {
   const slide2 = document.getElementById('blindsSlide2');
-  if (slide2) {
-    slide2.remove();
-    rebuildDots();
-  }
+  if (!slide2 || slide2.hidden === !ukaz) return;
+  slide2.hidden = !ukaz;
+  rebuildDots();
+}
+
+function hideBlindsSlide2() {
+  zobrazBlindsSlide2(false);
 }
 
 function renderBlinds() {
@@ -5275,8 +5415,15 @@ function renderBlinds() {
     if (!roomsMap.has(skupina)) roomsMap.set(skupina, []);
     roomsMap.get(skupina).push(b);
   }
-  const rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
+  let rooms = Array.from(roomsMap, ([room, items]) => ({ room, items, ...roomPageIndex(room) }));
   rooms.sort((a, b) => a.page - b.page || a.order - b.order || a.room.localeCompare(b.room, 'cs'));
+  // V dětském režimu zbude jediný pokoj — a padne na první stránku, protože
+  // druhá je schovaná
+  const jenPokoj = rezimPokoj();
+  if (jenPokoj) {
+    rooms = rooms.filter(g => normalizeName(g.room).includes(jenPokoj));
+    for (const g of rooms) g.page = 1;
+  }
 
   const slide2Exists = !!document.getElementById('blindsSlide2');
   for (const group of rooms) {
@@ -5293,7 +5440,9 @@ function renderBlinds() {
     listEl.appendChild(block);
   }
 
-  if (blindsList2El && !blindsList2El.children.length) hideBlindsSlide2();
+  // V dětském režimu zůstává druhá stránka schovaná bez ohledu na obsah —
+  // ten jeden pokoj se vejde na první
+  zobrazBlindsSlide2(!!(blindsList2El && blindsList2El.children.length) && !rezimPokoj());
 }
 
 async function loadBlinds() {
@@ -8166,7 +8315,12 @@ function renderTempAuto() {
   if (!tempAutoListEl || !tempAutoListOwnEl) return;
   tempAutoListEl.textContent = '';
   tempAutoListOwnEl.textContent = '';
-  for (const room of TEMP_AUTO_ROOMS) {
+  // V dětském režimu zbude řádek jediného pokoje. Jezdec společné meze se schová
+  // zvlášť v CSS — je společný i pro ložnici a druhé dítě, takže ho nemá
+  // přenastavovat ten, komu patří jeden pokoj.
+  const jenPokoj = rezimPokoj();
+  const pokoje = jenPokoj ? TEMP_AUTO_ROOMS.filter(r => r.key === jenPokoj) : TEMP_AUTO_ROOMS;
+  for (const room of pokoje) {
     const row = document.createElement('div');
     row.className = 'tempauto-row';
     const name = document.createElement('div');
@@ -9791,7 +9945,7 @@ const pageTabsEl = document.getElementById('pageTabs');
 // posouvá se vždycky po jedné stránce, ať je jich vidět kolik chce. Měří se z DOM,
 // ne z konstanty, aby to sedělo s tím, co doopravdy nakreslilo CSS.
 function sirkaStranky() {
-  const prvni = sliderWrap.querySelector('.slide');
+  const prvni = sliderWrap.querySelector('.slide:not([hidden])');
   const w = prvni ? prvni.getBoundingClientRect().width : 0;
   return w > 1 ? w : sliderWrap.clientWidth;
 }
@@ -10176,9 +10330,96 @@ function kalOtevri(otevrit) {
   else updateDots();
 }
 
+// Tři tlačítka, která v dětském režimu nahradí celou stránku Asistent.
+// Textové pole asistenta v dětském režimu není schválně — uměl by cokoli,
+// včetně odemknutí domu.
+const DETI_TLACITKA = [
+  { jmeno: 'Zatáhnout žaluzie', akce: 'down', hodnota: 100, dvere: false },
+  { jmeno: 'Otevřít žaluzie', akce: 'tilt', hodnota: 25, dvere: false },
+  { jmeno: 'Otevřít žaluzie dveří', akce: 'up', hodnota: null, dvere: true }
+];
+
+const detiTlacitkaEl = document.getElementById('detiTlacitka');
+
+function rezimZaluzieVPokoji() {
+  const pokoj = rezimPokoj();
+  if (!pokoj) return [];
+  return blinds.filter(b => normalizeName(b.room).includes(pokoj)
+    || normalizeName(b.label).includes(pokoj));
+}
+
+function rezimRenderTlacitka() {
+  if (!detiTlacitkaEl) return;
+  detiTlacitkaEl.textContent = '';
+  const pokoj = rezimPokoj();
+  if (!pokoj) return;
+  const vsechny = rezimZaluzieVPokoji();
+  if (!vsechny.length) {
+    const nic = document.createElement('div');
+    nic.className = 'rezim-hint';
+    nic.textContent = 'Žaluzie z tohohle pokoje se zatím nenačetly.';
+    detiTlacitkaEl.appendChild(nic);
+    return;
+  }
+  for (const def of DETI_TLACITKA) {
+    // Žaluzie u dveří se hledá podle štítku („Miky dveře", „Elenka Dveře").
+    // Když v pokoji žádná taková není, tlačítko se neukáže — radši než aby
+    // mlelo naprázdno.
+    const cile = def.dvere
+      ? vsechny.filter(b => normalizeName(b.label).includes('dver'))
+      : vsechny;
+    if (!cile.length) continue;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'deti-btn';
+    b.textContent = def.jmeno;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      for (const zaluzie of cile) {
+        await blindCommand(zaluzie.deviceURL, def.akce,
+          def.akce === 'tilt' ? def.hodnota : (def.hodnota === null ? undefined : def.hodnota),
+          null, def.akce === 'tilt' ? def.hodnota : undefined);
+      }
+      b.disabled = false;
+    });
+    detiTlacitkaEl.appendChild(b);
+  }
+}
+
+// Rozvrh se v dětském režimu jen ukazuje. Nastavovat ho jde dál jen ve full —
+// pravidla míří na celý dům, ne na jeden pokoj.
+const rozvrhPrehledEl = document.getElementById('rozvrhPrehled');
+
+function rezimRenderRozvrh() {
+  if (!rozvrhPrehledEl) return;
+  rozvrhPrehledEl.textContent = '';
+  const pokoj = rezimPokoj();
+  if (!pokoj) return;
+  const patri = k => normalizeName(k.cil).includes(pokoj);
+  const pravidla = (rozvrhData || []).filter(r => r.zapnuto !== false && (r.kroky || []).some(patri));
+  if (!pravidla.length) {
+    const nic = document.createElement('div');
+    nic.textContent = 'Pro tenhle pokoj není v rozvrhu nic.';
+    rozvrhPrehledEl.appendChild(nic);
+    return;
+  }
+  for (const r of pravidla) {
+    const radek = document.createElement('div');
+    const kdy = document.createElement('b');
+    kdy.textContent = rozvrhKdyText(r) + ' · ';
+    radek.appendChild(kdy);
+    // Ukazují se jen kroky toho pokoje — co dělá rozvrh jinde, sem nepatří
+    radek.appendChild(document.createTextNode(
+      (r.kroky || []).filter(patri).map(rozvrhKrokText).join(' · ')));
+    rozvrhPrehledEl.appendChild(radek);
+  }
+}
+
 function rebuildDots() {
   if (!pageTabsEl) return;
-  const slides = sliderWrap.querySelectorAll('.slide');
+  // Schované stránky se do lišty ani do posouvání nepočítají — v dětském režimu
+  // jich polovina chybí a indexy by se rozešly s tím, co je doopravdy vidět
+  const slides = sliderWrap.querySelectorAll('.slide:not([hidden])');
   pageTabsEl.textContent = '';
   slides.forEach((slide, i) => {
     const tab = document.createElement('button');
@@ -10203,7 +10444,8 @@ function rebuildDots() {
 
 sliderWrap.addEventListener('scroll', updateDots, { passive: true });
 window.addEventListener('resize', updateDots);
-rebuildDots();
+// Režim se nasadí hned při startu — jinak by dítěti na okamžik probliklo všechno
+pouzijRezim();
 
 // ---------- iPad na zdi: doma je kalendář ----------
 // Na zdi se appka skoro pořád jen kouká — kalendář je to, co má být vidět, když

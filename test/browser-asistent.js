@@ -104,7 +104,10 @@ setTimeout(async () => {
     Math.round(navrhy[0].getBoundingClientRect().top), Math.round(navrhy[1].getBoundingClientRect().top));
 
   R.push('\\n2) Pořadí karet');
-  const karty = [...slide.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
+  // Jen karty, které je doopravdy vidět — schované (zámek, dětský režim) do
+  // pořadí na obrazovce nepatří
+  const karty = [...slide.querySelectorAll(':scope > .page > .card')]
+    .filter(c => !c.classList.contains('lock-panel') && getComputedStyle(c).display !== 'none');
   const popis = c => (c.querySelector('.asst-log-title, .shelly-label') || {}).textContent
     || (c.classList.contains('asszistant-card') ? 'pole pro asistenta' : c.id || '?');
   // Teplotní automatika má být PŘED automatikou — dřív to bylo obráceně

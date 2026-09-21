@@ -40,7 +40,8 @@ setTimeout(() => {
 
   // Všechny stránky mají začínat u horního okraje stejně. Dřív se kratší
   // stránka svisle vystředila a při listování horní box poskakoval.
-  const odsazeni = stranky.map(sl => Math.round(
+  // Schovaná stránka nemá rozměry — do porovnání odsazení nepatří
+  const odsazeni = stranky.filter(sl => !sl.hidden).map(sl => Math.round(
     sl.querySelector('.page').getBoundingClientRect().top - sl.getBoundingClientRect().top));
   check('horní box sedí na všech stránkách stejně', [...new Set(odsazeni)].join(', '), String(odsazeni[0]));
   check('  a drží se u horního okraje', odsazeni[0] < 40, true);

@@ -21,6 +21,11 @@ window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: tr
 try { localStorage.clear(); } catch {}
 
 const T = Date.now(), MIN = 60000;
+// Západ se schválně neodvozuje od „teď + 3 h": když sada běžela po deváté večer,
+// přetekl čas přes půlnoc, appka k němu připsala datum („22. 9. 01:16") a
+// kontrola nápovědy spadla. S pevnou hodinou dnešního dne to vyjde vždycky
+// stejně, ať se sada pustí kdykoli.
+const ZAPAD = (() => { const d = new Date(); d.setHours(19, 30, 0, 0); return d.getTime(); })();
 function rada(od, krok, fn) {
   const out = [];
   for (let t = T - od; t <= T; t += krok) out.push(fn(t));
@@ -38,7 +43,7 @@ const SNAP = {
   timeline: { shelly: [], pool: [{ from: T - 2 * 3600000, to: T - 3600000 }], solinator: [],
               wallbox: [], wbPlugged: [{ from: T - 5 * 3600000, to: T }], sauna: [] },
   autoMode: 'on', manualHold: {},
-  weather: { tempC: 18, sunsetMs: T + 3 * 3600000, fetchedAt: new Date().toISOString() },
+  weather: { tempC: 18, sunsetMs: ZAPAD, fetchedAt: new Date().toISOString() },
   runtime: { date: new Date().toISOString().slice(0, 10), ms: { shelly: 1000, pool: 2000, solinator: 3000 },
              wh: { feed: 100, import: 50, wb: 4000, b1: 10, b2: 20 }, yesterday: null },
   aircon: { devices: [], error: null }, sensors: { obyvak: { tempC: 23.4, humidity: 45, battery: 90, reportedAt: T } },
