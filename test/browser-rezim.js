@@ -76,6 +76,27 @@ setTimeout(async () => {
   check('  jeho náhled se neukazuje', vidim(document.getElementById('rozvrhPrehled')), false);
   check('bazén jde spínat', vidim(document.getElementById('poolOnBtn')), true);
   check('na Ovládání je oběhové čerpadlo', vidim(document.getElementById('obehOnBtn')), true);
+  // Světlo z TaHomy patří mezi ostatní světla, ne jen mezi žaluzie
+  check('  i světlo terasy', document.getElementById('tahomaSvetla').textContent.includes('Světla terasa'), true);
+  const boxyFull = () => [...document.querySelectorAll('#blindsList1 .blind-room')]
+    .map(b => b.textContent);
+  check('  a u žaluzií zůstalo taky',
+    boxyFull().some(t => t.includes('Světla terasa')), true);
+  // Mezi světla patří jen spínače — žaluzie by tam měly ON/OFF, které nikdy
+  // nikdo nechtěl
+  check('  a žádná žaluzie se mezi světla nevloudí',
+    document.querySelectorAll('#tahomaSvetla .light-cell').length, 1);
+  check('  a je to opravdu to světlo',
+    document.querySelector('#tahomaSvetla .shelly-label').textContent, 'Světla terasa');
+  POSLANO.length = 0;
+  document.querySelector('#tahomaSvetla .power-btn.on-btn').click();
+  await pockej();
+  check('  ON pošle povel na správné zařízení', POSLANO[0].telo.deviceURL, 'io://SvetlaTerasa');
+  check('    a je to zapnutí', POSLANO[0].telo.action, 'on');
+  POSLANO.length = 0;
+  document.querySelector('#tahomaSvetla .power-btn.off-btn').click();
+  await pockej();
+  check('  OFF vypíná', POSLANO[0].telo.action, 'off');
   check('  i zámek domu', vidim(document.getElementById('nukiLockBtn')), true);
 
   R.push('\\n2) Mikyho režim');
@@ -92,6 +113,7 @@ setTimeout(async () => {
   // zámkem domu ani časovačem relé
   check('světla zahrady jsou zpátky', vidim(document.getElementById('lightDoleOnBtn')), true);
   check('  obě', vidim(document.getElementById('lightNahoreOnBtn')), true);
+  check('  a světlo bazénu taky', vidim(document.getElementById('lightBazenOnBtn')), true);
   check('  ale noční světla ne', vidim(document.getElementById('lightNocniOnBtn')), false);
   check('  ani oběhové čerpadlo', vidim(document.getElementById('obehOnBtn')), false);
   check('  ani zámek domu', vidim(document.getElementById('nukiLockBtn')), false);
@@ -106,13 +128,15 @@ setTimeout(async () => {
   check('tlačítka jsou tři', detiBtns().join(' | '),
     'Zatáhnout žaluzie | Otevřít žaluzie | Otevřít žaluzie dveří');
   const boxy = () => [...document.querySelectorAll('#blindsList1 .blind-room-title')].map(t => t.textContent);
-  // Vedle vlastního pokoje zbydou světla z TaHomy (terasa, pergola) — jsou to
-  // světla, ne žaluzie, a dětem je nemá smysl brát
-  check('na stránce žaluzií je jeho pokoj a světla', boxy().join(' | '), 'Terasa | Miky');
-  const terasa = [...document.querySelectorAll('#blindsList1 .blind-room')]
-    .find(b => b.textContent.includes('Terasa'));
-  check('  a z terasy jen to světlo', /Světla terasa/.test(terasa.textContent), true);
-  check('  ne žaluzie pergoly', /Pergola/.test(terasa.textContent), false);
+  // Dětem zbude u žaluzií jen jejich pokoj — světlo terasy mají na Ovládání
+  // mezi ostatními světly
+  check('na stránce žaluzií je jen jeho pokoj', boxy().join(' | '), 'Miky');
+  check('  a žaluzie pergoly tam není',
+    document.getElementById('blindsList1').textContent.includes('Pergola'), false);
+  check('světlo terasy je na Ovládání',
+    document.getElementById('tahomaSvetla').textContent.includes('Světla terasa'), true);
+  check('  a jde zmáčknout',
+    vidim(document.querySelector('#tahomaSvetla .power-btn')), true);
 
   // Časovač nabízel žaluzie z DRUHÉ stránky: Miky i Elenka patří na stránku dvě,
   // ta je schovaná, a jejich pokoj se kreslí na první
@@ -157,7 +181,7 @@ setTimeout(async () => {
 
   R.push('\\n4) Elenka nevidí Mikyho a naopak');
   pouzijRezim('elenka');
-  check('na stránce žaluzií je Elenčin pokoj a světla', boxy().join(' | '), 'Terasa | Elenka');
+  check('na stránce žaluzií je jen Elenčin pokoj', boxy().join(' | '), 'Elenka');
   check('  a v časovači jsou Elenčiny žaluzie',
     [...document.querySelectorAll('.blind-timer-card')].find(c => c.getClientRects().length)
       .querySelectorAll('.bt-device option').length, 2);

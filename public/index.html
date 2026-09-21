@@ -2516,7 +2516,7 @@
               <button class="power-btn off-btn" id="lightNahoreOffBtn">OFF</button>
             </div>
           </div>
-          <div class="light-cell jen-full">
+          <div class="light-cell">
             <div class="shelly-row">
               <div class="traffic-light" id="lightBazenLight"></div>
               <div class="shelly-label">Světlo bazén</div>
@@ -2526,6 +2526,8 @@
               <button class="power-btn off-btn" id="lightBazenOffBtn">OFF</button>
             </div>
           </div>
+          <!-- Světla z TaHomy (terasa, pergola). Doplní se podle toho, co TaHoma
+               hlásí — nejsou to relé Shelly a deviceURL se dopředu nezná. -->
           <div class="light-cell jen-full">
             <div class="shelly-row">
               <div class="traffic-light" id="lightNocniLight"></div>
@@ -2537,6 +2539,7 @@
             </div>
           </div>
         </div>
+        <div class="lights-grid" id="tahomaSvetla"></div>
       </div>
 
       <div class="card lockable jen-full" id="nukiCard">
@@ -3338,6 +3341,7 @@ function pouzijRezim(novy) {
   // Až když nějaké žaluzie jsou. Prázdné vykreslení při startu by schovalo
   // druhou stránku dřív, než data vůbec dorazí.
   bezpecne(() => { if (blinds.length) renderBlinds(); });
+  bezpecne(renderTahomaSvetla);
   // Nabídka v časovači se řídí režimem taky — bez tohohle by v dětském režimu
   // zůstala ta z full, tedy cizí žaluzie
   bezpecne(() => { if (blinds.length) renderBlindTimerDevices(); });
@@ -5551,6 +5555,41 @@ function hideBlindsSlide2() {
   zobrazBlindsSlide2(false);
 }
 
+// Světla z TaHomy (terasa, pergola) patří mezi ostatní světla na Ovládání, ne
+// jen mezi žaluzie. Nejsou to relé Shelly — deviceURL se dozvíme až z TaHomy,
+// takže se buňky staví až podle toho, co přijde.
+const tahomaSvetlaEl = document.getElementById('tahomaSvetla');
+
+function renderTahomaSvetla() {
+  if (!tahomaSvetlaEl) return;
+  tahomaSvetlaEl.textContent = '';
+  for (const b of blinds.filter(x => x.type === 'switch')) {
+    const cell = document.createElement('div');
+    cell.className = 'light-cell';
+    const row = document.createElement('div');
+    row.className = 'shelly-row';
+    const kontrolka = document.createElement('div');
+    kontrolka.className = 'traffic-light' + (b.onState === true ? ' on' : '');
+    const jmeno = document.createElement('div');
+    jmeno.className = 'shelly-label';
+    jmeno.textContent = b.label;
+    row.appendChild(kontrolka);
+    row.appendChild(jmeno);
+    const btns = document.createElement('div');
+    btns.className = 'power-buttons';
+    for (const [popis, povel, trida] of [['ON', 'on', 'on-btn'], ['OFF', 'off', 'off-btn']]) {
+      const btn = document.createElement('button');
+      btn.className = 'power-btn ' + trida;
+      btn.textContent = popis;
+      btn.addEventListener('click', () => blindCommand(b.deviceURL, povel, null, btn));
+      btns.appendChild(btn);
+    }
+    cell.appendChild(row);
+    cell.appendChild(btns);
+    tahomaSvetlaEl.appendChild(cell);
+  }
+}
+
 function renderBlinds() {
   // Uprostřed tažení by se řádek pod prstem postavil znovu a gesto by se přetrhlo
   if (blindDragActive) { blindRenderPending = true; return; }
@@ -5577,15 +5616,10 @@ function renderBlinds() {
   if (jenPokoj) {
     // Kromě vlastního pokoje zůstanou spínače z TaHomy — světla na terase
     // a u pergoly. Jsou to světla, ne žaluzie, a dětem je nemá smysl brát.
-    const jeho = g => normalizeName(g.room).includes(jenPokoj);
-    // `some`, ne `every`: terasa má vedle světla i žaluzii pergoly, takže by
-    // s `every` vypadl celý box i se světlem
-    rooms = rooms.filter(g => jeho(g) || g.items.some(b => b.type === 'switch'));
-    for (const g of rooms) {
-      g.page = 1;
-      if (!jeho(g)) g.items = g.items.filter(b => b.type === 'switch');
-    }
-    rooms = rooms.filter(g => g.items.length);
+    // Světla z TaHomy mají děti na Ovládání mezi ostatními světly, tady by
+    // jim jen přidávala cizí pokoj navíc
+    rooms = rooms.filter(g => normalizeName(g.room).includes(jenPokoj));
+    for (const g of rooms) g.page = 1;
   }
 
   const slide2Exists = !!document.getElementById('blindsSlide2');
@@ -5619,6 +5653,7 @@ async function loadBlinds() {
     }
     blinds = data.blinds || [];
     renderBlinds();
+    renderTahomaSvetla();
     renderBlindTimerDevices();
     renderRozvrhCile();
   } catch {
