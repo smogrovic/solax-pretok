@@ -12,7 +12,7 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
-setTimeout(() => {
+setTimeout(async () => {
  try {
   const T = new Date(); T.setHours(10, 0, 0, 0);
   const t0 = T.getTime(), MIN = 60000;
@@ -113,6 +113,45 @@ setTimeout(() => {
     pruneOldLog([{ t: Date.now() - 50 * 3600000, msg: 'staré' },
                  { t: Date.now(), msg: 'nové' }]).length, 1);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
+
+  R.push('\\nDiagnostika na jedno klepnutí');
+  // Tlačítko vysype všechno do schránky, ať se to dá poslat celé najednou
+  let zkopirovano = null;
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: async t => { zkopirovano = t; } }
+  });
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({
+    kdy: '2026-09-21T10:00:00Z', behOd: '2026-09-21T08:00:00Z',
+    log: [{ t: Date.parse('2026-09-21T09:00:00Z'), msg: 'bojler zapnut' },
+          { t: Date.parse('2026-09-21T09:30:00Z'), msg: 'Solax mlčí', level: 'error' }],
+    assistantLog: [{ t: Date.parse('2026-09-21T09:10:00Z'), text: 'zatáhl žaluzie' }],
+    stav: { pool: { on: true } },
+    volani: [{ kdy: '2026-09-21T09:59:00Z', metoda: 'GET', kam: 'api.anthbot.com/v1/stav',
+               stav: 200, ms: 120, odpoved: '{"stav":"idle"}' }]
+  }) });
+  document.getElementById('diagBtn').click();
+  await new Promise(r => setTimeout(r, 50));
+  check('něco se zkopírovalo', typeof zkopirovano, 'string');
+  check('  je v tom log', /bojler zapnut/.test(zkopirovano), true);
+  check('  i chyba je označená', /\\[CHYBA\\] Solax mlčí/.test(zkopirovano), true);
+  check('  i co dělal asistent', /zatáhl žaluzie/.test(zkopirovano), true);
+  check('  i odchozí volání', /GET api.anthbot.com\\/v1\\/stav → 200/.test(zkopirovano), true);
+  check('  i odpověď serveru', /\\{"stav":"idle"\\}/.test(zkopirovano), true);
+  check('  i stav zařízení', /"on": true/.test(zkopirovano), true);
+  // Ať je dopředu vidět, jak velké to je — posílá se to do chatu
+  check('řekne se, kolik to je', /kB/.test(document.getElementById('diagStav').textContent), true);
+
+  // Schránka nemusí být povolená. Tlačítko pak nesmí jen mlčet.
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: async () => { throw new Error('nelze'); } }
+  });
+  document.getElementById('diagBtn').click();
+  await new Promise(r => setTimeout(r, 50));
+  const zaloha = document.getElementById('diagZaloha');
+  check('bez schránky se text nabídne k označení', zaloha.hidden, false);
+  check('  a je v něm totéž', /bojler zapnut/.test(zaloha.value), true);
+  check('  a řekne se, ať si to označí',
+    /označ/.test(document.getElementById('diagStav').textContent), true);
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

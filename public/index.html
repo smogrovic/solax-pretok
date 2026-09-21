@@ -1996,6 +1996,12 @@
   .sbal-btn i{font-style:normal;font-size:11px;transition:transform 0.15s;}
   .sbal-btn.otevreno i{transform:rotate(180deg);}
   .card[hidden]{display:none;}
+  /* Záloha, když schránka není povolená — dá se z ní aspoň označit a zkopírovat */
+  .diag-zaloha{
+    width:100%;margin-top:8px;height:120px;border:none;border-radius:14px;
+    padding:10px 12px;font-family:inherit;font-size:10px;line-height:1.4;
+    background:var(--card);color:var(--grey-text);
+  }
   .rozvrh-prehled b{color:var(--navy);font-weight:600;}
 </style>
 </head>
@@ -2955,6 +2961,10 @@
         </div>
       </div>
 
+      <!-- Všechno, co je potřeba k hledání chyby, na jedno klepnutí -->
+      <button class="sbal-btn" id="diagBtn" type="button">Zkopírovat diagnostiku<i id="diagStav">▾</i></button>
+      <textarea class="diag-zaloha" id="diagZaloha" readonly hidden></textarea>
+
       <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
       <div class="store-note" id="storeNote"></div>
     </div>
@@ -3197,6 +3207,69 @@ const poolValueEl = document.getElementById('poolValue');
 const wallboxValueEl = document.getElementById('wallboxValue');
 const updatedEl = document.getElementById('updatedAt');
 const errorEl = document.getElementById('errorBanner');
+
+// ---------- Diagnostika na jedno klepnutí ----------
+// Když se něco rozbije, je první otázka „co na to řekl ten server". Tohle
+// vysype log, výpadky, stav všech zařízení a posledních pár set odchozích
+// volání do schránky, ať se to dá poslat celé najednou.
+const diagBtnEl = document.getElementById('diagBtn');
+const diagStavEl = document.getElementById('diagStav');
+const diagZalohaEl = document.getElementById('diagZaloha');
+
+function diagText(d) {
+  const r = [`# Diagnostika ${d.kdy}`, `server běží od ${d.behOd}`, ''];
+  r.push(`## Log (${(d.log || []).length})`);
+  for (const e of d.log || []) {
+    r.push(`${new Date(e.t).toISOString()}  ${e.level === 'error' ? '[CHYBA] ' : ''}${e.msg}`);
+  }
+  if ((d.assistantLog || []).length) {
+    r.push('', `## Co dělal asistent (${d.assistantLog.length})`);
+    for (const e of d.assistantLog) r.push(`${new Date(e.t).toISOString()}  ${e.text}`);
+  }
+  r.push('', `## Odchozí volání (${(d.volani || []).length})`);
+  for (const v of d.volani || []) {
+    r.push(`${v.kdy}  ${v.metoda} ${v.kam} → ${v.stav} (${v.ms} ms)`);
+    if (v.odpoved) r.push(`    ${v.odpoved}`);
+  }
+  r.push('', '## Stav', JSON.stringify(d.stav, null, 1));
+  return r.join('\n');
+}
+
+async function diagZkopiruj() {
+  if (!diagBtnEl) return;
+  diagBtnEl.disabled = true;
+  if (diagStavEl) diagStavEl.textContent = '…';
+  try {
+    const res = await fetch('/api/diagnostika');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = diagText(await res.json());
+    const kb = Math.round(text.length / 1024);
+    let doSchranky = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      doSchranky = true;
+    } catch {}
+    if (doSchranky) {
+      if (diagZalohaEl) diagZalohaEl.hidden = true;
+      if (diagStavEl) diagStavEl.textContent = `zkopírováno, ${kb} kB`;
+    } else {
+      // Schránka nemusí být povolená (Safari bez gesta, http). Aspoň ať jde
+      // text označit rukou, místo aby tlačítko jen mlčelo.
+      if (diagZalohaEl) {
+        diagZalohaEl.hidden = false;
+        diagZalohaEl.value = text;
+        diagZalohaEl.focus();
+        diagZalohaEl.select();
+      }
+      if (diagStavEl) diagStavEl.textContent = `schránka nejde, označ si to (${kb} kB)`;
+    }
+  } catch (err) {
+    if (diagStavEl) diagStavEl.textContent = 'nepovedlo se: ' + err.message;
+  }
+  diagBtnEl.disabled = false;
+}
+
+if (diagBtnEl) diagBtnEl.addEventListener('click', diagZkopiruj);
 
 // ---------- Sbalené přehledy ----------
 // Tlačítko schová skupinu karet. Stav se pamatuje v telefonu zvlášť pro každou

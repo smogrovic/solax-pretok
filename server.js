@@ -8782,7 +8782,105 @@ function storeStart() {
   }
 }
 
+// ---------- Diagnostika ----------
+// Když něco nefunguje, je první otázka „co na to řekl ten server". Odpovědi se
+// dosud nikam neukládaly, takže se to dalo zjistit jen hádáním. Tady se drží
+// posledních pár set odchozích volání — obalí se `fetch` jednou na jednom místě
+// místo tří desítek volání jednotlivě.
+const DIAG_MAX = 200;
+const DIAG_TELO_MAX = 300;
+const diagVolani = [];
+
+// Tenhle výpis se posílá do chatu, takže z něj musí ven všechno, co je klíč.
+// Hlavičky se nezaznamenávají vůbec (tam žijí Authorization a tokeny), z adresy
+// se škrtají parametry, které bývají klíčem, a z odpovědi hodnoty u jmen,
+// pod kterými chodí tajnosti.
+const DIAG_PARAMY = ['t', 'token', 'key', 'sign', 'signature', 'password', 'auth', 'access_token'];
+const DIAG_KLICE = ['token', 'access_token', 'refresh_token', 'passToken', 'serviceToken',
+  'ssecurity', 'secret', 'secret_access_key', 'session_token', 'access_key_id',
+  'password', 'heslo', 'apiKey', 'api_key', 'deviceToken'];
+
+function diagAdresa(url) {
+  try {
+    const u = new URL(String(url));
+    for (const p of DIAG_PARAMY) if (u.searchParams.has(p)) u.searchParams.set(p, '…');
+    return u.host + u.pathname + (u.search || '');
+  } catch {
+    return String(url).slice(0, 120);
+  }
+}
+
+function diagOcisti(text) {
+  let t = String(text || '');
+  for (const k of DIAG_KLICE) {
+    t = t.replace(new RegExp('("' + k + '"\\s*:\\s*")[^"]*(")', 'gi'), '$1…$2');
+  }
+  return t;
+}
+
+function diagZapis(zaznam) {
+  diagVolani.push(zaznam);
+  if (diagVolani.length > DIAG_MAX) diagVolani.splice(0, diagVolani.length - DIAG_MAX);
+}
+
+// Obalí se globální `fetch` jednou. Sady si ho podstrkávají samy a tenhle kód
+// se do nich nevyjímá, takže jim to nevadí.
+function diagObalFetch() {
+  const puvodni = globalThis.fetch;
+  if (typeof puvodni !== 'function' || puvodni.__diag) return;
+  const obal = async (url, opts = {}) => {
+    const zac = Date.now();
+    const zaznam = {
+      kdy: new Date().toISOString(),
+      metoda: (opts && opts.method) || 'GET',
+      kam: diagAdresa(typeof url === 'object' && url ? url.url || url : url)
+    };
+    try {
+      const res = await puvodni(url, opts);
+      zaznam.stav = res.status;
+      zaznam.ms = Date.now() - zac;
+      // Tělo se čte z klonu, ať o něj volající nepřijde
+      try {
+        const text = await res.clone().text();
+        zaznam.odpoved = diagOcisti(text).slice(0, DIAG_TELO_MAX);
+      } catch { zaznam.odpoved = '(nešlo přečíst)'; }
+      diagZapis(zaznam);
+      return res;
+    } catch (err) {
+      zaznam.stav = 'chyba';
+      zaznam.ms = Date.now() - zac;
+      zaznam.odpoved = String(err && err.message || err).slice(0, DIAG_TELO_MAX);
+      diagZapis(zaznam);
+      throw err;
+    }
+  };
+  obal.__diag = true;
+  globalThis.fetch = obal;
+}
+
+// Všechno, co je potřeba k hledání chyby, na jedno klepnutí. Dlouhé série
+// (historie grafů, časová osa) se vynechávají — do chatu se nevejdou a k ničemu
+// tam nejsou.
+const DIAG_VYNECHAT = new Set(['history', 'wallboxHistory', 'boilerHistory', 'airconHistory',
+  'wbModeHistory', 'timeline', 'pvDays', 'log']);
+
+app.get('/api/diagnostika', (req, res) => {
+  const snap = snapshot();
+  const stav = {};
+  for (const [k, v] of Object.entries(snap)) if (!DIAG_VYNECHAT.has(k)) stav[k] = v;
+  res.json({
+    kdy: new Date().toISOString(),
+    behOd: new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString(),
+    log: state.log,
+    assistantLog: state.assistantLog,
+    stav,
+    volani: diagVolani
+  });
+});
+
 // ---------- Keep-alive a start ----------
+
+diagObalFetch();
 
 app.get('/healthz', (req, res) => res.send('ok'));
 

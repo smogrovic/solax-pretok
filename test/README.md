@@ -23,6 +23,7 @@ node test/zavlaha-most.js             # most na NASu: spínací povely, kolo, oc
 node test/zavlaha-server.js           # závlaha v appce: fronta povelů, stáří hlášení, jména zón
 node test/sekacka.js                  # sekačka Anthbot: podpis SigV4 proti vzoru AWS, přihlášení
 node test/sekacka-server.js           # sekačka v appce: cloud Anthbotu, obnova klíčů, povely
+node test/diagnostika.js             # diagnostika: proškrtání klíčů, obal kolem fetch
 node test/vysavac.js                  # vysavač Xiaomi: RC4 proti vzoru, přihlášení, ověření účtu
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
