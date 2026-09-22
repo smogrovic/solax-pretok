@@ -4,7 +4,9 @@ const zlib = require('zlib');
 const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('úložiště');
 
-const CODE = between('// ---------- Trvalé úložiště', '// ---------- Keep-alive a start');
+// Konec bloku je Diagnostika, ne Keep-alive: mezi úložiště a start se Diagnostika
+// vložila později a s ní i `app.get`, který tahle sada nemá čím nakrmit.
+const CODE = between('// ---------- Trvalé úložiště', '// ---------- Diagnostika ----------');
 
 // Server si to bere z modulu; tady to nasypeme dovnitř jako parametry.
 function build({ env = {}, state: st, kv = {} } = {}) {

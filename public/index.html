@@ -1561,6 +1561,10 @@
      ani pozadí nepotřebuje. */
   .huum-temps{display:flex;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
   .huum-temps .boiler-name{white-space:nowrap;}
+  /* Ladicí tlačítka vedle sebe. Vzhled si berou od diagnostiky kalendáře — je to
+     ta samá věc: jediná cesta, jak se podívat na napojení, které běží na serveru. */
+  .huum-lad{display:flex;gap:8px;margin-top:10px;}
+  .huum-lad .kal-diag-btn{margin-bottom:0;}
   .boiler-sep{
     width:1px;
     background:rgba(44,62,80,0.1);
@@ -2769,6 +2773,15 @@
             </div>
           </div>
           <div class="manual-hold" id="huumHint"></div>
+          <div class="sauna-meta" id="huumKdy"></div>
+          <!-- Napojení na HUUM se dá ladit jen naostro: jméno s heslem jsou na
+               serveru a z karty je vidět už jen přeložený tvar. Proto tady:
+               jedno tlačítko vynutí kolo dotazů, druhé ukáže, co HUUM vrátil. -->
+          <div class="huum-lad jen-full">
+            <button class="kal-diag-btn" id="huumObnovBtn" type="button">Aktualizovat</button>
+            <button class="kal-diag-btn" id="huumSyroveBtn" type="button">Syrová data</button>
+          </div>
+          <pre class="kal-diag jen-full" id="huumSyrove" hidden></pre>
         </div>
       </div>
 
@@ -7609,7 +7622,7 @@ const huumEls = {};
 for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumTarget', 'huumHint',
   'huumStatusCard', 'huumLimitsCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
   'huumLightState', 'huumSteamer', 'huumName', 'huumLimTemp', 'huumLimHeat',
-  'huumLimTimer', 'huumLimLock']) {
+  'huumLimTimer', 'huumLimLock', 'huumKdy']) {
   huumEls[id] = document.getElementById(id);
 }
 let huumData = null;
@@ -7670,7 +7683,54 @@ function renderHuum() {
   huumEls.huumHint.textContent = !d.enabled
     ? 'Zatím jen náhled. Doplň na serveru HUUM_USER a HUUM_PASS (účet z appky HUUM) a začne se to plnit.'
     : (d.error || (zname ? (d.configText ? `Osazeno: ${d.configText}` : '') : 'Z HUUM nechodí data.'));
+
+  // Kdy naposledy DORAZILA data — při chybě se razítko na serveru neobnovuje, takže
+  // zmrzlá teplota je poznat i na kartě, která jinak vypadá úplně normálně.
+  huumEls.huumKdy.textContent = d.enabled && d.fetchedAt
+    ? 'Naposledy ' + fmtSolTime(new Date(d.fetchedAt).getTime())
+    : '';
 }
+
+const huumObnovBtn = document.getElementById('huumObnovBtn');
+const huumSyroveBtn = document.getElementById('huumSyroveBtn');
+const huumSyroveEl = document.getElementById('huumSyrove');
+
+if (huumObnovBtn) {
+  huumObnovBtn.addEventListener('click', async () => {
+    huumObnovBtn.disabled = true;
+    const puvodni = huumObnovBtn.textContent;
+    huumObnovBtn.textContent = 'Ptám se…';
+    try {
+      const res = await fetch('/api/sauna/huum-obnov', { method: 'POST' });
+      const data = await res.json();
+      // Odpověď nese čerstvý stav rovnou — není proč čekat na zprávu ze streamu
+      if (data && data.huum) { huumData = data.huum; renderHuum(); }
+      else if (data && data.error) huumEls.huumHint.textContent = data.error;
+    } catch (err) {
+      huumEls.huumHint.textContent = 'Aktualizace selhala: ' + err.message;
+    }
+    huumObnovBtn.textContent = puvodni;
+    huumObnovBtn.disabled = false;
+  });
+}
+
+if (huumSyroveBtn && huumSyroveEl) {
+  huumSyroveBtn.addEventListener('click', async () => {
+    huumSyroveBtn.disabled = true;
+    huumSyroveEl.hidden = false;
+    huumSyroveEl.textContent = 'Ptám se HUUM…';
+    try {
+      const res = await fetch('/api/sauna/huum-syrove', { headers: { 'X-Auth-Token': authToken } });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error('Ovládání je zamčené.'); }
+      huumSyroveEl.textContent = JSON.stringify(data, null, 1);
+    } catch (err) {
+      huumSyroveEl.textContent = 'Nepovedlo se: ' + err.message;
+    }
+    huumSyroveBtn.disabled = false;
+  });
+}
+
 setInterval(renderHuum, 30000);   // „zbývá 1:20" musí odtikávat i bez zprávy ze serveru
 
 const saunaLightEl = document.getElementById('saunaLight');

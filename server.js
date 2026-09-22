@@ -6467,19 +6467,41 @@ function huumMap(d) {
   };
 }
 
-async function fetchHuum() {
+// Jedno volání na /status. Vrací i SYROVÉ tělo — z přeloženého tvaru se nepozná,
+// jestli HUUM přejmenoval pole, nebo je jen nevrátil, a to je přesně ta otázka,
+// která při ladění napojení vychází. Heslo jde v hlavičce, ta se nikam nezapisuje.
+async function huumStatus() {
   const auth = Buffer.from(`${HUUM_USER}:${HUUM_PASS}`).toString('base64');
   const res = await fetch(`${HUUM_URL}/status`, {
     headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(10000)
   });
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('HUUM: neplatné jméno nebo heslo.');
+  return { stav: res.status, ok: res.ok, text: await res.text() };
+}
+
+// Kus těla do hlášky. Samotné „HTTP 500" neřekne nic, kdežto to samé s kouskem
+// odpovědi (třeba hláškou o údržbě) rovnou poví, kde to vázne.
+function huumChyba(stav, text) {
+  if (stav === 401 || stav === 403) return 'HUUM: neplatné jméno nebo heslo.';
+  const kus = String(text || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+  return `HUUM API HTTP ${stav}` + (kus ? `: ${kus}` : '');
+}
+
+function huumTelo(text) {
+  let data = null;
+  try { data = JSON.parse(text); } catch { data = null; }
+  // Pole projde `typeof 'object'`, ale žádný `statusCode` v něm není — bez téhle
+  // podmínky by se z toho stala tichá karta s pomlčkami místo hlášky.
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('HUUM: nečekaná odpověď.');
   }
-  if (!res.ok) throw new Error(`HUUM API HTTP ${res.status}`);
-  const data = await res.json();
-  if (!data || typeof data !== 'object') throw new Error('HUUM: nečekaná odpověď.');
-  return huumMap(data);
+  return data;
+}
+
+async function fetchHuum() {
+  const { stav, ok, text } = await huumStatus();
+  if (!ok) throw new Error(huumChyba(stav, text));
+  return huumMap(huumTelo(text));
 }
 
 let huumPollRunning = false;
@@ -6501,6 +6523,39 @@ async function pollHuum() {
 function huumPayload() {
   return { ...state.huum, enabled: huumEnabled };
 }
+
+// Ladění napojení jde jen naostro — jméno s heslem jsou na serveru a z appky je
+// vidět už jen přeložený tvar. Tohle vrátí odpověď tak, jak přišla. Stejný důvod
+// i stejný tvar jako `/api/calendar/raw`.
+app.get('/api/sauna/huum-syrove', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!huumEnabled) {
+    return res.status(503).json({ nastaveno: false, chyba: 'Na serveru chybí HUUM_USER a HUUM_PASS.' });
+  }
+  // Adresa ano, jméno ani heslo ne — výpis se posílá dál
+  const out = { nastaveno: true, adresa: `${HUUM_URL}/status` };
+  try {
+    const { stav, ok, text } = await huumStatus();
+    out.stav = stav;
+    // Když to není JSON, jde dál jako text — právě na tom se pozná přihlašovací
+    // stránka nebo hláška brány místo odpovědi API.
+    try { out.telo = JSON.parse(text); } catch { out.telo = String(text).slice(0, 2000); }
+    if (!ok) out.chyba = huumChyba(stav, text);
+    else out.prelozeno = huumMap(huumTelo(text));
+  } catch (err) {
+    out.chyba = err.message;
+  }
+  res.json(out);
+});
+
+// Ruční „Aktualizovat" z appky. Po restartu se na první kolo čeká 70 s a pak na
+// každé další dvě minuty — to je při ladění věčnost. Schválně bez zámku, stejně jako
+// u kalendáře: `pollHuum` se sám vrátí, když už běží.
+app.post('/api/sauna/huum-obnov', async (req, res) => {
+  if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
+  await pollHuum();
+  res.json({ ok: true, huum: huumPayload() });
+});
 
 if (huumEnabled) {
   // Vlastní služba, se Shelly nemá nic společného. Offset 70 s je mezi ostatními volný.

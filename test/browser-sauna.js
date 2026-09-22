@@ -189,6 +189,59 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('chyba se ukáže', /neplatné jméno/.test(huumHint.textContent), 'true');
 
+  OUT.push('\\n8b) Kdy naposledy dorazila data');
+  // Ražítko se na serveru při chybě neobnovuje, takže tenhle řádek je jediné místo,
+  // kde je zmrzlá teplota poznat — karta jinak vypadá úplně normálně
+  huumData = { enabled: true, statusCode: 232, fetchedAt: new Date(T - 90 * MIN).toISOString() };
+  renderHuum();
+  check('u zmrzl\u00fdch dat je vid\u011bt, odkdy jsou',
+    huumKdy.textContent, 'Naposledy ' + fmtSolTime(T - 90 * MIN));
+  huumData = { enabled: false, error: null };
+  renderHuum();
+  check('bez p\u0159ipojen\u00ed se \u0159\u00e1dek neukazuje', huumKdy.textContent, '');
+
+  OUT.push('\\n8c) Ladic\u00ed tla\u010d\u00edtka');
+  const POSLANO = [];
+  window.fetch = async (adresa, opts) => {
+    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET' });
+    if (String(adresa).includes('huum-obnov')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, huum: {
+        enabled: true, statusCode: 232, statusText: 'p\u0159ipraven\u00e1', heating: false,
+        temperature: 41, fetchedAt: new Date().toISOString(), error: null } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({
+      nastaveno: true, stav: 200, telo: { statusCode: 232, temperature: '41' } }) };
+  };
+
+  huumData = { enabled: true, error: null };
+  renderHuum();
+  document.getElementById('huumObnovBtn').click();
+  await wait(80);
+  check('Aktualizovat se pt\u00e1 serveru', POSLANO[0].adresa, '/api/sauna/huum-obnov');
+  check('  a to POSTem', POSLANO[0].metoda, 'POST');
+  // Odpověď nese čerstvý stav — na zprávu ze streamu se čekat nemusí
+  check('  \u010derstv\u00fd stav se rovnou uk\u00e1\u017ee', huumTemp.textContent, '41 \u00b0C');
+  check('  i s \u010dasem, kdy doraz', /^Naposledy \\d\\d?:\\d\\d$/.test(huumKdy.textContent), 'true');
+  check('  a tla\u010d\u00edtko se zase povol\u00ed', document.getElementById('huumObnovBtn').disabled, 'false');
+
+  const syr = document.getElementById('huumSyrove');
+  check('v\u00fdpis je zat\u00edm schovan\u00fd', syr.hidden, 'true');
+  document.getElementById('huumSyroveBtn').click();
+  await wait(80);
+  check('Syrov\u00e1 data se zeptaj\u00ed', POSLANO[1].adresa, '/api/sauna/huum-syrove');
+  // Syrové tělo je celý smysl toho tlačítka — přeložený tvar už je na kartě
+  check('  v\u00fdpis se objev\u00ed', syr.hidden, 'false');
+  check('  a je v n\u011bm t\u011blo tak, jak p\u0159i\u0161lo',
+    syr.textContent.includes('"temperature": "41"'), 'true');
+
+  // Dětem tam nemají co dělat — z výpisu by se leda vyklikalo něco, co neměli
+  document.body.dataset.rezim = 'miky';
+  check('v d\u011btsk\u00e9m re\u017eimu tla\u010d\u00edtka nejsou',
+    document.querySelector('.huum-lad').getClientRects().length, 0);
+  check('  ani v\u00fdpis', syr.getClientRects().length, 0);
+  check('  ale karta s teplotou z\u016fstane', huumTemp.getClientRects().length > 0, 'true');
+  document.body.dataset.rezim = 'full';
+
   OUT.push('\\n9) Měřák 3EM zůstal nedotčený');
   saunaData = { powerW: 6200, fetchedAt: new Date().toISOString(), topi: true,
     since: T - 10 * MIN, blockUntil: T + 30 * MIN, limitW: 500 };
