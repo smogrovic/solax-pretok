@@ -220,4 +220,20 @@ const seznam = "const A = process.env.A || 'aabbccddeeff,112233445566';";
 check('seznam se rozpadne na kusy', idLiteraly(seznam).idcka.length, 2);
 check('oddělovač se za ID nepovažuje', idLiteraly("','").idcka.length, 0);
 
+nadpis('8) Čísla, která musí sedět na obou stranách');
+// Scéna „Zapni saunu" zapíná kamna na SCENA_SAUNA_C, ale v potvrzovacím okně
+// v appce je ta teplota napsaná ručně — okno má říct, co se opravdu stane.
+// Tyhle dvě hodnoty se rozejdou při první změně a nikdo si toho nevšimne,
+// protože obě části dál fungují.
+const scenaC = (LINES.join('\n').match(/const SCENA_SAUNA_C = (\d+);/) || [])[1];
+check('server má teplotu scény', scenaC, '80');
+const oknoText = (js.match(/sauna:\s*\{[\s\S]*?text:\s*([\s\S]*?),\n\s*sekundy/) || [])[1] || '';
+check('  a okno v appce mluví o té samé',
+  new RegExp(scenaC + '\\s*°C').test(oknoText), true);
+// Kdyby se text přepsal tak, že teplotu vůbec neuvádí, vršek by prošel naprázdno
+check('  a opravdu se v něm nějaká teplota píše', /\d+\s*°C/.test(oknoText), true);
+
+nadpis('9) Kontrola téhle kontroly');
+check('rozdílná čísla se chytí', new RegExp('85' + '\\s*°C').test('na 80 °C'), false);
+
 konec();

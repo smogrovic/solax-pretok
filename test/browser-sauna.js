@@ -203,10 +203,34 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Měření z 3EM je hlídač jističe, ne displej.
   const karty = Array.from(document.querySelectorAll('#saunaSlide .page > .card'));
   check('kamna HUUM jsou prvn\u00ed karta', karty[0].contains(huumLight), 'true');
-  check('  m\u011b\u0159en\u00ed 3EM druh\u00e1', karty[1].contains(saunaLight), 'true');
+  // Zapínání patří hned pod teploty — je to jedna věc
+  check('  zap\u00edn\u00e1n\u00ed hned pod nimi', karty[1].id, 'huumTopeniCard');
+  check('  m\u011b\u0159\u00e1k 3EM a\u017e t\u0159et\u00ed', karty[2].contains(saunaLight), 'true');
   // „33 °C" se lámalo mezi číslo a jednotku a stupeň zůstával viset níž
   check('teplota se nel\u00e1me', getComputedStyle(huumTemp).whiteSpace, 'nowrap');
   check('  a c\u00edl taky', getComputedStyle(huumTarget).whiteSpace, 'nowrap');
+
+  // Každá půlka přesně polovina karty, ať dělítko sedí uprostřed a hodnota
+  // zůstane pod svým popiskem i když se změní počet číslic
+  const stred = el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+  const tempKarta = document.querySelector('.huum-temps');
+  const delitko = tempKarta.querySelector('.boiler-sep');
+  check('d\u011bl\u00edtko sed\u00ed uprost\u0159ed karty',
+    Math.abs(stred(delitko) - stred(tempKarta)) < 1.5, 'true');
+  // A dvojice jde přes celou kartu, ne jen doprostřed podle šířky čísel
+  check('  a teploty jdou p\u0159es celou kartu',
+    Math.round(tempKarta.getBoundingClientRect().width),
+    Math.round(tempKarta.parentElement.getBoundingClientRect().width));
+  const popisky = [...tempKarta.querySelectorAll('.boiler-name')];
+  const hodnoty = [...tempKarta.querySelectorAll('.boiler-temp')];
+  check('teplota sed\u00ed pod sv\u00fdm popiskem',
+    Math.abs(stred(popisky[0]) - stred(hodnoty[0])) < 1.5, 'true');
+  check('  a c\u00edl taky', Math.abs(stred(popisky[1]) - stred(hodnoty[1])) < 1.5, 'true');
+  // Tříciferná teplota nesmí půlky rozhodit
+  huumData = { ...huumData, temperature: 100, targetTemperature: 9 };
+  renderHuum();
+  check('  a nerozhod\u00ed to ani 100 proti 9',
+    Math.abs(stred(delitko) - stred(tempKarta)) < 1.5, 'true');
 
   OUT.push('\\n8d) Sv\u011btlo v saun\u011b');
   const POSLANO = [];
@@ -299,7 +323,9 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     top('huumCilSlider').min + '\u2013' + top('huumCilSlider').max, '40\u201390');
   check('  a p\u0159evezme cíl z kamen', top('huumCilSlider').value, '79');
   check('  a je vid\u011bt \u010d\u00edslem', top('huumCilVal').textContent, '79 \u00b0C');
-  check('VYPNOUT je zv\u00fdrazn\u011bn\u00e9, kdy\u017e netop\u00ed',
+  check('tla\u010d\u00edtka se jmenuj\u00ed ON a OFF',
+    top('huumTopeniOnBtn').textContent + '/' + top('huumTopeniOffBtn').textContent, 'ON/OFF');
+  check('OFF je zv\u00fdrazn\u011bn\u00e9, kdy\u017e netop\u00ed',
     top('huumTopeniOffBtn').classList.contains('active-state'), 'true');
 
   // Jezdec drží CHTĚNOU teplotu. Dokud se nezmáčkne ZAPNOUT, do sauny nejde nic.
@@ -315,7 +341,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Rozpálit kamna omýlem je jiná liga než omýlem rozsvítit
   top('huumTopeniOnBtn').click();
   await wait(40);
-  check('ZAPNOUT se nejd\u0159\u00edv zept\u00e1', POSLANO.length, 0);
+  check('ON se nejd\u0159\u00edv zept\u00e1', POSLANO.length, 0);
   check('  a \u0159ekne, na kolik to pojede',
     /72 \u00b0C/.test(document.getElementById('potvrzText').textContent), 'true');
   check('  a p\u0159ipomene dve\u0159e a co le\u017e\u00ed na kamnech',
@@ -333,14 +359,14 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  s teplotou z jezdce', POSLANO[0].telo.teplota, 72);
   // Server povel ověřuje dalším dotazem, takže v odpovědi je skutečný stav
   check('stav se p\u0159evezme z odpov\u011bdi', huumState.textContent, 'top\u00ed');
-  check('  a ZAPNOUT je zv\u00fdrazn\u011bn\u00e9',
+  check('  a ON je zv\u00fdrazn\u011bn\u00e9',
     top('huumTopeniOnBtn').classList.contains('active-state'), 'true');
 
   POSLANO.length = 0;
   top('huumTopeniOffBtn').click();
   await wait(80);
   // Vypnutí se neptá — je to ta bezpečná strana
-  check('VYPNOUT jde rovnou', POSLANO[0].adresa, '/api/sauna/huum-stop');
+  check('OFF jde rovnou', POSLANO[0].adresa, '/api/sauna/huum-stop');
 
   // Chyba ze serveru musí být vidět u tlačítka, ne jen v konzoli
   window.fetch = async () => ({ ok: false, status: 409, json: async () => ({

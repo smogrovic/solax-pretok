@@ -364,29 +364,59 @@ nadpis('11) Zpráva o nahřáté sauně');
 }
 
 nadpis('12) Světlo');
+// HUUM umí jen PŘEPNOUT. Nejdřív se proto čte skutečný stav — bez toho by
+// tlačítko ON u rozsvíceného světla zhaslo, a to je přesně ta chyba, kterou
+// by na kartě nikdo nehledal, protože „povel přece odešel".
+const svetloOdpovedi = (predtim, potom) => {
+  let krok = 0;
+  return async () => {
+    krok++;
+    if (krok === 1) return { stav: 200, text: JSON.stringify(odpoved({ light: predtim })) };
+    if (krok === 2) return { stav: 200, text: '{"ok":true}' };
+    return { stav: 200, text: JSON.stringify(odpoved({ light: potom })) };
+  };
+};
 {
   const h = build();
-  await h.api.pollHuum();                       // light: 0
-  h.volani.length = 0;
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }         // přepnutí
-    : { stav: 200, text: JSON.stringify(odpoved({ light: 1 })) });  // ověření
+  h.odpovez = svetloOdpovedi(0, 1);
   const po = await h.api.huumSvetlo(true);
-  check('přepíná se na /light', h.volani[0].adresa, 'https://sauna.huum.eu/action/home/light');
-  // HUUM na přepnutí odpovídá mělce a podle jednotky různě — pravdu má až /status
-  check('  a hned se ověří dotazem na /status', h.volani[1].adresa,
+  check('nejdřív se zeptá, jak to je', h.volani[0].adresa,
     'https://sauna.huum.eu/action/home/status');
+  check('  pak teprve přepne', h.volani[1].adresa, 'https://sauna.huum.eu/action/home/light');
+  check('  a znovu ověří', h.volani[2].adresa, 'https://sauna.huum.eu/action/home/status');
   check('vrací se skutečný stav', po.light, 1);
   check('  a uloží se', h.state.huum.light, 1);
   // Bez rozeslání by karta na druhém telefonu zůstala na starém stavu
   check('  a rozešle se do appky', h.zpravy[h.zpravy.length - 1].data.huum.light, 1);
 }
 {
+  // Tohle je ta chyba: přepnout rozsvícené světlo tlačítkem ON by ho zhaslo
+  const h = build();
+  h.odpovez = svetloOdpovedi(1, 0);
+  const po = await h.api.huumSvetlo(true);
+  check('rozsvícené světlo se ON nepřepíná', h.volani.length, 1);
+  check('  a nikdo nesahal na /light',
+    h.volani.some(v => v.adresa.endsWith('/light')), false);
+  check('  a vrací se, že svítí', po.light, 1);
+}
+{
+  const h = build();
+  h.odpovez = svetloOdpovedi(0, 1);
+  const po = await h.api.huumSvetlo(false);
+  check('zhasnuté světlo se OFF taky nepřepíná', h.volani.length, 1);
+  check('  a vrací se, že nesvítí', po.light, 0);
+}
+{
+  const h = build();
+  h.odpovez = svetloOdpovedi(1, 0);
+  await h.api.huumSvetlo(false);
+  check('rozsvícené se OFF zhasne', h.volani.length, 3);
+  check('  a stav sedí', h.state.huum.light, 0);
+}
+{
   // Kdyby se povel ztratil, tlačítko nesmí říct „hotovo"
   const h = build();
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  h.odpovez = svetloOdpovedi(0, 0);
   let chyba = '';
   try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
   check('nepřepnuté světlo se nezamlčí', chyba,
@@ -395,12 +425,11 @@ nadpis('12) Světlo');
 }
 {
   const h = build();
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ light: undefined })) });
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ light: undefined })) });
   let chyba = '';
   try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
   check('když HUUM neřekne, netvrdíme nic', chyba, 'HUUM neřekl, jestli světlo svítí.');
+  check('  a nepřepíná se naslepo', h.volani.length, 1);
 }
 {
   const h = build();
@@ -408,15 +437,13 @@ nadpis('12) Světlo');
   let chyba = '';
   try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
   check('odmítnuté přihlášení projde dál', chyba, 'HUUM: neplatné jméno nebo heslo.');
-  check('  a na /status se pak už nechodí', h.volani.length, 1);
+  check('  a dál se nepokračuje', h.volani.length, 1);
 }
 
 nadpis('13) Endpoint na světlo');
 {
   const h = build();
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ light: 1 })) });
+  h.odpovez = svetloOdpovedi(0, 1);
   const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
   check('projde', kod, 200);
   check('  a vrátí stav světla', out.light, 1);
@@ -425,21 +452,15 @@ nadpis('13) Endpoint na světlo');
 }
 {
   const h = build();
-  await h.api.pollHuum();
-  h.volani.length = 0;
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  h.odpovez = svetloOdpovedi(1, 0);
   const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: false });
   check('vypnutí taky', kod, 200);
   check('  a v logu je vypnuto', h.zapisy.some(t => /světlo vypnuto/.test(t)), true);
-  check('  bez tělesa se bere vypnout', out.light, 0);
+  check('  se stavem', out.light, 0);
 }
 {
   const h = build();
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  h.odpovez = svetloOdpovedi(0, 0);
   const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
   check('neprovedený povel vrátí 502', kod, 502);
   check('  s hláškou', /pořád zhasnuté/.test(out.error), true);

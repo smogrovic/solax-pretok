@@ -14,7 +14,8 @@ const CODE = between('// ---------- Tlačítka na Asistentovi (scény) a „nejs
                      '// ---------- Trvalé úložiště');
 
 function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetla = [],
-                 zamekSelze = false } = {}) {
+                 zamekSelze = false, huum = true, dvere = true,
+                 saunaSelze = false, saunaNejede = false, svetloSelze = false } = {}) {
   const akce = [];
   const logy = [];
   const routy = {};
@@ -23,7 +24,8 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     devices: {},
     aircon: { devices: klimy.map(n => ({ name: n, guid: n, power: true })) },
     away: { since: 0 },
-    assistantLog: []
+    assistantLog: [],
+    huum: { doorClosed: dvere }
   };
   for (const k of ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni', 'obeh']) {
     state.devices[k] = { online: true, isOn: svetla.includes(k) };
@@ -33,6 +35,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'state', 'app', 'requireAuth', 'addLog', 'addAssistantLog', 'broadcast', 'fmtPragueTime',
     'assistantControlBlinds', 'assistantSetRelay', 'assistantSetAircon', 'actuateRelay',
     'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
+    'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -55,7 +58,17 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     async () => { akce.push('zamek:otevri'); return 'Dveře otevřeny.'; },
     nuki, tahoma,
     ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'],
-    100                       // zavřeno; konstanta bydlí v bloku rozvrhu žaluzií
+    100,                      // zavřeno; konstanta bydlí v bloku rozvrhu žaluzií
+    huum,
+    async (cesta, telo) => {
+      if (saunaSelze) throw new Error('HUUM API HTTP 503');
+      akce.push(`huum:${cesta}:${(telo || {}).targetTemperature}`);
+    },
+    async () => (saunaNejede ? { heating: false } : { heating: true }),
+    async on => {
+      if (svetloSelze) throw new Error('HUUM neřekl, jestli světlo svítí.');
+      akce.push(`huumsvetlo:${on ? 'on' : 'off'}`);
+    }
   );
   return { api, state, akce, logy, routy };
 }
@@ -83,21 +96,61 @@ nadpis('2) Zapni saunu');
   // Ve dne se venku svítit nemá — je světlo a stejně se to zapomene zhasnout
   const h = build({ poZapadu: false });
   const reply = await h.api.SCENA_FN.sauna();
-  check('vytáhne žaluzie v ložnici', h.akce.join(' | '), 'zaluzie:ložnice:up');
-  check('  a světlo nechá být', /nezapadlo slunce/.test(reply), true);
+  check('zapne saunu na 80 °C', h.akce[0], 'huum:start:80');
+  check('  a rozsvítí v ní', h.akce[1], 'huumsvetlo:on');
+  check('  vytáhne žaluzie v ložnici', h.akce[2], 'zaluzie:ložnice:up');
+  check('  a zahradu dole nechá být', /nezapadlo slunce/.test(reply), true);
+  check('  řekne, na kolik topí', /Sauna topí na 80 °C/.test(reply), true);
+  check('  i že v sauně svítí', /Světlo v sauně svítí/.test(reply), true);
+  check('a je to v logu', h.logy.some(t => /zapnuta na 80 °C \(tlačítko\)/.test(t)), true);
 }
 {
   const h = build({ poZapadu: true });
   await h.api.SCENA_FN.sauna();
   check('po západu rozsvítí i zahradu dole', h.akce.join(' | '),
-    'zaluzie:ložnice:up | lightDole:on (tlačítko sauna)');
+    'huum:start:80 | huumsvetlo:on | zaluzie:ložnice:up | lightDole:on (tlačítko sauna)');
 }
 {
-  // Žaluzie visí na cizím cloudu (TaHoma) — jeho výpadek nesmí sebrat světlo
+  // Dveře jsou pojistka v jednotce. Zkoušet to naslepo by skončilo mlhavou
+  // chybou z cloudu, ze které by nebylo poznat, co je špatně.
+  const h = build({ dvere: false });
+  const reply = await h.api.SCENA_FN.sauna();
+  check('s otevřenými dveřmi se sauna nezapne',
+    h.akce.some(a => a.startsWith('huum:')), false);
+  check('  a řekne se proč', /otevřené dveře/.test(reply), true);
+  check('  ale žaluzie se stejně vytáhnou', h.akce.join(' | '), 'zaluzie:ložnice:up');
+}
+{
+  const h = build({ huum: false });
+  const reply = await h.api.SCENA_FN.sauna();
+  check('bez nastavených kamen to řekne', /nejsou nastavená/.test(reply), true);
+  check('  a zbytek scény proběhne', h.akce.join(' | '), 'zaluzie:ložnice:up');
+}
+{
+  // Každý krok stojí sám za sebe: výpadek jednoho nesmí sebrat ostatní
+  const h = build({ poZapadu: true, saunaSelze: true });
+  const reply = await h.api.SCENA_FN.sauna();
+  check('když sauna selže, řekne se to', /nepodařilo zapnout/.test(reply), true);
+  check('  ale světlo, žaluzie i zahrada jedou dál', h.akce.join(' | '),
+    'huumsvetlo:on | zaluzie:ložnice:up | lightDole:on (tlačítko sauna)');
+}
+{
+  // „Přijato" není „topí" — kamna se nemusí rozjet a scéna to nesmí zamlčet
+  const h = build({ saunaNejede: true });
+  const reply = await h.api.SCENA_FN.sauna();
+  check('nerozjetá kamna se nezamlčí', /zatím nerozjela/.test(reply), true);
+  check('  a netvrdí se, že topí', /Sauna topí/.test(reply), false);
+}
+{
+  const h = build({ svetloSelze: true });
+  const reply = await h.api.SCENA_FN.sauna();
+  check('když selže světlo, řekne se to', /Světlo v sauně se nepodařilo/.test(reply), true);
+  check('  ale zatopeno je', /Sauna topí na 80 °C/.test(reply), true);
+}
+{
   const h = build({ poZapadu: true });
-  const puvodni = h.api.SCENA_FN.sauna;
   check('sauna má popisek o sauně', h.api.SCENY[0].label, 'Zapni saunu');
-  check('  a je první v řadě', typeof puvodni, 'function');
+  check('  a je první v řadě', typeof h.api.SCENA_FN.sauna, 'function');
 }
 
 nadpis('3) Ostatní tlačítka');
@@ -243,4 +296,9 @@ nadpis('6) Nejsme doma — obnova po restartu');
 
 konec();
 
-})();
+})().catch(err => {
+  // Bez tohohle by spadlá scéna sadu tiše ukončila: summary by se nevypsal,
+  // návratový kód by byl nula a „0 chyb" by znamenalo „nic se nespustilo".
+  check('sada doběhla bez výjimky', err && err.stack, '(nic)');
+  konec();
+});

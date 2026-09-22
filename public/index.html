@@ -1562,7 +1562,11 @@
   /* Dvojice teplot uvnitř karty HUUM. `boilers-card` počítá s tím, že je zároveň
      `card` (odtud display:flex) — tady je vevnitř, takže si flex řekne sama a rámeček
      ani pozadí nepotřebuje. */
-  .huum-temps{display:flex;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
+  /* `width:100%` je tu kvůli středění: bez něj se dvojice smrskne na šířku čísel
+     a dělítko sedí uprostřed NICH, ne uprostřed karty. Stejné půlky zařídí
+     `.boiler-cell{flex:1}` výš — `flex:1` je `flex:1 1 0%`, takže ani 100 proti
+     9 stupňům je nerozhodí. */
+  .huum-temps{display:flex;width:100%;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
   .huum-temps .boiler-name{white-space:nowrap;}
   /* „33 °C" se na úzkém telefonu lámalo mezi číslo a jednotku a stupeň zůstal
      viset na druhém řádku. Písmo se radši zmenší, než aby se to zalomilo. */
@@ -2781,19 +2785,6 @@
           <div class="sauna-meta" id="huumKdy"></div>
         </div>
       </div>
-
-      <div class="card">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="saunaLight"></div>
-            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
-          </div>
-          <div class="sauna-power" id="saunaPower">– kW</div>
-          <div class="manual-hold" id="saunaHint"></div>
-          <div class="sauna-meta" id="saunaMeta"></div>
-        </div>
-      </div>
-
       <!-- Topení. Jediné místo v appce, které umí rozpálit něco na devadesát
            stupňů, takže se ZAPNOUT ptá na potvrzení a server povel ověřuje. -->
       <div class="card lockable" id="huumTopeniCard" hidden>
@@ -2806,8 +2797,21 @@
           <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
         </div>
         <div class="power-buttons">
-          <button class="power-btn on-btn" id="huumTopeniOnBtn">ZAPNOUT</button>
-          <button class="power-btn off-btn" id="huumTopeniOffBtn">VYPNOUT</button>
+          <button class="power-btn on-btn" id="huumTopeniOnBtn">ON</button>
+          <button class="power-btn off-btn" id="huumTopeniOffBtn">OFF</button>
+        </div>
+      </div>
+
+
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="saunaLight"></div>
+            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
+          </div>
+          <div class="sauna-power" id="saunaPower">– kW</div>
+          <div class="manual-hold" id="saunaHint"></div>
+          <div class="sauna-meta" id="saunaMeta"></div>
         </div>
       </div>
 
@@ -8485,7 +8489,16 @@ if (prazdninyBtnEl) {
 // Tlačítka, která se ptají, a na kolik vteřin. Otevřené dveře jsou horší omyl než
 // cokoli jiného, co se odsud dá spustit.
 const POTVRZ_SCENY = {
-  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 10 }
+  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 10 },
+  // Těch 80 °C musí sedět se `SCENA_SAUNA_C` na serveru — hlídá to test/staticka.js.
+  // Okno vypisuje všechny kroky: scéna sahá na čtyři věci naráz a z názvu
+  // „Zapni saunu" by nikdo nečekal, že se otevřou žaluzie v ložnici.
+  sauna: {
+    nadpis: 'Zapnout saunu?',
+    text: 'Kamna se rozjedou na 80 °C, rozsvítí se v sauně, vytáhnou se žaluzie '
+        + 'v ložnici a po západu slunce i zahrada dole. Zkontroluj, že na kamnech nic neleží.',
+    sekundy: 15
+  }
 };
 
 function scenaKlik(key, btn) {

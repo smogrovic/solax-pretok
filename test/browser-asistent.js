@@ -155,6 +155,26 @@ setTimeout(async () => {
   check('potvrzení je otevře', poslano[0].url, '/api/scene');
   check('  se správnou scénou', poslano[0].body.scene, 'otevri');
 
+  // Sauna: scéna sáhne na čtyři věci naráz a z názvu „Zapni saunu" by nikdo
+  // nečekal, že se otevřou žaluzie v ložnici. Okno je proto má vyjmenovat.
+  renderSceny([{ key: 'sauna', label: 'Zapni saunu' }]);
+  poslano.length = 0;
+  tlac('sauna').click();
+  check('zapni saunu se ptá taky', okno0.hidden, false);
+  check('  a zatím nic neposílá', poslano.length, 0);
+  const textOkna = document.getElementById('potvrzText').textContent;
+  check('  řekne, na kolik kamna pojedou', /80 °C/.test(textOkna), true);
+  check('  že se rozsvítí v sauně', /rozsvítí se v sauně/.test(textOkna), true);
+  check('  že se vytáhnou žaluzie v ložnici', /žaluzie v ložnici/.test(textOkna), true);
+  check('  že zahrada až po západu', /po západu slunce/.test(textOkna), true);
+  check('  a připomene, co leží na kamnech', /nic neleží/.test(textOkna), true);
+  document.getElementById('potvrzZpet').click();
+  check('„zpět" saunu nezapne', poslano.length, 0);
+  tlac('sauna').click();
+  document.getElementById('potvrzAno').click();
+  await pockej();
+  check('potvrzení ji zapne', poslano[0].body.scene, 'sauna');
+
   R.push('\\n2b) Zítra jsou prázdniny');
   // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
   // zítřek se má počítat jako víkend, i když je středa.

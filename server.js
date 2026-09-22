@@ -6509,11 +6509,22 @@ async function fetchHuum() {
 }
 
 // Světlo v sauně. HUUM umí jen PŘEPNOUT (GET /light), ne „zapni" a „vypni" —
-// takže se nejdřív zjistí, jak na tom je, a přepíná se jen když je potřeba.
+// takže se nejdřív přečte skutečný stav a přepíná se, jen když je to potřeba.
 // Bez toho by tlačítko ON u rozsvíceného světla zhaslo.
 //
-// Topení se schválně neovládá: světlo je neškodné, rozpálená kamna nejsou.
+// Uložit a rozeslat se musí i stav ZE ČTENÍ: karta v appce může být o dvě minuty
+// pozadu a po klepnutí na tlačítko má ukazovat pravdu, i když se nic nepřepínalo.
+function huumUloz(d) {
+  state.huum = { ...d, error: null, fetchedAt: new Date().toISOString() };
+  broadcast('huum', { huum: huumPayload() });
+  return d;
+}
+
 async function huumSvetlo(chci) {
+  const ted = huumUloz(await fetchHuum());
+  if (ted.light === null) throw new Error('HUUM neřekl, jestli světlo svítí.');
+  if (!!ted.light === chci) return ted;      // už je, jak má být — přepnout by ho vyplo
+
   const auth = Buffer.from(`${HUUM_USER}:${HUUM_PASS}`).toString('base64');
   const res = await fetch(`${HUUM_URL}/light`, {
     headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
@@ -6523,9 +6534,7 @@ async function huumSvetlo(chci) {
   if (!res.ok) throw new Error(huumChyba(res.status, text));
   // Odpověď na přepnutí je mělká a podle jednotky se liší. Pravdu má až
   // další /status — tudy se pozná, jestli se to opravdu stalo.
-  const po = await fetchHuum();
-  state.huum = { ...po, error: null, fetchedAt: new Date().toISOString() };
-  broadcast('huum', { huum: huumPayload() });
+  const po = huumUloz(await fetchHuum());
   if (po.light === null) throw new Error('HUUM neřekl, jestli světlo svítí.');
   if (!!po.light !== chci) {
     throw new Error(`Povel odešel, ale světlo je pořád ${po.light ? 'rozsvícené' : 'zhasnuté'}.`);
@@ -6629,9 +6638,7 @@ async function huumOverStav(chciTopit) {
   for (const cekej of HUUM_OVERENI_MS) {
     await delay(cekej);
     try {
-      posledni = await fetchHuum();
-      state.huum = { ...posledni, error: null, fetchedAt: new Date().toISOString() };
-      broadcast('huum', { huum: huumPayload() });
+      posledni = huumUloz(await fetchHuum());
       if (posledni.heating === chciTopit) return posledni;
     } catch { /* zkusí se ještě jednou */ }
   }
@@ -8574,9 +8581,38 @@ function poZapaduSlunce(at = Date.now()) {
   return !!(w && typeof w.sunsetMs === 'number' && at >= w.sunsetMs);
 }
 
+// Na kolik scéna saunu pustí. Jedno číslo: kdyby bylo i v textu potvrzovacího
+// okna v appce, rozešlo by se to při první změně. Hlídá to test/staticka.js.
+const SCENA_SAUNA_C = 80;
+
 async function scenaSauna() {
   const kroky = [];
-  // Samotné spínání sauny zatím appka neumí — až bude, přibude sem.
+  if (!huumEnabled) {
+    kroky.push('Kamna HUUM nejsou nastavená.');
+  } else if (state.huum && state.huum.doorClosed === false) {
+    // Dveře jsou pojistka v jednotce. Zkoušet to naslepo by skončilo mlhavou
+    // chybou z cloudu, ze které by nebylo poznat, co je špatně.
+    kroky.push('Sauna se nezapnula — má otevřené dveře.');
+  } else {
+    try {
+      await huumPovel('start', { targetTemperature: SCENA_SAUNA_C });
+      addLog(`Sauna: zapnuta na ${SCENA_SAUNA_C} °C (tlačítko)`);
+      const po = await huumOverStav(true);
+      // „Přijato" není „topí" — když se kamna nerozjela, scéna to řekne
+      kroky.push(po && po.heating
+        ? `Sauna topí na ${SCENA_SAUNA_C} °C.`
+        : 'Povel na saunu odešel, ale kamna se zatím nerozjela.');
+    } catch (err) {
+      kroky.push(`Saunu se nepodařilo zapnout (${err.message}).`);
+    }
+    // Světlo až po topení: kdyby se nepovedlo, ať už je aspoň zatopeno
+    try {
+      await huumSvetlo(true);
+      kroky.push('Světlo v sauně svítí.');
+    } catch (err) {
+      kroky.push(`Světlo v sauně se nepodařilo zapnout (${err.message}).`);
+    }
+  }
   try {
     kroky.push(await assistantControlBlinds({ target: 'ložnice', action: 'up' }));
   } catch (err) {
