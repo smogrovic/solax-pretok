@@ -88,6 +88,31 @@ setTimeout(async () => {
     document.querySelectorAll('#tahomaSvetla .light-cell').length, 1);
   check('  a je to opravdu to světlo',
     document.querySelector('#tahomaSvetla .shelly-label').textContent, 'Světla terasa');
+  // Buňky musí sedět v mřížce ostatních světel, ne ve vlastní pod ní
+  const mrizka = document.getElementById('lightDoleLight').closest('.lights-grid');
+  const bunky = () => [...mrizka.querySelectorAll('.light-cell')]
+    .filter(c => c.getClientRects().length)
+    .map(c => c.querySelector('.shelly-label').textContent);
+  check('  a je ve stejné mřížce jako ostatní',
+    bunky().join(' | '), 'Zahrada dole | Zahrada nahoře | Světlo bazén | Noční světla | Světla terasa');
+
+  // Až u DVOU světel z TaHomy je poznat, jestli sedí každé ve své buňce mřížky,
+  // nebo obě nacpaná v jedné. S jedním světlem vypadá obojí stejně.
+  const jednoSvetlo = blinds.slice();
+  blinds = [...blinds, { deviceURL: 'io://SvetlaPergola', label: 'Světla pergola',
+    room: 'Terasa', type: 'switch', onState: false }];
+  renderTahomaSvetla();
+  const dve = [...document.querySelectorAll('#tahomaSvetla .light-cell')];
+  check('  dvě světla jsou dvě buňky', dve.length, 2);
+  // Vedle sebe (dva sloupce mřížky), ne pod sebou v jedné buňce. Bez
+  // display:contents by se obě nacpala do jedné buňky a stála by nad sebou —
+  // stejný levý okraj, jiný horní.
+  const r0 = dve[0].getBoundingClientRect(), r1 = dve[1].getBoundingClientRect();
+  check('    vedle sebe, ne pod sebou',
+    Math.round(r1.left) > Math.round(r0.left) && Math.round(r0.top) === Math.round(r1.top), true);
+  check('    a druhé nesedí uvnitř prvního', dve[0].contains(dve[1]), false);
+  blinds = jednoSvetlo;
+  renderTahomaSvetla();
   POSLANO.length = 0;
   document.querySelector('#tahomaSvetla .power-btn.on-btn').click();
   await pockej();
@@ -137,6 +162,20 @@ setTimeout(async () => {
     document.getElementById('tahomaSvetla').textContent.includes('Světla terasa'), true);
   check('  a jde zmáčknout',
     vidim(document.querySelector('#tahomaSvetla .power-btn')), true);
+  // Mřížka 2×2: terasa vpravo od bazénu, noční světla schovaná a místo neberou
+  const mrizkaDeti = document.getElementById('lightDoleLight').closest('.lights-grid');
+  const bunkyDeti = [...mrizkaDeti.querySelectorAll('.light-cell')]
+    .filter(c => c.getClientRects().length);
+  check('světla jsou čtyři', bunkyDeti.length, 4);
+  check('  v pořadí pro mřížku 2×2',
+    bunkyDeti.map(c => c.querySelector('.shelly-label').textContent).join(' | '),
+    'Zahrada dole | Zahrada nahoře | Světlo bazén | Světla terasa');
+  // Dva řádky po dvou: první dvě buňky mají stejný horní okraj, druhé dvě taky
+  const horni = bunkyDeti.map(c => Math.round(c.getBoundingClientRect().top));
+  check('  a doopravdy stojí ve dvou řádcích',
+    horni[0] === horni[1] && horni[2] === horni[3] && horni[0] !== horni[2], true);
+  const levy = bunkyDeti.map(c => Math.round(c.getBoundingClientRect().left));
+  check('  terasa vpravo od bazénu', levy[3] > levy[2], true);
 
   // Časovač nabízel žaluzie z DRUHÉ stránky: Miky i Elenka patří na stránku dvě,
   // ta je schovaná, a jejich pokoj se kreslí na první
@@ -169,8 +208,12 @@ setTimeout(async () => {
   POSLANO.length = 0;
   document.querySelectorAll('#detiTlacitka .deti-btn')[1].click();
   await pockej();
-  check('otevřít naklopí na 25 %', POSLANO[0].telo.tilt, 25);
-  check('  a je to naklopení, ne poloha', POSLANO[0].telo.action, 'tilt');
+  // Dřív tu stálo action 'tilt' — a byla to zapsaná chyba: server takovou akci
+  // nezná a povel končil na 400. Naklopení se posílá jako orientation.
+  check('otevřít posílá naklopení', POSLANO[0].telo.action, 'orientation');
+  check('  na 25 %', POSLANO[0].telo.value, 25);
+  check('  oběma žaluziím v pokoji', POSLANO.length, 2);
+  check('  a oběma Mikyho', POSLANO.every(p => p.telo.deviceURL.includes('Miky')), true);
 
   POSLANO.length = 0;
   document.querySelectorAll('#detiTlacitka .deti-btn')[2].click();

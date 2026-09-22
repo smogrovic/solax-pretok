@@ -64,6 +64,32 @@ const n2 = [...new Set([...rozbite.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map(m =>
 check('nedeklarovaný prvek se najde', n2.join(','), 'chybejiciBtnEl');
 check('  a deklarovaný se nehlásí', n2.includes('aEl'), false);
 
+nadpis('2b) Appka posílá jen povely, které server zná');
+{
+  // TOHLE prohlížečová sada odhalit nemůže: podstrkává si `fetch`, takže se
+  // nikdy nedozví, co server přijímá. Dětské tlačítko „Otevřít žaluzie" kvůli
+  // tomu posílalo `tilt`, server odpověděl 400 „neznámá action" a žaluzie se
+  // nehnula — a kontrola v prohlížeči tu chybu ještě potvrzovala jako správnou.
+  //
+  // Pozor na dva významy slova `tilt`: v ROZVRHU je to vlastní pojmenování
+  // kroku a server si ho překládá sám, v přímém povelu neplatí.
+  const blok = between('const BLIND_ACTION_LABELS', 'app.post(\'/api/blinds/command\'');
+  const zna = new Set([...blok.matchAll(/(?:^|[{,\s])([a-z]+)\s*:\s*'/g)].map(m => m[1]));
+  check('server zná osm akcí', zna.size, 8);
+  check('  a naklopení je mezi nimi jako orientation', zna.has('orientation'), true);
+  check('  kdežto tilt ne', zna.has('tilt'), false);
+
+  // Co appka posílá: první parametr blindCommand(url, AKCE, …) pokud je to
+  // řetězec, plus akce vypsané v tabulce dětských tlačítek
+  const posila = new Set([
+    ...[...js.matchAll(/blindCommand\([^,]+,\s*'([a-z]+)'/g)].map(m => m[1]),
+    ...[...js.matchAll(/akce:\s*'([a-z]+)'/g)].map(m => m[1])
+  ]);
+  check('appka nějaké povely posílá', posila.size > 3, true);
+  check('a všechny jsou serveru známé',
+    [...posila].filter(a => !zna.has(a)).join(', ') || 'všechny', 'všechny');
+}
+
 nadpis('3) Ruční přepnutí režimu wallboxu');
 // Konkrétně tenhle blok už jednou zmizel — hlídáme, že drží pohromadě
 check('tlačítka mají deklaraci', /const wbManualBtnsEl = document\.getElementById/.test(js), true);

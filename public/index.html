@@ -525,6 +525,7 @@
   }
   /* Světlo u bazénu je na své stránce samo — ať se neroztahuje přes půl karty */
   .lights-grid.one{grid-template-columns:1fr;}
+  #tahomaSvetla{display:contents;}
   .light-cell{
     display:flex;
     flex-direction:column;
@@ -2538,8 +2539,11 @@
               <button class="power-btn off-btn" id="lightNocniOffBtn">OFF</button>
             </div>
           </div>
+          <!-- Buňky sedí přímo v téhle mřížce (display:contents), ne ve vlastní
+               pod ní. V dětském režimu jsou Noční světla schovaná a schovaná
+               buňka místo nezabírá — zbude čistá mřížka 2×2. -->
+          <div id="tahomaSvetla"></div>
         </div>
-        <div class="lights-grid" id="tahomaSvetla"></div>
       </div>
 
       <div class="card lockable jen-full" id="nukiCard">
@@ -10601,9 +10605,13 @@ function kalOtevri(otevrit) {
 // Tři tlačítka, která v dětském režimu nahradí celou stránku Asistent.
 // Textové pole asistenta v dětském režimu není schválně — uměl by cokoli,
 // včetně odemknutí domu.
+// Akce musí být ta, kterou zná server (BLIND_ACTION_LABELS): naklopení se
+// posílá jako `orientation` s hodnotou ve `value`. Slovo `tilt` patří do
+// ROZVRHU, kde je to vlastní pojmenování kroku a server si ho překládá sám —
+// v přímém povelu skončí na 400 a žaluzie se nehne. Přesně to se stalo.
 const DETI_TLACITKA = [
   { jmeno: 'Zatáhnout žaluzie', akce: 'down', hodnota: 100, dvere: false },
-  { jmeno: 'Otevřít žaluzie', akce: 'tilt', hodnota: 25, dvere: false },
+  { jmeno: 'Otevřít žaluzie', akce: 'orientation', hodnota: 25, dvere: false },
   { jmeno: 'Otevřít žaluzie dveří', akce: 'up', hodnota: null, dvere: true }
 ];
 
@@ -10645,8 +10653,7 @@ function rezimRenderTlacitka() {
       b.disabled = true;
       for (const zaluzie of cile) {
         await blindCommand(zaluzie.deviceURL, def.akce,
-          def.akce === 'tilt' ? def.hodnota : (def.hodnota === null ? undefined : def.hodnota),
-          null, def.akce === 'tilt' ? def.hodnota : undefined);
+          def.hodnota === null ? undefined : def.hodnota, null);
       }
       b.disabled = false;
     });
