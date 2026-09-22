@@ -33,6 +33,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     pustDal: true,
     zapisy: [],
     zpravicky: [],
+    cekani: [],
     // Co má stub odpovědět; sekce si to přepisují
     odpovez: async () => ({ stav: 200, text: JSON.stringify(odpoved()) })
   };
@@ -51,9 +52,11 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
   h.api = new Function(
     'HUUM_USER', 'HUUM_PASS', 'HUUM_URL', 'huumEnabled', 'fetch', 'state', 'app',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
+    'delay',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
-         + ' checkHuumNahrata, HUUM_NAHRATA_C };'
+         + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
+         + ' huumOverStav, HUUM_OVERENI_MS };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -67,7 +70,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
       return false;
     },
     text => h.zapisy.push(text),
-    (nadpis, telo) => h.zpravicky.push({ nadpis, telo })
+    (nadpis, telo) => h.zpravicky.push({ nadpis, telo }),
+    ms => { h.cekani.push(ms); return Promise.resolve(); }
   );
   return h;
 }
@@ -464,6 +468,146 @@ nadpis('13) Endpoint na světlo');
   h.pustDal = false;
   const { kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
   check('zamčená appka nepřepíná', kod, 401);
+  check('  a nikam nechodí', h.volani.length, 0);
+}
+
+nadpis('14) Zapnutí topení');
+{
+  const h = build();
+  await h.api.pollHuum();          // meze: bez saunaConfig → výchozí 40–110
+  h.volani.length = 0;
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 231, targetTemperature: '85' })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-start', { teplota: 85 });
+  check('projde', kod, 200);
+  check('jde to na /start', h.volani[0].adresa, 'https://sauna.huum.eu/action/home/start');
+  check('  POSTem', h.volani[0].opts.method, 'POST');
+  check('  s cílovou teplotou', JSON.parse(h.volani[0].opts.body).targetTemperature, 85);
+  check('  a jako JSON', h.volani[0].opts.headers['Content-Type'], 'application/json');
+  // „Přijato" není „topí" — pravdu má až další /status
+  check('povel se ověří dotazem na /status', h.volani[1].adresa,
+    'https://sauna.huum.eu/action/home/status');
+  check('  a čeká se, než si to cloud předá', h.cekani[0], h.api.HUUM_OVERENI_MS[0]);
+  check('vrací se, na kolik se topí', out.teplota, 85);
+  check('  a že kamna jedou', out.huum.heating, true);
+  check('  a je to v logu', h.zapisy.some(t => /zapnuta na 85/.test(t)), true);
+}
+{
+  // Kdyby se povel ztratil, tlačítko nesmí říct „hotovo"
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-start', { teplota: 85 });
+  check('nerozjetá kamna vrátí 502', kod, 502);
+  check('  a řeknou proč', out.error, 'Povel odešel, ale kamna se do pár vteřin nerozjela.');
+  // Zkouší se dvakrát — jedno pomalé čtení není důkaz, že povel selhal
+  check('  po dvou pokusech o ověření', h.cekani.length, 2);
+}
+{
+  const h = build();
+  await h.api.pollHuum();
+  h.state.huum.doorClosed = false;
+  h.volani.length = 0;
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-start', { teplota: 85 });
+  // Dveře jsou pojistka v jednotce; tohle to jen řekne srozumitelně a hned
+  check('s otevřenými dveřmi 409', kod, 409);
+  check('  a řekne se co s tím', out.error, 'Sauna má otevřené dveře — zavři je a zkus to znovu.');
+  check('  a nikam se nechodí', h.volani.length, 0);
+}
+{
+  const h = build();
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-start', {});
+  check('bez teploty 400', kod, 400);
+  check('  a řekne se proč', out.error, 'Chybí cílová teplota.');
+  check('nesmysl místo teploty taky',
+    (await volej(h, 'POST /api/sauna/huum-start', { teplota: 'horko' })).kod, 400);
+}
+
+nadpis('15) Teplota se ořízne na meze jednotky');
+{
+  const h = build();
+  // Meze si hlásí sama jednotka — natvrdo napsaný rozsah by u jiných kamen lhal
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({
+    saunaConfig: { minTemp: 40, maxTemp: 90 } })) });
+  await h.api.pollHuum();
+  check('meze se vezmou z jednotky',
+    `${h.api.huumMezeTeplot().min}–${h.api.huumMezeTeplot().max}`, '40–90');
+
+  const zkus = async t => {
+    h.volani.length = 0;
+    h.odpovez = async n => (n === 1
+      ? { stav: 200, text: '{"ok":true}' }
+      : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+    const { out } = await volej(h, 'POST /api/sauna/huum-start', { teplota: t });
+    return JSON.parse(h.volani[0].opts.body).targetTemperature;
+  };
+  check('200 °C se ořízne na 90', await zkus(200), 90);
+  check('10 °C se zvedne na 40', await zkus(10), 40);
+  check('85 projde beze změny', await zkus(85), 85);
+  check('desetinná se zaokrouhlí', await zkus(78.6), 79);
+}
+{
+  // Bez údajů od jednotky se jede na výchozí rozsah, ne na NaN
+  const h = build();
+  check('bez mezí platí výchozí',
+    `${h.api.huumMezeTeplot().min}–${h.api.huumMezeTeplot().max}`, '40–110');
+}
+
+nadpis('16) Vypnutí topení');
+{
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-stop');
+  check('projde', kod, 200);
+  check('jde to na /stop', h.volani[0].adresa, 'https://sauna.huum.eu/action/home/stop');
+  check('  a ověří se', h.volani[1].adresa, 'https://sauna.huum.eu/action/home/status');
+  check('  kamna netopí', out.huum.heating, false);
+  check('  a je to v logu', h.zapisy.some(t => /Sauna: vypnuta/.test(t)), true);
+  // Vypnutí se dveřmi nebrzdí — je to ta bezpečná strana
+}
+{
+  const h = build();
+  await h.api.pollHuum();
+  h.state.huum.doorClosed = false;
+  h.volani.length = 0;
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  check('vypnout jde i s otevřenými dveřmi',
+    (await volej(h, 'POST /api/sauna/huum-stop')).kod, 200);
+}
+{
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-stop');
+  check('kamna co pořád topí = 502', kod, 502);
+  check('  a řekne se to', out.error, 'Povel odešel, ale kamna pořád topí.');
+}
+{
+  const h = build();
+  h.odpovez = async () => ({ stav: 401, text: '' });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-stop');
+  check('odmítnuté přihlášení projde dál', out.error, 'HUUM: neplatné jméno nebo heslo.');
+  check('  jako 502', kod, 502);
+}
+{
+  const h = build({ user: '', pass: '' });
+  check('bez nastavení 503 u startu',
+    (await volej(h, 'POST /api/sauna/huum-start', { teplota: 85 })).kod, 503);
+  check('  i u vypnutí', (await volej(h, 'POST /api/sauna/huum-stop')).kod, 503);
+}
+{
+  const h = build();
+  h.pustDal = false;
+  check('zamčená appka saunu nezapne',
+    (await volej(h, 'POST /api/sauna/huum-start', { teplota: 85 })).kod, 401);
+  check('  ani nevypne', (await volej(h, 'POST /api/sauna/huum-stop')).kod, 401);
   check('  a nikam nechodí', h.volani.length, 0);
 }
 

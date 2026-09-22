@@ -6583,6 +6583,108 @@ function checkHuumNahrata(d) {
   }
 }
 
+// Zapnutí a vypnutí topení. Do téhle chvíle uměla appka do kamen leda rozsvítit;
+// tohle je jediné místo, kde umí rozpálit něco na devadesát stupňů. Proto:
+//  * teplota se ořízne na meze, které hlásí sama jednotka (ne na naše domněnky),
+//  * s otevřenými dveřmi se to ani nezkouší — to je pojistka v jednotce a mlhavá
+//    chyba z cloudu by o ní neřekla nic,
+//  * povel se ověřuje dalším /status. „Přijato" není „topí".
+//
+// Co appka ohlídat NEUMÍ: co na kamnech leží. Dálkový start je věc jednotky
+// s bezpečnostním čidlem dveří, ne appky z Renderu.
+const HUUM_TEPLOTA_MIN = 40;
+const HUUM_TEPLOTA_MAX = 110;      // strop pro případ, že jednotka své meze nehlásí
+// Cloud si povel musí předat jednotce, takže hned po odeslání se stav ještě nezmění
+const HUUM_OVERENI_MS = [800, 3000];
+
+function huumMezeTeplot() {
+  const l = (state.huum && state.huum.limits) || {};
+  return {
+    min: typeof l.minTemp === 'number' ? l.minTemp : HUUM_TEPLOTA_MIN,
+    max: typeof l.maxTemp === 'number' ? l.maxTemp : HUUM_TEPLOTA_MAX
+  };
+}
+
+async function huumPovel(cesta, telo) {
+  const auth = Buffer.from(`${HUUM_USER}:${HUUM_PASS}`).toString('base64');
+  const res = await fetch(`${HUUM_URL}/${cesta}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${auth}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(telo || {}),
+    signal: AbortSignal.timeout(10000)
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(huumChyba(res.status, text));
+  return text;
+}
+
+// Vrací poslední přečtený stav, i když se nepovedlo — volající se pak rozhodne,
+// jestli je to úspěch. Neúspěšné čtení není důkaz, že povel selhal.
+async function huumOverStav(chciTopit) {
+  let posledni = null;
+  for (const cekej of HUUM_OVERENI_MS) {
+    await delay(cekej);
+    try {
+      posledni = await fetchHuum();
+      state.huum = { ...posledni, error: null, fetchedAt: new Date().toISOString() };
+      broadcast('huum', { huum: huumPayload() });
+      if (posledni.heating === chciTopit) return posledni;
+    } catch { /* zkusí se ještě jednou */ }
+  }
+  return posledni;
+}
+
+app.post('/api/sauna/huum-start', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
+  const chtena = Number((req.body || {}).teplota);
+  if (!Number.isFinite(chtena)) return res.status(400).json({ error: 'Chybí cílová teplota.' });
+  const { min, max } = huumMezeTeplot();
+  const teplota = Math.round(Math.min(max, Math.max(min, chtena)));
+  // `doorClosed: false` znamená otevřené. HUUM by to odmítl sám, ale tohle to
+  // řekne srozumitelně a bez čekání na cloud.
+  if (state.huum && state.huum.doorClosed === false) {
+    return res.status(409).json({
+      error: 'Sauna má otevřené dveře — zavři je a zkus to znovu.', huum: huumPayload()
+    });
+  }
+  try {
+    await huumPovel('start', { targetTemperature: teplota });
+    addLog(`Sauna: zapnuta na ${teplota} °C`);
+    const po = await huumOverStav(true);
+    if (!po || !po.heating) {
+      return res.status(502).json({
+        error: 'Povel odešel, ale kamna se do pár vteřin nerozjela.', huum: huumPayload()
+      });
+    }
+    res.json({ ok: true, huum: huumPayload(), teplota });
+  } catch (err) {
+    res.status(502).json({ error: err.message, huum: huumPayload() });
+  }
+});
+
+app.post('/api/sauna/huum-stop', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
+  try {
+    await huumPovel('stop', {});
+    addLog('Sauna: vypnuta');
+    const po = await huumOverStav(false);
+    if (!po || po.heating) {
+      return res.status(502).json({
+        error: 'Povel odešel, ale kamna pořád topí.', huum: huumPayload()
+      });
+    }
+    res.json({ ok: true, huum: huumPayload() });
+  } catch (err) {
+    res.status(502).json({ error: err.message, huum: huumPayload() });
+  }
+});
+
 // Světlo z appky. Stav se vrací až po ověření, takže tlačítko neřekne „hotovo",
 // když se nic nestalo — u světla je to hned vidět, ale mlčet o tom je horší.
 app.post('/api/sauna/huum-svetlo', async (req, res) => {

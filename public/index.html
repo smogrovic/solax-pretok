@@ -2794,6 +2794,23 @@
         </div>
       </div>
 
+      <!-- Topení. Jediné místo v appce, které umí rozpálit něco na devadesát
+           stupňů, takže se ZAPNOUT ptá na potvrzení a server povel ověřuje. -->
+      <div class="card lockable" id="huumTopeniCard" hidden>
+        <div class="tempauto-thr" style="margin-top:0;padding-top:0;border-top:none">
+          <div class="tempauto-thr-row">
+            <span class="tempauto-thr-label">Nahřát na</span>
+            <span class="tempauto-thr-val" id="huumCilVal">– °C</span>
+          </div>
+          <input type="range" min="40" max="110" step="1" value="85" id="huumCilSlider">
+          <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
+        </div>
+        <div class="power-buttons">
+          <button class="power-btn on-btn" id="huumTopeniOnBtn">ZAPNOUT</button>
+          <button class="power-btn off-btn" id="huumTopeniOffBtn">VYPNOUT</button>
+        </div>
+      </div>
+
       <!-- Světlo v sauně. HUUM umí jen přepnout, ON/OFF si server dopočítá
            ze stavu. Totéž tlačítko je i na Ovládání. -->
       <div class="card lockable" id="huumSvetloCard" hidden>
@@ -2817,7 +2834,6 @@
         <div class="stat-row" data-huum="door"><span>Dveře</span><span class="stat-val" id="huumDoor">–</span></div>
         <div class="stat-row" data-huum="end"><span>Topí do</span><span class="stat-val" id="huumEnd">–</span></div>
         <div class="stat-row" data-huum="left"><span>Zbývá</span><span class="stat-val" id="huumLeft">–</span></div>
-        <div class="stat-row" data-huum="humidity"><span>Vlhkost</span><span class="stat-val" id="huumHumidity">–</span></div>
         <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
       </div>
 
@@ -7695,6 +7711,89 @@ function renderHuum() {
     : '';
 
   renderHuumSvetlo(d, zname);
+  renderHuumTopeni(d, zname);
+}
+
+// Topení. Jezdec drží CHTĚNOU teplotu, ne tu z kamen — dokud se nezmáčkne
+// ZAPNOUT, do sauny nejde nic. Proto se hodnota ze serveru přebírá jen dokud
+// se jezdce nikdo nedotkl; jinak by ho přepisovala uprostřed tažení.
+const huumTopeniEls = {
+  karta: document.getElementById('huumTopeniCard'),
+  slider: document.getElementById('huumCilSlider'),
+  val: document.getElementById('huumCilVal'),
+  hint: document.getElementById('huumTopeniHint'),
+  on: document.getElementById('huumTopeniOnBtn'),
+  off: document.getElementById('huumTopeniOffBtn')
+};
+let huumCilDotcen = false;
+
+function huumCil() {
+  return Number(huumTopeniEls.slider.value);
+}
+
+function renderHuumTopeni(d, cerstve) {
+  const e = huumTopeniEls;
+  if (!e.karta) return;
+  e.karta.hidden = !(d && d.enabled);
+
+  // Meze si hlásí sama jednotka — natvrdo napsaný rozsah by u jiných kamen lhal
+  const l = (d && d.limits) || {};
+  if (typeof l.minTemp === 'number') e.slider.min = String(l.minTemp);
+  if (typeof l.maxTemp === 'number') e.slider.max = String(l.maxTemp);
+
+  if (!huumCilDotcen && cerstve && typeof d.targetTemperature === 'number') {
+    e.slider.value = String(d.targetTemperature);
+  }
+  e.val.textContent = huumCil() + ' °C';
+
+  const topi = cerstve && d ? !!d.heating : null;
+  e.on.classList.toggle('active-state', topi === true);
+  e.off.classList.toggle('active-state', topi === false);
+}
+
+if (huumTopeniEls.slider) {
+  huumTopeniEls.slider.addEventListener('input', () => {
+    huumCilDotcen = true;
+    huumTopeniEls.val.textContent = huumCil() + ' °C';
+  });
+}
+
+async function huumTopeniPovel(cesta, telo) {
+  const e = huumTopeniEls;
+  const btns = [e.on, e.off];
+  btns.forEach(b => { b.disabled = true; });
+  e.hint.textContent = cesta.endsWith('start') ? 'Zapínám…' : 'Vypínám…';
+  try {
+    const res = await fetch(cesta, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify(telo || {})
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    // Server povel ověřuje dalším dotazem, takže v odpovědi je skutečný stav
+    if (data && data.huum) { huumData = data.huum; huumCilDotcen = false; renderHuum(); }
+    if (!res.ok) throw new Error(data.error || 'Povel se nepodařilo odeslat.');
+    e.hint.textContent = '';
+  } catch (err) {
+    e.hint.textContent = err.message;
+  }
+  btns.forEach(b => { b.disabled = false; });
+}
+
+if (huumTopeniEls.on) {
+  huumTopeniEls.on.addEventListener('click', () => {
+    const t = huumCil();
+    // Rozpálit kamna omylem je jiná liga než omylem rozsvítit, tak se to ptá.
+    potvrzZeptej('Zapnout saunu?',
+      `Kamna se rozjedou na ${t} °C. Zkontroluj, že na nich nic neleží a že jsou zavřené dveře.`,
+      () => huumTopeniPovel('/api/sauna/huum-start', { teplota: t }),
+      null, () => {});
+  });
+}
+if (huumTopeniEls.off) {
+  // Vypnutí se neptá — je to ta bezpečná strana
+  huumTopeniEls.off.addEventListener('click', () => huumTopeniPovel('/api/sauna/huum-stop'));
 }
 
 // Světlo v sauně. Ovládání je na dvou stránkách (Sauna i Ovládání), proto pole
