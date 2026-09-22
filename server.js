@@ -2032,6 +2032,28 @@ app.post('/api/unlock', (req, res) => {
   res.status(401).json({ error: 'Nesprávný kód.' });
 });
 
+// PIN na přepnutí režimu appky (full / Miky / Elenka). S APP_PIN nesouvisí:
+// zamykání appky je vypnuté, tohle je zvlášť a jen na ten přepínač. Počítadlo
+// pokusů je ale společné — jeden rozpočet hádání na IP.
+//
+// Nedělá to ze živého plotu zámek: režim se drží v prohlížeči, takže kdo umí
+// otevřít vývojářské nástroje, si ho přepíše i bez kódu. PIN je na to, aby se
+// přepínač nedal odklepnout omylem nebo ze zvědavosti.
+const REZIM_PIN = process.env.REZIM_PIN || '8423';
+
+app.post('/api/rezim/pin', (req, res) => {
+  if (tooManyAttempts(req.ip)) {
+    return res.status(429).json({ error: 'Příliš mnoho pokusů, zkus to za chvíli.' });
+  }
+  const { pin } = req.body || {};
+  if (typeof pin === 'string' && safeEqual(pin, REZIM_PIN)) {
+    unlockAttempts.delete(req.ip);
+    return res.json({ ok: true });
+  }
+  registerFailedAttempt(req.ip);
+  res.status(401).json({ error: 'Nesprávný kód.' });
+});
+
 app.post('/api/unlock/check', (req, res) => {
   const { token } = req.body || {};
   const valid = !lockEnabled || (typeof token === 'string' && token.length > 0 && safeEqual(token, UNLOCK_TOKEN));

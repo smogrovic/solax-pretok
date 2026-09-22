@@ -23,8 +23,12 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno.padEnd(52) + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 const POSLANO = [];
+let ODPOVED_PIN = { ok: true, status: 200, telo: { ok: true } };
 window.fetch = async (url, opts) => {
   POSLANO.push({ url: String(url), telo: opts && opts.body ? JSON.parse(opts.body) : null });
+  if (String(url).includes('/api/rezim/pin')) {
+    return { ok: ODPOVED_PIN.ok, status: ODPOVED_PIN.status, json: async () => ODPOVED_PIN.telo };
+  }
   return { ok: true, status: 200, json: async () => ({ ok: true, success: true }) };
 };
 const pockej = () => new Promise(r => setTimeout(r, 30));
@@ -247,19 +251,54 @@ setTimeout(async () => {
     document.querySelectorAll('#rezimBtns .rezim-btn').length, 3);
   check('  a ví se, který režim běží',
     document.querySelector('#rezimBtns .rezim-btn.aktivni').dataset.rezim, 'miky');
-  // Přepnutí projde potvrzovacím oknem — jedno omylem ťuknutí appku nepřehodí
-  document.querySelector('#rezimBtns .rezim-btn[data-rezim="full"]').click();
+  // Přepnutí chce kód. Ověřuje ho server, takže v téhle stránce nikde není —
+  // dítě si ho z view-source nepřečte.
+  const pinEl = document.getElementById('potvrzPin');
+  const naFull = () => document.querySelector('#rezimBtns .rezim-btn[data-rezim="full"]').click();
+  naFull();
   check('klik se nejdřív zeptá', document.getElementById('potvrzOkno').hidden, false);
+  check('  a chce kód', vidim(pinEl), true);
   check('  a režim se zatím nemění', rezimApky, 'miky');
   document.getElementById('potvrzZpet').click();
   check('zamítnutí režim nechá být', rezimApky, 'miky');
-  document.querySelector('#rezimBtns .rezim-btn[data-rezim="full"]').click();
+  check('  a pole na kód se schová', pinEl.hidden, true);
+
+  // Špatný kód: server vrátí 401 a režim zůstane
+  ODPOVED_PIN = { ok: false, status: 401, telo: { error: 'Nesprávný kód.' } };
+  naFull();
+  POSLANO.length = 0;
+  pinEl.value = '1111';
   document.getElementById('potvrzAno').click();
-  check('potvrzení přepne na full', rezimApky, 'full');
+  await pockej();
+  check('kód se posílá na server', POSLANO[0].url, '/api/rezim/pin');
+  check('  a jde v těle', POSLANO[0].telo.pin, '1111');
+  check('špatný kód režim nepřepne', rezimApky, 'miky');
+  check('  a řekne se to', /Nesprávný kód/.test(document.getElementById('errorBanner').textContent), true);
+
+  // Správný kód
+  ODPOVED_PIN = { ok: true, status: 200, telo: { ok: true } };
+  naFull();
+  pinEl.value = '8423';
+  document.getElementById('potvrzAno').click();
+  await pockej();
+  check('správný kód přepne na full', rezimApky, 'full');
   check('  a vrátí všechny záložky', zalozky().length, 14);
   check('  i pole pro asistenta', vidim(document.getElementById('asstInput')), true);
 
+  // Kód se chce i OPAČNÝM směrem — jinak by stačilo přepnout tam a zpátky
+  document.querySelector('#rezimBtns .rezim-btn[data-rezim="elenka"]').click();
+  check('do dětského režimu se taky ptá', vidim(pinEl), true);
+  check('  a bez kódu se nepřepne', rezimApky, 'full');
+  ODPOVED_PIN = { ok: false, status: 401, telo: { error: 'Nesprávný kód.' } };
+  pinEl.value = '0000';
+  document.getElementById('potvrzAno').click();
+  await pockej();
+  check('  se špatným kódem taky ne', rezimApky, 'full');
+  ODPOVED_PIN = { ok: true, status: 200, telo: { ok: true } };
+
+
   R.push('\\n7) Režim přežije zavření appky');
+  // Tady se přepíná rovnou, bez okna — kontroluje se ukládání, ne kód
   pouzijRezim('elenka');
   check('uloží se do telefonu', localStorage.getItem('rezimApky'), 'elenka');
   check('  a načte se zpátky', rezimNacti(), 'elenka');

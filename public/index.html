@@ -1289,6 +1289,8 @@
   }
   .potvrz-nadpis{font-size:16px;font-weight:800;color:var(--navy);text-align:center;}
   .potvrz-text{font-size:12px;color:var(--grey-text);line-height:1.5;text-align:center;margin-top:8px;}
+  .potvrz-pin{margin-top:12px;}
+  .potvrz-pin[hidden]{display:none;}
   .potvrz-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
   .potvrz-btns button{
     border:none;
@@ -3197,6 +3199,9 @@
   <div class="potvrz-box">
     <div class="potvrz-nadpis" id="potvrzNadpis"></div>
     <div class="potvrz-text" id="potvrzText"></div>
+    <!-- Jen když si o to volající řekne (dnes přepínač režimu) -->
+    <input class="pin-input potvrz-pin" id="potvrzPin" type="password"
+           inputmode="numeric" autocomplete="off" placeholder="Zadej kód" hidden>
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="potvrzZpet" type="button">Zpět</button>
       <button class="potvrz-ano" id="potvrzAno" type="button">Potvrdit</button>
@@ -3377,16 +3382,40 @@ function rezimRenderPrepinac() {
   }
 }
 
+// Kód se chce při KAŽDÉ změně, i při přechodu do dětského režimu — jinak by
+// stačilo přepnout tam a zpátky. Ověřuje ho server, takže v téhle stránce
+// nikde není.
+async function rezimOverKod(klic, kod) {
+  try {
+    const res = await fetch('/api/rezim/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: String(kod || '') })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Kód se nepodařilo ověřit.');
+    pouzijRezim(klic);
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Režim: ' + err.message;
+    errorEl.classList.add('show');
+  }
+}
+
 function rezimZeptej(klic) {
   if (klic === rezimApky) return;
   const def = REZIMY[klic];
   potvrzZeptej(
     klic === 'full' ? 'Přepnout na plnou appku?' : `Přepnout na ${def.popis}?`,
     klic === 'full'
-      ? 'Vrátí se všechny stránky a celé ovládání domu.'
-      : `Zůstane jen ${def.popis}: žaluzie, teplotní automatika, teplota bazénu a světlo. Zbytek appky zmizí.`,
-    () => pouzijRezim(klic),
-    20
+      ? 'Vrátí se všechny stránky a celé ovládání domu. Zadej kód.'
+      : `Zůstane jen ${def.popis}: žaluzie, teplotní automatika, teplota bazénu a světlo. Zbytek appky zmizí. Zadej kód.`,
+    kod => rezimOverKod(klic, kod),
+    // Na dvacet vteřin se kód v klidu napsat nedá
+    60,
+    // Zamítnutí se nesmí dotknout jezdce automatiky — s režimem nesouvisí
+    () => {},
+    true
   );
 }
 
@@ -4439,6 +4468,7 @@ const POTVRZ_POLOHY = {
 const potvrzOknoEl = document.getElementById('potvrzOkno');
 const potvrzNadpisEl = document.getElementById('potvrzNadpis');
 const potvrzTextEl = document.getElementById('potvrzText');
+const potvrzPinEl = document.getElementById('potvrzPin');
 const potvrzAnoEl = document.getElementById('potvrzAno');
 const potvrzZpetEl = document.getElementById('potvrzZpet');
 let potvrzAkce = null;
@@ -4450,13 +4480,20 @@ let potvrzTimer = null;
 
 function potvrzCeka() { return !!potvrzAkce; }
 
-function potvrzZeptej(nadpis, text, akce, sekundy, zpet) {
+// `pin` = okno si navíc vyžádá kód a předá ho akci. Ostatní volající o tom
+// nevědí a chovají se jako dřív.
+function potvrzZeptej(nadpis, text, akce, sekundy, zpet, pin) {
   potvrzAkce = akce;
   potvrzZpetAkce = zpet || renderAutoSlider;
   potvrzDoKdy = Date.now() + (sekundy ? sekundy * 1000 : POTVRZ_MS);
   if (potvrzNadpisEl) potvrzNadpisEl.textContent = nadpis;
   if (potvrzTextEl) potvrzTextEl.textContent = text;
+  if (potvrzPinEl) {
+    potvrzPinEl.hidden = !pin;
+    potvrzPinEl.value = '';
+  }
   if (potvrzOknoEl) potvrzOknoEl.hidden = false;
+  if (pin && potvrzPinEl) potvrzPinEl.focus();
   clearInterval(potvrzTimer);
   potvrzTimer = setInterval(potvrzTik, 1000);
   potvrzTik();
@@ -4478,7 +4515,9 @@ function potvrzKonec(potvrzeno) {
   if (potvrzOknoEl) potvrzOknoEl.hidden = true;
   const zpet = potvrzZpetAkce;
   potvrzZpetAkce = null;
-  if (potvrzeno && akce) akce();
+  const kod = potvrzPinEl && !potvrzPinEl.hidden ? potvrzPinEl.value : null;
+  if (potvrzPinEl) { potvrzPinEl.hidden = true; potvrzPinEl.value = ''; }
+  if (potvrzeno && akce) akce(kod);
   else if (zpet) zpet();
 }
 

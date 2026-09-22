@@ -9,7 +9,7 @@
 // se takový zásah nejčastěji dotkne.
 const fs = require('fs');
 const path = require('path');
-const { suite, between, fn } = require('./zdroj');
+const { suite, between, fn, LINES } = require('./zdroj');
 const { check, nadpis, konec } = suite('statická kontrola');
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -88,6 +88,20 @@ nadpis('2b) Appka posílá jen povely, které server zná');
   check('appka nějaké povely posílá', posila.size > 3, true);
   check('a všechny jsou serveru známé',
     [...posila].filter(a => !zna.has(a)).join(', ') || 'všechny', 'všechny');
+}
+
+nadpis('2c) Kód k přepnutí režimu není ve stránce');
+{
+  // Celá obrana stojí na tom, že kód zná jen server. Kdyby se octl v index.html,
+  // stačilo by dítěti otevřít zdroj stránky. Kontroluje se tady, a ne
+  // v prohlížečové sadě: ta si do stránky vkládá vlastní skript a ten kód
+  // obsahuje, takže by se dala oklamat sama sebou.
+  const kod = (LINES.find(l => l.startsWith('const REZIM_PIN')) || '').match(/'([^']+)'/);
+  check('server nějaký výchozí kód má', !!kod, true);
+  check('  a ve stránce není', HTML.includes(kod[1]), false);
+  // Ověřuje se na serveru, ne v prohlížeči
+  check('appka se ptá serveru', /fetch\('\/api\/rezim\/pin'/.test(js), true);
+  check('  a kód si sama neporovnává', /REZIM_PIN|=== ?'\d{4}'/.test(js), false);
 }
 
 nadpis('3) Ruční přepnutí režimu wallboxu');
