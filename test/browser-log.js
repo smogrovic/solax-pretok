@@ -112,7 +112,6 @@ setTimeout(async () => {
   check('  a starší se zahodí',
     pruneOldLog([{ t: Date.now() - 50 * 3600000, msg: 'staré' },
                  { t: Date.now(), msg: 'nové' }]).length, 1);
- } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   R.push('\\nDiagnostika na jedno klepnutí');
   // Tlačítko vysype všechno do schránky, ať se to dá poslat celé najednou
@@ -152,6 +151,7 @@ setTimeout(async () => {
   check('  a je v něm totéž', /bojler zapnut/.test(zaloha.value), true);
   check('  a řekne se, ať si to označí',
     /označ/.test(document.getElementById('diagStav').textContent), true);
+ } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

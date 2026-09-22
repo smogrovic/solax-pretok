@@ -5330,17 +5330,14 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
   if (btn) btn.disabled = false;
 }
 
-function blindPositionText(b) {
-  // closure: 0 = otevřeno, 100 = zavřeno (jen io zařízení, RTS polohu nehlásí)
-  if (b.type === 'switch') {
-    if (b.onState === true) return 'zapnuto';
-    if (b.onState === false) return 'vypnuto';
-    return '';
-  }
-  if (typeof b.closure !== 'number') return '';
-  if (b.closure <= 0) return 'otevřeno';
-  if (b.closure >= 100) return 'zavřeno';
-  return 'zataženo ' + Math.round(b.closure) + ' %';
+// Jen pro spínače (světla z TaHomy). Rolety text o poloze nemají: vedle v řádku
+// ji kreslí ukazatel pruhem a píše pod něj procenta, takže to byla tatáž informace
+// dvakrát — a na zataženou roletu je vidět z okna. Světlo ukazatel nemá, takže
+// tohle je jediné, z čeho se u něj stav pozná, a z postele vidět není.
+function blindSpinacText(b) {
+  if (b.onState === true) return 'zapnuto';
+  if (b.onState === false) return 'vypnuto';
+  return '';
 }
 
 function blindsMessage(listEl, msg) {
@@ -5527,7 +5524,7 @@ function renderBlindRow(b) {
   label.textContent = b.label;
   info.appendChild(label);
   // U garáže stav nepíšeme — vpravo ho už ukazuje ikona vrat s popiskem
-  const pos = isGarage ? '' : blindPositionText(b);
+  const pos = b.type === 'switch' && !isGarage ? blindSpinacText(b) : '';
   if (pos) {
     const posEl = document.createElement('span');
     posEl.className = 'blind-pos';

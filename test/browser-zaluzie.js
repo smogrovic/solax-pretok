@@ -56,7 +56,6 @@ setTimeout(() => {
   const volby = blindTimerOptions(1).map(o => o.label);
   check('kuchyň je v seznamu vlastní položkou', volby.includes('Kuchyň'), true);
   check('  a obývákové taky', volby.filter(l => /Obývák/.test(l)).join(','), 'Obývák Okno,Obývák Dveře');
- } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   R.push('');
   R.push('4) Jezdec naklopen\u00ed');
@@ -88,6 +87,30 @@ setTimeout(() => {
     document.querySelector('.timer-card .blind-tilt .blind-tilt-label').textContent, 'Naklopen\u00ed');
   check('  i v rozvrhu',
     document.getElementById('rozvrhNaklonLabel').textContent, 'Naklopen\u00ed');
+  R.push('');
+  R.push('5) Poloha se nep\u00ed\u0161e slovy');
+  // Vedle v řádku ji kreslí ukazatel pruhem a píše pod něj procenta — text
+  // „zavřeno" byl tatáž informace podruhé. Na zataženou roletu je navíc vidět.
+  blinds = [
+    { deviceURL: 'io://Loznice', label: 'Lo\u017enice', room: 'Lo\u017enice', type: 'cover',
+      hasOrientation: true, orientation: 50, hasClosure: true, closure: 100 },
+    { deviceURL: 'io://SvetlaTerasa', label: 'Sv\u011btla terasa', room: 'Terasa',
+      type: 'switch', onState: true }
+  ];
+  renderBlinds();
+  // Ložnice patří na druhou stránku žaluzií, takže se hledá v obou seznamech
+  const radky = [...document.querySelectorAll('.blind-row')];
+  const roleta = radky.find(r => /Lo\u017enice/.test(r.textContent));
+  check('roleta u\u017e popisek polohy nem\u00e1', !!roleta.querySelector('.blind-pos'), 'false');
+  check('  a slovo \u201ezav\u0159eno" v \u0159\u00e1dku nen\u00ed', /zav\u0159eno/.test(roleta.textContent), 'false');
+  // Ta informace se neztrácí, jen ji nese ukazatel
+  check('  ale ukazatel po\u0159\u00e1d p\u00ed\u0161e procenta',
+    roleta.querySelector('.blind-meter-pct').textContent, '100 %');
+  // Světlo ukazatel nemá, takže tohle je jediné, z čeho se u něj stav pozná
+  const svetlo = radky.find(r => /Sv\u011btla terasa/.test(r.textContent));
+  check('sv\u011btlu popisek z\u016fst\u00e1v\u00e1', !!svetlo.querySelector('.blind-pos'), 'true');
+  check('  a \u0159\u00edk\u00e1 stav', svetlo.querySelector('.blind-pos').textContent, 'zapnuto');
+ } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');
