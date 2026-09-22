@@ -539,6 +539,9 @@
     color:var(--navy);
   }
   .light-cell .power-buttons{margin-top:0;}
+  /* `display:flex` výš by atributu `hidden` přebilo jeho display:none z prohlížeče.
+     Buňka se světlem sauny se schovává právě tím atributem. */
+  .light-cell[hidden]{display:none;}
   .pool-card{
     margin-top:12px;
   }
@@ -1561,10 +1564,9 @@
      ani pozadí nepotřebuje. */
   .huum-temps{display:flex;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
   .huum-temps .boiler-name{white-space:nowrap;}
-  /* Ladicí tlačítka vedle sebe. Vzhled si berou od diagnostiky kalendáře — je to
-     ta samá věc: jediná cesta, jak se podívat na napojení, které běží na serveru. */
-  .huum-lad{display:flex;gap:8px;margin-top:10px;}
-  .huum-lad .kal-diag-btn{margin-bottom:0;}
+  /* „33 °C" se na úzkém telefonu lámalo mezi číslo a jednotku a stupeň zůstal
+     viset na druhém řádku. Písmo se radši zmenší, než aby se to zalomilo. */
+  .huum-temps .boiler-temp{white-space:nowrap;font-size:clamp(18px, 6.5vw, 26px);}
   .boiler-sep{
     width:1px;
     background:rgba(44,62,80,0.1);
@@ -2545,6 +2547,19 @@
               <button class="power-btn off-btn" id="lightNocniOffBtn">OFF</button>
             </div>
           </div>
+          <!-- Světlo v sauně jde přes HUUM, ne přes Shelly. `jen-full` proto, že
+               dětem by rozbilo mřížku 2×2 a v sauně nemají co dělat. -->
+          <div class="light-cell jen-full" id="huumSvetloCell2" hidden>
+            <div class="shelly-row">
+              <div class="traffic-light" id="huumSvetloLight2"></div>
+              <div class="shelly-label">Světlo sauna</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="huumSvetloOnBtn2">ON</button>
+              <button class="power-btn off-btn" id="huumSvetloOffBtn2">OFF</button>
+            </div>
+            <div class="manual-hold" id="huumSvetloHint2"></div>
+          </div>
           <!-- Buňky sedí přímo v téhle mřížce (display:contents), ne ve vlastní
                pod ní. V dětském režimu jsou Noční světla schovaná a schovaná
                buňka místo nezabírá — zbude čistá mřížka 2×2. -->
@@ -2743,18 +2758,8 @@
   <!-- Stránka: Sauna -->
   <div class="slide" data-title="Sauna" id="saunaSlide" data-rezim="full">
     <div class="page">
-      <div class="card">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="saunaLight"></div>
-            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
-          </div>
-          <div class="sauna-power" id="saunaPower">– kW</div>
-          <div class="manual-hold" id="saunaHint"></div>
-          <div class="sauna-meta" id="saunaMeta"></div>
-        </div>
-      </div>
-
+      <!-- Kamna napřed: teplota v sauně je to, kvůli čemu se na stránku chodí.
+           Měření z 3EM je pod tím — je to hlídač jističe, ne displej. -->
       <div class="card">
         <div class="device-block last">
           <div class="shelly-row">
@@ -2774,14 +2779,36 @@
           </div>
           <div class="manual-hold" id="huumHint"></div>
           <div class="sauna-meta" id="huumKdy"></div>
-          <!-- Napojení na HUUM se dá ladit jen naostro: jméno s heslem jsou na
-               serveru a z karty je vidět už jen přeložený tvar. Proto tady:
-               jedno tlačítko vynutí kolo dotazů, druhé ukáže, co HUUM vrátil. -->
-          <div class="huum-lad jen-full">
-            <button class="kal-diag-btn" id="huumObnovBtn" type="button">Aktualizovat</button>
-            <button class="kal-diag-btn" id="huumSyroveBtn" type="button">Syrová data</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="saunaLight"></div>
+            <div class="shelly-label">Sauna <span class="state" id="saunaState">–</span></div>
           </div>
-          <pre class="kal-diag jen-full" id="huumSyrove" hidden></pre>
+          <div class="sauna-power" id="saunaPower">– kW</div>
+          <div class="manual-hold" id="saunaHint"></div>
+          <div class="sauna-meta" id="saunaMeta"></div>
+        </div>
+      </div>
+
+      <!-- Světlo v sauně. HUUM umí jen přepnout, ON/OFF si server dopočítá
+           ze stavu. Totéž tlačítko je i na Ovládání. -->
+      <div class="card lockable" id="huumSvetloCard" hidden>
+        <div class="lights-grid one">
+          <div class="light-cell">
+            <div class="shelly-row">
+              <div class="traffic-light" id="huumSvetloLight"></div>
+              <div class="shelly-label">Světlo sauna</div>
+            </div>
+            <div class="power-buttons">
+              <button class="power-btn on-btn" id="huumSvetloOnBtn">ON</button>
+              <button class="power-btn off-btn" id="huumSvetloOffBtn">OFF</button>
+            </div>
+            <div class="manual-hold" id="huumSvetloHint"></div>
+          </div>
         </div>
       </div>
 
@@ -2792,16 +2819,6 @@
         <div class="stat-row" data-huum="left"><span>Zbývá</span><span class="stat-val" id="huumLeft">–</span></div>
         <div class="stat-row" data-huum="humidity"><span>Vlhkost</span><span class="stat-val" id="huumHumidity">–</span></div>
         <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
-        <div class="stat-row" data-huum="steamer"><span>Parní vyvíječ</span><span class="stat-val" id="huumSteamer">–</span></div>
-        <div class="stat-row" data-huum="name"><span>Název sauny</span><span class="stat-val" id="huumName">–</span></div>
-      </div>
-
-      <div class="card stats-card" id="huumLimitsCard">
-        <div class="graph-title">Meze jednotky</div>
-        <div class="stat-row" data-huum="lTemp"><span>Teplota</span><span class="stat-val" id="huumLimTemp">–</span></div>
-        <div class="stat-row" data-huum="lHeat"><span>Doba topení</span><span class="stat-val" id="huumLimHeat">–</span></div>
-        <div class="stat-row" data-huum="lTimer"><span>Časovač</span><span class="stat-val" id="huumLimTimer">–</span></div>
-        <div class="stat-row" data-huum="lLock"><span>Dětský zámek</span><span class="stat-val" id="huumLimLock">–</span></div>
       </div>
 
       <button class="sbal-btn" data-sbal="sauna" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
@@ -7620,9 +7637,8 @@ const WB_MODE_LEGEND = [
 // vidět, co přijde. Po připojení se řádky naplní a prázdné se schovají.
 const huumEls = {};
 for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumTarget', 'huumHint',
-  'huumStatusCard', 'huumLimitsCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
-  'huumLightState', 'huumSteamer', 'huumName', 'huumLimTemp', 'huumLimHeat',
-  'huumLimTimer', 'huumLimLock', 'huumKdy']) {
+  'huumStatusCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
+  'huumLightState', 'huumKdy']) {
   huumEls[id] = document.getElementById(id);
 }
 let huumData = null;
@@ -7667,18 +7683,6 @@ function renderHuum() {
     : null, p);
   huumSet('huumLightState', 'light',
     p && typeof d.light === 'number' ? (d.light ? 'zapnuto' : 'vypnuto') : null, p);
-  huumSet('huumSteamer', 'steamer', p && typeof d.steamerError === 'number'
-    ? (d.steamerError ? 'došla voda' : 'v pořádku') : null, p);
-  huumSet('huumName', 'name', p ? d.saunaName : null, p);
-
-  const l = (p && d.limits) || {};
-  const rozsah = (a, b, jed) => (typeof a === 'number' && typeof b === 'number' ? `${a}–${b} ${jed}` : null);
-  huumSet('huumLimTemp', 'lTemp', rozsah(l.minTemp, l.maxTemp, '°C'), p);
-  huumSet('huumLimHeat', 'lHeat', rozsah(l.minHeatingTime, l.maxHeatingTime, 'h'), p);
-  huumSet('huumLimTimer', 'lTimer', rozsah(l.minTimer, l.maxTimer, 'h'), p);
-  huumSet('huumLimLock', 'lLock',
-    p && l.childLock !== null && l.childLock !== undefined
-      ? (l.childLock && l.childLock !== 'OFF' ? 'zapnutý' : 'vypnutý') : null, p);
 
   huumEls.huumHint.textContent = !d.enabled
     ? 'Zatím jen náhled. Doplň na serveru HUUM_USER a HUUM_PASS (účet z appky HUUM) a začne se to plnit.'
@@ -7689,47 +7693,62 @@ function renderHuum() {
   huumEls.huumKdy.textContent = d.enabled && d.fetchedAt
     ? 'Naposledy ' + fmtSolTime(new Date(d.fetchedAt).getTime())
     : '';
+
+  renderHuumSvetlo(d, zname);
 }
 
-const huumObnovBtn = document.getElementById('huumObnovBtn');
-const huumSyroveBtn = document.getElementById('huumSyroveBtn');
-const huumSyroveEl = document.getElementById('huumSyrove');
+// Světlo v sauně. Ovládání je na dvou stránkách (Sauna i Ovládání), proto pole
+// prvků — stejně jako u světla u bazénu.
+const huumSvetloEls = {
+  light: els('huumSvetloLight', 'huumSvetloLight2'),
+  on: els('huumSvetloOnBtn', 'huumSvetloOnBtn2'),
+  off: els('huumSvetloOffBtn', 'huumSvetloOffBtn2'),
+  hint: els('huumSvetloHint', 'huumSvetloHint2'),
+  karty: els('huumSvetloCard', 'huumSvetloCell2')
+};
 
-if (huumObnovBtn) {
-  huumObnovBtn.addEventListener('click', async () => {
-    huumObnovBtn.disabled = true;
-    const puvodni = huumObnovBtn.textContent;
-    huumObnovBtn.textContent = 'Ptám se…';
-    try {
-      const res = await fetch('/api/sauna/huum-obnov', { method: 'POST' });
-      const data = await res.json();
-      // Odpověď nese čerstvý stav rovnou — není proč čekat na zprávu ze streamu
-      if (data && data.huum) { huumData = data.huum; renderHuum(); }
-      else if (data && data.error) huumEls.huumHint.textContent = data.error;
-    } catch (err) {
-      huumEls.huumHint.textContent = 'Aktualizace selhala: ' + err.message;
-    }
-    huumObnovBtn.textContent = puvodni;
-    huumObnovBtn.disabled = false;
+function renderHuumSvetlo(d, cerstve) {
+  // Nepřipojená kamna nebo jednotka jen s parním vyvíječem (config 1) → tlačítko
+  // by nemělo co přepnout, tak se celá buňka schová. Prázdné ON/OFF vedle ostatních
+  // světel vypadá jako rozbité relé.
+  const zapojeno = !!(d && d.enabled) && d.config !== 1;
+  huumSvetloEls.karty.forEach(el => { el.hidden = !zapojeno; });
+
+  // `light` je číslo 0/1. Bez čerstvých dat se stav nepředstírá: semafor zůstane
+  // šedý a žádné z tlačítek není zvýrazněné.
+  const sviti = cerstve && d && typeof d.light === 'number' ? !!d.light : null;
+  huumSvetloEls.light.forEach(el => {
+    el.className = 'traffic-light' + (sviti === null ? '' : (sviti ? ' on' : ' off'));
   });
+  huumSvetloEls.on.forEach(el => el.classList.toggle('active-state', sviti === true));
+  huumSvetloEls.off.forEach(el => el.classList.toggle('active-state', sviti === false));
 }
 
-if (huumSyroveBtn && huumSyroveEl) {
-  huumSyroveBtn.addEventListener('click', async () => {
-    huumSyroveBtn.disabled = true;
-    huumSyroveEl.hidden = false;
-    huumSyroveEl.textContent = 'Ptám se HUUM…';
-    try {
-      const res = await fetch('/api/sauna/huum-syrove', { headers: { 'X-Auth-Token': authToken } });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error('Ovládání je zamčené.'); }
-      huumSyroveEl.textContent = JSON.stringify(data, null, 1);
-    } catch (err) {
-      huumSyroveEl.textContent = 'Nepovedlo se: ' + err.message;
-    }
-    huumSyroveBtn.disabled = false;
-  });
+async function huumSvetloPrepni(on) {
+  const btns = huumSvetloEls.on.concat(huumSvetloEls.off);
+  btns.forEach(b => { b.disabled = true; });
+  huumSvetloEls.hint.forEach(el => { el.textContent = ''; });
+  try {
+    const res = await fetch('/api/sauna/huum-svetlo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ on })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    // Server povel ověřuje dalším dotazem, takže v odpovědi je skutečný stav,
+    // ne jen „odesláno" — čekat na stream by tady jen zdrželo
+    if (data && data.huum) { huumData = data.huum; renderHuum(); }
+    if (!res.ok) throw new Error(data.error || 'Světlo se nepodařilo přepnout.');
+    errorEl.classList.remove('show');
+  } catch (err) {
+    huumSvetloEls.hint.forEach(el => { el.textContent = err.message; });
+  }
+  btns.forEach(b => { b.disabled = false; });
 }
+
+huumSvetloEls.on.forEach(b => b.addEventListener('click', () => huumSvetloPrepni(true)));
+huumSvetloEls.off.forEach(b => b.addEventListener('click', () => huumSvetloPrepni(false)));
 
 setInterval(renderHuum, 30000);   // „zbývá 1:20" musí odtikávat i bez zprávy ze serveru
 

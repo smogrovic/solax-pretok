@@ -135,9 +135,14 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('cíl taky', huumTarget.textContent, '– °C');
   check('hláška řekne, co doplnit', /HUUM_USER a HUUM_PASS/.test(huumHint.textContent), 'true');
   // Náhled: ukazují se VŠECHNY řádky, ať je co ladit
-  const vsechny = ['door', 'end', 'left', 'humidity', 'light', 'steamer', 'name',
-                   'lTemp', 'lHeat', 'lTimer', 'lLock'];
-  check('všech 11 řádků je vidět', vsechny.filter(vidi).length, 11);
+  const vsechny = ['door', 'end', 'left', 'humidity', 'light'];
+  check('všech 5 řádků je vidět', vsechny.filter(vidi).length, 5);
+  // Parní vyvíječ, název sauny a celá karta „Meze jednotky" jsou pryč — na stránku
+  // se chodí kvůli teplotě, ne kvůli tabulce parametrů, co se nikdy nemění
+  check('parní vyvíječ je pryč', !!radek('steamer'), 'false');
+  check('název sauny taky', !!radek('name'), 'false');
+  check('a karta s mezemi jednotky neexistuje',
+    !!document.getElementById('huumLimitsCard'), 'false');
   check('  a všechny mají pomlčku',
     vsechny.every(k => radek(k).querySelector('.stat-val').textContent === '–'), 'true');
 
@@ -158,17 +163,12 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('zbývá se dopočítá', huumLeft.textContent, '1:20');
   check('vlhkost i s cílem', huumHumidity.textContent, '35 % (cíl 40 %)');
   check('světlo', huumLightState.textContent, 'zapnuto');
-  check('vyvíječ v pořádku', huumSteamer.textContent, 'v pořádku');
-  check('název sauny', huumName.textContent, 'Chata');
-  check('meze teploty', huumLimTemp.textContent, '40–110 °C');
-  check('meze doby topení', huumLimHeat.textContent, '1–3 h');
-  check('dětský zámek', huumLimLock.textContent, 'vypnutý');
   check('hláška ukáže vybavení', /vyvíječ i světlo/.test(huumHint.textContent), 'true');
 
   OUT.push('\\n8) Kamna HUUM — mezní stavy');
   // Cílovou teplotu API nevrací, dokud sauna netopí
   huumData = { ...huumData, statusCode: 232, statusText: 'připravená', heating: false,
-    targetTemperature: null, endDate: null, humidity: null, steamerError: null };
+    targetTemperature: null, endDate: null, humidity: null };
   renderHuum();
   check('bez cíle je pomlčka', huumTarget.textContent, '– °C');
   check('  ale teplota zůstane', huumTemp.textContent, '78 °C');
@@ -179,9 +179,6 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumData = { ...huumData, doorClosed: false };
   renderHuum();
   check('otevřené dveře se poznají', huumDoor.textContent, 'otevřené');
-  huumData = { ...huumData, steamerError: 1 };
-  renderHuum();
-  check('došlá voda ve vyvíječi', huumSteamer.textContent, 'došla voda');
   huumData = { enabled: true, statusCode: 232, fetchedAt: new Date(T - 30 * MIN).toISOString() };
   renderHuum();
   check('stará data = nedostupná', huumState.textContent, 'nedostupná');
@@ -200,47 +197,80 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('bez p\u0159ipojen\u00ed se \u0159\u00e1dek neukazuje', huumKdy.textContent, '');
 
-  OUT.push('\\n8c) Ladic\u00ed tla\u010d\u00edtka');
+  OUT.push('\\n8c) Po\u0159ad\u00ed karet a zalomen\u00ed teploty');
+  // Kamna patří nahoru — teplota v sauně je to, kvůli čemu se na stránku chodí.
+  // Měření z 3EM je hlídač jističe, ne displej.
+  const karty = Array.from(document.querySelectorAll('#saunaSlide .page > .card'));
+  check('kamna HUUM jsou prvn\u00ed karta', karty[0].contains(huumLight), 'true');
+  check('  m\u011b\u0159en\u00ed 3EM druh\u00e1', karty[1].contains(saunaLight), 'true');
+  // „33 °C" se lámalo mezi číslo a jednotku a stupeň zůstával viset níž
+  check('teplota se nel\u00e1me', getComputedStyle(huumTemp).whiteSpace, 'nowrap');
+  check('  a c\u00edl taky', getComputedStyle(huumTarget).whiteSpace, 'nowrap');
+
+  OUT.push('\\n8d) Sv\u011btlo v saun\u011b');
   const POSLANO = [];
+  const svetloOn = document.getElementById('huumSvetloOnBtn');
+  const svetloOff = document.getElementById('huumSvetloOffBtn');
+  const svetloKontrolka = document.getElementById('huumSvetloLight');
   window.fetch = async (adresa, opts) => {
-    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET' });
-    if (String(adresa).includes('huum-obnov')) {
-      return { ok: true, status: 200, json: async () => ({ ok: true, huum: {
-        enabled: true, statusCode: 232, statusText: 'p\u0159ipraven\u00e1', heating: false,
-        temperature: 41, fetchedAt: new Date().toISOString(), error: null } }) };
-    }
-    return { ok: true, status: 200, json: async () => ({
-      nastaveno: true, stav: 200, telo: { statusCode: 232, temperature: '41' } }) };
+    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
+                   telo: opts && opts.body ? JSON.parse(opts.body) : null });
+    return { ok: true, status: 200, json: async () => ({ ok: true, light: 1, huum: {
+      ...huumData, light: 1, fetchedAt: new Date().toISOString() } }) };
   };
 
-  huumData = { enabled: true, error: null };
+  // Dokud ze serveru nic nepřišlo, neví se, jestli kamna vůbec jsou — do té doby
+  // se světlo neukazuje. Prázdné ON/OFF vedle ostatních vypadá jako rozbité relé.
+  check('do prvn\u00edho sn\u00edmku se sv\u011btlo neukazuje',
+    document.getElementById('huumSvetloCard').hasAttribute('hidden'), 'true');
+
+  huumData = { enabled: true, statusCode: 232, statusText: 'p\u0159ipraven\u00e1', heating: false,
+    temperature: 33, targetTemperature: 79, light: 0, config: 2,
+    fetchedAt: new Date().toISOString(), error: null };
   renderHuum();
-  document.getElementById('huumObnovBtn').click();
-  await wait(80);
-  check('Aktualizovat se pt\u00e1 serveru', POSLANO[0].adresa, '/api/sauna/huum-obnov');
-  check('  a to POSTem', POSLANO[0].metoda, 'POST');
-  // Odpověď nese čerstvý stav — na zprávu ze streamu se čekat nemusí
-  check('  \u010derstv\u00fd stav se rovnou uk\u00e1\u017ee', huumTemp.textContent, '41 \u00b0C');
-  check('  i s \u010dasem, kdy doraz', /^Naposledy \\d\\d?:\\d\\d$/.test(huumKdy.textContent), 'true');
-  check('  a tla\u010d\u00edtko se zase povol\u00ed', document.getElementById('huumObnovBtn').disabled, 'false');
+  check('po p\u0159ipojen\u00ed je karta se sv\u011btlem vid\u011bt',
+    document.getElementById('huumSvetloCard').getClientRects().length > 0, 'true');
+  check('zhasnut\u00e9 sv\u011btlo m\u00e1 \u010dervenou', svetloKontrolka.className, 'traffic-light off');
+  check('  a OFF je zv\u00fdrazn\u011bn\u00e9', svetloOff.classList.contains('active-state'), 'true');
+  check('  ON nen\u00ed', svetloOn.classList.contains('active-state'), 'false');
 
-  const syr = document.getElementById('huumSyrove');
-  check('v\u00fdpis je zat\u00edm schovan\u00fd', syr.hidden, 'true');
-  document.getElementById('huumSyroveBtn').click();
+  svetloOn.click();
   await wait(80);
-  check('Syrov\u00e1 data se zeptaj\u00ed', POSLANO[1].adresa, '/api/sauna/huum-syrove');
-  // Syrové tělo je celý smysl toho tlačítka — přeložený tvar už je na kartě
-  check('  v\u00fdpis se objev\u00ed', syr.hidden, 'false');
-  check('  a je v n\u011bm t\u011blo tak, jak p\u0159i\u0161lo',
-    syr.textContent.includes('"temperature": "41"'), 'true');
+  check('ON po\u0161le povel', POSLANO[0].adresa, '/api/sauna/huum-svetlo');
+  check('  POSTem', POSLANO[0].metoda, 'POST');
+  check('  a \u0159ekne co chce', POSLANO[0].telo.on, 'true');
+  // Server povel ověřuje dalším dotazem, takže v odpovědi je skutečný stav
+  check('stav se p\u0159evezme z odpov\u011bdi', svetloKontrolka.className, 'traffic-light on');
+  check('  a ON je te\u010f zv\u00fdrazn\u011bn\u00e9', svetloOn.classList.contains('active-state'), 'true');
 
-  // Dětem tam nemají co dělat — z výpisu by se leda vyklikalo něco, co neměli
-  document.body.dataset.rezim = 'miky';
-  check('v d\u011btsk\u00e9m re\u017eimu tla\u010d\u00edtka nejsou',
-    document.querySelector('.huum-lad').getClientRects().length, 0);
-  check('  ani v\u00fdpis', syr.getClientRects().length, 0);
-  check('  ale karta s teplotou z\u016fstane', huumTemp.getClientRects().length > 0, 'true');
-  document.body.dataset.rezim = 'full';
+  POSLANO.length = 0;
+  svetloOff.click();
+  await wait(80);
+  check('OFF po\u0161le opak', POSLANO[0].telo.on, 'false');
+
+  // Totéž tlačítko je i na Ovládání — musí ukazovat ten samý stav
+  check('na Ovl\u00e1d\u00e1n\u00ed je tot\u00e9\u017e sv\u011btlo',
+    document.getElementById('huumSvetloLight2').className,
+    document.getElementById('huumSvetloLight').className);
+
+  // Bez čerstvých dat se stav nepředstírá
+  huumData = { ...huumData, fetchedAt: new Date(T - 30 * MIN).toISOString() };
+  renderHuum();
+  check('u star\u00fdch dat je semafor \u0161ed\u00fd', svetloKontrolka.className, 'traffic-light');
+  check('  a \u017e\u00e1dn\u00e9 tla\u010d\u00edtko nen\u00ed zv\u00fdrazn\u011bn\u00e9',
+    svetloOn.classList.contains('active-state') || svetloOff.classList.contains('active-state'), 'false');
+
+  // Jednotka jen s parním vyvíječem (config 1) nemá světlo kam zapnout
+  huumData = { ...huumData, config: 1, fetchedAt: new Date().toISOString() };
+  renderHuum();
+  check('bez osazen\u00e9ho sv\u011btla karta zmiz\u00ed',
+    document.getElementById('huumSvetloCard').getClientRects().length, 0);
+  check('  i bu\u0148ka na Ovl\u00e1d\u00e1n\u00ed',
+    document.getElementById('huumSvetloCell2').getClientRects().length, 0);
+  huumData = { enabled: false, error: null };
+  renderHuum();
+  check('nep\u0159ipojen\u00e1 kamna sv\u011btlo taky neukazuj\u00ed',
+    document.getElementById('huumSvetloCard').getClientRects().length, 0);
 
   OUT.push('\\n9) Měřák 3EM zůstal nedotčený');
   saunaData = { powerW: 6200, fetchedAt: new Date().toISOString(), topi: true,

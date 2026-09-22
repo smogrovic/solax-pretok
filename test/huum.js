@@ -31,6 +31,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     zpravy: [],
     volani: [],
     pustDal: true,
+    zapisy: [],
+    zpravicky: [],
     // Co má stub odpovědět; sekce si to přepisují
     odpovez: async () => ({ stav: 200, text: JSON.stringify(odpoved()) })
   };
@@ -48,9 +50,10 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
 
   h.api = new Function(
     'HUUM_USER', 'HUUM_PASS', 'HUUM_URL', 'huumEnabled', 'fetch', 'state', 'app',
-    'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth',
+    'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
-         + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload };'
+         + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
+         + ' checkHuumNahrata, HUUM_NAHRATA_C };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -62,7 +65,9 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
       if (h.pustDal) return true;
       res.status(401).json({ error: 'zamčeno' });
       return false;
-    }
+    },
+    text => h.zapisy.push(text),
+    (nadpis, telo) => h.zpravicky.push({ nadpis, telo })
   );
   return h;
 }
@@ -266,82 +271,200 @@ nadpis('9) Kolo dotazů');
   check('  a appka ví, že to není zapnuté', h.api.huumPayload().enabled, false);
 }
 
-nadpis('10) Syrová data');
+nadpis('10) Syrové tělo pro diagnostiku');
 {
   const h = build();
-  const { out } = await volej(h, 'GET /api/sauna/huum-syrove');
-  check('řekne, že je nastaveno', out.nastaveno, true);
-  check('  a kam se ptalo', out.adresa, 'https://sauna.huum.eu/action/home/status');
-  check('  s jakým výsledkem', out.stav, 200);
-  // Tělo musí jít dál NEPŘELOŽENÉ — jinak by se nepoznalo, že HUUM přejmenoval
-  // pole nebo je nevrátil, a přesně kvůli tomu ten endpoint existuje
-  check('tělo je syrové', out.telo.temperature, '23');
-  check('  včetně názvů polí', 'statusCode' in out.telo, true);
-  check('a vedle něj překlad', out.prelozeno.temperature, 23);
-  check('  se stavem slovy', out.prelozeno.statusText, 'připravená');
-  // Výpis se posílá do chatu
-  check('heslo ve výpisu není', JSON.stringify(out).includes('tajne-heslo'), false);
-  check('  ani jméno', JSON.stringify(out).includes('ja@doma.cz'), false);
+  await h.api.pollHuum();
+  // Obal kolem `fetch` zapisuje odpovědi ořezané na 300 znaků; odpověď z HUUM je
+  // delší a zajímavé názvy polí jsou až dole. Proto se schovává celá zvlášť.
+  check('uloží se tak, jak přišlo', h.state.huumSyrove.telo.includes('"temperature":"23"'), true);
+  check('  i se stavem', h.state.huumSyrove.stav, 200);
+  check('  a s časem', typeof h.state.huumSyrove.kdy, 'string');
+  h.odpovez = async () => ({ stav: 500, text: 'rozbito' });
+  await h.api.pollHuum();
+  // Zrovna u chyby se na to tělo člověk potřebuje podívat nejvíc
+  check('i neúspěšná odpověď se schová', h.state.huumSyrove.telo, 'rozbito');
+  check('  se svým kódem', h.state.huumSyrove.stav, 500);
+  check('heslo v tom není', JSON.stringify(h.state.huumSyrove).includes('tajne-heslo'), false);
 }
 {
   const h = build();
-  h.odpovez = async () => ({ stav: 503, text: '{"error":"maintenance"}' });
-  const { out } = await volej(h, 'GET /api/sauna/huum-syrove');
-  check('při chybě je vidět kód', out.stav, 503);
-  check('  i hláška', out.chyba, 'HUUM API HTTP 503: {"error":"maintenance"}');
-  check('  a tělo pořád taky', out.telo.error, 'maintenance');
-  check('  překlad se nepřikládá', 'prelozeno' in out, false);
-}
-{
-  const h = build();
-  h.odpovez = async () => ({ stav: 200, text: '<!DOCTYPE html><title>Login</title>' });
-  const { out } = await volej(h, 'GET /api/sauna/huum-syrove');
-  // Právě tohle je ta odpověď, kterou z přeloženého tvaru nepoznáš
-  check('co není JSON, jde dál jako text', out.telo, '<!DOCTYPE html><title>Login</title>');
-  check('  a řekne se, že je to nečekané', out.chyba, 'HUUM: nečekaná odpověď.');
-}
-{
-  const h = build();
-  h.odpovez = async () => ({ pad: 'fetch failed' });
-  const { out } = await volej(h, 'GET /api/sauna/huum-syrove');
-  check('spadlé spojení nespadne endpoint', out.chyba, 'fetch failed');
-}
-{
-  const h = build({ user: '', pass: '' });
-  const { out, kod } = await volej(h, 'GET /api/sauna/huum-syrove');
-  check('bez nastavení 503', kod, 503);
-  check('  a řekne se co chybí', out.chyba, 'Na serveru chybí HUUM_USER a HUUM_PASS.');
-  check('  a nikam se nechodí', h.volani.length, 0);
-}
-{
-  const h = build();
-  h.pustDal = false;
-  const { kod } = await volej(h, 'GET /api/sauna/huum-syrove');
-  check('zamčená appka se neptá', kod, 401);
-  check('  a do HUUM nechodí', h.volani.length, 0);
+  h.odpovez = async () => ({ stav: 200, text: 'x'.repeat(5000) });
+  try { await h.api.fetchHuum(); } catch (e) { /* nečekaná odpověď, to je v pořádku */ }
+  check('dlouhé tělo se ořízne', h.state.huumSyrove.telo.length, 2000);
 }
 
-nadpis('11) Ruční aktualizace');
+nadpis('11) Zpráva o nahřáté sauně');
 {
   const h = build();
-  const { out } = await volej(h, 'POST /api/sauna/huum-obnov');
-  check('kolo proběhne', h.volani.length, 1);
-  check('  a vrátí se čerstvý stav', out.huum.temperature, 23);
-  check('  se zapnutostí', out.huum.enabled, true);
-  check('  a potvrzením', out.ok, true);
+  const kolo = async (t, cil, stav = 231) => {
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(
+      odpoved({ statusCode: stav, temperature: String(t), targetTemperature: String(cil) })) });
+    await h.api.pollHuum();
+  };
+  check('pět stupňů je ta hranice', h.api.HUUM_NAHRATA_C, 5);
+
+  // První vzorek po startu jen nastaví výchozí stav. Kdyby se začínalo od `false`,
+  // restart serveru nad rozpálenou saunou by poslal zprávu o něčem, co nikdo neviděl.
+  await kolo(88, 90);
+  check('první vzorek mlčí i nad cílem', h.zpravicky.length, 0);
+}
+{
+  const h = build();
+  const kolo = async (t, cil, stav = 231) => {
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(
+      odpoved({ statusCode: stav, temperature: String(t), targetTemperature: String(cil) })) });
+    await h.api.pollHuum();
+  };
+  await kolo(30, 90);
+  check('studená sauna mlčí', h.zpravicky.length, 0);
+  await kolo(84, 90);
+  check('šest pod cílem ještě ne', h.zpravicky.length, 0);
+  await kolo(85, 90);
+  check('pět pod cílem už je zpráva', h.zpravicky.length, 1);
+  check('  a řekne, kolik v ní je', h.zpravicky[0].telo, 'Je v ní 85 °C, cíl 90 °C.');
+  check('  s nadpisem', h.zpravicky[0].nadpis, '🧖 Sauna je nahřátá');
+  check('  a je to i v logu', h.zapisy.some(t => /nahřátá na 85/.test(t)), true);
+
+  // Kolísání kolem cíle nesmí posílat zprávu každé dvě minuty
+  await kolo(88, 90);
+  check('další kola už mlčí', h.zpravicky.length, 1);
+  await kolo(86, 90);
+  check('  ani po poklesu v pásmu', h.zpravicky.length, 1);
+  await kolo(84, 90);
+  check('  ani těsně pod hranicí', h.zpravicky.length, 1);
+  // A hlavně ani po návratu nahoru. Bez hystereze by stačilo klesnout o stupeň
+  // pod hranici a zpráva by chodila při každém cyklu termostatu.
+  await kolo(86, 90);
+  check('  ani po návratu nahoru', h.zpravicky.length, 1);
+  // Odjistí se až o dva stupně níž, pak smí přijít znovu
+  await kolo(82, 90);
+  await kolo(86, 90);
+  check('po vychladnutí se ozve znovu', h.zpravicky.length, 2);
+}
+{
+  const h = build();
+  const kolo = async (o) => {
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved(o)) });
+    await h.api.pollHuum();
+  };
+  await kolo({ statusCode: 231, temperature: '30', targetTemperature: '90' });
+  // Offline jednotka drží poslední teplotu — z té by vznikla zpráva o ničem
+  await kolo({ statusCode: 230, temperature: '88', targetTemperature: '90' });
+  check('offline jednotka nic neposílá', h.zpravicky.length, 0);
+  // Bez cílové teploty není co porovnávat
+  await kolo({ statusCode: 231, temperature: '88', targetTemperature: '' });
+  check('bez cíle taky ne', h.zpravicky.length, 0);
+  await kolo({ statusCode: 232, temperature: '88', targetTemperature: '90' });
+  check('ale připravená (232) se počítá', h.zpravicky.length, 1);
+}
+
+nadpis('12) Světlo');
+{
+  const h = build();
+  await h.api.pollHuum();                       // light: 0
+  h.volani.length = 0;
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }         // přepnutí
+    : { stav: 200, text: JSON.stringify(odpoved({ light: 1 })) });  // ověření
+  const po = await h.api.huumSvetlo(true);
+  check('přepíná se na /light', h.volani[0].adresa, 'https://sauna.huum.eu/action/home/light');
+  // HUUM na přepnutí odpovídá mělce a podle jednotky různě — pravdu má až /status
+  check('  a hned se ověří dotazem na /status', h.volani[1].adresa,
+    'https://sauna.huum.eu/action/home/status');
+  check('vrací se skutečný stav', po.light, 1);
+  check('  a uloží se', h.state.huum.light, 1);
+  // Bez rozeslání by karta na druhém telefonu zůstala na starém stavu
+  check('  a rozešle se do appky', h.zpravy[h.zpravy.length - 1].data.huum.light, 1);
+}
+{
+  // Kdyby se povel ztratil, tlačítko nesmí říct „hotovo"
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  let chyba = '';
+  try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
+  check('nepřepnuté světlo se nezamlčí', chyba,
+    'Povel odešel, ale světlo je pořád zhasnuté.');
+  check('  a stav v appce odpovídá skutečnosti', h.state.huum.light, 0);
+}
+{
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ light: undefined })) });
+  let chyba = '';
+  try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
+  check('když HUUM neřekne, netvrdíme nic', chyba, 'HUUM neřekl, jestli světlo svítí.');
 }
 {
   const h = build();
   h.odpovez = async () => ({ stav: 401, text: '' });
-  const { out } = await volej(h, 'POST /api/sauna/huum-obnov');
-  // Tlačítko nesmí mlčet, když se nepovedlo — chyba jde rovnou v odpovědi
-  check('chyba se vrátí rovnou', out.huum.error, 'HUUM: neplatné jméno nebo heslo.');
+  let chyba = '';
+  try { await h.api.huumSvetlo(true); } catch (e) { chyba = e.message; }
+  check('odmítnuté přihlášení projde dál', chyba, 'HUUM: neplatné jméno nebo heslo.');
+  check('  a na /status se pak už nechodí', h.volani.length, 1);
+}
+
+nadpis('13) Endpoint na světlo');
+{
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ light: 1 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
+  check('projde', kod, 200);
+  check('  a vrátí stav světla', out.light, 1);
+  check('  i celá kamna', out.huum.enabled, true);
+  check('  a zapíše se to do logu', h.zapisy.some(t => /světlo zapnuto/.test(t)), true);
+}
+{
+  const h = build();
+  await h.api.pollHuum();
+  h.volani.length = 0;
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: false });
+  check('vypnutí taky', kod, 200);
+  check('  a v logu je vypnuto', h.zapisy.some(t => /světlo vypnuto/.test(t)), true);
+  check('  bez tělesa se bere vypnout', out.light, 0);
+}
+{
+  const h = build();
+  h.odpovez = async n => (n === 1
+    ? { stav: 200, text: '{"ok":true}' }
+    : { stav: 200, text: JSON.stringify(odpoved({ light: 0 })) });
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
+  check('neprovedený povel vrátí 502', kod, 502);
+  check('  s hláškou', /pořád zhasnuté/.test(out.error), true);
+  // I při chybě se posílá stav — jinak by karta zůstala na tom, co si pamatovala
+  check('  ale i se stavem', out.huum.light, 0);
+}
+{
+  // Jednotka jen s parním vyvíječem (config 1) nemá světlo kam zapnout
+  const h = build();
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ config: 1 })) });
+  await h.api.pollHuum();
+  h.volani.length = 0;
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
+  check('bez osazeného světla 400', kod, 400);
+  check('  a řekne se proč', out.error, 'Jednotka nemá osazené světlo.');
+  check('  a nikam se nechodí', h.volani.length, 0);
 }
 {
   const h = build({ user: '', pass: '' });
-  const { out, kod } = await volej(h, 'POST /api/sauna/huum-obnov');
+  const { out, kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
   check('bez nastavení 503', kod, 503);
   check('  a řekne se proč', out.error, 'Kamna HUUM nejsou nastavená.');
+}
+{
+  const h = build();
+  h.pustDal = false;
+  const { kod } = await volej(h, 'POST /api/sauna/huum-svetlo', { on: true });
+  check('zamčená appka nepřepíná', kod, 401);
+  check('  a nikam nechodí', h.volani.length, 0);
 }
 
 konec();

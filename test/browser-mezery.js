@@ -52,8 +52,10 @@ setTimeout(() => {
   for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) sbalNastav(btn.dataset.sbal, false);
   const sauna = stranky.find(s => s.dataset.title === 'Sauna');
   const saunaKarty = Array.from(sauna.querySelectorAll('.page > .card')).filter(viditelna);
-  check('sauna má šest karet', saunaKarty.length, 6);
-  check('  a Kamna HUUM mají mezeru od měřáku', mezera(saunaKarty[1]) >= 12, true);
+  // Pět: kamna, měřák, stav jednotky, tlačítko přehledu a graf. Karta se světlem
+  // je do prvního snímku ze serveru schovaná, takže se sem nepočítá.
+  check('sauna má pět karet', saunaKarty.length, 5);
+  check('  a měřák má mezeru od kamen', mezera(saunaKarty[1]) >= 12, true);
 
   // Grafy si drží svých 10 px — obecné pravidlo je nesmí přebít
   const fve = stranky.find(s => s.dataset.title === 'FVE');

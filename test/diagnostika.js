@@ -147,6 +147,8 @@ nadpis('5) Endpoint');
   h.state.log = [{ t: 1, msg: 'něco' }];
   h.state.assistantLog = [{ t: 2, text: 'zapnul bojler' }];
   h.api.diagZapis({ kdy: 'x', kam: 'a.cz/b', stav: 200 });
+  h.state.huumSyrove = { kdy: '2026-09-22T10:00:00.000Z', stav: 200,
+    telo: '{"statusCode":232,"temperature":"33"}' };
   const out = volej(h, 'GET /api/diagnostika');
   check('vrátí log', out.log.length, 1);
   check('  i výpis asistenta', out.assistantLog[0].text, 'zapnul bojler');
@@ -158,6 +160,16 @@ nadpis('5) Endpoint');
   check('dlouhé série se vynechají',
     ['history', 'timeline', 'log'].filter(k => k in out.stav).join(', ') || 'žádná', 'žádná');
   check('  a stav bazénu zůstane', out.stav.pool.on, true);
+  // Odpověď z HUUM celá. Obal kolem fetch ji zapisuje taky, ale ořezanou na 300
+  // znaků — a u ní jde právě o názvy polí až dole.
+  check('a syrová odpověď z HUUM je v tom', out.huumSyrove.telo.includes('"temperature":"33"'), true);
+  check('  se svým kódem', out.huumSyrove.stav, 200);
+}
+{
+  // Bez kamen tam prostě nic není, ale klíč nesmí zmizet — jinak se z chybějícího
+  // napojení stane „zapomněl jsem se podívat"
+  const h = build();
+  check('bez HUUM je to null', volej(h, 'GET /api/diagnostika').huumSyrove, null);
 }
 
 globalThis.fetch = puvodniFetch;

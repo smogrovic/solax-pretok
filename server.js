@@ -276,6 +276,7 @@ const state = {
   zavlahaDny: [],    // { d, zony: { '3': ms } } — kolik která zóna zalévala (7 dní)
   sekacka: { stin: null, kdy: 0, potiz: null },  // poslední stav z cloudu Anthbotu
   huum: { error: null },  // kamna HUUM (teplota, cíl, dveře, vlhkost, meze jednotky)
+  huumSyrove: null,  // poslední odpověď z HUUM tak, jak přišla — jen do diagnostiky
   heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
@@ -6500,8 +6501,36 @@ function huumTelo(text) {
 
 async function fetchHuum() {
   const { stav, ok, text } = await huumStatus();
+  // Syrové tělo si necháme pro výpis diagnostiky. Obal kolem `fetch` ho sice
+  // zapisuje taky, ale ořezaný na 300 znaků — odpověď z HUUM je delší.
+  state.huumSyrove = { kdy: new Date().toISOString(), stav, telo: String(text).slice(0, 2000) };
   if (!ok) throw new Error(huumChyba(stav, text));
   return huumMap(huumTelo(text));
+}
+
+// Světlo v sauně. HUUM umí jen PŘEPNOUT (GET /light), ne „zapni" a „vypni" —
+// takže se nejdřív zjistí, jak na tom je, a přepíná se jen když je potřeba.
+// Bez toho by tlačítko ON u rozsvíceného světla zhaslo.
+//
+// Topení se schválně neovládá: světlo je neškodné, rozpálená kamna nejsou.
+async function huumSvetlo(chci) {
+  const auth = Buffer.from(`${HUUM_USER}:${HUUM_PASS}`).toString('base64');
+  const res = await fetch(`${HUUM_URL}/light`, {
+    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10000)
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(huumChyba(res.status, text));
+  // Odpověď na přepnutí je mělká a podle jednotky se liší. Pravdu má až
+  // další /status — tudy se pozná, jestli se to opravdu stalo.
+  const po = await fetchHuum();
+  state.huum = { ...po, error: null, fetchedAt: new Date().toISOString() };
+  broadcast('huum', { huum: huumPayload() });
+  if (po.light === null) throw new Error('HUUM neřekl, jestli světlo svítí.');
+  if (!!po.light !== chci) {
+    throw new Error(`Povel odešel, ale světlo je pořád ${po.light ? 'rozsvícené' : 'zhasnuté'}.`);
+  }
+  return po;
 }
 
 let huumPollRunning = false;
@@ -6510,6 +6539,7 @@ async function pollHuum() {
   huumPollRunning = true;
   try {
     state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
+    checkHuumNahrata(state.huum);
   } catch (err) {
     // Razítko se schválně NEobnovuje — stejně jako u Infigy znamená „kdy naposledy
     // dorazila data", ne „kdy jsme se ptali". Zmrzlá teplota nesmí vypadat čerstvě.
@@ -6524,37 +6554,53 @@ function huumPayload() {
   return { ...state.huum, enabled: huumEnabled };
 }
 
-// Ladění napojení jde jen naostro — jméno s heslem jsou na serveru a z appky je
-// vidět už jen přeložený tvar. Tohle vrátí odpověď tak, jak přišla. Stejný důvod
-// i stejný tvar jako `/api/calendar/raw`.
-app.get('/api/sauna/huum-syrove', async (req, res) => {
-  if (!requireAuth(req, res)) return;
-  if (!huumEnabled) {
-    return res.status(503).json({ nastaveno: false, chyba: 'Na serveru chybí HUUM_USER a HUUM_PASS.' });
-  }
-  // Adresa ano, jméno ani heslo ne — výpis se posílá dál
-  const out = { nastaveno: true, adresa: `${HUUM_URL}/status` };
-  try {
-    const { stav, ok, text } = await huumStatus();
-    out.stav = stav;
-    // Když to není JSON, jde dál jako text — právě na tom se pozná přihlašovací
-    // stránka nebo hláška brány místo odpovědi API.
-    try { out.telo = JSON.parse(text); } catch { out.telo = String(text).slice(0, 2000); }
-    if (!ok) out.chyba = huumChyba(stav, text);
-    else out.prelozeno = huumMap(huumTelo(text));
-  } catch (err) {
-    out.chyba = err.message;
-  }
-  res.json(out);
-});
+// Kolik stupňů pod cílem se považuje za „už tam skoro je". Pět proto, že
+// poslední stupně lezou nejpomaleji a než dojdeš, je dotopeno.
+const HUUM_NAHRATA_C = 5;
+// null = po startu ještě nevíme. Kdyby se začínalo od `false`, restart serveru
+// nad rozpálenou saunou by rovnou poslal zprávu o něčem, co appka neviděla.
+let huumNahrataNahlaseno = null;
 
-// Ruční „Aktualizovat" z appky. Po restartu se na první kolo čeká 70 s a pak na
-// každé další dvě minuty — to je při ladění věčnost. Schválně bez zámku, stejně jako
-// u kalendáře: `pollHuum` se sám vrátí, když už běží.
-app.post('/api/sauna/huum-obnov', async (req, res) => {
+function checkHuumNahrata(d) {
+  const t = d.temperature, cil = d.targetTemperature;
+  if (typeof t !== 'number' || typeof cil !== 'number') return;
+  // Offline jednotka drží poslední teplotu — z té by vznikla zpráva o ničem
+  if (d.statusCode !== 231 && d.statusCode !== 232) return;
+  const dosazeno = t >= cil - HUUM_NAHRATA_C;
+  if (huumNahrataNahlaseno === null) {   // první vzorek po startu jen nastaví výchozí stav
+    huumNahrataNahlaseno = dosazeno;
+    return;
+  }
+  if (dosazeno && !huumNahrataNahlaseno) {
+    huumNahrataNahlaseno = true;
+    addLog(`Sauna: nahřátá na ${Math.round(t)} °C (cíl ${Math.round(cil)} °C)`);
+    sendPushToAll('🧖 Sauna je nahřátá',
+      `Je v ní ${Math.round(t)} °C, cíl ${Math.round(cil)} °C.`);
+  } else if (t < cil - HUUM_NAHRATA_C - 2) {
+    // Odjistí se až o dva stupně níž. Přesně na hraně by kolísání kolem cíle
+    // posílalo zprávu každé dvě minuty.
+    huumNahrataNahlaseno = false;
+  }
+}
+
+// Světlo z appky. Stav se vrací až po ověření, takže tlačítko neřekne „hotovo",
+// když se nic nestalo — u světla je to hned vidět, ale mlčet o tom je horší.
+app.post('/api/sauna/huum-svetlo', async (req, res) => {
+  if (!requireAuth(req, res)) return;
   if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
-  await pollHuum();
-  res.json({ ok: true, huum: huumPayload() });
+  const chci = !!(req.body || {}).on;
+  // `config` říká, co je osazené. 1 = jen parní vyvíječ, tam nemá povel kam jít.
+  // Neznámé vybavení nebrzdíme — to by tlačítko umlčelo i tam, kde světlo je.
+  if (state.huum && state.huum.config === 1) {
+    return res.status(400).json({ error: 'Jednotka nemá osazené světlo.' });
+  }
+  try {
+    const po = await huumSvetlo(chci);
+    addLog(`Sauna: světlo ${chci ? 'zapnuto' : 'vypnuto'}`);
+    res.json({ ok: true, huum: huumPayload(), light: po.light });
+  } catch (err) {
+    res.status(502).json({ error: err.message, huum: huumPayload() });
+  }
 });
 
 if (huumEnabled) {
@@ -8951,6 +8997,9 @@ app.get('/api/diagnostika', (req, res) => {
     log: state.log,
     assistantLog: state.assistantLog,
     stav,
+    // Odpověď z HUUM celá. Obal kolem `fetch` ji zapisuje taky, ale ořezanou na
+    // 300 znaků, a právě u ní jde o ty názvy polí až dole.
+    huumSyrove: state.huumSyrove || null,
     volani: diagVolani
   });
 });
