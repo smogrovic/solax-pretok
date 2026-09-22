@@ -71,6 +71,10 @@ setTimeout(() => {
   const stred = el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
   check('jezdec sed\u00ed na st\u0159edu karty',
     Math.abs(stred(jezdec) - stred(box)) < 1.5, 'true');
+  // Procenta patří nalevo od jezdce, ne napravo
+  const proc = tilt.querySelector('.blind-tilt-val');
+  check('  a procenta jsou vlevo od n\u011bj',
+    proc.getBoundingClientRect().right <= jezdec.getBoundingClientRect().left + 1, 'true');
   const rb = box.getBoundingClientRect(), rj = jezdec.getBoundingClientRect();
   check('  a od obou hran m\u00e1 m\u00edsto',
     Math.min(rj.left - rb.left, rb.right - rj.right) >= 40, 'true');

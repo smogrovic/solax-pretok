@@ -268,6 +268,7 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  saunaNahrev: { bezici: null, zaznamy: [] },  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -486,6 +487,7 @@ function snapshot() {
     huum: huumPayload(),
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
+    saunaNahrev: state.saunaNahrev,
     siteDny: state.siteDny,
     months: state.months,
     timeline: state.timeline,
@@ -999,6 +1001,7 @@ function updateSauna(powerW) {
     if (!state.sauna.since) {
       state.sauna.since = now;
       addLog(`Sauna: topí (${Math.round(state.sauna.powerW)} W) — bazén a solinátor jdou dolů`);
+      nahrevStart('odber', now);
     }
     state.saunaBlockUntil = now + saunaHoldMs();
   } else if (state.sauna.since && !saunaBlokuje()) {
@@ -1006,6 +1009,7 @@ function updateSauna(powerW) {
     state.sauna.since = 0;
     state.sauna.alertAt = 0;
     addLog('Sauna: dotopeno — bazén a solinátor se můžou vrátit');
+    nahrevKonec(now);
   }
   checkSaunaForgotten();
   broadcast('sauna', { sauna: saunaPayload() });
@@ -1036,6 +1040,71 @@ function recordSaunaDay(w, dtH) {
     state.saunaDays.sort((a, b) => a.d.localeCompare(b.d));
     state.saunaDays = state.saunaDays.slice(-SAUNA_DAYS_MAX);
   }
+}
+
+// ---------- Měření nahřívání sauny ----------
+// Kolik minut trvá, než se sauna nahřeje — podklad pro předpověď „za jak dlouho
+// bude hotovo". Začátek se bere ze DVOU stran: ze stisku ON v appce a z odběru
+// na měřáku 3EM. Ta druhá cesta zachytí i nahřívání puštěná z appky HUUM nebo
+// z panelu na kamnech — je to fyzická pravda, ne co si myslí cloud.
+//
+// Konec je tam, kde končí `state.sauna.since`, tedy až doběhne okno po posledním
+// nátopu. Jedno měření je tím jedno použití sauny: cyklování termostatu u cílové
+// teploty žádná falešná měření nevyrobí, protože `since` mezitím nespadne.
+const NAHREV_PRAHY = [60, 70, 80];
+const NAHREV_MAX = 40;            // kolik měření se drží
+const NAHREV_BODU_MAX = 90;       // strop vzorků na měření (~3 h po dvou minutách)
+const NAHREV_STROP_MS = 4 * 3600000;
+
+function nahrevStart(duvod, now = Date.now()) {
+  const n = state.saunaNahrev;
+  if (n.bezici) return;           // z appky i z odběru přijde obojí — zakládá se jednou
+  const huum = state.huum || {};
+  n.bezici = {
+    start: now,
+    duvod,
+    venkuC: state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null,
+    odC: typeof huum.temperature === 'number' ? huum.temperature : null,
+    cilC: typeof huum.targetTemperature === 'number' ? huum.targetTemperature : null,
+    prahy: {},
+    body: [],
+    maxC: null
+  };
+  // Teplota na startu je zároveň první bod křivky
+  if (n.bezici.odC !== null) nahrevVzorek(n.bezici.odC, now);
+}
+
+// Volá se z `pollHuum` po každém úspěšném dotazu na kamna
+function nahrevVzorek(c, now = Date.now()) {
+  const b = state.saunaNahrev.bezici;
+  if (!b || typeof c !== 'number') return;
+  // Zapomenutá sauna by jinak sbírala vzorky do nekonečna
+  if (now - b.start > NAHREV_STROP_MS) { nahrevKonec(now); return; }
+  const min = Math.round((now - b.start) / 6000) / 10;
+  if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min, c });
+  b.maxC = b.maxC === null ? c : Math.max(b.maxC, c);
+  // Práh se zapisuje při PRVNÍM vzorku nad hranicí a nese i teplotu, která tam
+  // zrovna byla. Dotazy chodí po dvou minutách, takže se dá práh přeskočit
+  // (58 → 72) — z `c` je to pak poznat a analýza se tím nenechá zmást.
+  for (const p of NAHREV_PRAHY) {
+    if (c >= p && !b.prahy[p]) b.prahy[p] = { min, c };
+  }
+  // Cíl navíc k pevným prahům: při cíli 79 by se na 80 nikdy nedostalo
+  if (typeof b.cilC === 'number' && c >= b.cilC && !b.prahy.cil) b.prahy.cil = { min, c };
+}
+
+function nahrevKonec(now = Date.now()) {
+  const n = state.saunaNahrev;
+  const b = n.bezici;
+  if (!b) return;
+  n.bezici = null;
+  // Krátké bliknutí odběru není nahřívání — bez druhého vzorku není co měřit
+  if (b.body.length < 2 && !Object.keys(b.prahy).length) return;
+  b.konec = now;
+  n.zaznamy.push(b);
+  if (n.zaznamy.length > NAHREV_MAX) n.zaznamy = n.zaznamy.slice(-NAHREV_MAX);
+  addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min)`);
+  broadcast('saunaNahrev', { saunaNahrev: n });
 }
 
 // ---------- Spotřeba po měsících ----------
@@ -1731,6 +1800,21 @@ app.post('/api/sauna-days/restore', (req, res) => {
     broadcast('saunaDays', { saunaDays: state.saunaDays });
   }
   res.json({ ok: true, days: state.saunaDays.length });
+});
+
+// Obnova měření nahřívání. Na rozdíl od denních řad se tyhle záznamy neslučují
+// po dnech — je to seznam událostí. Záloha se proto vezme jen když je v ní VÍC
+// než co má server: po nasazení je prázdný a vezme se celá, ale měření, která
+// mezitím přibyla, se nepřepíšou.
+app.post('/api/sauna/nahrev/restore', (req, res) => {
+  const z = req.body && Array.isArray(req.body.zaznamy) ? req.body.zaznamy : null;
+  if (!z) return res.status(400).json({ error: 'Chybí zaznamy.' });
+  const platne = z.filter(r => r && typeof r.start === 'number' && Array.isArray(r.body));
+  if (platne.length > state.saunaNahrev.zaznamy.length) {
+    state.saunaNahrev.zaznamy = platne.slice(-NAHREV_MAX);
+    broadcast('saunaNahrev', { saunaNahrev: state.saunaNahrev });
+  }
+  res.json({ ok: true, zaznamu: state.saunaNahrev.zaznamy.length });
 });
 
 // Obnova denní řady sítě a bojlerů po deployi — stejný princip jako u sauny
@@ -6549,6 +6633,7 @@ async function pollHuum() {
   try {
     state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
     checkHuumNahrata(state.huum);
+    nahrevVzorek(state.huum.temperature);
   } catch (err) {
     // Razítko se schválně NEobnovuje — stejně jako u Infigy znamená „kdy naposledy
     // dorazila data", ne „kdy jsme se ptali". Zmrzlá teplota nesmí vypadat čerstvě.
@@ -6668,6 +6753,7 @@ app.post('/api/sauna/huum-start', async (req, res) => {
         error: 'Povel odešel, ale kamna se do pár vteřin nerozjela.', huum: huumPayload()
       });
     }
+    nahrevStart('appka');
     res.json({ ok: true, huum: huumPayload(), teplota });
   } catch (err) {
     res.status(502).json({ error: err.message, huum: huumPayload() });
@@ -8829,6 +8915,7 @@ const STORE_POSTS = [
   '/api/pool-days/restore',
   '/api/usage-days/restore',
   '/api/sauna-days/restore',
+  '/api/sauna/nahrev/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -8870,6 +8957,7 @@ function storeSnapshot() {
     '/api/pool-days/restore': { poolDays: state.poolDays },
     '/api/usage-days/restore': { usageDays: state.usageDays },
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
+    '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },

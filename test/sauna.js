@@ -15,7 +15,10 @@ const CODE = KONST + '\n'
   + fn('function saunaPayload() {') + '\n'
   + fn('function updateSauna(powerW) {') + '\n'
   + fn('function checkSaunaForgotten() {') + '\n'
-  + fn('function recordSaunaDay(w, dtH) {');
+  + fn('function recordSaunaDay(w, dtH) {') + '\n'
+  // Měření nahřívání visí na týchž hranách odběru, takže patří do téže sady
+  + between('// ---------- Měření nahřívání sauny ----------',
+            '// ---------- Spotřeba po měsících ----------');
 
 // K sauně patří i to, co na ni reaguje: vypínání relé a udržovací ON
 const CODE2 = CODE + '\n'
@@ -24,7 +27,8 @@ const CODE2 = CODE + '\n'
   + between('const KEEPALIVE_KEYS', 'async function sendKeepalive') + '\n'
   + fn('async function sendKeepalive() {');
 
-function build({ prah = 500, drzeni = 30, pool = false, solinator = false } = {}) {
+function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
+                 venku = 8, huum = { temperature: 22, targetTemperature: 79 } } = {}) {
   let now = Date.UTC(2026, 6, 15, 14, 0, 0);
   const log = [], pushes = [], broadcasts = [], povely = [];
   const state = {
@@ -33,6 +37,9 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false } = {}
     saunaHoldMin: drzeni,
     saunaBlockUntil: 0,
     saunaDays: [],
+    saunaNahrev: { bezici: null, zaznamy: [] },
+    weather: { tempC: venku },
+    huum: huum === null ? {} : huum,
     devices: {
       pool: pool === null ? { online: true, isOn: null } : { online: true, isOn: pool },
       solinator: solinator === null ? { online: true, isOn: null } : { online: true, isOn: solinator },
@@ -46,7 +53,9 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false } = {}
     'setShellyState', 'Date',
     CODE2 + '\n; return { saunaTopi, saunaBlokuje, saunaPayload, updateSauna, recordSaunaDay,'
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
-          + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled };'
+          + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
+          + ' nahrevStart, nahrevVzorek, nahrevKonec, NAHREV_PRAHY, NAHREV_MAX,'
+          + ' NAHREV_BODU_MAX, NAHREV_STROP_MS };'
   )(
     { env }, state, 'key', 'shelly-x.cloud',
     ts => !!ts && now - new Date(ts).getTime() <= 10 * MIN,
@@ -232,5 +241,141 @@ nadpis('7) Když měřák mlčí');
   check('po půl hodině se bazén může vrátit', h.api.saunaBlokuje(), 'false');
 }
 
+nadpis('Měření nahřívání');
+{
+  // Začátek se bere z odběru i ze stisku ON. Z odběru proto, že sauna jde pustit
+  // i z appky HUUM nebo z panelu na kamnech — a odběr je fyzická pravda.
+  const h = build({ venku: 8, huum: { temperature: 22, targetTemperature: 79 } });
+  h.api.updateSauna(6000);
+  const b = () => h.state.saunaNahrev.bezici;
+  check('odběr nad prahem založí měření', !!b(), 'true');
+  check('  s důvodem', b().duvod, 'odber');
+  check('  s venkovní teplotou', b().venkuC, 8);
+  check('  s teplotou v sauně', b().odC, 22);
+  check('  a s cílem z kamen', b().cilC, 79);
+  check('  teplota na startu je první bod', JSON.stringify(b().body), '[{"min":0,"c":22}]');
+
+  // Vzorky chodí z dotazů na kamna, po dvou minutách
+  h.posun(2); h.api.nahrevVzorek(31, h.now);
+  h.posun(2); h.api.nahrevVzorek(45, h.now);
+  check('vzorky se sbírají', b().body.length, 3);
+  check('  s časem v minutách', b().body[2].min, 4);
+  check('  a drží se nejvyšší teplota', b().maxC, 45);
+  check('pod prahem se práh nezapíše', Object.keys(b().prahy).length, 0);
+
+  h.posun(14); h.api.nahrevVzorek(61, h.now);
+  check('nad 60 se práh zapíše', b().prahy[60].min, 18);
+  check('  i se skutečnou teplotou', b().prahy[60].c, 61);
+  // Práh se zapisuje při PRVNÍM vzorku nad hranicí — jinak by čas lezl nahoru
+  // s každým dalším dotazem
+  h.posun(2); h.api.nahrevVzorek(64, h.now);
+  check('  a další vzorek s ním nehne', b().prahy[60].min, 18);
+
+  // Dotazy chodí po dvou minutách, takže se dá práh přeskočit. Ze zapsané
+  // teploty (c: 72 u prahu 70) je to poznat.
+  h.posun(8); h.api.nahrevVzorek(72, h.now);
+  check('přeskočený práh se zapíše taky', b().prahy[70].min, 28);
+  check('  a je vidět, že se přeskočil', b().prahy[70].c, 72);
+
+  h.posun(10); h.api.nahrevVzorek(79, h.now);
+  check('cíl je práh navíc', b().prahy.cil && b().prahy.cil.min, 38);
+  check('  a 80 se nezapsalo', b().prahy[80], 'undefined');
+}
+{
+  // Stisk ON i odběr dorazí těsně po sobě — měření se nesmí založit dvakrát
+  const h = build();
+  h.api.nahrevStart('appka', h.now);
+  const start = h.state.saunaNahrev.bezici.start;
+  h.api.updateSauna(6000);
+  check('appka a odběr nezaloží dvě měření', h.state.saunaNahrev.zaznamy.length, 0);
+  check('  a drží se to první', h.state.saunaNahrev.bezici.start, start);
+  check('  i s jeho důvodem', h.state.saunaNahrev.bezici.duvod, 'appka');
+}
+{
+  // Konec je tam, kde končí `since` — tedy až doběhne okno po posledním nátopu
+  const h = build({ drzeni: 30 });
+  h.api.updateSauna(6000);
+  h.posun(20); h.api.nahrevVzorek(65, h.now);
+  h.api.updateSauna(50);
+  check('pokles odběru měření hned neukončí', !!h.state.saunaNahrev.bezici, 'true');
+  h.posun(31); h.api.updateSauna(50);
+  check('po doběhnutí okna se zapíše', h.state.saunaNahrev.zaznamy.length, 1);
+  check('  a běžící už není', h.state.saunaNahrev.bezici, 'null');
+  const z = h.state.saunaNahrev.zaznamy[0];
+  check('  má konec', typeof z.konec, 'number');
+  check('  i prahy', z.prahy[60].c, 65);
+  check('  a je to v logu', h.log.some(t => /nahřívání zapsáno/.test(t)), 'true');
+}
+{
+  // Termostat u cílové teploty cykluje. Kdyby se měření zakládalo na každý
+  // náběh odběru, byla by z jednoho použití sauny desítka falešných měření.
+  const h = build({ drzeni: 30 });
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.updateSauna(50);     // termostat vypnul
+  h.posun(2); h.api.updateSauna(6000);   // a zase zapnul
+  h.posun(2); h.api.updateSauna(50);
+  h.posun(2); h.api.updateSauna(6000);
+  check('cyklování termostatu nevyrobí další měření', h.state.saunaNahrev.zaznamy.length, 0);
+  check('  pořád běží to jedno', !!h.state.saunaNahrev.bezici, 'true');
+}
+{
+  // Krátké bliknutí odběru není nahřívání
+  const h = build({ drzeni: 30, huum: {} });
+  h.api.updateSauna(6000);
+  h.posun(31); h.api.updateSauna(50);
+  h.posun(31); h.api.updateSauna(50);
+  check('bliknutí bez vzorků se nezapíše', h.state.saunaNahrev.zaznamy.length, 0);
+}
+{
+  // Zapomenutá sauna by jinak sbírala vzorky do nekonečna
+  const h = build();
+  h.api.updateSauna(6000);
+  h.posun(20); h.api.nahrevVzorek(65, h.now);
+  h.posun(4 * 60 + 1); h.api.nahrevVzorek(70, h.now);
+  check('po čtyřech hodinách se měření uzavře', h.state.saunaNahrev.zaznamy.length, 1);
+  check('  a běžící končí', h.state.saunaNahrev.bezici, 'null');
+  check('  pozdní vzorek se už nezapočítal',
+    h.state.saunaNahrev.zaznamy[0].body.every(bd => bd.c < 70), 'true');
+}
+{
+  const h = build();
+  h.api.updateSauna(6000);
+  for (let i = 0; i < h.api.NAHREV_BODU_MAX + 20; i++) {
+    h.posun(1); h.api.nahrevVzorek(30 + i * 0.1, h.now);
+  }
+  check('vzorků se drží nejvýš strop',
+    h.state.saunaNahrev.bezici.body.length, h.api.NAHREV_BODU_MAX);
+}
+{
+  // Kamna můžou být nedostupná — měření se má založit i bez teplot
+  const h = build({ venku: null, huum: {} });
+  h.api.updateSauna(6000);
+  const b = h.state.saunaNahrev.bezici;
+  check('bez kamen se měření přesto založí', !!b, 'true');
+  check('  teploty jsou prázdné, ne NaN', [b.venkuC, b.odC, b.cilC].join(','), ',,');
+  check('  a křivka začíná prázdná', b.body.length, 0);
+}
+{
+  // Starých měření se drží jen posledních pár — jinak by záloha rostla donekonečna
+  const h = build({ drzeni: 1 });
+  for (let i = 0; i < h.api.NAHREV_MAX + 5; i++) {
+    h.api.updateSauna(6000);
+    h.posun(1); h.api.nahrevVzorek(40 + i, h.now);
+    h.posun(3); h.api.updateSauna(50);
+  }
+  check('drží se nejvýš čtyřicet měření',
+    h.state.saunaNahrev.zaznamy.length, h.api.NAHREV_MAX);
+  // Každé kolo má svou teplotu (40 + i), tak je poznat, která vypadla.
+  // Nejstarších pět se mělo zahodit, takže první zbylé nese 45.
+  check('  a vypadla ta nejstarší', h.state.saunaNahrev.zaznamy[0].body[1].c, 45);
+  check('  poslední je ta nejnovější',
+    h.state.saunaNahrev.zaznamy[h.api.NAHREV_MAX - 1].body[1].c, 40 + h.api.NAHREV_MAX + 4);
+}
+
 konec();
-})();
+})().catch(err => {
+  // Bez tohohle by výjimka sadu tiše ukončila: summary by se nevypsal, návratový
+  // kód by byl nula a „0 chyb" by znamenalo „nic se nedoběhlo".
+  check('sada doběhla bez výjimky', err && err.stack, '(nic)');
+  konec();
+});

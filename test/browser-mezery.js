@@ -52,9 +52,9 @@ setTimeout(() => {
   for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) sbalNastav(btn.dataset.sbal, false);
   const sauna = stranky.find(s => s.dataset.title === 'Sauna');
   const saunaKarty = Array.from(sauna.querySelectorAll('.page > .card')).filter(viditelna);
-  // Pět: kamna, měřák, stav jednotky, tlačítko přehledu a graf. Karta se světlem
-  // je do prvního snímku ze serveru schovaná, takže se sem nepočítá.
-  check('sauna má pět karet', saunaKarty.length, 5);
+  // Šest: kamna, měřák, stav jednotky, měření nahřívání a dvě karty spotřeby.
+  // Karty s topením a světlem jsou do prvního snímku ze serveru schované.
+  check('sauna má šest karet', saunaKarty.length, 6);
   check('  a měřák má mezeru od kamen', mezera(saunaKarty[1]) >= 12, true);
 
   // Grafy si drží svých 10 px — obecné pravidlo je nesmí přebít
@@ -83,7 +83,7 @@ setTimeout(() => {
   const klice = [...document.querySelectorAll('.sbal-btn[data-sbal]')].map(b => b.dataset.sbal);
   check('tlačítka jsou na všech stránkách, kde mají být',
     // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Přehled
-    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, sauna, zavlaha, prehled');
+    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, nahrev, sauna, zavlaha, prehled');
   // Na Přehledu jdou pod jedno tlačítko oba boxy — dnešek i týden
   check('Přehled sbalí oba boxy',
     document.querySelectorAll('[data-sbal-obsah="prehled"]').length, 2);

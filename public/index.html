@@ -2856,6 +2856,17 @@
         <div class="stat-row" data-huum="light"><span>Světlo</span><span class="stat-val" id="huumLightState">–</span></div>
       </div>
 
+      <!-- Podklad pro předpověď „za jak dlouho bude hotovo". Sbírá se samo pokaždé,
+           co se sauna nahřívá — z appky i z měřáku, takže i nahřívání puštěná
+           z appky HUUM se započítají. -->
+      <button class="sbal-btn" data-sbal="nahrev" type="button" aria-expanded="false">Jak dlouho se nahřívá<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="nahrev">
+        <div class="wbsrc-list" id="nahrevList"></div>
+        <div class="wbsrc-note" id="nahrevPozn"></div>
+        <button class="sbal-btn" id="nahrevKopirBtn" type="button">Zkopírovat data<i id="nahrevStav">▾</i></button>
+        <textarea class="diag-zaloha" id="nahrevZaloha" readonly hidden></textarea>
+      </div>
+
       <button class="sbal-btn" data-sbal="sauna" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="sauna">
         <div class="graph-title">Spotřeba za 7 dní</div>
@@ -3094,7 +3105,7 @@
             <li>Přebíjí to ruční zapnutí i bazénové „+24 h". Solinátor si nedoběhnutý čas přenese.</li>
             <li>Do vteřiny vypíná <b>skript v Shelly</b>, appka je pomalejší pojistka.</li>
             <li>Notifikace po <b>2 h</b> topení v kuse, pak připomínka po 6 h.</li>
-            <li><b>Zapni saunu</b> (Asistent): vytáhne <b>žaluzie v ložnici</b>, po západu rozsvítí <b>zahradu dole</b> (ve dne ne). Kamna zatím nespíná.</li>
+            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, světlo v sauně, žaluzie v ložnici, po západu i zahradu dole (ve dne ne). Ptá se oknem.</li>
           </ul>
           <div class="sauna-set">
             <div class="sauna-set-row">
@@ -3108,7 +3119,7 @@
               <span class="sauna-set-unit">min po nátopu</span>
             </div>
             <button class="mode-btn" id="saunaSaveBtn" type="button">Uložit</button>
-            <div class="sauna-set-hint" id="saunaSaveHint">Práh ve skriptu uvnitř Shelly je vlastní — ten se mění zvlášť.</div>
+            <div class="sauna-set-hint" id="saunaSaveHint">Odběr nad prahem se bere jako „sauna topí". Mezi nátopy klesá skoro k nule, proto se bazén se solinátorem drží dole ještě tu dobu po posledním nátopu. Práh ve skriptu uvnitř Shelly je vlastní — ten se mění zvlášť.</div>
           </div>
 
         </div>
@@ -5634,14 +5645,15 @@ function renderBlindRow(b) {
     tilt.className = 'blind-tilt stred';
     // Popisek „Naklopení" tu nebyl potřeba — je to jediný jezdec v řádku. Jeho
     // místo vlevo drží prázdná buňka mřížky, aby jezdec vyšel na střed karty.
-    tilt.appendChild(document.createElement('span'));
     const val = document.createElement('span');
     val.className = 'blind-tilt-val';
     val.textContent = tiltSlider.value + ' %';
     tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
     tiltSlider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null));
-    tilt.appendChild(tiltSlider);
     tilt.appendChild(val);
+    tilt.appendChild(tiltSlider);
+    // Prázdná buňka vpravo drží jezdec na středu karty — procenta jsou vlevo
+    tilt.appendChild(document.createElement('span'));
     wrap.appendChild(tilt);
   }
 
@@ -7720,7 +7732,9 @@ function renderHuum() {
 
   huumEls.huumHint.textContent = !d.enabled
     ? 'Zatím jen náhled. Doplň na serveru HUUM_USER a HUUM_PASS (účet z appky HUUM) a začne se to plnit.'
-    : (d.error || (zname ? (d.configText ? `Osazeno: ${d.configText}` : '') : 'Z HUUM nechodí data.'));
+    // Co má jednotka osazené se nemění a na kartě to nikomu nic neříká —
+    // zůstává jen to, co je špatně
+    : (d.error || (zname ? '' : 'Z HUUM nechodí data.'));
 
   // Kdy naposledy DORAZILA data — při chybě se razítko na serveru neobnovuje, takže
   // zmrzlá teplota je poznat i na kartě, která jinak vypadá úplně normálně.
@@ -8032,10 +8046,9 @@ function renderSauna() {
   saunaLightEl.className = 'traffic-light' + (topi ? ' on' : (blok ? ' warm' : ' off'));
   saunaStateEl.textContent = topi ? 'topí' : (blok ? 'v pauze' : 'vypnutá');
   saunaPowerEl.textContent = (d.powerW / 1000).toFixed(1).replace('.', ',') + ' kW';
-  const kusy = [];
-  if (d.since) kusy.push(`Topí ${fmtSolDur(Date.now() - d.since)}`);
-  if (!kusy.length && typeof d.limitW === 'number') kusy.push(`Zapnuto se počítá od ${d.limitW} W`);
-  saunaHintEl.textContent = kusy.join(' · ');
+  // Práh, od kterého se odběr počítá jako „topí", patří k políčku na Logice
+  // automatiky, kde se nastavuje — na kartě to byla jen věta navíc
+  saunaHintEl.textContent = d.since ? `Topí ${fmtSolDur(Date.now() - d.since)}` : '';
   renderSaunaMeta();
 }
 
@@ -8133,6 +8146,95 @@ if (saunaSaveBtn) {
 }
 
 const saunaDnyListEl = document.getElementById('saunaDnyList');
+
+// ---------- Jak dlouho se sauna nahřívá ----------
+// Seznam měření a tlačítko, kterým se dají poslat k analýze. Server je sbírá sám
+// pokaždé, co se sauna nahřívá — tady se jen ukazují.
+let saunaNahrevData = null;
+const nahrevListEl = document.getElementById('nahrevList');
+const nahrevPoznEl = document.getElementById('nahrevPozn');
+const nahrevKopirBtnEl = document.getElementById('nahrevKopirBtn');
+const nahrevStavEl = document.getElementById('nahrevStav');
+const nahrevZalohaEl = document.getElementById('nahrevZaloha');
+
+function nahrevMin(v) {
+  return v === null || v === undefined ? null : Math.round(v) + ' min';
+}
+
+function renderSaunaNahrev() {
+  if (!nahrevListEl) return;
+  const zaznamy = (saunaNahrevData && saunaNahrevData.zaznamy) || [];
+  nahrevListEl.textContent = '';
+  if (!zaznamy.length) {
+    const p = document.createElement('div');
+    p.className = 'log-empty';
+    p.textContent = 'Zatím nic — přibude to po prvním nahřátí sauny.';
+    nahrevListEl.appendChild(p);
+  }
+  // Nejnovější nahoře: jdeš se podívat, jak to trvalo dneska, ne před měsícem
+  for (const z of [...zaznamy].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'wbsrc-row';
+    const head = document.createElement('div');
+    head.className = 'wbsrc-head';
+    const den = document.createElement('span');
+    den.className = 'wbsrc-day';
+    den.textContent = fmtSolTime(z.start);
+    const zac = document.createElement('span');
+    const kusyZac = [];
+    if (typeof z.venkuC === 'number') kusyZac.push('venku ' + Math.round(z.venkuC) + ' °C');
+    if (typeof z.odC === 'number') kusyZac.push('v sauně ' + Math.round(z.odC) + ' °C');
+    zac.textContent = kusyZac.join(', ') || 'bez teplot';
+    head.appendChild(den);
+    head.appendChild(zac);
+    row.appendChild(head);
+
+    const casy = document.createElement('div');
+    casy.className = 'wbsrc-legend';
+    const prahy = z.prahy || {};
+    const kusy = [];
+    for (const p of [60, 70, 80]) {
+      if (prahy[p]) kusy.push(p + ' °C za ' + nahrevMin(prahy[p].min));
+    }
+    if (prahy.cil) kusy.push('cíl ' + Math.round(z.cilC) + ' °C za ' + nahrevMin(prahy.cil.min));
+    // Nahřívání, co se nikam nedostalo, je taky údaj — nemá se tvářit jako chyba
+    casy.textContent = kusy.join(' · ')
+      || ('nedostalo se na 60 °C' + (typeof z.maxC === 'number' ? ' (max ' + Math.round(z.maxC) + ' °C)' : ''));
+    row.appendChild(casy);
+    nahrevListEl.appendChild(row);
+  }
+  if (nahrevPoznEl) {
+    nahrevPoznEl.textContent = zaznamy.length
+      ? `${zaznamy.length} měření. Kamna se ptají po dvou minutách, takže časy sedí na ±2 min. `
+        + 'Tlačítkem pošli data k analýze.'
+      : 'Měří se samo: od stisku ON i od odběru na měřáku, takže se započítá i nahřívání puštěné z appky HUUM.';
+  }
+}
+
+async function nahrevZkopiruj() {
+  if (!nahrevKopirBtnEl) return;
+  const text = JSON.stringify(saunaNahrevData || { zaznamy: [] }, null, 1);
+  const kb = Math.max(1, Math.round(text.length / 1024));
+  let doSchranky = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    doSchranky = true;
+  } catch {}
+  // Schránka nemusí být povolená (Safari bez gesta, http). Aspoň ať jde text
+  // označit rukou, místo aby tlačítko jen mlčelo.
+  if (doSchranky) {
+    if (nahrevZalohaEl) nahrevZalohaEl.hidden = true;
+    if (nahrevStavEl) nahrevStavEl.textContent = `zkopírováno, ${kb} kB`;
+  } else if (nahrevZalohaEl) {
+    nahrevZalohaEl.hidden = false;
+    nahrevZalohaEl.value = text;
+    nahrevZalohaEl.focus();
+    nahrevZalohaEl.select();
+    if (nahrevStavEl) nahrevStavEl.textContent = 'označ a zkopíruj';
+  }
+}
+
+if (nahrevKopirBtnEl) nahrevKopirBtnEl.addEventListener('click', nahrevZkopiruj);
 
 function renderSaunaDays() {
   if (!saunaTotalEl) return;
@@ -9799,6 +9901,11 @@ function applySnapshot(snap) {
     saveSaunaDaysLocal();
     maybeRestoreSaunaDays(serverDny, loadSaunaDaysLocal());
   }
+  // Měření nahřívání se v telefonu nezálohuje: je to událostní řada, ne denní
+  // součty, a slučovat ji po restartu by jen vyrábělo duplicity. Server ji drží
+  // v Upstashi.
+  saunaNahrevData = snap.saunaNahrev || null;
+  bezpecne(renderSaunaNahrev);
   if (snap.assistantEnabled === false) hideAssistantSlide();
   bezpecne(() => renderAssistantLog(snap.assistantLog || []));
   bezpecne(() => renderSceny(snap.sceny));
@@ -10207,6 +10314,10 @@ function connectStream() {
     monthsData = mergeMonths(JSON.parse(e.data).months || [], monthsData);
     renderMonths();
     saveMonthsLocal();
+  });
+  es.addEventListener('saunaNahrev', e => {
+    saunaNahrevData = JSON.parse(e.data).saunaNahrev || null;
+    bezpecne(renderSaunaNahrev);
   });
   es.addEventListener('saunaDays', e => {
     saunaDaysData = mergeSaunaDays(JSON.parse(e.data).saunaDays || [], saunaDaysData);

@@ -64,6 +64,10 @@ function vzorovyStav() {
     tempAutoOn: 23, tempAutoOnRooms: { obyvak: 24 },
     tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 20 },
     saunaLimitW: 700, saunaHoldMin: 45,
+    saunaNahrev: { bezici: null, zaznamy: [
+      { start: t, konec: t + 2400000, duvod: 'odber', venkuC: 8, odC: 22, cilC: 79,
+        prahy: { 60: { min: 18, c: 61 } }, body: [{ min: 0, c: 22 }, { min: 2, c: 31 }], maxC: 79 }
+    ] },
     poolForce: { until: 0 },
     poolTemp: { c: 26.4, at: t, bezOd: 0 },
     away: { since: t },

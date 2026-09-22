@@ -34,6 +34,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     zapisy: [],
     zpravicky: [],
     cekani: [],
+    vzorky: [],
+    nahrevy: [],
     // Co má stub odpovědět; sekce si to přepisují
     odpovez: async () => ({ stav: 200, text: JSON.stringify(odpoved()) })
   };
@@ -52,7 +54,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
   h.api = new Function(
     'HUUM_USER', 'HUUM_PASS', 'HUUM_URL', 'huumEnabled', 'fetch', 'state', 'app',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
-    'delay',
+    'delay', 'nahrevVzorek', 'nahrevStart',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
@@ -71,7 +73,9 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     },
     text => h.zapisy.push(text),
     (nadpis, telo) => h.zpravicky.push({ nadpis, telo }),
-    ms => { h.cekani.push(ms); return Promise.resolve(); }
+    ms => { h.cekani.push(ms); return Promise.resolve(); },
+    c => h.vzorky.push(c),
+    duvod => h.nahrevy.push(duvod)
   );
   return h;
 }

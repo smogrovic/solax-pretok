@@ -40,7 +40,9 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   saunaData = { powerW: 3, fetchedAt: ted(), topi: false, since: 0, blockUntil: 0, limitW: 500 };
   renderSauna();
   check('vypnutá sauna má červenou', saunaLight.className, 'traffic-light off');
-  check('  a řekne, od čeho se počítá zapnuto', /od 500 W/.test(saunaHint.textContent), 'true');
+  // Práh patří k políčku na Logice automatiky, kde se nastavuje — na kartě
+  // to byla jen věta navíc, která nikdy nikoho nezajímala
+  check('  a práh 500 W na kartě není', /od 500 W/.test(saunaHint.textContent), 'false');
 
   saunaData = { powerW: 500, fetchedAt: new Date(T - 40 * MIN).toISOString(), topi: false, since: 0, blockUntil: 0, limitW: 500 };
   renderSauna();
@@ -165,7 +167,9 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('dveře zavřené', huumDoor.textContent, 'zavřené');
   check('zbývá se dopočítá', huumLeft.textContent, '1:20');
   check('světlo', huumLightState.textContent, 'zapnuto');
-  check('hláška ukáže vybavení', /vyvíječ i světlo/.test(huumHint.textContent), 'true');
+  // „Osazeno: světlo" se nemění a nic neříká — hint nese jen to, co je špatně
+  check('hláška o vybavení je pryč', /Osazeno/.test(huumHint.textContent), 'false');
+  check('  a při připojených kamnech je hint prázdný', huumHint.textContent, '');
 
   OUT.push('\\n8) Kamna HUUM — mezní stavy');
   // Cílovou teplotu API nevrací, dokud sauna netopí
@@ -393,6 +397,52 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('otev\u0159en\u00e9 dve\u0159e se \u0159eknou u tla\u010d\u00edtka',
     /otev\u0159en\u00e9 dve\u0159e/.test(top('huumTopeniHint').textContent), 'true');
   check('  a tla\u010d\u00edtka se zase povol\u00ed', top('huumTopeniOnBtn').disabled, 'false');
+
+  OUT.push('\\n8f) Jak dlouho se nah\u0159\u00edv\u00e1');
+  const seznam = document.getElementById('nahrevList');
+  saunaNahrevData = { bezici: null, zaznamy: [] };
+  renderSaunaNahrev();
+  // Prázdná karta nesmí vypadat jako rozbitá — má říct, že se to teď sbírá
+  check('bez m\u011b\u0159en\u00ed to \u0159ekne', /p\u0159ibude to po prvn\u00edm/.test(seznam.textContent), 'true');
+
+  saunaNahrevData = { bezici: null, zaznamy: [
+    { start: T - 26 * H, konec: T - 25 * H, duvod: 'appka', venkuC: -2, odC: 15, cilC: 79,
+      prahy: {}, body: [{ min: 0, c: 15 }, { min: 2, c: 19 }], maxC: 41 },
+    { start: T - 3 * H, konec: T - 2 * H, duvod: 'odber', venkuC: 8, odC: 22, cilC: 79,
+      prahy: { 60: { min: 18, c: 61 }, 70: { min: 26, c: 72 }, cil: { min: 38, c: 79 } },
+      body: [{ min: 0, c: 22 }, { min: 2, c: 31 }], maxC: 79 }
+  ] };
+  renderSaunaNahrev();
+  const radky = [...seznam.querySelectorAll('.wbsrc-row')];
+  check('dv\u011b m\u011b\u0159en\u00ed = dva \u0159\u00e1dky', radky.length, 2);
+  // Nejnovější nahoře — chodíš se podívat, jak to trvalo dneska
+  check('nejnov\u011bj\u0161\u00ed je prvn\u00ed', /venku 8/.test(radky[0].textContent), 'true');
+  check('  s po\u010d\u00e1te\u010dn\u00ed teplotou v saun\u011b', /v saun\u011b 22/.test(radky[0].textContent), 'true');
+  check('  a s \u010dasy na prahy', /60 \u00b0C za 18 min/.test(radky[0].textContent), 'true');
+  check('  i na c\u00edl', /c\u00edl 79 \u00b0C za 38 min/.test(radky[0].textContent), 'true');
+  // Nahřívání, co se nikam nedostalo, je taky údaj — nemá se tvářit jako chyba
+  check('nedokon\u010den\u00e9 nah\u0159\u00edv\u00e1n\u00ed \u0159ekne, kam do\u0161lo',
+    /nedostalo se na 60/.test(radky[1].textContent) && /max 41/.test(radky[1].textContent), 'true');
+  check('pozn\u00e1mka \u0159ekne, kolik jich je',
+    /2 m\u011b\u0159en\u00ed/.test(document.getElementById('nahrevPozn').textContent), 'true');
+  // ±2 min je poctivé říct: kamna se ptají po dvou minutách
+  check('  i s jak\u00fdm rozli\u0161en\u00edm',
+    /\u00b12 min/.test(document.getElementById('nahrevPozn').textContent), 'true');
+
+  let zkopirovano = null;
+  // navigator.clipboard je jen ke čtení, přiřazením by se nepřepsalo
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: async t => { zkopirovano = t; } } });
+  document.getElementById('nahrevKopirBtn').click();
+  await wait(60);
+  check('tla\u010d\u00edtko zkop\u00edruje data', typeof zkopirovano, 'string');
+  const parsed = JSON.parse(zkopirovano);
+  check('  jako JSON se v\u0161\u00edm', parsed.zaznamy.length, 2);
+  // Celá křivka je to, proč to tlačítko existuje — z milestones samotných
+  // se rychlost nahřívání nespočítá
+  check('  v\u010detn\u011b k\u0159ivky', parsed.zaznamy[0].body.length, 2);
+  check('  a \u0159ekne kolik toho bylo',
+    /zkop\u00edrov\u00e1no/.test(document.getElementById('nahrevStav').textContent), 'true');
 
   OUT.push('\\n9) Měřák 3EM zůstal nedotčený');
   saunaData = { powerW: 6200, fetchedAt: new Date().toISOString(), topi: true,
