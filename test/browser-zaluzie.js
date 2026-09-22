@@ -58,6 +58,33 @@ setTimeout(() => {
   check('  a obývákové taky', volby.filter(l => /Obývák/.test(l)).join(','), 'Obývák Okno,Obývák Dveře');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
+  R.push('');
+  R.push('4) Jezdec naklopen\u00ed');
+  // Dřív byl jezdec poslední v řádku, takže končil na hraně karty — a tažení
+  // od kraje obrazovky appka brala jako listování stránek místo naklopení lamel.
+  const box = document.querySelector('#blindsList1 .blind-room');
+  const tilt = box.querySelector('.blind-tilt');
+  const jezdec = tilt.querySelector('input[type=range]');
+  check('u \u017ealuzie popisek \u201eNaklopen\u00ed\u201c nen\u00ed',
+    !!tilt.querySelector('.blind-tilt-label'), 'false');
+  check('  ale procenta z\u016fstala', /%/.test(tilt.textContent), 'true');
+  const stred = el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+  check('jezdec sed\u00ed na st\u0159edu karty',
+    Math.abs(stred(jezdec) - stred(box)) < 1.5, 'true');
+  const rb = box.getBoundingClientRect(), rj = jezdec.getBoundingClientRect();
+  check('  a od obou hran m\u00e1 m\u00edsto',
+    Math.min(rj.left - rb.left, rb.right - rj.right) >= 40, 'true');
+  // Šířka se neměla srazit — jen se místo popisku posunula na druhou stranu
+  // Šířka se neměla srazit: dřív mu popisek s hodnotou ubraly ~108 px, teď mu
+  // mřížka ubere ~112. Zbytek karty mu má pořád patřit.
+  check('  a z\u016fstal skoro stejn\u011b \u0161irok\u00fd', rj.width > rb.width * 0.5, 'true');
+  // Formuláře časovače a rozvrhu mají pořadí popisek → jezdec → hodnota, takže
+  // ke hraně nesahají a popisek tam dává smysl
+  check('v \u010dasova\u010di popisek z\u016fst\u00e1v\u00e1',
+    document.querySelector('.timer-card .blind-tilt .blind-tilt-label').textContent, 'Naklopen\u00ed');
+  check('  i v rozvrhu',
+    document.getElementById('rozvrhNaklonLabel').textContent, 'Naklopen\u00ed');
+
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');
   pre.id = 'VYSLEDEK';

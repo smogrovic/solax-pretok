@@ -769,7 +769,7 @@
   .wbsrc-total{margin-top:8px;padding-top:8px;border-top:1px solid rgba(44,62,80,0.12);}
   .wbsrc-total .wbsrc-head{font-size:14px;color:var(--navy);font-weight:700;}
   .wbsrc-note{font-size:11px;color:var(--grey-text);margin-top:10px;line-height:1.35;}
-  .sauna-power{font-size:34px;font-weight:800;color:var(--orange);text-align:center;margin:10px 0 2px;}
+  .sauna-power{font-size:34px;font-weight:800;color:var(--navy);text-align:center;margin:10px 0 2px;}
   /* Drobným písmem pod odběrem: kdy naposledy dorazilo měření, jestli se ozval skript
      v Shelly (ten shazuje relé do vteřiny) a dokud drží blokace bazénu */
   .sauna-meta{font-size:11px;color:var(--grey-text);text-align:center;line-height:1.5;margin-top:6px;}
@@ -1570,7 +1570,12 @@
   .huum-temps .boiler-name{white-space:nowrap;}
   /* „33 °C" se na úzkém telefonu lámalo mezi číslo a jednotku a stupeň zůstal
      viset na druhém řádku. Písmo se radši zmenší, než aby se to zalomilo. */
-  .huum-temps .boiler-temp{white-space:nowrap;font-size:clamp(18px, 6.5vw, 26px);}
+  /* Stejná velikost i barva jako `.hp-temp` u bazénu (34 px, navy) — obě stránky
+     ukazují teplotu vody/vzduchu a lišit se nemají. Clamp zůstává kvůli úzkým
+     displejům: dvě čísla po 34 px se vedle sebe na 320px telefonu nevejdou.
+     Platí JEN uvnitř `.huum-temps` — základní `.boiler-temp` má karta bojlerů
+     na Ovládání a ta zůstává oranžová. */
+  .huum-temps .boiler-temp{white-space:nowrap;font-size:clamp(26px, 8.5vw, 34px);color:var(--navy);}
   .boiler-sep{
     width:1px;
     background:rgba(44,62,80,0.1);
@@ -1789,6 +1794,16 @@
     gap:8px;
     padding-bottom:6px;
   }
+  /* Jezdec u KAŽDÉ žaluzie. Dřív byl poslední v řádku, takže končil na hraně
+     karty — a tažení od kraje obrazovky appka brala jako listování stránek.
+     Mřížka `48px 1fr 48px` ho posadí přesně na střed karty a z obou stran mu
+     nechá místo. Formuláře časovače a rozvrhu tuhle variantu nemají: tam je
+     pořadí popisek → jezdec → hodnota, takže k hraně nesahá. */
+  .blind-tilt.stred{
+    display:grid;
+    grid-template-columns:48px 1fr 48px;
+  }
+  .blind-tilt.stred .blind-tilt-val{text-align:center;min-width:0;}
   /* Ukazatel polohy: podržet a táhnout svisle = nastavit zatažení na % */
   .blind-meter-col.holdable{
     cursor:grab;
@@ -5616,18 +5631,17 @@ function renderBlindRow(b) {
   // Naklopení lamel: posuvník 0–100 %, povel se pošle po puštění prstu
   if (tiltSlider) {
     const tilt = document.createElement('div');
-    tilt.className = 'blind-tilt';
-    const tiltLabel = document.createElement('span');
-    tiltLabel.className = 'blind-tilt-label';
-    tiltLabel.textContent = 'Naklopení';
+    tilt.className = 'blind-tilt stred';
+    // Popisek „Naklopení" tu nebyl potřeba — je to jediný jezdec v řádku. Jeho
+    // místo vlevo drží prázdná buňka mřížky, aby jezdec vyšel na střed karty.
+    tilt.appendChild(document.createElement('span'));
     const val = document.createElement('span');
     val.className = 'blind-tilt-val';
     val.textContent = tiltSlider.value + ' %';
     tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
     tiltSlider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null));
-    tilt.appendChild(tiltLabel);
-    tilt.appendChild(val);
     tilt.appendChild(tiltSlider);
+    tilt.appendChild(val);
     wrap.appendChild(tilt);
   }
 

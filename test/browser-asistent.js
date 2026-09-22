@@ -41,14 +41,14 @@ setTimeout(async () => {
   R.push('1) Tlačítka pod instrukcemi');
   renderSceny([
     { key: 'sauna', label: 'Zapni saunu' },
-    { key: 'zhasni', label: 'Zhasni všechna světla' },
+    { key: 'zahrada', label: 'Zahrada OFF' },
     { key: 'zamkni', label: 'Zamkni dům' },
     { key: 'sprcha', label: 'Jdu do sprchy' }
   ]);
   const tlacitka = [...document.querySelectorAll('#asstScenes .asst-scene')];
   check('jsou čtyři', tlacitka.length, 4);
   check('  s popisky ze serveru', tlacitka.map(b => b.textContent).join(' | '),
-    'Zapni saunu | Zhasni všechna světla | Zamkni dům | Jdu do sprchy');
+    'Zapni saunu | Zahrada OFF | Zamkni dům | Jdu do sprchy');
   // Musí být ve stejné kartě jako pole na instrukce, ne někde dole pod logem
   check('jsou v kartě s polem na instrukce',
     document.getElementById('asstScenes').closest('.card').contains(document.getElementById('asstInput')), true);
@@ -72,7 +72,7 @@ setTimeout(async () => {
   // Pátá scéna by v hlavní mřížce zbyla sama na řádku. Patří vedle prázdnin.
   renderSceny([
     { key: 'sauna', label: 'Zapni saunu' },
-    { key: 'zhasni', label: 'Zhasni všechna světla' },
+    { key: 'zahrada', label: 'Zahrada OFF' },
     { key: 'zamkni', label: 'Zamkni dům' },
     { key: 'sprcha', label: 'Jdu do sprchy' },
     { key: 'otevri', label: 'Otevři dveře' }
@@ -132,14 +132,16 @@ setTimeout(async () => {
 
   R.push('\\n1b) Otevři dveře se ptá');
   // Otevřené dveře jsou horší omyl než cokoli jiného, co se odsud dá spustit
-  renderSceny([{ key: 'zhasni', label: 'Zhasni všechna světla' }, { key: 'otevri', label: 'Otevři dveře' }]);
+  renderSceny([{ key: 'zahrada', label: 'Zahrada OFF' }, { key: 'otevri', label: 'Otevři dveře' }]);
   const okno0 = document.getElementById('potvrzOkno');
   const tlac = k => document.querySelector('[data-scene=\"' + k + '\"]');
   poslano.length = 0;
-  tlac('zhasni').click();
+  tlac('zahrada').click();
   await pockej();
   check('ostatní tlačítka se neptají', okno0.hidden, true);
-  check('  a rovnou pošlou scénu', poslano[0].body.scene, 'zhasni');
+  // Zhasínání je bezpečná strana — na rozdíl od sauny a dveří se na nic neptá
+  check('  a rovnou pošlou scénu', poslano[0].body.scene, 'zahrada');
+  check('  a tlačítko se jmenuje Zahrada OFF', tlac('zahrada').textContent, 'Zahrada OFF');
   poslano.length = 0;
   tlac('otevri').click();
   check('otevři dveře se ptá', okno0.hidden, false);

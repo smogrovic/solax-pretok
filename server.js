@@ -8568,7 +8568,7 @@ app.post('/api/sekacka/obnov', async (req, res) => {
 // neumí. Popisky jsou tedy taky odsud.
 const SCENY = [
   { key: 'sauna',  label: 'Zapni saunu' },
-  { key: 'zhasni', label: 'Zhasni všechna světla' },
+  { key: 'zahrada', label: 'Zahrada OFF' },
   { key: 'zamkni', label: 'Zamkni dům' },
   { key: 'sprcha', label: 'Jdu do sprchy' },
   // Otevřít, ne jen odemknout. V appce se na to ptá potvrzovací okno — omylem
@@ -8632,8 +8632,44 @@ async function scenaSauna() {
   return kroky.join(' ');
 }
 
-async function scenaZhasni() {
-  return assistantSetRelay('všechna světla', false);
+// Zhasne celý venek: zahradu dole i nahoře, světlo u bazénu, pergolu a světlo
+// v sauně. NOČNÍ SVĚTLA zůstávají — ta svítí schválně a tohle tlačítko se mačká
+// při odchodu ze zahrady, ne při odchodu z domu.
+//
+// Každý krok stojí sám za sebe: pergola visí na TaHomě a sauna na cloudu HUUM,
+// takže výpadek jednoho z nich nesmí sebrat zhasnutí zbytku.
+const ZAHRADA_RELE = ['lightNahore', 'lightDole', 'lightBazen'];
+
+async function scenaZahrada() {
+  const kroky = [];
+  const zhaslo = [];
+  for (const key of ZAHRADA_RELE) {
+    try {
+      await actuateRelay(key, false, 'tlačítko Zahrada OFF');
+      zhaslo.push(DEVICE_LABELS[key] || key);
+    } catch (err) {
+      kroky.push(`${DEVICE_LABELS[key] || key} se nepodařilo zhasnout (${err.message}).`);
+    }
+  }
+  try {
+    await assistantSetTerasaLight(false);
+    zhaslo.push('pergola');
+  } catch (err) {
+    kroky.push(`Pergolu se nepodařilo zhasnout (${err.message}).`);
+  }
+  // Kamna bez přihlašovacích údajů se mlčky přeskočí — u vypínací scény je
+  // hláška o nenastavení jen šum
+  if (huumEnabled) {
+    try {
+      await huumSvetlo(false);
+      zhaslo.push('sauna');
+    } catch (err) {
+      kroky.push(`Světlo v sauně se nepodařilo zhasnout (${err.message}).`);
+    }
+  }
+  if (zhaslo.length) kroky.unshift(`Zhasnuto: ${zhaslo.join(', ')}.`);
+  kroky.push('Noční světla zůstala.');
+  return kroky.join(' ');
 }
 
 async function scenaZamkni() {
@@ -8656,7 +8692,7 @@ async function scenaOtevri() {
   return msg;
 }
 
-const SCENA_FN = { sauna: scenaSauna, zhasni: scenaZhasni, zamkni: scenaZamkni,
+const SCENA_FN = { sauna: scenaSauna, zahrada: scenaZahrada, zamkni: scenaZamkni,
                    sprcha: scenaSprcha, otevri: scenaOtevri };
 
 app.post('/api/scene', async (req, res) => {

@@ -15,7 +15,8 @@ const CODE = between('// ---------- Tlačítka na Asistentovi (scény) a „nejs
 
 function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetla = [],
                  zamekSelze = false, huum = true, dvere = true,
-                 saunaSelze = false, saunaNejede = false, svetloSelze = false } = {}) {
+                 saunaSelze = false, saunaNejede = false, svetloSelze = false,
+                 pergolaSelze = false, releSelze = null } = {}) {
   const akce = [];
   const logy = [];
   const routy = {};
@@ -36,6 +37,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'assistantControlBlinds', 'assistantSetRelay', 'assistantSetAircon', 'actuateRelay',
     'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
+    'assistantSetTerasaLight', 'DEVICE_LABELS',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -52,7 +54,11 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     },
     async (co, on) => { akce.push(`rele:${co}:${on ? 'on' : 'off'}`); return `${co}: ${on ? 'zap' : 'vyp'}.`; },
     async ({ room, power }) => { akce.push(`klima:${room}:${power}`); return `${room}: ${power}.`; },
-    async (key, on, duvod) => { akce.push(`${key}:${on ? 'on' : 'off'} (${duvod})`); state.devices[key].isOn = on; },
+    async (key, on, duvod) => {
+      if (releSelze === key) throw new Error('Shelly nereaguje');
+      akce.push(`${key}:${on ? 'on' : 'off'} (${duvod})`);
+      state.devices[key].isOn = on;
+    },
     async (key, turn, duvod) => { akce.push(`auto:${key}:${turn} (${duvod})`); state.devices[key].isOn = turn === 'on'; return true; },
     async () => { if (zamekSelze) throw new Error('Nuki HTTP 503'); akce.push('zamek:lock'); return 'Zamčeno.'; },
     async () => { akce.push('zamek:otevri'); return 'Dveře otevřeny.'; },
@@ -68,7 +74,13 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     async on => {
       if (svetloSelze) throw new Error('HUUM neřekl, jestli světlo svítí.');
       akce.push(`huumsvetlo:${on ? 'on' : 'off'}`);
-    }
+    },
+    async on => {
+      if (pergolaSelze) throw new Error('TaHoma HTTP 503');
+      akce.push(`pergola:${on ? 'on' : 'off'}`);
+    },
+    { lightDole: 'Zahrada dole', lightNahore: 'Zahrada nahoře',
+      lightBazen: 'Světlo bazén', lightNocni: 'Noční světla' }
   );
   return { api, state, akce, logy, routy };
 }
@@ -85,7 +97,7 @@ nadpis('1) Seznam tlačítek');
 {
   const h = build();
   check('je jich pět', h.api.SCENY.length, 5);
-  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zhasni,zamkni,sprcha,otevri');
+  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zahrada,zamkni,sprcha,otevri');
   check('každé má popisek', h.api.SCENY.every(s => s.label && s.label.length > 3), true);
   // Tlačítko bez obsluhy by v appce svítilo a nic nedělalo
   check('a každé má co dělat', h.api.SCENY.every(s => typeof h.api.SCENA_FN[s.key] === 'function'), true);
@@ -155,9 +167,49 @@ nadpis('2) Zapni saunu');
 
 nadpis('3) Ostatní tlačítka');
 {
-  const h = build();
-  await h.api.SCENA_FN.zhasni();
-  check('zhasni pošle skupinu všech světel', h.akce.join(','), 'rele:všechna světla:off');
+  const h = build({ svetla: ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'] });
+  const reply = await h.api.SCENA_FN.zahrada();
+  check('Zahrada OFF zhasne zahradu, bazén, pergolu i saunu', h.akce.join(' | '),
+    'lightNahore:off (tlačítko Zahrada OFF) | lightDole:off (tlačítko Zahrada OFF) | '
+    + 'lightBazen:off (tlačítko Zahrada OFF) | pergola:off | huumsvetlo:off');
+  // Tohle je ta kontrola, která odliší novou scénu od staré „zhasni všechna světla":
+  // noční světla svítí schválně a tohle tlačítko se mačká při odchodu ze zahrady
+  check('  a noční světla nechá svítit', h.state.devices.lightNocni.isOn, true);
+  check('  a řekne to', /Noční světla zůstala/.test(reply), true);
+  check('  i co zhaslo', /Zhasnuto: Zahrada nahoře, Zahrada dole, Světlo bazén, pergola, sauna/.test(reply), true);
+}
+{
+  // Pergola visí na TaHomě, sauna na cloudu HUUM — výpadek jednoho nesmí sebrat zbytek
+  const h = build({ pergolaSelze: true });
+  const reply = await h.api.SCENA_FN.zahrada();
+  check('když selže pergola, zbytek zhasne', h.akce.join(' | '),
+    'lightNahore:off (tlačítko Zahrada OFF) | lightDole:off (tlačítko Zahrada OFF) | '
+    + 'lightBazen:off (tlačítko Zahrada OFF) | huumsvetlo:off');
+  check('  a řekne se to', /Pergolu se nepodařilo zhasnout/.test(reply), true);
+}
+{
+  const h = build({ svetloSelze: true });
+  const reply = await h.api.SCENA_FN.zahrada();
+  check('když selže sauna, zbytek zhasne',
+    h.akce.filter(a => a.startsWith('light') || a.startsWith('pergola')).length, 4);
+  check('  a řekne se to', /Světlo v sauně se nepodařilo zhasnout/.test(reply), true);
+}
+{
+  const h = build({ releSelze: 'lightDole' });
+  const reply = await h.api.SCENA_FN.zahrada();
+  check('když nereaguje relé, ostatní jdou dál',
+    h.akce.join(' | ').includes('lightBazen:off'), true);
+  check('  a pojmenuje se, které', /Zahrada dole se nepodařilo zhasnout/.test(reply), true);
+  check('  a do seznamu zhasnutých se nedostane', /Zhasnuto: Zahrada nahoře, Světlo bazén/.test(reply), true);
+}
+{
+  // Bez nastavených kamen se sauna mlčky přeskočí — u vypínací scény je hláška
+  // o nenastavení jen šum
+  const h = build({ huum: false });
+  const reply = await h.api.SCENA_FN.zahrada();
+  check('bez HUUM se sauna přeskočí', h.akce.some(a => a.startsWith('huumsvetlo')), false);
+  check('  a nic se o tom nepíše', /HUUM|sauně/.test(reply), false);
+  check('  ale zbytek zhasne', h.akce.length, 4);
 }
 {
   const h = build();

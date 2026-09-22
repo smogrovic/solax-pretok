@@ -232,6 +232,21 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  a nerozhod\u00ed to ani 100 proti 9',
     Math.abs(stred(delitko) - stred(tempKarta)) < 1.5, 'true');
 
+  OUT.push('\\n8c2) Sjednoceno s baz\u00e9nem');
+  // Bazén je předloha: velké číslo 34 px navy. Sauna měla teploty 26 px oranžové
+  // a odběr 34 px oranžový — tři různé podoby téhož na dvou stránkách.
+  const hp = document.getElementById('hpTemp');
+  const st = el => getComputedStyle(el);
+  check('teplota sauny je stejn\u011b velk\u00e1 jako u baz\u00e9nu',
+    st(huumTemp).fontSize, st(hp).fontSize);
+  check('  a c\u00edl taky', st(huumTarget).fontSize, st(hp).fontSize);
+  check('  i odb\u011br v kW', st(document.getElementById('saunaPower')).fontSize, st(hp).fontSize);
+  check('teplota sauny m\u00e1 barvu baz\u00e9nu', st(huumTemp).color, st(hp).color);
+  check('  i odb\u011br', st(document.getElementById('saunaPower')).color, st(hp).color);
+  // Oranžová zůstává jinde v appce — bojlery na Ovládání se měnit neměly
+  const bojler = document.querySelector('.boilers-card:not(.huum-temps) .boiler-temp');
+  check('bojlery si oran\u017eovou nechaly', st(bojler).color !== st(hp).color, 'true');
+
   OUT.push('\\n8d) Sv\u011btlo v saun\u011b');
   const POSLANO = [];
   const svetloOn = document.getElementById('huumSvetloOnBtn');
