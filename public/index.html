@@ -539,6 +539,8 @@
     color:var(--navy);
   }
   .light-cell .power-buttons{margin-top:0;}
+  .light-odhad{font-size:11px;color:var(--grey-text);margin-top:-4px;}
+  .light-odhad:empty{display:none;}
   /* `display:flex` výš by atributu `hidden` přebilo jeho display:none z prohlížeče.
      Buňka se světlem sauny se schovává právě tím atributem. */
   .light-cell[hidden]{display:none;}
@@ -5437,6 +5439,7 @@ function roomPageIndex(room) {
 
 async function blindCommand(deviceURL, action, value, btn, tilt) {
   if (btn) btn.disabled = true;
+  let ok = false;
   try {
     const res = await fetch('/api/blinds/command', {
       method: 'POST',
@@ -5450,6 +5453,7 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
+    ok = true;
     // Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
     // konečný stav (Overkiz hlásí novou polohu až po zastavení pohonu)
     clearTimeout(blindsReloadTimer);
@@ -5461,6 +5465,7 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
     errorEl.classList.add('show');
   }
   if (btn) btn.disabled = false;
+  return ok;
 }
 
 // Jen pro spínače (světla z TaHomy). Rolety text o poloze nemají: vedle v řádku
@@ -5818,22 +5823,37 @@ function renderTahomaSvetla() {
     const row = document.createElement('div');
     row.className = 'shelly-row';
     const kontrolka = document.createElement('div');
-    kontrolka.className = 'traffic-light' + (b.onState === true ? ' on' : '');
+    kontrolka.className = 'traffic-light' + (b.onState === true ? ' on' : (b.onState === false ? ' off' : ''));
     const jmeno = document.createElement('div');
     jmeno.className = 'shelly-label';
     jmeno.textContent = b.label;
     row.appendChild(kontrolka);
     row.appendChild(jmeno);
+    // Světla na RTS (terasa) stav nehlásí — RTS je jednosměrné rádio. Server pak
+    // posílá poslední povel z appky; vypínač na zdi ani ovladač Somfy ale nezná.
+    const pozn = document.createElement('div');
+    pozn.className = 'light-odhad';
+    pozn.textContent = b.onState === null || b.onState === undefined ? 'stav světlo nehlásí'
+      : (b.onStateOdhad ? 'podle posledního povelu z appky' : '');
     const btns = document.createElement('div');
     btns.className = 'power-buttons';
     for (const [popis, povel, trida] of [['ON', 'on', 'on-btn'], ['OFF', 'off', 'off-btn']]) {
       const btn = document.createElement('button');
       btn.className = 'power-btn ' + trida;
       btn.textContent = popis;
-      btn.addEventListener('click', () => blindCommand(b.deviceURL, povel, null, btn));
+      btn.addEventListener('click', async () => {
+        const ok = await blindCommand(b.deviceURL, povel, null, btn);
+        // Světlo, které stav nehlásí, by se jinak nepřeplo nikdy — ukážeme povel hned
+        if (ok && (b.onStateOdhad || b.onState === null || b.onState === undefined)) {
+          b.onState = povel === 'on';
+          b.onStateOdhad = true;
+          renderTahomaSvetla();
+        }
+      });
       btns.appendChild(btn);
     }
     cell.appendChild(row);
+    cell.appendChild(pozn);
     cell.appendChild(btns);
     tahomaSvetlaEl.appendChild(cell);
   }

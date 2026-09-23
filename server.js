@@ -3842,6 +3842,26 @@ async function tahomaFetch(path, options = {}, retried) {
 
 let blindsCache = { ts: 0, list: [] };
 
+// Světla na RTS (terasa) stav nehlásí — RTS je jednosměrné rádio, přijímač nikdy
+// neodpoví. Pamatujeme si proto poslední ON/OFF, který jsme TaHomě poslali sami
+// (tlačítka, scény, asistent — všechno jde přes tahomaExec). Vypínač na zdi ani
+// dálkový ovladač Somfy se tím nezachytí, proto appka ukazuje, že je to odhad.
+let tahomaSpinace = {};   // deviceURL -> { on, at }
+
+function tahomaSpinacZapis(deviceURL, commands, now = Date.now()) {
+  for (const c of commands || []) {
+    if (c && (c.name === 'on' || c.name === 'off')) tahomaSpinace[deviceURL] = { on: c.name === 'on', at: now };
+  }
+}
+
+// Stav spínače: co hlásí TaHoma, jinak poslední náš povel (s příznakem odhadu)
+function tahomaSpinacStav(deviceURL, stavZTahomy) {
+  if (stavZTahomy === 'on') return { onState: true, onStateOdhad: false };
+  if (stavZTahomy === 'off') return { onState: false, onStateOdhad: false };
+  const z = tahomaSpinace[deviceURL];
+  return z ? { onState: z.on, onStateOdhad: true } : { onState: null, onStateOdhad: false };
+}
+
 async function getBlinds() {
   if (blindsCache.list.length && Date.now() - blindsCache.ts < 60 * 1000) {
     return blindsCache.list;
@@ -3885,8 +3905,7 @@ async function getBlinds() {
       const orientation = typeof states['core:SlateOrientationState'] === 'number'
         ? states['core:SlateOrientationState']
         : null;
-      const onState = states['core:OnOffState'] === 'on' ? true
-        : (states['core:OnOffState'] === 'off' ? false : null);
+      const { onState, onStateOdhad } = tahomaSpinacStav(d.deviceURL, states['core:OnOffState']);
       const commands = {
         up: cmds.has('up') ? 'up' : (cmds.has('open') ? 'open' : (cmds.has('deploy') ? 'deploy' : null)),
         down: cmds.has('down') ? 'down' : (cmds.has('close') ? 'close' : (cmds.has('undeploy') ? 'undeploy' : null)),
@@ -3915,6 +3934,7 @@ async function getBlinds() {
         closure,
         orientation,
         onState,
+        onStateOdhad,
         commands
       };
     })
@@ -3949,6 +3969,8 @@ async function tahomaExec(label, deviceURL, commands) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label, actions: [{ deviceURL, commands }] })
   });
+  // Až když TaHoma povel přijala — neodeslaný povel stav nemění
+  tahomaSpinacZapis(deviceURL, commands);
   return out && out.execId ? out.execId : null;
 }
 
@@ -4041,6 +4063,7 @@ app.get('/api/blinds', async (req, res) => {
         closure: b.closure,
         orientation: b.orientation,
         onState: b.onState,
+        onStateOdhad: !!b.onStateOdhad,
         hasStop: !!b.commands.stop,
         hasOrientation: !!b.commands.orientation,
         hasClosure: !!b.commands.closure
@@ -9203,6 +9226,8 @@ function storeSnapshot() {
     // zpátky na GREEN, i když se ráno rozhodlo jinak
     wbLowSocUntil: state.wbLowSoc.until,
     assistantLog: state.assistantLog,
+    // Poslední ON/OFF světel z TaHomy, která stav sama nehlásí (RTS)
+    tahomaSpinace,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -9211,6 +9236,14 @@ function storeSnapshot() {
 function storeApplyPrimo(p) {
   if (!p || typeof p !== 'object') return;
   const now = Date.now();
+  if (p.tahomaSpinace && typeof p.tahomaSpinace === 'object') {
+    for (const [url, v] of Object.entries(p.tahomaSpinace)) {
+      // Co mezitím přišlo po startu, je novější než záloha
+      if (typeof url !== 'string' || url.length > 200 || tahomaSpinace[url]) continue;
+      if (!v || typeof v.on !== 'boolean' || !Number.isFinite(v.at) || v.at > now) continue;
+      tahomaSpinace[url] = { on: v.on, at: v.at };
+    }
+  }
   if (typeof p.wbAuto === 'boolean') state.wbAuto = p.wbAuto;
   if (p.tempAuto && typeof p.tempAuto === 'object') {
     for (const k of Object.keys(state.tempAuto)) {

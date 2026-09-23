@@ -126,6 +126,31 @@ setTimeout(async () => {
   document.querySelector('#tahomaSvetla .power-btn.off-btn').click();
   await pockej();
   check('  OFF vypíná', POSLANO[0].telo.action, 'off');
+  // Světla na RTS stav nehlásí: kontrolka jede podle posledního povelu z appky
+  const terasa = blinds.find(b => b.deviceURL === 'io://SvetlaTerasa');
+  const puvodniTerasa = { ...terasa };
+  const kontrolka = () => document.querySelector('#tahomaSvetla .traffic-light').className;
+  const pozn = () => document.querySelector('#tahomaSvetla .light-odhad').textContent;
+  terasa.onState = null; terasa.onStateOdhad = false;
+  renderTahomaSvetla();
+  check('  bez stavu šedá kontrolka', kontrolka(), 'traffic-light');
+  check('    a řekne, že stav nehlásí', pozn(), 'stav světlo nehlásí');
+  document.querySelector('#tahomaSvetla .power-btn.on-btn').click();
+  await pockej();
+  check('  po ON svítí hned zeleně', kontrolka(), 'traffic-light on');
+  check('    s poznámkou, že je to odhad', pozn(), 'podle posledního povelu z appky');
+  document.querySelector('#tahomaSvetla .power-btn.off-btn').click();
+  await pockej();
+  check('  po OFF červeně', kontrolka(), 'traffic-light off');
+  // Když TaHoma stav hlásí, poznámka není a kontrolka se nepředbíhá
+  terasa.onState = true; terasa.onStateOdhad = false;
+  renderTahomaSvetla();
+  check('  skutečný stav bez poznámky', pozn(), '');
+  document.querySelector('#tahomaSvetla .power-btn.off-btn').click();
+  await pockej();
+  check('    a OFF počká na TaHomu', kontrolka(), 'traffic-light on');
+  Object.assign(terasa, puvodniTerasa);
+  renderTahomaSvetla();
   check('  i zámek domu', vidim(document.getElementById('nukiLockBtn')), true);
 
   R.push('\\n2) Mikyho režim');

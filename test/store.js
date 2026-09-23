@@ -22,6 +22,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
   const lastCmd = (st && st.__lastCmd) || {};
   const DEVICES = { pool: {}, solinator: {}, shelly: {} };
   const RELAY_AUTO_OFF_MS = 15 * 60 * 1000;
+  const tahoma = {};                 // tahomaSpinace — poslední ON/OFF světel z TaHomy
 
   const fakeFetch = async (url, init = {}) => {
     if (String(url).includes('127.0.0.1')) {
@@ -38,7 +39,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
-    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
@@ -52,10 +53,10 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS,
-    [{ id: 1, time: '18:00', teplota: 85 }]);
+    [{ id: 1, time: '18:00', teplota: 85 }], tahoma);
 
   process.env = puvodni;
-  return { api, state, kv, volani, posty, pushSubscriptions, timery };
+  return { api, state, kv, volani, posty, pushSubscriptions, timery, tahoma };
 }
 
 function vzorovyStav() {
@@ -272,6 +273,25 @@ nadpis('5) Přímé hodnoty');
   check('povel starší než časovač se zahodí', 'shelly' in h.api.lastCmd, false);
   check('neznámé relé se zahodí', 'cizi' in h.api.lastCmd, false);
   check('povel z budoucnosti taky', 'budouci' in h.api.lastCmd, false);
+}
+{
+  // Světla na RTS stav nehlásí — poslední povel z appky musí přežít nasazení
+  const h = build({ env: UPSTASH });
+  const now = Date.now();
+  h.tahoma['rts://terasa'] = { on: true, at: now - 1000 };
+  check('stav světla jde do zálohy', h.api.storeSnapshot().primo.tahomaSpinace['rts://terasa'].on, true);
+  const h2 = build({ env: UPSTASH, state: prazdnyStav() });
+  h2.tahoma['rts://pergola'] = { on: false, at: now };
+  h2.api.storeApplyPrimo({ tahomaSpinace: {
+    'rts://terasa': { on: true, at: now - 1000 },
+    'rts://pergola': { on: true, at: now - 5000 },      // mezitím přišel novější povel
+    'rts://budouci': { on: true, at: now + 60000 },
+    'rts://nesmysl': { on: 'ano', at: now }
+  } });
+  check('  a vrátí se', h2.tahoma['rts://terasa'].on, true);
+  check('  novější povel záloha nepřebije', h2.tahoma['rts://pergola'].on, false);
+  check('  budoucí se zahodí', 'rts://budouci' in h2.tahoma, false);
+  check('  nesmysl taky', 'rts://nesmysl' in h2.tahoma, false);
 }
 {
   const h = build({ env: UPSTASH, state: prazdnyStav() });
