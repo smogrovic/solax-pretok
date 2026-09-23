@@ -2055,6 +2055,26 @@
      Je to plot, ne zámek: schovává se v prohlížeči, takže kdo umí otevřít
      vývojářské nástroje, se dostane dál. Na děti, co appku jen používají,
      to stačí — na nic víc se tím nespoléhá. */
+  /* Připomínky */
+  .prip-radek{width:100%;display:flex;align-items:center;gap:10px;padding:10px 0;}
+  .prip-radek + .prip-radek{border-top:1px solid rgba(44,62,80,0.08);}
+  .prip-ikona{font-size:22px;flex:0 0 auto;}
+  .prip-telo{flex:1;min-width:0;}
+  .prip-nazev{font-size:15px;font-weight:700;color:var(--navy);}
+  .prip-text{font-size:12px;color:var(--grey-text);margin-top:2px;}
+  .prip-radek.sviti .prip-text{color:var(--orange-dark);font-weight:600;}
+  .prip-akce{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
+  .prip-akce .sek-btn{flex:0 0 auto;min-width:78px;}
+  .prip-akce .sek-btn.sviti{background:var(--orange);color:#fff;}
+  .prip-akce .sek-btn[hidden]{display:none;}
+  /* Vystrčená záložka: kouká zpoza pravého okraje na všech ostatních stránkách */
+  .prip-zalozka{
+    position:fixed;right:0;top:42%;z-index:60;
+    border:none;border-radius:14px 0 0 14px;padding:10px 10px 10px 12px;
+    background:var(--orange);color:#fff;font-size:14px;font-weight:700;
+    box-shadow:-2px 2px 10px rgba(0,0,0,0.22);cursor:pointer;
+  }
+  .prip-zalozka[hidden]{display:none;}
   .slide[hidden]{display:none;}
   body[data-rezim="miky"] .jen-full,
   body[data-rezim="elenka"] .jen-full{display:none !important;}
@@ -2100,6 +2120,7 @@
   <div class="page-tabs" id="pageTabs"></div>
 </div>
 
+<button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
 <div class="slider-wrap" id="sliderWrap">
 
   <!-- Asistent (první stránka) -->
@@ -3036,6 +3057,17 @@
           <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
         </div>
         <div class="zavlaha-hint" id="sekHint"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stránka: Připomínky (vidí ji všichni, i děti — ať můžou odťuknout) -->
+  <div class="slide" data-title="Připomínky" id="pripominkySlide">
+    <div class="page">
+      <div class="card">
+        <div class="graph-title">Připomínky</div>
+        <div class="prip-seznam" id="pripSeznam"></div>
+        <div class="zavlaha-hint" id="pripHint"></div>
       </div>
     </div>
   </div>
@@ -10271,6 +10303,8 @@ function applySnapshot(snap) {
   bezpecne(renderSaunaNahrev);
   saunaZapnutoData = snap.saunaZapnuto || null;
   bezpecne(renderHuum);
+  pripData = snap.pripominky || null;
+  bezpecne(renderPripominky);
   huumTimersData = snap.saunaTimers || [];
   bezpecne(renderHuumTimers);
   if (snap.assistantEnabled === false) hideAssistantSlide();
@@ -10682,6 +10716,10 @@ function connectStream() {
     renderMonths();
     saveMonthsLocal();
   });
+  es.addEventListener('pripominky', e => {
+    pripData = JSON.parse(e.data).pripominky || null;
+    bezpecne(renderPripominky);
+  });
   es.addEventListener('saunaZapnuto', e => {
     saunaZapnutoData = JSON.parse(e.data).saunaZapnuto || null;
     bezpecne(renderHuum);
@@ -10973,7 +11011,176 @@ function updateDots() {
   // Aktivní záložku vždy doroluj do viditelné části lišty
   const active = stranky[prvni];
   if (active && !kalOtevreny) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  bezpecne(pripZalozkaObnov);
 }
+
+// ---------- Připomínky ----------
+// Kytky a vysavač jednou za 7 dní od posledního odťuknutí. Popelnice svítí od
+// poledne den před svozem do poledne dne svozu — pak zhasne sama, i když ji nikdo
+// neodťukne (svezená je tak jako tak). Server drží jen časy odťuknutí a přepínače;
+// kdy co svítí, se počítá tady podle hodin, v pražském čase.
+const PRIPOMINKY = [
+  { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7 },
+  { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7 },
+  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1 },       // pondělí
+  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 }     // čtvrtek dopoledne
+];
+const PRIP_DEN = 86400000;
+const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
+const pripSeznamEl = document.getElementById('pripSeznam');
+const pripHintEl = document.getElementById('pripHint');
+const pripZalozkaEl = document.getElementById('pripZalozka');
+const pripSlideEl = document.getElementById('pripominkySlide');
+let pripData = null;
+const pripZpet = {};   // id → do kdy jde odťuknutí vrátit
+let pripPraha = null;
+
+// Posun pražských hodin proti UTC v daném okamžiku (v zimě +1 h, v létě +2 h)
+function pripPosun(t) {
+  if (!pripPraha) {
+    pripPraha = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', hourCycle: 'h23',
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  }
+  const c = {};
+  for (const p of pripPraha.formatToParts(new Date(t))) c[p.type] = Number(p.value);
+  return Date.UTC(c.year, c.month - 1, c.day, c.hour % 24, c.minute, c.second) - Math.floor(t / 1000) * 1000;
+}
+// „Nástěnné" hodiny: čas posunutý tak, aby getUTC* vracely pražské datum a hodinu
+const pripNastenne = t => t + pripPosun(t);
+const pripDatum = w => { const d = new Date(w); return d.getUTCDate() + '. ' + (d.getUTCMonth() + 1) + '.'; };
+
+function pripominkaStav(def, p, now = Date.now()) {
+  p = p || {};
+  const hotovo = Number(p.hotovo) || 0;
+  if (def.dni) {
+    const perioda = def.dni * PRIP_DEN;
+    if (!hotovo) return { sviti: true, tlacitko: true, text: 'Zatím neodťuknuto' };
+    if (now - hotovo >= perioda) {
+      const dni = Math.floor((now - hotovo) / PRIP_DEN);
+      return { sviti: true, tlacitko: true, text: 'Naposledy před ' + dni + ' dny' };
+    }
+    return { sviti: false, tlacitko: true,
+      text: 'Hotovo ' + pripDatum(pripNastenne(hotovo)) + ' · příště ' + pripDatum(pripNastenne(hotovo + perioda)) };
+  }
+  // Popelnice: okno od poledne den před svozem do poledne dne svozu
+  const W = pripNastenne(now);
+  const den = new Date(W).getUTCDay();
+  const k = (den - (def.svoz + 6) % 7 + 7) % 7;
+  let zacatek = Math.floor(W / PRIP_DEN) * PRIP_DEN - k * PRIP_DEN + 12 * 3600000;
+  if (zacatek > W) zacatek -= 7 * PRIP_DEN;
+  const konec = zacatek + PRIP_DEN;
+  const vOkne = W < konec;
+  const svozW = vOkne ? konec : zacatek + 8 * PRIP_DEN;
+  const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra') : PRIP_KDY[def.svoz] + ' ' + pripDatum(svozW));
+  if (p.zapnuto === false) return { sviti: false, tlacitko: false, text: 'Připomínka vypnutá' };
+  if (!vOkne) return { sviti: false, tlacitko: false, text: 'Příští ' + kdySvoz };
+  if (hotovo && pripNastenne(hotovo) >= zacatek) return { sviti: false, tlacitko: true, text: 'Vyndáno ✓ · ' + kdySvoz };
+  return { sviti: true, tlacitko: true, text: 'Vyndat — ' + kdySvoz };
+}
+
+function pripSviticich(now = Date.now()) {
+  return PRIPOMINKY.filter(def => pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
+}
+
+async function pripPost(adresa, telo) {
+  pripHintEl.textContent = '';
+  try {
+    const res = await fetch(adresa, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+    if (data.pripominky) { pripData = data.pripominky; renderPripominky(); }
+  } catch (err) {
+    pripHintEl.textContent = err.message || 'Nepodařilo se uložit.';
+  }
+}
+
+function renderPripominky(now = Date.now()) {
+  if (!pripSeznamEl) return;
+  pripSeznamEl.textContent = '';
+  for (const def of PRIPOMINKY) {
+    const p = pripData && pripData[def.id];
+    const st = pripominkaStav(def, p, now);
+    const radek = document.createElement('div');
+    radek.className = 'prip-radek' + (st.sviti ? ' sviti' : '');
+    radek.dataset.id = def.id;
+    const ikona = document.createElement('div');
+    ikona.className = 'prip-ikona';
+    ikona.textContent = def.ikona;
+    const telo = document.createElement('div');
+    telo.className = 'prip-telo';
+    const nazev = document.createElement('div');
+    nazev.className = 'prip-nazev';
+    nazev.textContent = def.nazev;
+    const text = document.createElement('div');
+    text.className = 'prip-text';
+    text.textContent = st.text;
+    telo.append(nazev, text);
+    const akce = document.createElement('div');
+    akce.className = 'prip-akce';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sek-btn prip-hotovo' + (st.sviti ? ' sviti' : '');
+    const zpet = (pripZpet[def.id] || 0) > now;
+    btn.textContent = zpet ? 'Zpět' : 'Hotovo';
+    btn.hidden = !st.tlacitko && !zpet;
+    btn.addEventListener('click', () => {
+      if (zpet) {
+        delete pripZpet[def.id];
+        renderPripominky();
+        pripPost('/api/pripominky/' + def.id + '/hotovo', { zpet: true });
+      } else {
+        pripZpet[def.id] = Date.now() + 5000;
+        setTimeout(() => bezpecne(renderPripominky), 5100);
+        renderPripominky();
+        pripPost('/api/pripominky/' + def.id + '/hotovo', {});
+      }
+    });
+    akce.appendChild(btn);
+    if (def.svoz) {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      const zapnuto = !p || p.zapnuto !== false;
+      sw.className = 'toggle-switch prip-prepinac' + (zapnuto ? ' on' : '');
+      sw.setAttribute('aria-label', 'Připomínat ' + def.nazev);
+      sw.addEventListener('click', () => pripPost('/api/pripominky/' + def.id + '/zapnuto', { zapnuto: !zapnuto }));
+      akce.appendChild(sw);
+    }
+    radek.append(ikona, telo, akce);
+    pripSeznamEl.appendChild(radek);
+  }
+  pripZalozkaObnov(now);
+}
+
+// Je stránka Připomínky zrovna na očích? Na iPadu jsou vidět tři stránky vedle sebe.
+function pripNaOcich() {
+  if (!pripSlideEl || pripSlideEl.hidden) return false;
+  if (kalPanelEl && !kalPanelEl.hidden) return false;
+  if (!sliderWrap.clientWidth) return false;
+  const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  const i = slides.indexOf(pripSlideEl);
+  const prvni = Math.round(sliderWrap.scrollLeft / sirkaStranky());
+  return i >= prvni && i < prvni + viditelnychStranek();
+}
+
+function pripZalozkaObnov(now = Date.now()) {
+  if (!pripZalozkaEl) return;
+  const kolik = pripSviticich(now);
+  pripZalozkaEl.hidden = !kolik || pripNaOcich();
+  pripZalozkaEl.textContent = '🔔 ' + kolik;
+}
+
+function pripOtevri() {
+  if (kalPanelEl && !kalPanelEl.hidden) kalOtevri(false);
+  const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  const i = slides.indexOf(pripSlideEl);
+  if (i < 0) return;
+  sliderWrap.scrollTo({ left: i * sirkaStranky(), behavior: 'smooth' });
+  pripZalozkaEl.hidden = true;
+}
+if (pripZalozkaEl) pripZalozkaEl.addEventListener('click', pripOtevri);
+setInterval(() => bezpecne(renderPripominky), 60000);
 
 // ---------- Kalendář ----------
 // Panel stojí mimo pás stránek a přepíná se vlastní záložkou. Na iPadu tak zabere

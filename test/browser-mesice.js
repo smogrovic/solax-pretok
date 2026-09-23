@@ -24,7 +24,7 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   // záložku a přepíná celou obrazovku (viz browser-kalendar)
   const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')).map(t => t.textContent);
   check('záložky jdou v zadaném pořadí', tabs.join(' · '),
-    'Asistent · FVE · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Závlaha · Úklid · Přehled · Log · Logika automatiky');
+    'Asistent · FVE · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Závlaha · Úklid · Připomínky · Přehled · Log · Logika automatiky');
   const slides = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
   check('  a kalendář je až za nimi',

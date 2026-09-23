@@ -18,7 +18,7 @@ const CODE = KONST + '\n'
   + fn('function recordSaunaDay(w, dtH) {') + '\n'
   // Měření nahřívání visí na týchž hranách odběru, takže patří do téže sady
   + between('// ---------- Měření nahřívání sauny ----------',
-            '// ---------- Spotřeba po měsících ----------');
+            '// ---------- Připomínky ----------');
 
 // K sauně patří i to, co na ni reaguje: vypínání relé a udržovací ON
 const CODE2 = CODE + '\n'

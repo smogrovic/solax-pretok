@@ -270,6 +270,7 @@ const state = {
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   saunaNahrev: { bezici: null, zaznamy: [] },  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
+  pripominky: pripominkyVychozi(),  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -490,6 +491,7 @@ function snapshot() {
     saunaDays: state.saunaDays,
     saunaNahrev: state.saunaNahrev,
     saunaZapnuto: state.saunaZapnuto,
+    pripominky: state.pripominky,
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
@@ -1153,6 +1155,77 @@ function saunaZapnutoObnov(b, now = Date.now()) {
   broadcast('saunaZapnuto', { saunaZapnuto: state.saunaZapnuto });
   return true;
 }
+
+// ---------- Připomínky ----------
+// Kytky, vysavač a popelnice. Server drží jen to, kdy se co naposledy odťuklo, a
+// přepínače popelnic. Kdy připomínka svítí, si počítá appka podle hodin — v neděli
+// ve 12:00 se tak nemusí nic nikam posílat.
+const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice'];
+const PRIPOMINKY_S_PREPINACEM = ['bio', 'popelnice'];
+
+function pripominkyVychozi() {
+  return {
+    kytky: { hotovo: 0, predtim: 0 },
+    vysavac: { hotovo: 0, predtim: 0 },
+    bio: { zapnuto: true, hotovo: 0, predtim: 0 },
+    popelnice: { zapnuto: true, hotovo: 0, predtim: 0 }
+  };
+}
+
+// Odťuknutí. `zpet` vrací omylem odťuknuté na předchozí čas.
+function pripominkaHotovo(id, zpet, now = Date.now()) {
+  const p = state.pripominky[id];
+  if (!p) return false;
+  if (zpet) { p.hotovo = p.predtim || 0; p.predtim = 0; }
+  else { p.predtim = p.hotovo; p.hotovo = now; }
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+function pripominkaZapnuto(id, zapnuto) {
+  if (!PRIPOMINKY_S_PREPINACEM.includes(id)) return false;
+  state.pripominky[id].zapnuto = zapnuto;
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+// Obnova po nasazení. Bere se jen platné a novější odťuknutí serveru se nepřepíše —
+// kdo mezi startem a načtením zálohy odťukl, má pravdu on.
+function pripominkyObnov(b) {
+  if (!b || typeof b !== 'object' || !b.pripominky || typeof b.pripominky !== 'object') return false;
+  for (const id of PRIPOMINKY_IDS) {
+    const z = b.pripominky[id], p = state.pripominky[id];
+    if (!z || typeof z !== 'object') continue;
+    const hotovo = Number(z.hotovo);
+    if (Number.isFinite(hotovo) && hotovo > p.hotovo) {
+      p.hotovo = hotovo;
+      const predtim = Number(z.predtim);
+      p.predtim = Number.isFinite(predtim) && predtim >= 0 ? predtim : 0;
+    }
+    if (PRIPOMINKY_S_PREPINACEM.includes(id) && typeof z.zapnuto === 'boolean') p.zapnuto = z.zapnuto;
+  }
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+app.post('/api/pripominky/restore', (req, res) => {
+  if (!pripominkyObnov(req.body)) return res.status(400).json({ error: 'Chybí pripominky.' });
+  res.json({ ok: true });
+});
+
+app.post('/api/pripominky/:id/hotovo', (req, res) => {
+  const zpet = !!(req.body && req.body.zpet === true);
+  if (!pripominkaHotovo(req.params.id, zpet)) return res.status(404).json({ error: 'Neznámá připomínka.' });
+  res.json({ ok: true, pripominky: state.pripominky });
+});
+
+app.post('/api/pripominky/:id/zapnuto', (req, res) => {
+  if (!PRIPOMINKY_S_PREPINACEM.includes(req.params.id)) return res.status(404).json({ error: 'Tahle připomínka přepínač nemá.' });
+  const z = req.body && req.body.zapnuto;
+  if (typeof z !== 'boolean') return res.status(400).json({ error: 'Chybí zapnuto (true/false).' });
+  pripominkaZapnuto(req.params.id, z);
+  res.json({ ok: true, pripominky: state.pripominky });
+});
 
 // ---------- Spotřeba po měsících ----------
 // Sauna, bazén a wallbox si vedle denních čísel drží i měsíční součty, ať je za rok
@@ -9053,6 +9126,7 @@ const STORE_POSTS = [
   '/api/sauna-days/restore',
   '/api/sauna/nahrev/restore',
   '/api/sauna/zapnuto/restore',
+  '/api/pripominky/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -9096,6 +9170,7 @@ function storeSnapshot() {
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
     '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy },
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
+    '/api/pripominky/restore': { pripominky: state.pripominky },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
