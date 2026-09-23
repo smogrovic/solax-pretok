@@ -88,6 +88,48 @@ setTimeout(() => {
   check('stránka roluje svisle sama', getComputedStyle(slides[0]).overflowY, 'auto');
   check('  a pás jen vodorovně', getComputedStyle(wrap).overflowY, 'hidden');
   check('přichytává se po stránkách', getComputedStyle(slides[0]).scrollSnapAlign, 'start');
+  R.push('\\n7) Když běží sauna, je výchozí Sauna uprostřed');
+  // Plynulé rolování headless nedojede — posun se provede hned
+  const plynule = wrap.scrollTo;
+  wrap.scrollTo = o => { wrap.scrollLeft = o.left; };
+  const viditelne = () => [...wrap.querySelectorAll('.slide:not([hidden])')];
+  const iSauna = viditelne().indexOf(document.getElementById('saunaSlide'));
+  const prvni = () => Math.round(wrap.scrollLeft / sirkaStranky());
+  kalOtevri(true);
+  ipadDotekAt = 0;
+  saunaTopilaAt = 0; saunaZapnutoData = null;
+  huumData = { enabled: true, statusCode: 231, heating: true, temperature: 60, targetTemperature: 80,
+               fetchedAt: new Date().toISOString() };
+  renderHuum();
+  check('rozjetá sauna zavře kalendář', document.getElementById('kalPanel').hidden, true);
+  check('  a Sauna je prostřední ze tří', prvni() + 1, iSauna);
+  // Kdo na iPad sahá, tomu se nic nepřepíná
+  kalOtevri(true);
+  ipadDotekAt = Date.now();
+  renderHuum();
+  check('pod rukama se nepřepíná', document.getElementById('kalPanel').hidden, false);
+  ipadDotekAt = 0;
+  // Dotopeno: 29 min po posledním topení pořád sauna, po 31 min kalendář
+  huumData = { ...huumData, heating: false, statusCode: 232, fetchedAt: new Date().toISOString() };
+  saunaTopilaAt = Date.now() - 29 * 60000;
+  renderHuum();
+  check('29 min po topení pořád Sauna', document.getElementById('kalPanel').hidden + ',' + (prvni() + 1), 'true,' + iSauna);
+  saunaTopilaAt = Date.now() - 31 * 60000;
+  ipadKontrola();
+  check('po 31 min zase kalendář', document.getElementById('kalPanel').hidden, false);
+  // Po otevření appky se čas posledního topení vezme ze serveru
+  kalOtevri(true);
+  saunaTopilaAt = 0;
+  saunaZapnutoData = { od: Date.now() - 60 * 60000, naposledy: Date.now() - 10 * 60000 };
+  ipadKontrola();
+  check('poslední topení ze serveru (před 10 min) → Sauna', document.getElementById('kalPanel').hidden, true);
+  saunaZapnutoData = null;
+  ipadKontrola();
+  check('  bez něj kalendář', document.getElementById('kalPanel').hidden, false);
+  wrap.scrollTo = plynule;
+
+  R.push('\\n8) Zvoneček je na iPadu 2× větší');
+  check('36 px místo 18', getComputedStyle(document.getElementById('pripZalozka')).fontSize, '36px');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

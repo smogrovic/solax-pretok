@@ -484,7 +484,34 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('stav se p\u0159evezme z odpov\u011bdi', huumState.textContent, 'top\u00ed');
   check('  a vyp\u00edna\u010d je rozsv\u00edcen\u00fd', btn.classList.contains('topi'), 'true');
 
-  // Vypínání je bezpečná strana — držet se nemusí
+  OUT.push('\\n8e2b) Změna teploty při topení jen po potvrzení');
+  const okno = top('potvrzOkno');
+  check('kamna topí na 85', jezdec.value, '85');
+  POSLANO.length = 0;
+  tahni(270);
+  await wait(30);
+  check('posun puntíku otevře okno', okno.hidden, 'false');
+  check('  s otázkou', top('potvrzText').textContent, 'Sauna teď topí na 85 °C. Nastavit 65 °C?');
+  check('  a zatím se nic nepošle', POSLANO.length, 0);
+  top('potvrzZpet').click();
+  await wait(30);
+  check('Zpět vrátí puntík na teplotu kamen', jezdec.value, '85');
+  check('  a nic nepošle', POSLANO.length, 0);
+  tahni(270);
+  await wait(30);
+  top('potvrzAno').click();
+  await wait(60);
+  check('Potvrdit pošle novou teplotu', POSLANO[0] && POSLANO[0].adresa + ' ' + POSLANO[0].telo.teplota,
+    '/api/sauna/huum-start 65');
+  // I z klávesnice (skrytý jezdec) se ptá
+  POSLANO.length = 0;
+  jezdec.value = '70'; jezdec.dispatchEvent(new Event('input')); jezdec.dispatchEvent(new Event('change'));
+  check('změna z klávesnice se taky ptá', okno.hidden, 'false');
+  top('potvrzZpet').click();
+  await wait(30);
+
+  OUT.push('\\n8e2c) Vypnutí se taky musí podržet');
+  check('popisek řekne, že se má držet', top('huumTopeniPopis').textContent, 'Podrž pro vypnutí');
   POSLANO.length = 0;
   window.fetch = async (adresa, opts) => {
     POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
@@ -492,10 +519,22 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     return { ok: true, status: 200, json: async () => ({ ok: true, huum: {
       ...huumData, heating: false, statusCode: 232, fetchedAt: new Date().toISOString() } }) };
   };
+  dotyk('pointerdown');
+  await wait(120);
+  dotyk('pointerup');
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
   await wait(60);
-  check('klepnut\u00ed p\u0159i topen\u00ed vypne', POSLANO[0].adresa, '/api/sauna/huum-stop');
-  check('  a popisek se zm\u011bn\u00ed', /Podr\u017e pro zapnut\u00ed/.test(top('huumTopeniPopis').textContent), 'true');
+  check('krátké klepnutí při topení NEVYPNE', POSLANO.length, 0);
+  dotyk('pointerdown');
+  await wait(1200);
+  dotyk('pointerup');
+  await wait(60);
+  check('podržení vypne', POSLANO[0] && POSLANO[0].adresa, '/api/sauna/huum-stop');
+  check('  a popisek se změní', /Podrž pro zapnutí/.test(top('huumTopeniPopis').textContent), 'true');
+  // Když netopí, puntík se nastavuje bez ptání
+  tahni(360);
+  await wait(30);
+  check('když netopí, posun se neptá', okno.hidden, 'true');
 
   OUT.push('\\n8e3) \u010casova\u010d sauny');
   POSLANO.length = 0;

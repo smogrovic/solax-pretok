@@ -6953,9 +6953,10 @@ app.post('/api/sauna/huum-start', async (req, res) => {
       error: 'Sauna má otevřené dveře — zavři je a zkus to znovu.', huum: huumPayload()
     });
   }
+  const uzTopila = !!(state.huum && state.huum.heating);
   try {
     await huumPovel('start', { targetTemperature: teplota });
-    addLog(`Sauna: zapnuta na ${teplota} °C`);
+    addLog(uzTopila ? `Sauna: teplota změněna na ${teplota} °C` : `Sauna: zapnuta na ${teplota} °C`);
     const po = await huumOverStav(true);
     if (!po || !po.heating) {
       return res.status(502).json({

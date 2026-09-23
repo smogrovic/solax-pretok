@@ -2088,6 +2088,14 @@
     pointer-events:none;
   }
   .prip-zalozka[hidden]{display:none;}
+  /* Na iPadu na zdi je zvoneček 2× větší — kouká se na něj z dálky */
+  @media (min-width: 1000px) {
+    .prip-zalozka{
+      font-size:36px;padding:6px 26px;border-radius:32px;
+      box-shadow:0 0 0 10px rgba(245,147,61,0.18), 0 0 40px 12px rgba(245,147,61,0.45);
+    }
+    .prip-zalozka::before{inset:-28px;border-radius:64px;}
+  }
   .slide[hidden]{display:none;}
   body[data-rezim="miky"] .jen-full,
   body[data-rezim="elenka"] .jen-full{display:none !important;}
@@ -8025,7 +8033,7 @@ function dialKresli() {
   e.val.textContent = huumCil() + ' °C';
   e.slider.setAttribute('aria-valuetext', huumCil() + ' °C');
   if (e.popis) {
-    e.popis.textContent = huumTopiTed === true ? 'Klepnutím vypneš'
+    e.popis.textContent = huumTopiTed === true ? 'Podrž pro vypnutí'
       : (huumTopiTed === false ? `Podrž pro zapnutí na ${huumCil()} °C` : '');
   }
 }
@@ -8047,10 +8055,13 @@ function renderHuumTopeni(d, cerstve) {
     e.slider.value = String(d.targetTemperature);
   }
   huumTopiTed = cerstve && d ? !!d.heating : null;
+  if (huumTopiTed === true) saunaTopilaAt = Date.now();
   huumTeplotaTed = cerstve && d && typeof d.temperature === 'number' ? d.temperature : null;
   e.btn.classList.toggle('topi', huumTopiTed === true);
   e.btn.setAttribute('aria-label', huumTopiTed === true ? 'Vypnout saunu' : 'Zapnout saunu');
   dialKresli();
+  // iPad na zdi: rozjetá sauna má přednost před kalendářem
+  bezpecne(ipadKontrola);
 }
 
 // ---- tažení po kruhu ----
@@ -8099,16 +8110,35 @@ if (huumTopeniEls.dial) {
   });
   huumTopeniEls.dial.addEventListener('pointermove', ev => { if (tahne) dialNastav(ev); });
   for (const t of ['pointerup', 'pointercancel']) {
-    huumTopeniEls.dial.addEventListener(t, () => { tahne = false; });
+    huumTopeniEls.dial.addEventListener(t, () => {
+      if (!tahne) return;
+      tahne = false;
+      huumZmenaTeploty();
+    });
   }
   // Klávesnice jde přes skrytý `input` — ten si šipky obslouží sám
   huumTopeniEls.slider.addEventListener('input', () => { huumCilDotcen = true; dialKresli(); });
+  huumTopeniEls.slider.addEventListener('change', huumZmenaTeploty);
+}
+
+// Když sauna topí, nová teplota se kamnům pošle až po potvrzení. Puntík se
+// jinak dá posunout omylem — a kamna by pak topila jinam, než si kdo myslí.
+// Když netopí, nic se neposílá: teplota se použije až při zapnutí.
+function huumZmenaTeploty() {
+  const d = huumData;
+  if (huumTopiTed !== true || !d || typeof d.targetTemperature !== 'number') return;
+  const nova = huumCil();
+  if (nova === d.targetTemperature || potvrzCeka()) return;
+  const zpet = () => { huumCilDotcen = false; renderHuum(); };
+  potvrzZeptej('Změnit teplotu sauny?',
+    `Sauna teď topí na ${d.targetTemperature} °C. Nastavit ${nova} °C?`,
+    () => huumTopeniPovel('/api/sauna/huum-start', { teplota: nova }), null, zpet);
 }
 
 async function huumTopeniPovel(cesta, telo) {
   const e = huumTopeniEls;
   e.btn.disabled = true;
-  e.hint.textContent = cesta.endsWith('start') ? 'Zapínám…' : 'Vypínám…';
+  e.hint.textContent = cesta.endsWith('start') ? (huumTopiTed === true ? 'Nastavuji teplotu…' : 'Zapínám…') : 'Vypínám…';
   try {
     const res = await fetch(cesta, {
       method: 'POST',
@@ -8130,9 +8160,9 @@ async function huumTopeniPovel(cesta, telo) {
 const huumZapni = () => huumTopeniPovel('/api/sauna/huum-start', { teplota: huumCil() });
 const huumVypni = () => huumTopeniPovel('/api/sauna/huum-stop');
 
-// Vypínač: ZAPNOUT se musí podržet, jako v appce HUUM. Rozpálit kamna omylem
-// ťuknutím v kapse je jiná liga než omylem rozsvítit. VYPNOUT jde klepnutím —
-// to je bezpečná strana.
+// Vypínač se musí podržet, jako v appce HUUM — zapnout i vypnout. Rozpálit kamna
+// omylem ťuknutím v kapse je jiná liga než omylem rozsvítit, a omylem vypnutá
+// sauna uprostřed saunování taky nepotěší.
 if (huumTopeniEls.btn) {
   let drzeniOd = 0, drzeniTimer = null, drzeniRaf = null;
   const ring = huumTopeniEls.ring;
@@ -8155,10 +8185,10 @@ if (huumTopeniEls.btn) {
   };
   huumTopeniEls.btn.addEventListener('pointerdown', ev => {
     ev.stopPropagation();
-    if (huumTopiTed === true) return;      // vypíná se klepnutím, držet netřeba
+    const vypnout = huumTopiTed === true;
     drzeniOd = Date.now();
     huumTopeniEls.btn.classList.add('drzi');
-    drzeniTimer = setTimeout(() => { konecDrzeni(); huumZapni(); }, DIAL_DRZENI_MS);
+    drzeniTimer = setTimeout(() => { konecDrzeni(); if (vypnout) huumVypni(); else huumZapni(); }, DIAL_DRZENI_MS);
     tik();
   });
   for (const t of ['pointerup', 'pointercancel', 'pointerleave']) {
@@ -8166,10 +8196,10 @@ if (huumTopeniEls.btn) {
   }
   huumTopeniEls.btn.addEventListener('click', ev => {
     ev.stopPropagation();
-    // Klepnutí zapíná jen z klávesnice: tam je držení k ničemu a `click` z prstu
+    // Klepnutí přepíná jen z klávesnice: tam je držení k ničemu a `click` z prstu
     // přijde až po `pointerup`, který držení stornoval.
-    if (huumTopiTed === true) { huumVypni(); return; }
-    if (ev.detail === 0) huumZapni();
+    if (ev.detail !== 0) return;
+    if (huumTopiTed === true) huumVypni(); else huumZapni();
   });
 }
 
@@ -11699,20 +11729,66 @@ pouzijRezim();
 // kolem nikdo nestojí. Kdo si odskočí na Ovládání, nemusí nic vracet: po pěti
 // minutách bez doteku se panel přepne zpátky sám.
 // Na telefonu nic z toho neplatí, tam by to přepínalo stránku pod rukama.
+// Když běží sauna, je výchozí místo kalendáře stránka Sauna — uprostřed tří
+// viditelných. Půl hodiny po posledním topení se výchozím stane zase kalendář.
 const KAL_VYCHOZI_MS = 5 * 60 * 1000;
+const IPAD_SAUNA_DOBEH_MS = 30 * 60 * 1000;
 const sirokyDisplej = () => window.matchMedia('(min-width: 1000px)').matches;
 let kalNavratTimer = null;
+let ipadDotekAt = 0;            // 0 = od otevření appky na displej nikdo nesáhl
+let saunaTopilaAt = 0;          // kdy appka naposledy viděla kamna topit
+
+function saunaBezi(now = Date.now()) {
+  if (huumTopiTed === true) return true;
+  const naposledy = Math.max(saunaTopilaAt, (saunaZapnutoData && Number(saunaZapnutoData.naposledy)) || 0);
+  return naposledy > 0 && now - naposledy < IPAD_SAUNA_DOBEH_MS;
+}
+
+// Index Sauny mezi viditelnými stránkami (v dětském režimu chybí → -1)
+function ipadSaunaIndex() {
+  const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  return slides.indexOf(document.getElementById('saunaSlide'));
+}
+
+function ipadVychozi(now = Date.now()) {
+  if (!sirokyDisplej()) return;
+  const i = ipadSaunaIndex();
+  if (!saunaBezi(now) || i < 0) { kalOtevri(true); return; }
+  kalOtevri(false);
+  // Sauna uprostřed: první viditelná je ta před ní
+  sliderWrap.scrollTo({ left: Math.max(0, i - 1) * sirkaStranky(), behavior: 'smooth' });
+}
+
+// Ukazuje iPad právě to, co má být výchozí? Jen tehdy se nemusí nic přepínat.
+function ipadJeVychozi(now = Date.now()) {
+  const kal = !!(kalPanelEl && !kalPanelEl.hidden);
+  const i = ipadSaunaIndex();
+  if (!saunaBezi(now) || i < 0) return kal;
+  return !kal && Math.round(sliderWrap.scrollLeft / sirkaStranky()) === Math.max(0, i - 1);
+}
+
+// Změnil se stav sauny, nebo uběhla minuta: přepnout, ale jen když na displej
+// nikdo nesahá — pod rukama se stránka měnit nesmí.
+function ipadKontrola(now = Date.now()) {
+  if (!sirokyDisplej()) return;
+  if (ipadDotekAt && now - ipadDotekAt < KAL_VYCHOZI_MS) return;
+  if (!ipadJeVychozi(now)) ipadVychozi(now);
+}
+
 function kalNaplanujNavrat() {
   clearTimeout(kalNavratTimer);
+  ipadDotekAt = Date.now();
   if (!sirokyDisplej()) return;
   // Kontrola se opakuje i při spuštění: mezitím se mohlo otočit okno
-  kalNavratTimer = setTimeout(() => { if (sirokyDisplej()) kalOtevri(true); }, KAL_VYCHOZI_MS);
+  kalNavratTimer = setTimeout(() => ipadVychozi(), KAL_VYCHOZI_MS);
 }
 for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
   window.addEventListener(ev, kalNaplanujNavrat, { passive: true });
 }
-if (sirokyDisplej()) kalOtevri(true);
+if (sirokyDisplej()) ipadVychozi();
 kalNaplanujNavrat();
+ipadDotekAt = 0;
+setInterval(() => bezpecne(ipadKontrola), 60000);
 
 // Prstem přes kalendář se listuje po dnech. Dny leží pomyslně vpravo od pásu
 // stránek: tah doleva jde na zítřek, tah doprava na včerejšek — a z dneška, kde
