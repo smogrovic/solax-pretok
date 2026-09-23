@@ -7861,24 +7861,18 @@ function dialBod(uhel, r) {
   return { x: DIAL_S + r * Math.cos(rad), y: DIAL_S + r * Math.sin(rad) };
 }
 
-// Studená modrá na spodku rozsahu, teplá červená nahoře — jako rysky v HUUM.
+// Jedna teplá barva od světlé po tmavou: broskvová → oranžová → tmavě červená.
+// Vybraná z náhledů (varianta D) — bez studeného modrého konce, takže škála
+// říká jen „čím tmavší, tím tepleji", jak se to u škál velikosti dělá.
 //
-// Míchá se v OKLabu, ne v HSL. Dřív se jelo lineárně po odstínu při pevné
-// světlosti 48 %, jenže žlutá při takové světlosti není žlutá — je to bláto.
-// Kolem 80 °C z toho vycházelo #c6962f, tedy khaki hnědá. V OKLabu má každá
-// kotva vlastní světlost, takže žlutozelený pás jde nahoru na světlosti a
-// zůstane čistý: 80 °C je teď #ef963a, jantarová.
-//
-// Kotvy jsou body, mezi kterými se prokládá. Sytost (OKLab C) nikde neklesne
-// pod 0,10 — to je ta pojistka proti blátu.
+// Míchá se v OKLabu, ne v HSL. Dřív se jelo po odstínu při pevné světlosti
+// 48 % a žlutá při ní zhnědla — kolem 80 °C vycházelo khaki #c6962f.
+// Začátek je schválně světlý; rysky kolem 40 °C jsou proto na bílé bledé,
+// hodnotu ale nese číslo uprostřed a poloha puntíku.
 const DIAL_KOTVY = [
-  [0,    [0.5521, -0.0290, -0.1601]],   // #2a78d6 modrá
-  [0.25, [0.6483, -0.0687, -0.0919]],
-  [0.45, [0.7307, -0.1013, 0.0311]],
-  [0.62, [0.8188, -0.0678, 0.1098]],
-  [0.78, [0.7563, 0.0533, 0.1300]],
-  [0.90, [0.6304, 0.1481, 0.1017]],
-  [1,    [0.5504, 0.1509, 0.0876]]      // #c0392b červená
+  [0,   [0.8890, 0.0299, 0.0484]],   // #f8d2b6 světlá broskvová
+  [0.5, [0.6708, 0.1328, 0.1140]],   // #eb6834 oranžová
+  [1,   [0.4263, 0.1342, 0.0665]]    // #8f1d1d tmavě červená
 ];
 
 function dialGama(v) {

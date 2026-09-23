@@ -387,31 +387,19 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Drív se míchalo lineárně po odstínu při pevné světlosti 48 %. Žlutá při takové
   // světlosti není žlutá, je to bláto — kolem 80 °C z toho vycházelo khaki hnědé.
   const rgb = s => s.match(/\\d+/g).map(Number);
-  // Sytost v OKLabu: pod 0,10 začíná barva šedivět a vypadat blátivě
-  const sytost = s => {
-    const [r, g, b] = rgb(s).map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-    const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * q;
-    const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * q;
-    return Math.sqrt(A * A + B * B);
-  };
-  const vzorky = [0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map(dialBarva);
-  // Pod 0,09 začíná barva šedivět; nejnižší bod škály je tyrkys na 0,094
-  check('\u017e\u00e1dn\u00e1 barva \u0161k\u00e1ly ne\u0161ediv\u00ed',
-    vzorky.every(b => sytost(b) >= 0.09), 'true');
-  // Studený konec modrý, teplý červený — to je to, co se na číselníku líbí
-  const [r0, g0, b0] = rgb(dialBarva(0));
-  check('spodek \u0161k\u00e1ly je modr\u00fd', b0 > r0 + 60, 'true');
-  const [r1, g1, b1] = rgb(dialBarva(1));
-  check('vrch \u010derven\u00fd', r1 > b1 + 100, 'true');
-  // Konkrétně to, na co sis stěžoval: 80 °C už není khaki
-  // Stará škála tu měla #c6962f — khaki hnědou. Jantarová má výrazně víc červené
-  // a málo modré; ta stará by na první podmínce spadla (měla r = 198).
+  const vzorky = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map(dialBarva);
+  // Varianta D: jedna tepl\u00e1 barva sv\u011btl\u00e1 \u2192 tmav\u00e1. Sv\u011btlost mus\u00ed po cel\u00e9 \u0161k\u00e1le klesat,
+  // jinak by \u010d\u00edseln\u00edk n\u011bkde uprost\u0159ed tvrdil, \u017ee je chladn\u011bji ne\u017e o kus n\u00ed\u017e.
+  const svetlost = s => { const [r, g, b] = rgb(s); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  check('sv\u011btlost po cel\u00e9 \u0161k\u00e1le kles\u00e1',
+    vzorky.every((b, i) => i === 0 || svetlost(b) < svetlost(vzorky[i - 1])), 'true');
+  // \u017d\u00e1dn\u00fd studen\u00fd konec \u2014 v cel\u00e9 \u0161k\u00e1le nikde modr\u00e1
+  check('v\u0161echny barvy jsou tepl\u00e9', vzorky.every(b => { const [r, , bl] = rgb(b); return r > bl; }), 'true');
+  // Star\u00e1 \u0161k\u00e1la tu m\u011bla #c6962f \u2014 khaki. Sytou \u010dervenooran\u017eovou pozn\u00e1\u0161 podle toho,
+  // \u017ee \u010derven\u00e1 slo\u017eka je vysoko nad zelenou i modrou.
   const osmdesat = rgb(dialBarva(0.8));
-  check('80 \u00b0C je jantarov\u00e1, ne khaki',
-    osmdesat[0] >= 220 && osmdesat[1] >= 120 && osmdesat[2] <= 90, 'true');
+  check('80 \u00b0C je \u010dervenooran\u017eov\u00e1, ne khaki',
+    osmdesat[0] - osmdesat[1] >= 80 && osmdesat[0] - osmdesat[2] >= 100, 'true');
 
   // Oblouk kopíruje ty samé barvy — dřív byl celý jednobarevný podle hodnoty
   jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
