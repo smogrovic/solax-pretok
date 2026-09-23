@@ -2068,13 +2068,24 @@
   .prip-akce .sek-btn.sviti{background:var(--orange);color:#fff;}
   .prip-akce .sek-btn.schovane{visibility:hidden;}
   .prip-akce .sek-btn.odpocet{opacity:1;color:var(--grey-text);}
-  /* Zvoneček vlevo nahoře, nad záložkami — je vidět na všech ostatních stránkách.
-     Pod překryvnými okny (z-index 60), ať je nepřekrývá. */
+  /* Zvoneček vlevo pod lištou záložek, klidně přes kartu — je vidět na všech
+     ostatních stránkách. Přesnou výšku mu dopočítá pripZalozkaObnov() podle lišty;
+     tady je jen výchozí odhad. Pod překryvnými okny (z-index 60). */
   .prip-zalozka{
-    position:fixed;left:12px;top:calc(max(8px, env(safe-area-inset-top)) + 1px);z-index:55;
+    position:fixed;left:12px;top:calc(max(8px, env(safe-area-inset-top)) + 74px);z-index:55;
     border:none;border-radius:16px;padding:3px 13px;
     background:var(--orange);color:#fff;font-size:18px;font-weight:700;line-height:1.2;
-    box-shadow:0 2px 10px rgba(0,0,0,0.22);cursor:pointer;
+    box-shadow:0 0 0 5px rgba(245,147,61,0.18), 0 0 20px 6px rgba(245,147,61,0.45);
+    cursor:pointer;
+  }
+  /* Aura: rozmazané okolí, které se ke krajům ztrácí */
+  .prip-zalozka::before{
+    content:"";position:absolute;inset:-14px;z-index:-1;border-radius:32px;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+    background:rgba(238,242,246,0.35);
+    -webkit-mask:radial-gradient(closest-side, #000 55%, transparent);
+    mask:radial-gradient(closest-side, #000 55%, transparent);
+    pointer-events:none;
   }
   .prip-zalozka[hidden]{display:none;}
   .slide[hidden]{display:none;}
@@ -11188,6 +11199,9 @@ function pripZalozkaObnov(now = Date.now()) {
   if (!pripZalozkaEl) return;
   const kolik = pripSviticich(now);
   pripZalozkaEl.hidden = !kolik || pripNaOcich();
+  // Pod lištu záložek — její výška se mění s výřezem displeje
+  const lista = document.querySelector('.page-tabs-bar');
+  if (lista && !pripZalozkaEl.hidden) pripZalozkaEl.style.top = Math.round(lista.getBoundingClientRect().bottom + 10) + 'px';
   pripZalozkaEl.textContent = '🔔 ' + kolik;
 }
 

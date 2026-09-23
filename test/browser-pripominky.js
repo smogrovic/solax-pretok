@@ -152,7 +152,9 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('na jiné stránce je vidět', zal.hidden, 'false');
   check('  s počtem', zal.textContent, '🔔 2');
   const rz = zal.getBoundingClientRect();
-  check('zvoneček je vlevo nahoře', rz.left < 30 && rz.top < 80, 'true');
+  const listaDole = document.querySelector('.page-tabs-bar').getBoundingClientRect().bottom;
+  check('zvoneček je vlevo pod lištou záložek', rz.left < 30 && rz.top >= listaDole && rz.top < listaDole + 30, 'true');
+  check('  s aurou kolem', getComputedStyle(zal, '::before').backdropFilter, 'blur(6px)');
   check('  o 30 % větší (18 px místo 14)', getComputedStyle(zal).fontSize, '18px');
   // Plynulé rolování headless prohlížeč nedojede — zachytí se, kam se rolovalo
   const slides = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
