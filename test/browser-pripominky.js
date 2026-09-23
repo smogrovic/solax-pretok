@@ -70,6 +70,15 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
     sviti('bio', { zapnuto: true, hotovo: praha('2026-09-27', 18) }, praha('2026-09-27', 20)), 'false');
   check('odťuknutí z minulého týdne se nepočítá',
     sviti('bio', { zapnuto: true, hotovo: praha('2026-09-20', 18) }, praha('2026-09-27', 20)), 'true');
+  const bioSob = { zapnuto: true, hotovo: praha('2026-09-26', 10) };
+  check('odťuknuté dřív (sobota) v neděli 12:00 nesvítí', sviti('bio', bioSob, praha('2026-09-27', 12)), 'false');
+  check('  a hlásí vyndáno', pripominkaStav(def('bio'), bioSob, praha('2026-09-27', 12)).text, 'Vyndáno ✓ · svoz zítra');
+  check('  už v sobotu', pripominkaStav(def('bio'), bioSob, praha('2026-09-26', 11)).text, 'Vyndáno ✓ · svoz v pondělí 28. 9.');
+  check('  a odpočítává do dalšího týdne', pripominkaStav(def('bio'), bioSob, praha('2026-09-26', 11)).dalsi, praha('2026-10-04', 12));
+  check('odťuknuté hned po svozu platí pro příští týden',
+    sviti('bio', { zapnuto: true, hotovo: praha('2026-09-21', 13) }, praha('2026-09-27', 12)), 'false');
+  check('odťuknuté před svozem se na další týden nepřenese',
+    sviti('bio', { zapnuto: true, hotovo: praha('2026-09-21', 8) }, praha('2026-09-27', 12)), 'true');
   check('vypnutý přepínač nesvítí', sviti('bio', { zapnuto: false, hotovo: 0 }, praha('2026-09-27', 20)), 'false');
   // Zimní čas: v lednu je Praha UTC + 1 h
   check('v zimním čase neděle 12:00 svítí',
@@ -111,14 +120,24 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   const kb = radek('kytky').querySelector('.prip-hotovo');
   check('hotové místo Hotovo odpočítává', kb.textContent, 'za 5 dní');
   check('  šedě, ne oranžově', kb.classList.contains('sviti') + ',' + kb.classList.contains('odpocet'), 'false,true');
-  check('  a nejde odťuknout', kb.disabled, 'true');
+  check('  a jde odťuknout i dřív', kb.disabled, 'false');
+  POSLANO.length = 0;
+  kb.click();
+  await wait(30);
+  check('  pošle odťuknutí', POSLANO[0] && POSLANO[0].adresa, '/api/pripominky/kytky/hotovo');
+  check('  a nabídne Zpět', radek('kytky').querySelector('.prip-hotovo').textContent, 'Zpět');
+  pripZpet.kytky = 0;
+  pripData.kytky.hotovo = Date.now();
+  renderPripominky();
+  check('  pak naskočí nový odpočet', radek('kytky').querySelector('.prip-hotovo').textContent, 'za 7 dní');
+  POSLANO.length = 0;
   pripData.vysavac.hotovo = 0; renderPripominky();
   const vb = radek('vysavac').querySelector('.prip-hotovo');
   check('svítící je oranžové Hotovo', vb.textContent + ',' + vb.classList.contains('sviti') + ',' + vb.classList.contains('odpocet'), 'Hotovo,true,false');
   pripZpet.kytky = Date.now() + 5000; renderPripominky();
   radek('kytky').querySelector('.prip-hotovo').click();
   await wait(30);
-  check('Zpět vrátí odťuknutí', JSON.stringify(POSLANO[1] && POSLANO[1].telo), '{"zpet":true}');
+  check('Zpět vrátí odťuknutí', JSON.stringify(POSLANO[0] && POSLANO[0].telo), '{"zpet":true}');
   POSLANO.length = 0;
   radek('bio').querySelector('.prip-prepinac').click();
   await wait(30);

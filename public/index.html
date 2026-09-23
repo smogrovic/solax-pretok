@@ -11072,15 +11072,19 @@ function pripominkaStav(def, p, now = Date.now()) {
   const k = (den - (def.svoz + 6) % 7 + 7) % 7;
   let zacatek = Math.floor(W / PRIP_DEN) * PRIP_DEN - k * PRIP_DEN + 12 * 3600000;
   if (zacatek > W) zacatek -= 7 * PRIP_DEN;
-  const konec = zacatek + PRIP_DEN;
-  const vOkne = W < konec;
-  const svozW = vOkne ? konec : zacatek + 8 * PRIP_DEN;
-  // Začátek dalšího okna zpátky v reálném čase (posun hodin kolem poledne je stálý)
-  const dalsiOkno = zacatek + 7 * PRIP_DEN - (W - now);
-  const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra') : PRIP_KDY[def.svoz] + ' ' + pripDatum(svozW));
+  const vOkne = W < zacatek + PRIP_DEN;
+  // Okno, o které jde: to právě běžící, jinak nejbližší příští
+  const S = vOkne ? zacatek : zacatek + 7 * PRIP_DEN;
+  const naReal = w => w - (W - now);   // zpátky z nástěnných hodin (posun kolem poledne je stálý)
+  const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra')
+    : PRIP_KDY[def.svoz] + ' ' + pripDatum(S + PRIP_DEN));
   if (def.prepinac && p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
-  if (!vOkne) return { sviti: false, text: 'Příští ' + kdySvoz, dalsi: dalsiOkno };
-  if (hotovo && pripNastenne(hotovo) >= zacatek) return { sviti: false, text: 'Vyndáno ✓ · ' + kdySvoz, dalsi: dalsiOkno };
+  // Odťuknout jde i dřív: počítá se k nejbližšímu svozu všechno od poledne dne
+  // minulého svozu (tedy od konce předchozího okna)
+  if (hotovo && pripNastenne(hotovo) >= S - 6 * PRIP_DEN) {
+    return { sviti: false, text: 'Vyndáno ✓ · ' + kdySvoz, dalsi: naReal(S + 7 * PRIP_DEN) };
+  }
+  if (!vOkne) return { sviti: false, text: 'Příští ' + kdySvoz, dalsi: naReal(S) };
   return { sviti: true, text: 'Vyndat — ' + kdySvoz, dalsi: null };
 }
 
@@ -11139,7 +11143,6 @@ function renderPripominky(now = Date.now()) {
     btn.className = 'sek-btn prip-hotovo' + (st.sviti && !zpet ? ' sviti' : '') + (odpocet ? ' odpocet' : '');
     // Hotové: místo oranžového Hotovo šedé tlačítko s odpočtem do další akce
     btn.textContent = zpet ? 'Zpět' : odpocet ? pripOdpocet(st.dalsi - now) : 'Hotovo';
-    btn.disabled = odpocet;
     // Schová se jen naoko — místo zůstane, ať jsou tlačítka pěkně pod sebou
     btn.classList.toggle('schovane', !zpet && !st.sviti && !odpocet);
     btn.addEventListener('click', () => {
