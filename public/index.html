@@ -2064,15 +2064,17 @@
   .prip-text{font-size:12px;color:var(--grey-text);margin-top:2px;}
   .prip-radek.sviti .prip-text{color:var(--orange-dark);font-weight:600;}
   .prip-akce{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
-  .prip-akce .sek-btn{flex:0 0 auto;min-width:78px;}
+  .prip-akce .sek-btn{flex:0 0 auto;width:84px;}
   .prip-akce .sek-btn.sviti{background:var(--orange);color:#fff;}
-  .prip-akce .sek-btn[hidden]{display:none;}
-  /* Vystrčená záložka: kouká zpoza pravého okraje na všech ostatních stránkách */
+  .prip-akce .sek-btn.schovane{visibility:hidden;}
+  .prip-akce .sek-btn.odpocet{opacity:1;color:var(--grey-text);}
+  /* Zvoneček vlevo nahoře, nad záložkami — je vidět na všech ostatních stránkách.
+     Pod překryvnými okny (z-index 60), ať je nepřekrývá. */
   .prip-zalozka{
-    position:fixed;right:0;top:42%;z-index:60;
-    border:none;border-radius:14px 0 0 14px;padding:10px 10px 10px 12px;
-    background:var(--orange);color:#fff;font-size:14px;font-weight:700;
-    box-shadow:-2px 2px 10px rgba(0,0,0,0.22);cursor:pointer;
+    position:fixed;left:12px;top:calc(max(8px, env(safe-area-inset-top)) + 1px);z-index:55;
+    border:none;border-radius:16px;padding:3px 13px;
+    background:var(--orange);color:#fff;font-size:18px;font-weight:700;line-height:1.2;
+    box-shadow:0 2px 10px rgba(0,0,0,0.22);cursor:pointer;
   }
   .prip-zalozka[hidden]{display:none;}
   .slide[hidden]{display:none;}
@@ -11022,8 +11024,8 @@ function updateDots() {
 const PRIPOMINKY = [
   { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7 },
   { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7 },
-  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1 },       // pondělí
-  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 }     // čtvrtek dopoledne
+  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí; v zimě jde vypnout
+  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 }     // čtvrtek dopoledne, celý rok
 ];
 const PRIP_DEN = 86400000;
 const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
@@ -11049,17 +11051,19 @@ function pripPosun(t) {
 const pripNastenne = t => t + pripPosun(t);
 const pripDatum = w => { const d = new Date(w); return d.getUTCDate() + '. ' + (d.getUTCMonth() + 1) + '.'; };
 
+// → { sviti, text, dalsi }. `dalsi` je okamžik další akce, pokud je hotovo a čeká
+// se — tlačítko pak místo „Hotovo" odpočítává, kolik zbývá.
 function pripominkaStav(def, p, now = Date.now()) {
   p = p || {};
   const hotovo = Number(p.hotovo) || 0;
   if (def.dni) {
     const perioda = def.dni * PRIP_DEN;
-    if (!hotovo) return { sviti: true, tlacitko: true, text: 'Zatím neodťuknuto' };
+    if (!hotovo) return { sviti: true, text: 'Zatím neodťuknuto', dalsi: null };
     if (now - hotovo >= perioda) {
       const dni = Math.floor((now - hotovo) / PRIP_DEN);
-      return { sviti: true, tlacitko: true, text: 'Naposledy před ' + dni + ' dny' };
+      return { sviti: true, text: 'Naposledy před ' + dni + ' dny', dalsi: null };
     }
-    return { sviti: false, tlacitko: true,
+    return { sviti: false, dalsi: hotovo + perioda,
       text: 'Hotovo ' + pripDatum(pripNastenne(hotovo)) + ' · příště ' + pripDatum(pripNastenne(hotovo + perioda)) };
   }
   // Popelnice: okno od poledne den před svozem do poledne dne svozu
@@ -11071,11 +11075,20 @@ function pripominkaStav(def, p, now = Date.now()) {
   const konec = zacatek + PRIP_DEN;
   const vOkne = W < konec;
   const svozW = vOkne ? konec : zacatek + 8 * PRIP_DEN;
+  // Začátek dalšího okna zpátky v reálném čase (posun hodin kolem poledne je stálý)
+  const dalsiOkno = zacatek + 7 * PRIP_DEN - (W - now);
   const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra') : PRIP_KDY[def.svoz] + ' ' + pripDatum(svozW));
-  if (p.zapnuto === false) return { sviti: false, tlacitko: false, text: 'Připomínka vypnutá' };
-  if (!vOkne) return { sviti: false, tlacitko: false, text: 'Příští ' + kdySvoz };
-  if (hotovo && pripNastenne(hotovo) >= zacatek) return { sviti: false, tlacitko: true, text: 'Vyndáno ✓ · ' + kdySvoz };
-  return { sviti: true, tlacitko: true, text: 'Vyndat — ' + kdySvoz };
+  if (def.prepinac && p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
+  if (!vOkne) return { sviti: false, text: 'Příští ' + kdySvoz, dalsi: dalsiOkno };
+  if (hotovo && pripNastenne(hotovo) >= zacatek) return { sviti: false, text: 'Vyndáno ✓ · ' + kdySvoz, dalsi: dalsiOkno };
+  return { sviti: true, text: 'Vyndat — ' + kdySvoz, dalsi: null };
+}
+
+// Kolik zbývá do další akce: pod den v hodinách, jinak ve dnech (zaokrouhleno nahoru)
+function pripOdpocet(ms) {
+  if (ms < PRIP_DEN) return 'za ' + Math.max(1, Math.ceil(ms / 3600000)) + ' h';
+  const d = Math.ceil(ms / PRIP_DEN);
+  return 'za ' + d + (d === 1 ? ' den' : d < 5 ? ' dny' : ' dní');
 }
 
 function pripSviticich(now = Date.now()) {
@@ -11121,10 +11134,14 @@ function renderPripominky(now = Date.now()) {
     akce.className = 'prip-akce';
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'sek-btn prip-hotovo' + (st.sviti ? ' sviti' : '');
     const zpet = (pripZpet[def.id] || 0) > now;
-    btn.textContent = zpet ? 'Zpět' : 'Hotovo';
-    btn.hidden = !st.tlacitko && !zpet;
+    const odpocet = !zpet && !st.sviti && st.dalsi !== null;
+    btn.className = 'sek-btn prip-hotovo' + (st.sviti && !zpet ? ' sviti' : '') + (odpocet ? ' odpocet' : '');
+    // Hotové: místo oranžového Hotovo šedé tlačítko s odpočtem do další akce
+    btn.textContent = zpet ? 'Zpět' : odpocet ? pripOdpocet(st.dalsi - now) : 'Hotovo';
+    btn.disabled = odpocet;
+    // Schová se jen naoko — místo zůstane, ať jsou tlačítka pěkně pod sebou
+    btn.classList.toggle('schovane', !zpet && !st.sviti && !odpocet);
     btn.addEventListener('click', () => {
       if (zpet) {
         delete pripZpet[def.id];
@@ -11137,8 +11154,7 @@ function renderPripominky(now = Date.now()) {
         pripPost('/api/pripominky/' + def.id + '/hotovo', {});
       }
     });
-    akce.appendChild(btn);
-    if (def.svoz) {
+    if (def.prepinac) {
       const sw = document.createElement('button');
       sw.type = 'button';
       const zapnuto = !p || p.zapnuto !== false;
@@ -11147,6 +11163,7 @@ function renderPripominky(now = Date.now()) {
       sw.addEventListener('click', () => pripPost('/api/pripominky/' + def.id + '/zapnuto', { zapnuto: !zapnuto }));
       akce.appendChild(sw);
     }
+    akce.appendChild(btn);
     radek.append(ikona, telo, akce);
     pripSeznamEl.appendChild(radek);
   }

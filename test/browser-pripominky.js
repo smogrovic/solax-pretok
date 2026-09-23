@@ -35,9 +35,14 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('stránka je hned za Úklidem', tituly[tituly.indexOf('Úklid') + 1], 'Připomínky');
   pripData = null; renderPripominky();
   check('čtyři připomínky', document.querySelectorAll('#pripSeznam .prip-radek').length, 4);
-  check('přepínač mají jen popelnice',
+  check('přepínač má jen BIO (běžná popelnice jede celý rok)',
     Array.from(document.querySelectorAll('#pripSeznam .prip-prepinac')).map(s => s.closest('.prip-radek').dataset.id).join(','),
-    'bio,popelnice');
+    'bio');
+  const akceBio = Array.from(radek('bio').querySelector('.prip-akce').children).map(e => e.classList.contains('prip-prepinac') ? 'prepinac' : 'hotovo');
+  check('přepínač je vlevo, Hotovo vpravo', akceBio.join(','), 'prepinac,hotovo');
+  const praveOkraje = Array.from(document.querySelectorAll('#pripSeznam .prip-hotovo')).map(b => Math.round(b.getBoundingClientRect().right));
+  const sirky = Array.from(document.querySelectorAll('#pripSeznam .prip-hotovo')).map(b => Math.round(b.getBoundingClientRect().width));
+  check('tlačítka jsou pod sebou', new Set(praveOkraje).size === 1 && new Set(sirky).size === 1, 'true');
   check('není zamykací', document.getElementById('pripominkySlide').querySelector('.lockable'), null);
 
   OUT.push('\\n2) Kytky a vysavač');
@@ -79,7 +84,17 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('čtvrtek 12:00 zhasne', sviti('popelnice', pop, praha('2026-10-01', 12)), 'false');
   check('  a řekne příští svoz', pripominkaStav(def('popelnice'), pop, praha('2026-10-01', 12)).text,
     'Příští svoz ve čtvrtek 8. 10.');
-  check('mimo okno se neodťukává', pripominkaStav(def('popelnice'), pop, praha('2026-10-02', 12)).tlacitko, 'false');
+  check('mimo okno odpočítává do dalšího okna',
+    pripominkaStav(def('popelnice'), pop, praha('2026-10-02', 12)).dalsi, praha('2026-10-07', 12));
+  check('běžná popelnice se vypnout nedá',
+    sviti('popelnice', { zapnuto: false, hotovo: 0 }, praha('2026-09-30', 12)), 'true');
+  check('vypnuté BIO neodpočítává', pripominkaStav(def('bio'), { zapnuto: false }, praha('2026-09-30', 12)).dalsi, null);
+
+  OUT.push('\\n4b) Odpočet');
+  check('pod den v hodinách', pripOdpocet(3 * H - MIN), 'za 3 h');
+  check('den', pripOdpocet(DEN), 'za 1 den');
+  check('dny', pripOdpocet(3 * DEN + H), 'za 4 dny');
+  check('dní', pripOdpocet(6 * DEN + H), 'za 7 dní');
 
   OUT.push('\\n5) Tlačítka');
   pripData = { kytky: { hotovo: 0 }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: true, hotovo: 0 },
@@ -90,6 +105,17 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   await wait(30);
   check('Hotovo pošle odťuknutí', POSLANO[0] && POSLANO[0].adresa, '/api/pripominky/kytky/hotovo');
   check('  a tlačítko nabídne Zpět', radek('kytky').querySelector('.prip-hotovo').textContent, 'Zpět');
+  pripZpet.kytky = 0;
+  pripData.kytky.hotovo = Date.now() - 2 * DEN;
+  renderPripominky();
+  const kb = radek('kytky').querySelector('.prip-hotovo');
+  check('hotové místo Hotovo odpočítává', kb.textContent, 'za 5 dní');
+  check('  šedě, ne oranžově', kb.classList.contains('sviti') + ',' + kb.classList.contains('odpocet'), 'false,true');
+  check('  a nejde odťuknout', kb.disabled, 'true');
+  pripData.vysavac.hotovo = 0; renderPripominky();
+  const vb = radek('vysavac').querySelector('.prip-hotovo');
+  check('svítící je oranžové Hotovo', vb.textContent + ',' + vb.classList.contains('sviti') + ',' + vb.classList.contains('odpocet'), 'Hotovo,true,false');
+  pripZpet.kytky = Date.now() + 5000; renderPripominky();
   radek('kytky').querySelector('.prip-hotovo').click();
   await wait(30);
   check('Zpět vrátí odťuknutí', JSON.stringify(POSLANO[1] && POSLANO[1].telo), '{"zpet":true}');
@@ -102,10 +128,13 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   OUT.push('\\n6) Vystrčená záložka');
   const zal = document.getElementById('pripZalozka');
   sliderWrap.scrollTo({ left: 0 }); await wait(100); updateDots();
-  pripData = { kytky: { hotovo: 0 }, vysavac: { hotovo: 0 }, bio: { zapnuto: false }, popelnice: { zapnuto: false } };
+  pripData = { kytky: { hotovo: 0 }, vysavac: { hotovo: 0 }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };
   renderPripominky();
   check('na jiné stránce je vidět', zal.hidden, 'false');
   check('  s počtem', zal.textContent, '🔔 2');
+  const rz = zal.getBoundingClientRect();
+  check('zvoneček je vlevo nahoře', rz.left < 30 && rz.top < 80, 'true');
+  check('  o 30 % větší (18 px místo 14)', getComputedStyle(zal).fontSize, '18px');
   // Plynulé rolování headless prohlížeč nedojede — zachytí se, kam se rolovalo
   const slides = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
   const cil = slides.indexOf(document.getElementById('pripominkySlide'));
@@ -119,7 +148,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('na Připomínkách záložka není', zal.hidden, 'true');
   sliderWrap.scrollLeft = 0; updateDots();
   check('zpátky jinde je zase vidět', zal.hidden, 'false');
-  pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false }, popelnice: { zapnuto: false } };
+  pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };
   renderPripominky();
   check('když nic nesvítí, záložka není', zal.hidden, 'true');
 

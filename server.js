@@ -1158,17 +1158,17 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 
 // ---------- Připomínky ----------
 // Kytky, vysavač a popelnice. Server drží jen to, kdy se co naposledy odťuklo, a
-// přepínače popelnic. Kdy připomínka svítí, si počítá appka podle hodin — v neděli
+// přepínač BIO (běžná popelnice jede celý rok, ta ho nemá). Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
 const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice'];
-const PRIPOMINKY_S_PREPINACEM = ['bio', 'popelnice'];
+const PRIPOMINKY_S_PREPINACEM = ['bio'];
 
 function pripominkyVychozi() {
   return {
     kytky: { hotovo: 0, predtim: 0 },
     vysavac: { hotovo: 0, predtim: 0 },
     bio: { zapnuto: true, hotovo: 0, predtim: 0 },
-    popelnice: { zapnuto: true, hotovo: 0, predtim: 0 }
+    popelnice: { hotovo: 0, predtim: 0 }
   };
 }
 

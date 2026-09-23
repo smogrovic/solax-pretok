@@ -28,7 +28,8 @@ nadpis('1) Výchozí stav');
   const h = build();
   check('čtyři připomínky', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice');
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
-  check('popelnice mají přepínač zapnutý', h.state.pripominky.bio.zapnuto && h.state.pripominky.popelnice.zapnuto, true);
+  check('BIO má přepínač zapnutý', h.state.pripominky.bio.zapnuto, true);
+  check('běžná popelnice přepínač nemá (jede celý rok)', 'zapnuto' in h.state.pripominky.popelnice, false);
   check('kytky přepínač nemají', 'zapnuto' in h.state.pripominky.kytky, false);
 }
 
@@ -63,6 +64,8 @@ nadpis('3) Endpointy');
   check('  a nic se nezmění', h.state.pripominky.bio.zapnuto, false);
   r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'kytky' }, { zapnuto: false });
   check('kytky přepínač nemají → 404', r.status, 404);
+  r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'popelnice' }, { zapnuto: false });
+  check('běžná popelnice taky ne → 404', r.status, 404);
 }
 
 nadpis('4) Obnova ze zálohy');
@@ -73,7 +76,7 @@ nadpis('4) Obnova ze zálohy');
     kytky: { hotovo: 5000 },
     vysavac: { hotovo: 7000, predtim: 3000 },
     bio: { hotovo: 'x', zapnuto: false },
-    popelnice: { zapnuto: 'ano' },
+    popelnice: { zapnuto: false },
     pes: { hotovo: 1 }
   } });
   check('restore → 200', r.status, 200);
@@ -82,7 +85,7 @@ nadpis('4) Obnova ze zálohy');
   check('  i s předchozím', h.state.pripominky.vysavac.predtim, 3000);
   check('nečíslo se zahodí', h.state.pripominky.bio.hotovo, 0);
   check('  ale přepínač se vezme', h.state.pripominky.bio.zapnuto, false);
-  check('neplatný přepínač se zahodí', h.state.pripominky.popelnice.zapnuto, true);
+  check('běžné popelnici se přepínač nevnutí', 'zapnuto' in h.state.pripominky.popelnice, false);
   check('cizí id se nezaloží', 'pes' in h.state.pripominky, false);
   check('prázdné tělo → 400', h.zavolej('/api/pripominky/restore', {}, {}).status, 400);
 }
