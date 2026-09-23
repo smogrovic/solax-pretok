@@ -38,6 +38,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     saunaBlockUntil: 0,
     saunaDays: [],
     saunaNahrev: { bezici: null, zaznamy: [] },
+    saunaZapnuto: { od: 0, naposledy: 0 },
     weather: { tempC: venku },
     huum: huum === null ? {} : huum,
     devices: {
@@ -55,7 +56,8 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
           + ' nahrevStart, nahrevVzorek, nahrevKonec, NAHREV_PRAHY, NAHREV_MAX,'
-          + ' NAHREV_BODU_MAX, NAHREV_STROP_MS };'
+          + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
+          + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
   )(
     { env }, state, 'key', 'shelly-x.cloud',
     ts => !!ts && now - new Date(ts).getTime() <= 10 * MIN,
@@ -370,6 +372,63 @@ nadpis('Měření nahřívání');
   check('  a vypadla ta nejstarší', h.state.saunaNahrev.zaznamy[0].body[1].c, 45);
   check('  poslední je ta nejnovější',
     h.state.saunaNahrev.zaznamy[h.api.NAHREV_MAX - 1].body[1].c, 40 + h.api.NAHREV_MAX + 4);
+}
+
+nadpis('Zapnuto v');
+{
+  const h = build({ drzeni: 30 });
+  const z = () => h.state.saunaZapnuto;
+  const start = h.now;
+  h.api.updateSauna(6000);
+  check('první topení zapíše čas', z().od, start);
+  check('  a pošle se do appky', h.broadcasts.includes('saunaZapnuto'), 'true');
+
+  // Termostat vypíná a zapíná, ale čas prvního zapnutí se nemění
+  h.posun(10); h.api.updateSauna(50);
+  h.posun(5);  h.api.updateSauna(6000);
+  h.posun(20); h.api.updateSauna(50);
+  h.posun(5);  h.api.updateSauna(6000);
+  check('cyklování termostatu ho nepřepíše', z().od, start);
+  const posledni = h.now;
+  check('  ale poslední topení se posouvá', z().naposledy, posledni);
+
+  // 3 h se počítají od POSLEDNÍHO topení, ne od prvního zapnutí
+  h.posun(2 * 60 + 59); h.api.updateSauna(50);
+  check('2 h 59 min po posledním topení ještě drží', z().od, start);
+  h.posun(2); h.api.updateSauna(50);
+  check('po 3 h zmizí', z().od, 0);
+  check('  i s posledním topením', z().naposledy, 0);
+
+  const znovu = h.now + 60000;
+  h.posun(1); h.api.updateSauna(6000);
+  check('další topení začne nové saunování', z().od, znovu);
+}
+{
+  // Zapnutí z kamen i z měřáku se nezaloží dvakrát
+  const h = build();
+  const start = h.now;
+  h.api.saunaZapnutoTopi(start);
+  h.posun(2); h.api.updateSauna(6000);
+  check('kamna a odběr nezaloží dvě saunování', h.state.saunaZapnuto.od, start);
+}
+{
+  // Kontrola musí běžet i bez topení — jinak by ráno svítilo včerejší zapnutí
+  const h = build();
+  h.api.saunaZapnutoTopi(h.now);
+  h.api.saunaZapnutoKontrola(h.now + h.api.SAUNA_ZAPNUTO_RESET_MS + 1);
+  check('samotná kontrola po 3 h vynuluje', h.state.saunaZapnuto.od, 0);
+}
+{
+  // Obnova po nasazení
+  const h = build();
+  const now = h.now;
+  check('rozbité tělo se odmítne', h.api.saunaZapnutoObnov({}, now), false);
+  h.api.saunaZapnutoObnov({ od: now - 5 * 3600000, naposledy: now - 4 * 3600000 }, now);
+  check('vypršelé saunování se neobnoví', h.state.saunaZapnuto.od, 0);
+  h.api.saunaZapnutoObnov({ od: now - 3600000, naposledy: now - 600000 }, now);
+  check('běžící se obnoví', h.state.saunaZapnuto.od, now - 3600000);
+  h.api.saunaZapnutoObnov({ od: now - 7200000, naposledy: now - 600000 }, now);
+  check('  a když už server něco má, nepřepíše ho', h.state.saunaZapnuto.od, now - 3600000);
 }
 
 konec();

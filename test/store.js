@@ -65,6 +65,7 @@ function vzorovyStav() {
     tempAutoOn: 23, tempAutoOnRooms: { obyvak: 24 },
     tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 20 },
     saunaLimitW: 700, saunaHoldMin: 45,
+    saunaZapnuto: { od: t - 3600000, naposledy: t },
     saunaNahrev: { bezici: null, zaznamy: [
       { start: t, konec: t + 2400000, duvod: 'odber', venkuC: 8, odC: 22, cilC: 79,
         prahy: { 60: { min: 18, c: 61 } }, body: [{ min: 0, c: 22 }, { min: 2, c: 31 }], maxC: 79 }
@@ -121,6 +122,9 @@ nadpis('2) Balení');
   check('každá cesta ze seznamu má svoje tělo', chybi.join(',') || 'žádná', 'žádná');
   const navic = Object.keys(snap.posts).filter(c => !h.api.STORE_POSTS.includes(c));
   check('a nic navíc se neukládá', navic.join(',') || 'nic', 'nic');
+  // Saunování přes nasazení: bez tohohle by „Zapnuto v" po každém deployi zmizelo
+  check('zapnutí sauny je v záloze', JSON.stringify(snap.posts['/api/sauna/zapnuto/restore']),
+    JSON.stringify({ od: h.state.saunaZapnuto.od, naposledy: h.state.saunaZapnuto.naposledy }));
   check('historie jde jako points', snap.posts['/api/history/restore'].points.length, 1);
   check('log jako entries', snap.posts['/api/log/restore'].entries.length, 1);
   // Teplota bazénu se měří jen za chodu čerpadla; bez zálohy by po deployi svítila

@@ -37,6 +37,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     vzorky: [],
     nahrevy: [],
     tiky: [],
+    zapnuti: [],
     hodiny: { hour: 18, minute: 30 },
     // Co má stub odpovědět; sekce si to přepisují
     odpovez: async () => ({ stav: 200, text: JSON.stringify(odpoved()) })
@@ -57,6 +58,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'HUUM_USER', 'HUUM_PASS', 'HUUM_URL', 'huumEnabled', 'fetch', 'state', 'app',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
+    'saunaZapnutoTopi', 'saunaZapnutoKontrola',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
@@ -82,7 +84,9 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     duvod => h.nahrevy.push(duvod),
     t => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t),
     () => h.hodiny,
-    (fn, ms) => { h.tiky.push({ fn, ms }); return 0; }
+    (fn, ms) => { h.tiky.push({ fn, ms }); return 0; },
+    () => h.zapnuti.push('topi'),
+    () => h.zapnuti.push('kontrola')
   );
   return h;
 }
@@ -759,6 +763,18 @@ nadpis('18) Tik časovače');
   await tik();
   check('nerozjetá kamna se nezamlčí',
     h.zapisy.some(t => /kamna se nerozjela/.test(t)), true);
+}
+
+nadpis('19) Zapnuto v — zdroj z kamen');
+{
+  const h = build();
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+  await h.api.pollHuum();
+  // Zapnutí z appky HUUM nebo z panelu na kamnech měřák nemusí vidět hned
+  check('topící kamna zapíšou zapnutí', h.zapnuti.join(','), 'topi');
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  await h.api.pollHuum();
+  check('  netopící jen zkontrolují vypršení', h.zapnuti.join(','), 'topi,kontrola');
 }
 
 konec();

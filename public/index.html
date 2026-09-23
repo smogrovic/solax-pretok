@@ -2850,6 +2850,8 @@
                karta tepelného čerpadla u bazénu. Cíl tu není: nastavuje ho
                číselník hned pod tím a psát ho dvakrát nemá smysl. -->
           <div class="hp-temp" id="huumTemp">– °C</div>
+          <!-- Kdy se dnešní saunování poprvé zaplo; drží se do 3 h po posledním topení -->
+          <div class="hp-meta" id="huumZapnuto" hidden></div>
           <div class="manual-hold" id="huumHint"></div>
           <div class="hp-meta" id="huumKdy"></div>
         </div>
@@ -7756,10 +7758,14 @@ const WB_MODE_LEGEND = [
 const huumEls = {};
 for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumHint',
   'huumStatusCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
-  'huumLightState', 'huumKdy']) {
+  'huumLightState', 'huumKdy', 'huumZapnuto']) {
   huumEls[id] = document.getElementById(id);
 }
 let huumData = null;
+// { od, naposledy } ze serveru. Chodí vlastní zprávou, protože „topí" hlásí
+// dva zdroje (měřák i kamna) a karta kamen nesmí brát starou hodnotu z jednoho.
+let saunaZapnutoData = null;
+const SAUNA_ZAPNUTO_RESET_MS = 3 * 3600000;
 
 const huumRadek = klic => document.querySelector(`[data-huum="${klic}"]`);
 // Prázdný řádek se po připojení schová, ať karta nezůstane plná pomlček. Dokud
@@ -7808,6 +7814,13 @@ function renderHuum() {
 
   // Kdy naposledy DORAZILA data — při chybě se razítko na serveru neobnovuje, takže
   // zmrzlá teplota je poznat i na kartě, která jinak vypadá úplně normálně.
+  // Pojistka i v appce: kdyby se zpráva o vynulování ztratila, po 3 h od
+  // posledního topení řádek zmizí sám
+  const z = saunaZapnutoData || {};
+  const zapnuto = z.od > 0 && z.naposledy > 0 && Date.now() - z.naposledy <= SAUNA_ZAPNUTO_RESET_MS;
+  huumEls.huumZapnuto.textContent = zapnuto ? 'Zapnuto v ' + fmtSolTime(z.od) : '';
+  huumEls.huumZapnuto.hidden = !zapnuto;
+
   huumEls.huumKdy.textContent = d.enabled && d.fetchedAt
     ? 'Naposledy ' + fmtSolTime(new Date(d.fetchedAt).getTime())
     : '';
@@ -10248,6 +10261,8 @@ function applySnapshot(snap) {
   // v Upstashi.
   saunaNahrevData = snap.saunaNahrev || null;
   bezpecne(renderSaunaNahrev);
+  saunaZapnutoData = snap.saunaZapnuto || null;
+  bezpecne(renderHuum);
   huumTimersData = snap.saunaTimers || [];
   bezpecne(renderHuumTimers);
   if (snap.assistantEnabled === false) hideAssistantSlide();
@@ -10658,6 +10673,10 @@ function connectStream() {
     monthsData = mergeMonths(JSON.parse(e.data).months || [], monthsData);
     renderMonths();
     saveMonthsLocal();
+  });
+  es.addEventListener('saunaZapnuto', e => {
+    saunaZapnutoData = JSON.parse(e.data).saunaZapnuto || null;
+    bezpecne(renderHuum);
   });
   es.addEventListener('saunaTimers', e => {
     huumTimersData = JSON.parse(e.data).timers || [];

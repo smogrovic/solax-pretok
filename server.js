@@ -269,6 +269,7 @@ const state = {
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   saunaNahrev: { bezici: null, zaznamy: [] },  // jak dlouho se sauna nahřívá (podklad pro předpověď)
+  saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -488,6 +489,7 @@ function snapshot() {
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
     saunaNahrev: state.saunaNahrev,
+    saunaZapnuto: state.saunaZapnuto,
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
@@ -999,6 +1001,7 @@ function updateSauna(powerW) {
     // odvozovat to ze saunaBlockUntil by šlo, ale ta se počítá z nastavitelné doby
     // držení a rozvrh by se rozešel, kdyby ji někdo změnil.
     state.sauna.lastHeatAt = now;
+    saunaZapnutoTopi(now);
     if (!state.sauna.since) {
       state.sauna.since = now;
       addLog(`Sauna: topí (${Math.round(state.sauna.powerW)} W) — bazén a solinátor jdou dolů`);
@@ -1012,6 +1015,7 @@ function updateSauna(powerW) {
     addLog('Sauna: dotopeno — bazén a solinátor se můžou vrátit');
     nahrevKonec(now);
   }
+  saunaZapnutoKontrola(now);
   checkSaunaForgotten();
   broadcast('sauna', { sauna: saunaPayload() });
   // Nečekat na automatiku (běží po 5 min) — jistič má přednost před vším
@@ -1106,6 +1110,48 @@ function nahrevKonec(now = Date.now()) {
   if (n.zaznamy.length > NAHREV_MAX) n.zaznamy = n.zaznamy.slice(-NAHREV_MAX);
   addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min)`);
   broadcast('saunaNahrev', { saunaNahrev: n });
+}
+
+// ---------- Kdy se saunování zaplo ----------
+// Řádek „Zapnuto v 17:42" pod teplotou. Platí pro celé jedno saunování:
+// termostat mezitím vypíná a zapíná, ale čas prvního zapnutí se nemění.
+// Vynuluje se teprve 3 h po posledním topení — pak další zapnutí začne nové
+// saunování. „Topí" se bere z měřáku 3EM i z kamen HUUM, ať se zachytí
+// i zapnutí z appky HUUM nebo z panelu na kamnech.
+const SAUNA_ZAPNUTO_RESET_MS = 3 * 3600000;
+
+function saunaZapnutoTopi(now = Date.now()) {
+  const z = state.saunaZapnuto;
+  saunaZapnutoKontrola(now);
+  z.naposledy = now;
+  if (!z.od) {
+    z.od = now;
+    broadcast('saunaZapnuto', { saunaZapnuto: z });
+  }
+}
+
+// Volá se u každého pollu, i když netopí — jinak by se po saunování nikdy
+// nevynulovalo a druhý den by ráno svítilo včerejší „Zapnuto v".
+function saunaZapnutoKontrola(now = Date.now()) {
+  const z = state.saunaZapnuto;
+  if (z.od && now - z.naposledy > SAUNA_ZAPNUTO_RESET_MS) {
+    z.od = 0;
+    z.naposledy = 0;
+    broadcast('saunaZapnuto', { saunaZapnuto: z });
+  }
+}
+
+// Obnova po nasazení (Render jinak paměť smaže uprostřed saunování). Bere se
+// jen saunování, které ještě nevypršelo, a jen když server sám nic nemá.
+function saunaZapnutoObnov(b, now = Date.now()) {
+  const od = Number(b && b.od), naposledy = Number(b && b.naposledy);
+  if (!Number.isFinite(od) || !Number.isFinite(naposledy)) return false;
+  if (!(od > 0) || naposledy < od || naposledy > now) return true;
+  if (now - naposledy > SAUNA_ZAPNUTO_RESET_MS || state.saunaZapnuto.od) return true;
+  state.saunaZapnuto.od = od;
+  state.saunaZapnuto.naposledy = naposledy;
+  broadcast('saunaZapnuto', { saunaZapnuto: state.saunaZapnuto });
+  return true;
 }
 
 // ---------- Spotřeba po měsících ----------
@@ -1807,6 +1853,11 @@ app.post('/api/sauna-days/restore', (req, res) => {
 // po dnech — je to seznam událostí. Záloha se proto vezme jen když je v ní VÍC
 // než co má server: po nasazení je prázdný a vezme se celá, ale měření, která
 // mezitím přibyla, se nepřepíšou.
+app.post('/api/sauna/zapnuto/restore', (req, res) => {
+  if (!saunaZapnutoObnov(req.body)) return res.status(400).json({ error: 'Chybí od a naposledy.' });
+  res.json({ ok: true, od: state.saunaZapnuto.od || 0 });
+});
+
 app.post('/api/sauna/nahrev/restore', (req, res) => {
   const z = req.body && Array.isArray(req.body.zaznamy) ? req.body.zaznamy : null;
   if (!z) return res.status(400).json({ error: 'Chybí zaznamy.' });
@@ -6651,6 +6702,8 @@ async function pollHuum() {
     state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
     checkHuumNahrata(state.huum);
     nahrevVzorek(state.huum.temperature);
+    // Zapnutí z appky HUUM nebo z panelu na kamnech měřák nemusí vidět hned
+    if (state.huum.heating) saunaZapnutoTopi(); else saunaZapnutoKontrola();
   } catch (err) {
     // Razítko se schválně NEobnovuje — stejně jako u Infigy znamená „kdy naposledy
     // dorazila data", ne „kdy jsme se ptali". Zmrzlá teplota nesmí vypadat čerstvě.
@@ -8999,6 +9052,7 @@ const STORE_POSTS = [
   '/api/usage-days/restore',
   '/api/sauna-days/restore',
   '/api/sauna/nahrev/restore',
+  '/api/sauna/zapnuto/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -9041,6 +9095,7 @@ function storeSnapshot() {
     '/api/usage-days/restore': { usageDays: state.usageDays },
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
     '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy },
+    '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
