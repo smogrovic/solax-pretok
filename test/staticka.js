@@ -233,7 +233,32 @@ check('  a okno v appce mluví o té samé',
 // Kdyby se text přepsal tak, že teplotu vůbec neuvádí, vršek by prošel naprázdno
 check('  a opravdu se v něm nějaká teplota píše', /\d+\s*°C/.test(oknoText), true);
 
-nadpis('9) Kontrola téhle kontroly');
+nadpis('9) Prohlížečové sady: zpětné apostrofy v DRIVERu');
+// Sady pro prohlížeč si celý skript nesou jako šablonový řetězec. Zpětný
+// apostrof kdekoli uvnitř ho ukončí a ze zbytku souboru je syntaktická chyba —
+// sada pak nevypíše VŮBEC NIC a runner to hlásí jako „NENALEZENO", což se dá
+// mezi zelenými řádky přehlédnout. Chytlo mě to třikrát, pokaždé v komentáři.
+{
+  const soubory = fs.readdirSync(path.join(__dirname))
+    .filter(f => f.startsWith('browser-') && f.endsWith('.js'));
+  const spatne = [];
+  for (const f of soubory) {
+    const txt = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const i = txt.indexOf('const DRIVER = `');
+    if (i < 0) continue;
+    const telo = txt.slice(i + 'const DRIVER = `'.length);
+    const konec = telo.indexOf('\n`;');
+    for (const [n, radek] of telo.slice(0, konec < 0 ? undefined : konec).split('\n').entries()) {
+      // Uvnitř DRIVERu jsou legitimní jen ESCAPOVANÉ zpětné apostrofy
+      const holy = radek.replace(/\\`/g, '');
+      if (holy.includes('`')) spatne.push(`${f}:${n + 1}`);
+    }
+  }
+  check('žádná sada nemá v DRIVERu holý zpětný apostrof', spatne.join(', ') || 'žádná', 'žádná');
+  check('  a sady se vůbec našly', soubory.length > 10, true);
+}
+
+nadpis('10) Kontrola téhle kontroly');
 check('rozdílná čísla se chytí', new RegExp('85' + '\\s*°C').test('na 80 °C'), false);
 
 konec();

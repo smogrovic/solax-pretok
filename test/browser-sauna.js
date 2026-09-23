@@ -134,7 +134,6 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('semafor je šedý', huumLight.className, 'traffic-light');
   check('stav: zatím nepřipojená', huumState.textContent, 'zatím nepřipojená');
   check('teplota je pomlčka', huumTemp.textContent, '– °C');
-  check('cíl taky', huumTarget.textContent, '– °C');
   check('hláška řekne, co doplnit', /HUUM_USER a HUUM_PASS/.test(huumHint.textContent), 'true');
   // Náhled: ukazují se VŠECHNY řádky, ať je co ladit
   const vsechny = ['door', 'end', 'left', 'light'];
@@ -163,7 +162,6 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('semafor svítí, když topí', huumLight.className, 'traffic-light on');
   check('stav slovy', huumState.textContent, 'topí');
   check('teplota v sauně', huumTemp.textContent, '78 °C');
-  check('cílová teplota', huumTarget.textContent, '90 °C');
   check('dveře zavřené', huumDoor.textContent, 'zavřené');
   check('zbývá se dopočítá', huumLeft.textContent, '1:20');
   check('světlo', huumLightState.textContent, 'zapnuto');
@@ -176,8 +174,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumData = { ...huumData, statusCode: 232, statusText: 'připravená', heating: false,
     targetTemperature: null, endDate: null, humidity: null };
   renderHuum();
-  check('bez cíle je pomlčka', huumTarget.textContent, '– °C');
-  check('  ale teplota zůstane', huumTemp.textContent, '78 °C');
+  check('teplota zůstane', huumTemp.textContent, '78 °C');
   check('semafor zhasne', huumLight.className, 'traffic-light off');
   check('prázdné řádky se po připojení schovají', vidi('end'), 'false');
   check('  ale dveře zůstanou', vidi('door'), 'true');
@@ -212,30 +209,11 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  \u010dasova\u010d hned za n\u00edm', karty[2].id, 'huumTimerCard');
   check('  m\u011b\u0159\u00e1k 3EM a\u017e \u010dtvrt\u00fd', karty[3].contains(saunaLight), 'true');
   // „33 °C" se lámalo mezi číslo a jednotku a stupeň zůstával viset níž
-  check('teplota se nel\u00e1me', getComputedStyle(huumTemp).whiteSpace, 'nowrap');
-  check('  a c\u00edl taky', getComputedStyle(huumTarget).whiteSpace, 'nowrap');
-
-  // Každá půlka přesně polovina karty, ať dělítko sedí uprostřed a hodnota
-  // zůstane pod svým popiskem i když se změní počet číslic
-  const stred = el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
-  const tempKarta = document.querySelector('.huum-temps');
-  const delitko = tempKarta.querySelector('.boiler-sep');
-  check('d\u011bl\u00edtko sed\u00ed uprost\u0159ed karty',
-    Math.abs(stred(delitko) - stred(tempKarta)) < 1.5, 'true');
-  // A dvojice jde přes celou kartu, ne jen doprostřed podle šířky čísel
-  check('  a teploty jdou p\u0159es celou kartu',
-    Math.round(tempKarta.getBoundingClientRect().width),
-    Math.round(tempKarta.parentElement.getBoundingClientRect().width));
-  const popisky = [...tempKarta.querySelectorAll('.boiler-name')];
-  const hodnoty = [...tempKarta.querySelectorAll('.boiler-temp')];
-  check('teplota sed\u00ed pod sv\u00fdm popiskem',
-    Math.abs(stred(popisky[0]) - stred(hodnoty[0])) < 1.5, 'true');
-  check('  a c\u00edl taky', Math.abs(stred(popisky[1]) - stred(hodnoty[1])) < 1.5, 'true');
-  // Tříciferná teplota nesmí půlky rozhodit
-  huumData = { ...huumData, temperature: 100, targetTemperature: 9 };
-  renderHuum();
-  check('  a nerozhod\u00ed to ani 100 proti 9',
-    Math.abs(stred(delitko) - stred(tempKarta)) < 1.5, 'true');
+  // Cíl z karty zmizel — nastavuje ho číselník pod ní a psát ho dvakrát nemá smysl
+  check('c\u00edl u\u017e na kart\u011b nen\u00ed', !!document.getElementById('huumTarget'), 'false');
+  const kartaKamna = huumTemp.closest('.card');
+  check('  a zbylo jedno velk\u00e9 \u010d\u00edslo',
+    kartaKamna.querySelectorAll('.hp-temp').length, 1);
 
   OUT.push('\\n8c2) Sjednoceno s baz\u00e9nem');
   // Bazén je předloha: velké číslo 34 px navy. Sauna měla teploty 26 px oranžové
@@ -244,7 +222,6 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   const st = el => getComputedStyle(el);
   check('teplota sauny je stejn\u011b velk\u00e1 jako u baz\u00e9nu',
     st(huumTemp).fontSize, st(hp).fontSize);
-  check('  a c\u00edl taky', st(huumTarget).fontSize, st(hp).fontSize);
   check('  i odb\u011br v kW', st(document.getElementById('saunaPower')).fontSize, st(hp).fontSize);
   check('teplota sauny m\u00e1 barvu baz\u00e9nu', st(huumTemp).color, st(hp).color);
   check('  i odb\u011br', st(document.getElementById('saunaPower')).color, st(hp).color);
@@ -369,6 +346,42 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumData = { ...huumData, targetTemperature: 79, fetchedAt: new Date().toISOString() };
   renderHuum();
   check('  a data ze serveru s n\u00edm nehnou', jezdec.value, '65');
+
+  OUT.push('\\n8e1) Prst po obvodu');
+  // Tohle je ta kontrola, co minule chyběla: sada nastavovala hodnotu
+  // skrytým jezdcem a kreslení ověřovala zpětně, tedy jen směr hodnota → puntík.
+  // Rozbitý byl směr opačný: celá pravá polovina číselníku vracela minimum,
+  // takže nad 65 °C se prstem nedalo dostat vůbec.
+  const kruh = top('huumDial');
+  const rk = kruh.getBoundingClientRect();
+  // Bod na kružnici pod daným SVG uhlem, přepočtený na souřadnice okna
+  const naKruhu = (uhel, r = 100) => ({
+    clientX: rk.left + (120 + r * Math.cos(uhel * Math.PI / 180)) / 240 * rk.width,
+    clientY: rk.top + (120 + r * Math.sin(uhel * Math.PI / 180)) / 240 * rk.height
+  });
+  const tahni = (uhel, r) => {
+    const b = naKruhu(uhel, r);
+    kruh.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2, ...b }));
+    kruh.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2, ...b }));
+    return Number(jezdec.value);
+  };
+  check('za\u010d\u00e1tek v\u00fdse\u010de d\u00e1 minimum', tahni(135), 40);
+  check('vlevo', tahni(180), 48);
+  check('nahoru je p\u016flka', tahni(270), 65);
+  check('vpravo naho\u0159e', tahni(315), 73);
+  check('vpravo', tahni(360), 82);
+  check('konec v\u00fdse\u010de d\u00e1 maximum', tahni(405), 90);
+
+  // Spodní mezera mezi koncem a začátkem výseče: hodnota se nemění, zůstává
+  // tam, kam ji prst dotáhl
+  tahni(360);
+  check('spodn\u00ed mezera hodnotu nem\u011bn\u00ed', tahni(90), 82);
+  check('  ani t\u011bsn\u011b za koncem', tahni(60), 82);
+  check('  ani t\u011bsn\u011b p\u0159ed za\u010d\u00e1tkem', tahni(120), 82);
+  // Střed: z pár pixelů je úhel nespolehlivý, tak se s ním nehne
+  check('st\u0159ed hodnotou nehne', tahni(200, 10), 82);
+  // Mimo kruh, ale ve výseči — úhel pořád platí, hodnota se řídí jím
+  check('daleko za obvodem se po\u0159\u00e1d \u0159\u00edd\u00ed \u00fahlem', tahni(270, 400), 65);
 
   OUT.push('\\n8e2) Vyp\u00edna\u010d se mus\u00ed podr\u017eet');
   const btn = top('huumTopeniBtn');

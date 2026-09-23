@@ -1559,15 +1559,6 @@
     justify-content:center;
     gap:4px;
   }
-  /* Dvojice teplot uvnitř karty HUUM. `boilers-card` počítá s tím, že je zároveň
-     `card` (odtud display:flex) — tady je vevnitř, takže si flex řekne sama a rámeček
-     ani pozadí nepotřebuje. */
-  /* `width:100%` je tu kvůli středění: bez něj se dvojice smrskne na šířku čísel
-     a dělítko sedí uprostřed NICH, ne uprostřed karty. Stejné půlky zařídí
-     `.boiler-cell{flex:1}` výš — `flex:1` je `flex:1 1 0%`, takže ani 100 proti
-     9 stupňům je nerozhodí. */
-  .huum-temps{display:flex;width:100%;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
-  .huum-temps .boiler-name{white-space:nowrap;}
   /* Kruhový ovladač teploty. `touch-action:none` je tu to podstatné: bez něj by
      appka tažení po kruhu vzala jako listování stránek, stejně jako to dělala
      u jezdce naklopení u žaluzií. */
@@ -1634,14 +1625,6 @@
   }
   .huum-dial-input:focus-visible ~ svg,
   .huum-dial:focus-within svg{outline:2px solid var(--orange);outline-offset:4px;border-radius:50%;}
-  /* „33 °C" se na úzkém telefonu lámalo mezi číslo a jednotku a stupeň zůstal
-     viset na druhém řádku. Písmo se radši zmenší, než aby se to zalomilo. */
-  /* Stejná velikost i barva jako `.hp-temp` u bazénu (34 px, navy) — obě stránky
-     ukazují teplotu vody/vzduchu a lišit se nemají. Clamp zůstává kvůli úzkým
-     displejům: dvě čísla po 34 px se vedle sebe na 320px telefonu nevejdou.
-     Platí JEN uvnitř `.huum-temps` — základní `.boiler-temp` má karta bojlerů
-     na Ovládání a ta zůstává oranžová. */
-  .huum-temps .boiler-temp{white-space:nowrap;font-size:clamp(26px, 8.5vw, 34px);color:var(--navy);}
   .boiler-sep{
     width:1px;
     background:rgba(44,62,80,0.1);
@@ -2851,19 +2834,12 @@
             <div class="traffic-light" id="huumLight"></div>
             <div class="shelly-label">Kamna HUUM <span class="state" id="huumState">–</span></div>
           </div>
-          <div class="boilers-card huum-temps">
-            <div class="boiler-cell">
-              <div class="boiler-name">Teplota</div>
-              <div class="boiler-temp" id="huumTemp">– °C</div>
-            </div>
-            <div class="boiler-sep"></div>
-            <div class="boiler-cell">
-              <div class="boiler-name">Cíl</div>
-              <div class="boiler-temp" id="huumTarget">– °C</div>
-            </div>
-          </div>
+          <!-- Jedno velké číslo a pod ním drobná věta — doslova tytéž třídy jako
+               karta tepelného čerpadla u bazénu. Cíl tu není: nastavuje ho
+               číselník hned pod tím a psát ho dvakrát nemá smysl. -->
+          <div class="hp-temp" id="huumTemp">– °C</div>
           <div class="manual-hold" id="huumHint"></div>
-          <div class="sauna-meta" id="huumKdy"></div>
+          <div class="hp-meta" id="huumKdy"></div>
         </div>
       </div>
       <!-- Topení. Jediné místo v appce, které umí rozpálit něco na devadesát
@@ -7769,7 +7745,7 @@ const WB_MODE_LEGEND = [
 // Dokud nejsou na serveru přihlašovací údaje, karty zůstávají s pomlčkami — ať je
 // vidět, co přijde. Po připojení se řádky naplní a prázdné se schovají.
 const huumEls = {};
-for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumTarget', 'huumHint',
+for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumHint',
   'huumStatusCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
   'huumLightState', 'huumKdy']) {
   huumEls[id] = document.getElementById(id);
@@ -7802,8 +7778,6 @@ function renderHuum() {
     : (zname ? (d.statusText || '–') : 'nedostupná');
 
   huumEls.huumTemp.textContent = zname ? (huumTeplota(d.temperature) || '– °C') : '– °C';
-  // Cílovou teplotu API nevrací, dokud sauna netopí — pomlčka je tu správná odpověď
-  huumEls.huumTarget.textContent = zname ? (huumTeplota(d.targetTemperature) || '– °C') : '– °C';
 
   const p = zname;   // připojeno a čerstvé → prázdné řádky se schovají
   huumSet('huumDoor', 'door',
@@ -7959,21 +7933,33 @@ function renderHuumTopeni(d, cerstve) {
 }
 
 // ---- tažení po kruhu ----
+// Vrací null tam, kde se hodnota měnit NEMÁ: ve spodní mezeře mezi koncem
+// a začátkem výseče a blízko středu, kde je úhel z pár pixelů nespolehlivý.
+// Dřív se v obou případech podíl ořízl na nulu, takže prst dole shodil teplotu
+// na minimum — a protože se přetáčelo jen jednou podmínkou, dělala to celá
+// pravá polovina číselníku a nad 65 °C se nedalo dostat vůbec.
 function dialZBodu(ev) {
   const r = huumTopeniEls.dial.getBoundingClientRect();
   const x = (ev.clientX - r.left) / r.width * 240 - DIAL_S;
   const y = (ev.clientY - r.top) / r.height * 240 - DIAL_S;
+  if (Math.hypot(x, y) < 34) return null;
   let uhel = Math.atan2(y, x) * 180 / Math.PI;
-  // atan2 vrací −180…180; výseč jde od 135° do 405°, tak se spodní část přetočí
-  if (uhel < DIAL_OD - 180) uhel += 360;
+  // atan2 vrací −180…180, výseč jde od 135° do 405° — úhel se musí přetočit
+  // do [135, 495), ne jen jednou o 360°. Půlstupňová tolerance je kvůli přesně
+  // trefenému začátku: 134,9999° by se jinak přetočilo na 494,9999° a spadlo
+  // do mezery místo na minimum.
+  while (uhel < DIAL_OD - 0.5) uhel += 360;
   const podil = (uhel - DIAL_OD) / (DIAL_DO - DIAL_OD);
+  // Pár stupňů za koncem se ještě bere jako konec — prst kousek za maximem má
+  // zůstat na maximu, ne zamrznout. Dál už je spodní mezera a tam se nemění nic.
+  if (podil > 1.02) return null;
   const min = huumCilMin(), max = huumCilMax();
   return Math.round(min + Math.min(1, Math.max(0, podil)) * (max - min));
 }
 
 function dialNastav(ev) {
   const nova = dialZBodu(ev);
-  if (nova === huumCil()) return;
+  if (nova === null || nova === huumCil()) return;
   huumCilDotcen = true;
   huumTopeniEls.slider.value = String(nova);
   dialKresli();
@@ -7985,8 +7971,10 @@ if (huumTopeniEls.dial) {
     // Vypínač uprostřed má vlastní obsluhu — tažení mu ji nesmí sebrat
     if (huumTopeniEls.btn.contains(ev.target)) return;
     tahne = true;
-    huumTopeniEls.dial.setPointerCapture(ev.pointerId);
     dialNastav(ev);
+    // Zachycení ukazatele umí vyhodit výjimku, když prst mezitím zmizel. Hodnota
+    // se proto nastavuje PŘED ním — jinak by se tím klepnutí celé ztratilo.
+    try { huumTopeniEls.dial.setPointerCapture(ev.pointerId); } catch {}
   });
   huumTopeniEls.dial.addEventListener('pointermove', ev => { if (tahne) dialNastav(ev); });
   for (const t of ['pointerup', 'pointercancel']) {
