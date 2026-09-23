@@ -407,9 +407,32 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('oblouk je z v\u00edc \u00fasek\u016f', useky.length > 10, 'true');
   const barvyUseku = new Set(useky.map(u => u.getAttribute('stroke')));
   check('  a nen\u00ed jednobarevn\u00fd', barvyUseku.size > 10, 'true');
+  // Oblouk ukazuje SKUTE\u010cNOU teplotu v saun\u011b, punt\u00edk c\u00edl. P\u0159i nah\u0159\u00edv\u00e1n\u00ed
+  // oblouk dob\u00edh\u00e1 k punt\u00edku.
+  const videt = () => useky.filter(u => u.getAttribute('opacity') === '1').length;
+  const teplota = (t, stara) => {
+    huumData = { ...huumData, enabled: true, statusCode: 231, temperature: t,
+      fetchedAt: new Date(Date.now() - (stara ? 60 : 0) * MIN).toISOString() };
+    renderHuum();
+  };
+  const puvodniHuum = huumData;
+  jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
+  huumCilDotcen = true;
+  teplota(65);
+  check('  p\u0159i 65 \u00b0C je oblouk v p\u016flce, i kdy\u017e c\u00edl je 80',
+    Math.abs(videt() - useky.length / 2) <= 1, 'true');
+  const predTazenim = videt();
+  jezdec.value = '45'; jezdec.dispatchEvent(new Event('input'));
+  check('  ta\u017een\u00ed punt\u00edku oblouk nezm\u011bn\u00ed', videt(), predTazenim);
+  teplota(16);
+  check('  studen\u00e1 sauna (16 \u00b0C) = pr\u00e1zdn\u00fd oblouk', videt(), 0);
+  teplota(95);
+  check('  nad maximem pln\u00fd', videt(), useky.length);
+  teplota(70, true);
+  check('  star\u00e1 data = pr\u00e1zdn\u00fd, nic se nep\u0159edst\u00edr\u00e1', videt(), 0);
+  huumData = puvodniHuum;
+  renderHuum();
   jezdec.value = '65'; jezdec.dispatchEvent(new Event('input'));
-  const videt = useky.filter(u => u.getAttribute('opacity') === '1').length;
-  check('  v p\u016flce je vid\u011bt zhruba p\u016flka', Math.abs(videt - useky.length / 2) <= 1, 'true');
 
   OUT.push('\\n8e1c) Sv\u011btlo je ve stejn\u00e9 kart\u011b');
   // Světlo patří ke kamnům, ne na vlastní kartu — je to ta samá věc, jen druhý vypínač

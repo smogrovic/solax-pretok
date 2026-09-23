@@ -7851,6 +7851,9 @@ const huumTopeniEls = {
 };
 let huumCilDotcen = false;
 let huumTopiTed = null;          // null = ještě nevíme, jestli kamna topí
+// Skutečná teplota v sauně pro oblouk. Puntík ukazuje CÍL, oblouk to, kam už
+// sauna došla — při nahřívání dobíhá k puntíku. null = neznámá nebo stará data.
+let huumTeplotaTed = null;
 
 // Výseč 270°: od levého dolního rohu po pravý, po směru hodin. Stejně jako HUUM.
 const DIAL_OD = 135, DIAL_DO = 405, DIAL_R = 100, DIAL_S = 120;
@@ -7962,7 +7965,11 @@ function dialKresli() {
   const u = dialUhel(huumCil());
   const min = huumCilMin(), max = huumCilMax();
   const podil = max > min ? (huumCil() - min) / (max - min) : 0;
-  const kolik = Math.round(podil * dialUseky.length);
+  // Oblouk = skutečná teplota, ne cíl. Pod minimem stupnice prázdný, nad
+  // maximem plný; bez čerstvých dat prázdný — nic se nepředstírá.
+  const podilTed = huumTeplotaTed === null || max <= min ? 0
+    : Math.min(1, Math.max(0, (huumTeplotaTed - min) / (max - min)));
+  const kolik = Math.round(podilTed * dialUseky.length);
   for (let i = 0; i < dialUseky.length; i++) {
     dialUseky[i].setAttribute('opacity', i < kolik ? '1' : '0');
   }
@@ -7995,6 +8002,7 @@ function renderHuumTopeni(d, cerstve) {
     e.slider.value = String(d.targetTemperature);
   }
   huumTopiTed = cerstve && d ? !!d.heating : null;
+  huumTeplotaTed = cerstve && d && typeof d.temperature === 'number' ? d.temperature : null;
   e.btn.classList.toggle('topi', huumTopiTed === true);
   e.btn.setAttribute('aria-label', huumTopiTed === true ? 'Vypnout saunu' : 'Zapnout saunu');
   dialKresli();
