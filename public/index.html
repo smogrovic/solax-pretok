@@ -2076,8 +2076,9 @@
     border:none;border-radius:16px;padding:3px 13px;
     background:var(--orange);color:#fff;font-size:18px;font-weight:700;line-height:1.2;
     box-shadow:0 0 0 5px rgba(245,147,61,0.18), 0 0 20px 6px rgba(245,147,61,0.45);
-    cursor:pointer;
+    cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;
   }
+  .prip-zalozka.tahne{cursor:grabbing;opacity:0.9;}
   /* Aura: rozmazané okolí, které se ke krajům ztrácí */
   .prip-zalozka::before{
     content:"";position:absolute;inset:-14px;z-index:-1;border-radius:32px;
@@ -11039,6 +11040,16 @@ function viditelnychStranek() {
   return w > 1 ? Math.max(1, Math.round(sliderWrap.clientWidth / w)) : 1;
 }
 
+// Kam srolovat, aby stránka `i` byla uprostřed. Na iPadu (3 vedle sebe) je
+// kliknutá stránka ta prostřední; krajní stránky zůstanou na kraji, protože za
+// ně už nic není. Na telefonu je vidět jedna, takže je to prostě ona.
+function stranaNaStred(i) {
+  const k = viditelnychStranek();
+  const n = sliderWrap.querySelectorAll('.slide:not([hidden])').length;
+  const prvni = Math.max(0, Math.min(i - Math.floor(k / 2), n - k));
+  return prvni * sirkaStranky();
+}
+
 function updateDots() {
   if (!pageTabsEl || !sliderWrap.clientWidth) return;
   const w = sirkaStranky();
@@ -11229,10 +11240,11 @@ function pripZalozkaObnov(now = Date.now()) {
   if (!pripZalozkaEl) return;
   const kolik = pripSviticich(now);
   pripZalozkaEl.hidden = !kolik || pripNaOcich();
-  // Pod lištu záložek — její výška se mění s výřezem displeje
-  const lista = document.querySelector('.page-tabs-bar');
-  if (lista && !pripZalozkaEl.hidden) pripZalozkaEl.style.top = Math.round(lista.getBoundingClientRect().bottom + 10) + 'px';
   pripZalozkaEl.textContent = '🔔 ' + kolik;
+  if (pripZalozkaEl.hidden || pripPoziceUmisti()) return;
+  // Výchozí místo: pod lištou záložek — její výška se mění s výřezem displeje
+  const lista = document.querySelector('.page-tabs-bar');
+  if (lista) pripZalozkaEl.style.top = Math.round(lista.getBoundingClientRect().bottom + 10) + 'px';
 }
 
 function pripOtevri() {
@@ -11240,10 +11252,73 @@ function pripOtevri() {
   const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
   const i = slides.indexOf(pripSlideEl);
   if (i < 0) return;
-  sliderWrap.scrollTo({ left: i * sirkaStranky(), behavior: 'smooth' });
+  sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
   pripZalozkaEl.hidden = true;
 }
-if (pripZalozkaEl) pripZalozkaEl.addEventListener('click', pripOtevri);
+
+// Zvoneček jde prstem odtáhnout, kam komu nepřekáží. Poloha se pamatuje v tomhle
+// zařízení (telefon a iPad každý zvlášť) jako podíl šířky a výšky okna, ať po
+// otočení displeje zůstane zhruba na svém místě. Krátké klepnutí dál otevírá
+// Připomínky — za tažení se to počítá až od 8 px.
+const PRIP_TAH_PX = 8;
+function pripPoziceNacti() {
+  try {
+    const p = JSON.parse(localStorage.getItem('pripZvonekPozice') || 'null');
+    return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+  } catch { return null; }
+}
+function pripPoziceUloz(p) {
+  try { localStorage.setItem('pripZvonekPozice', JSON.stringify(p)); } catch {}
+}
+// Umístí zvoneček na uloženou polohu, oříznutou do okna. Bez uložené → false.
+function pripPoziceUmisti() {
+  const p = pripPoziceNacti();
+  if (!p || !pripZalozkaEl) return false;
+  const r = pripZalozkaEl.getBoundingClientRect();
+  const x = Math.max(0, Math.min(p.x * window.innerWidth, window.innerWidth - r.width));
+  const y = Math.max(0, Math.min(p.y * window.innerHeight, window.innerHeight - r.height));
+  pripZalozkaEl.style.left = Math.round(x) + 'px';
+  pripZalozkaEl.style.top = Math.round(y) + 'px';
+  return true;
+}
+if (pripZalozkaEl) {
+  let tah = null, taziloSe = false;
+  pripZalozkaEl.addEventListener('pointerdown', ev => {
+    const r = pripZalozkaEl.getBoundingClientRect();
+    tah = { x: ev.clientX, y: ev.clientY, dx: ev.clientX - r.left, dy: ev.clientY - r.top, jede: false };
+    taziloSe = false;
+    try { pripZalozkaEl.setPointerCapture(ev.pointerId); } catch {}
+  });
+  pripZalozkaEl.addEventListener('pointermove', ev => {
+    if (!tah) return;
+    if (!tah.jede && Math.hypot(ev.clientX - tah.x, ev.clientY - tah.y) < PRIP_TAH_PX) return;
+    tah.jede = true;
+    const r = pripZalozkaEl.getBoundingClientRect();
+    const x = Math.max(0, Math.min(ev.clientX - tah.dx, window.innerWidth - r.width));
+    const y = Math.max(0, Math.min(ev.clientY - tah.dy, window.innerHeight - r.height));
+    pripZalozkaEl.style.left = Math.round(x) + 'px';
+    pripZalozkaEl.style.top = Math.round(y) + 'px';
+    pripZalozkaEl.classList.add('tahne');
+  });
+  const pust = () => {
+    if (!tah) return;
+    if (tah.jede) {
+      const r = pripZalozkaEl.getBoundingClientRect();
+      pripPoziceUloz({ x: r.left / window.innerWidth, y: r.top / window.innerHeight });
+      taziloSe = true;
+    }
+    tah = null;
+    pripZalozkaEl.classList.remove('tahne');
+  };
+  pripZalozkaEl.addEventListener('pointerup', pust);
+  pripZalozkaEl.addEventListener('pointercancel', pust);
+  // Po odtažení přijde ještě `click` — ten nesmí otevřít Připomínky
+  pripZalozkaEl.addEventListener('click', () => {
+    if (taziloSe) { taziloSe = false; return; }
+    pripOtevri();
+  });
+  window.addEventListener('resize', () => bezpecne(pripPoziceUmisti));
+}
 setInterval(() => bezpecne(renderPripominky), 60000);
 
 // ---------- Kalendář ----------
@@ -11703,7 +11778,7 @@ function rebuildDots() {
     tab.textContent = slide.dataset.title || `Stránka ${i + 1}`;
     tab.addEventListener('click', () => {
       kalOtevri(false);
-      sliderWrap.scrollTo({ left: i * sirkaStranky(), behavior: 'smooth' });
+      sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
     });
     pageTabsEl.appendChild(tab);
   });
@@ -11756,7 +11831,7 @@ function ipadVychozi(now = Date.now()) {
   if (!saunaBezi(now) || i < 0) { kalOtevri(true); return; }
   kalOtevri(false);
   // Sauna uprostřed: první viditelná je ta před ní
-  sliderWrap.scrollTo({ left: Math.max(0, i - 1) * sirkaStranky(), behavior: 'smooth' });
+  sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
 }
 
 // Ukazuje iPad právě to, co má být výchozí? Jen tehdy se nemusí nic přepínat.
@@ -11764,7 +11839,7 @@ function ipadJeVychozi(now = Date.now()) {
   const kal = !!(kalPanelEl && !kalPanelEl.hidden);
   const i = ipadSaunaIndex();
   if (!saunaBezi(now) || i < 0) return kal;
-  return !kal && Math.round(sliderWrap.scrollLeft / sirkaStranky()) === Math.max(0, i - 1);
+  return !kal && Math.round(sliderWrap.scrollLeft / sirkaStranky()) === Math.round(stranaNaStred(i) / sirkaStranky());
 }
 
 // Změnil se stav sauny, nebo uběhla minuta: přepnout, ale jen když na displej

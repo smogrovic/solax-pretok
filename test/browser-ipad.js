@@ -64,9 +64,16 @@ setTimeout(() => {
   const puvodni = wrap.scrollTo;
   wrap.scrollTo = o => { kam = o.left; };
   tabs[4].click();
+  // Kliknutá stránka je ta prostřední ze tří: vlevo od ní čtvrtá
+  check('pátá stránka skončí uprostřed', Math.round(kam), Math.round(3 * sirka));
+  check('  a ne třikrát dál', Math.round(kam) === Math.round(3 * okno), false);
+  tabs[0].click();
+  check('první zůstane vlevo (před ní nic není)', Math.round(kam), 0);
+  tabs[1].click();
+  check('druhá je uprostřed', Math.round(kam), 0);
+  tabs[tabs.length - 1].click();
+  check('poslední zůstane vpravo', Math.round(kam), Math.round((tabs.length - 3) * sirka));
   wrap.scrollTo = puvodni;
-  check('roluje na pátou stránku', Math.round(kam), Math.round(4 * sirka));
-  check('  a ne třikrát dál', Math.round(kam) === Math.round(4 * okno), false);
 
   R.push('\\n5) Lišta pod stavovým řádkem');
   // Záložky nesmí sahat na horní hranu: iOS na ně tam nasadí „scroll edge" efekt a
@@ -129,7 +136,49 @@ setTimeout(() => {
   wrap.scrollTo = plynule;
 
   R.push('\\n8) Zvoneček je na iPadu 2× větší');
-  check('36 px místo 18', getComputedStyle(document.getElementById('pripZalozka')).fontSize, '36px');
+  const zv = document.getElementById('pripZalozka');
+  check('36 px místo 18', getComputedStyle(zv).fontSize, '36px');
+
+  R.push('\\n9) Zvoneček jde odtáhnout');
+  try { localStorage.removeItem('pripZvonekPozice'); } catch {}
+  pripData = { kytky: { hotovo: 0 } };
+  kalOtevri(false); wrap.scrollLeft = 0; updateDots(); renderPripominky();
+  check('zvoneček je vidět', zv.hidden, false);
+  let otevreno = 0;
+  const kamSrolovat = wrap.scrollTo;
+  wrap.scrollTo = () => { otevreno++; };
+  const r0 = zv.getBoundingClientRect();
+  const ptr = (typ, x, y) => zv.dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 5, clientX: x, clientY: y }));
+  ptr('pointerdown', r0.left + 10, r0.top + 10);
+  ptr('pointermove', r0.left + 60, r0.top + 210);
+  ptr('pointermove', r0.left + 510, r0.top + 410);
+  ptr('pointerup', r0.left + 510, r0.top + 410);
+  zv.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  const r1 = zv.getBoundingClientRect();
+  check('posune se s prstem', Math.round(r1.left - r0.left) + ',' + Math.round(r1.top - r0.top), '500,400');
+  check('  a tažení Připomínky neotevře', otevreno, 0);
+  let ulozeno = null;
+  try { ulozeno = JSON.parse(localStorage.getItem('pripZvonekPozice')); } catch {}
+  check('  poloha se zapamatuje', !!ulozeno && Math.round(ulozeno.x * innerWidth) === Math.round(r1.left), true);
+  renderPripominky();
+  check('překreslení ji nevrátí pod lištu', Math.round(zv.getBoundingClientRect().top), Math.round(r1.top));
+  // Malý pohyb prstu je pořád klepnutí
+  ptr('pointerdown', r1.left + 10, r1.top + 10);
+  ptr('pointermove', r1.left + 13, r1.top + 12);
+  ptr('pointerup', r1.left + 13, r1.top + 12);
+  zv.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  check('klepnutí Připomínky otevře', otevreno, 1);
+  // Po otevření se zvoneček schová, takže se měří jeho nastavená poloha
+  check('  a zvoneček se nehne', zv.style.left, Math.round(r1.left) + 'px');
+  zv.hidden = false;
+  // Ven z okna se odtáhnout nedá
+  ptr('pointerdown', r1.left + 10, r1.top + 10);
+  ptr('pointermove', r1.left + 5000, r1.top + 5000);
+  ptr('pointerup', r1.left + 5000, r1.top + 5000);
+  const r2 = zv.getBoundingClientRect();
+  check('za okraj okna neuteče', r2.right <= innerWidth + 1 && r2.bottom <= innerHeight + 1, true);
+  wrap.scrollTo = kamSrolovat;
+  try { localStorage.removeItem('pripZvonekPozice'); } catch {}
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
