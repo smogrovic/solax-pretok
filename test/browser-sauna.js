@@ -383,6 +383,55 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Mimo kruh, ale ve výseči — úhel pořád platí, hodnota se řídí jím
   check('daleko za obvodem se po\u0159\u00e1d \u0159\u00edd\u00ed \u00fahlem', tahni(270, 400), 65);
 
+  OUT.push('\\n8e1b) Barevn\u00e1 \u0161k\u00e1la');
+  // Drív se míchalo lineárně po odstínu při pevné světlosti 48 %. Žlutá při takové
+  // světlosti není žlutá, je to bláto — kolem 80 °C z toho vycházelo khaki hnědé.
+  const rgb = s => s.match(/\\d+/g).map(Number);
+  // Sytost v OKLabu: pod 0,10 začíná barva šedivět a vypadat blátivě
+  const sytost = s => {
+    const [r, g, b] = rgb(s).map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * q;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * q;
+    return Math.sqrt(A * A + B * B);
+  };
+  const vzorky = [0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map(dialBarva);
+  // Pod 0,09 začíná barva šedivět; nejnižší bod škály je tyrkys na 0,094
+  check('\u017e\u00e1dn\u00e1 barva \u0161k\u00e1ly ne\u0161ediv\u00ed',
+    vzorky.every(b => sytost(b) >= 0.09), 'true');
+  // Studený konec modrý, teplý červený — to je to, co se na číselníku líbí
+  const [r0, g0, b0] = rgb(dialBarva(0));
+  check('spodek \u0161k\u00e1ly je modr\u00fd', b0 > r0 + 60, 'true');
+  const [r1, g1, b1] = rgb(dialBarva(1));
+  check('vrch \u010derven\u00fd', r1 > b1 + 100, 'true');
+  // Konkrétně to, na co sis stěžoval: 80 °C už není khaki
+  // Stará škála tu měla #c6962f — khaki hnědou. Jantarová má výrazně víc červené
+  // a málo modré; ta stará by na první podmínce spadla (měla r = 198).
+  const osmdesat = rgb(dialBarva(0.8));
+  check('80 \u00b0C je jantarov\u00e1, ne khaki',
+    osmdesat[0] >= 220 && osmdesat[1] >= 120 && osmdesat[2] <= 90, 'true');
+
+  // Oblouk kopíruje ty samé barvy — dřív byl celý jednobarevný podle hodnoty
+  jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
+  const useky = [...top('huumDialOblouk').querySelectorAll('path')];
+  check('oblouk je z v\u00edc \u00fasek\u016f', useky.length > 10, 'true');
+  const barvyUseku = new Set(useky.map(u => u.getAttribute('stroke')));
+  check('  a nen\u00ed jednobarevn\u00fd', barvyUseku.size > 10, 'true');
+  jezdec.value = '65'; jezdec.dispatchEvent(new Event('input'));
+  const videt = useky.filter(u => u.getAttribute('opacity') === '1').length;
+  check('  v p\u016flce je vid\u011bt zhruba p\u016flka', Math.abs(videt - useky.length / 2) <= 1, 'true');
+
+  OUT.push('\\n8e1c) Sv\u011btlo je ve stejn\u00e9 kart\u011b');
+  // Světlo patří ke kamnům, ne na vlastní kartu — je to ta samá věc, jen druhý vypínač
+  check('sv\u011btlo sed\u00ed v kart\u011b s \u010d\u00edseln\u00edkem',
+    top('huumSvetloCard').closest('.card').id, 'huumTopeniCard');
+  check('  a je pod \u010d\u00edseln\u00edkem',
+    top('huumDial').compareDocumentPosition(top('huumSvetloCard')) & Node.DOCUMENT_POSITION_FOLLOWING ? 'true' : 'false', 'true');
+  check('  a vlastn\u00ed kartu u\u017e nem\u00e1',
+    document.querySelectorAll('#saunaSlide .card > .lights-grid').length, 0);
+
   OUT.push('\\n8e2) Vyp\u00edna\u010d se mus\u00ed podr\u017eet');
   const btn = top('huumTopeniBtn');
   const dotyk = typ => btn.dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 1 }));
