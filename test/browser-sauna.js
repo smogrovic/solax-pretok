@@ -476,7 +476,9 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     /Podr\u017e pro zapnut\u00ed na 65 \u00b0C/.test(top('huumTopeniPopis').textContent), 'true');
 
   dotyk('pointerdown');
-  await wait(1200);
+  await wait(300);
+  check('při zapínání je obvod oranžový', getComputedStyle(top('huumPowerRing')).stroke, 'rgb(245, 147, 61)');
+  await wait(900);
   check('podr\u017een\u00ed zapne', POSLANO[0].adresa, '/api/sauna/huum-start');
   check('  s teplotou z \u010d\u00edseln\u00edku', POSLANO[0].telo.teplota, 65);
   dotyk('pointerup');
@@ -525,8 +527,15 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
   await wait(60);
   check('krátké klepnutí při topení NEVYPNE', POSLANO.length, 0);
+  const obvod = top('huumPowerRing');
   dotyk('pointerdown');
-  await wait(1200);
+  await wait(300);
+  // Při vypínání je tlačítko oranžové — obvod musí mít jinou barvu, jinak není vidět
+  check('při vypínání obvod nabíhá',
+    getComputedStyle(obvod).opacity + ',' + btn.classList.contains('drzi'), '1,true');
+  check('  bíle přes oranžové tlačítko',
+    getComputedStyle(obvod).stroke + ' / ' + getComputedStyle(btn).backgroundColor, 'rgb(255, 255, 255) / rgb(245, 147, 61)');
+  await wait(900);
   dotyk('pointerup');
   await wait(60);
   check('podržení vypne', POSLANO[0] && POSLANO[0].adresa, '/api/sauna/huum-stop');
