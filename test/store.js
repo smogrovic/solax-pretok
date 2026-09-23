@@ -38,7 +38,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
-    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
@@ -51,7 +51,8 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     { 1: 20 },
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
-    lastCmd, DEVICES, RELAY_AUTO_OFF_MS);
+    lastCmd, DEVICES, RELAY_AUTO_OFF_MS,
+    [{ id: 1, time: '18:00', teplota: 85 }]);
 
   process.env = puvodni;
   return { api, state, kv, volani, posty, pushSubscriptions, timery };

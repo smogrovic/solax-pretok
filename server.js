@@ -488,6 +488,7 @@ function snapshot() {
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
     saunaNahrev: state.saunaNahrev,
+    saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
     timeline: state.timeline,
@@ -5425,7 +5426,7 @@ app.post('/api/timers/restore', (req, res) => {
     && ['on', 'off', 'up', 'down', 'tilt'].includes(t.action)
     && timerNextRun(t.time, savedAt) > now;   // mezitím už doběhl → nekřísit
   const jmeno = (v, zaloha) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : zaloha);
-  const pridano = { relay: 0, blinds: 0, aircon: 0 };
+  const pridano = { relay: 0, blinds: 0, aircon: 0, sauna: 0 };
 
   for (const t of (Array.isArray(b.relay) ? b.relay : []).slice(0, 10)) {
     if (!platny(t) || !DEVICES[t.key] || !['on', 'off'].includes(t.action)) continue;
@@ -5458,6 +5459,18 @@ app.post('/api/timers/restore', (req, res) => {
     pridano.aircon++;
   }
 
+  // Sauna nemá `action`, tak si platnost hlídá sama — jinak by ji společná
+  // podmínka výš vyhodila vždycky
+  for (const t of (Array.isArray(b.sauna) ? b.sauna : []).slice(0, 10)) {
+    if (!t || !validTimerTime(t.time) || timerNextRun(t.time, savedAt) <= now) continue;
+    const cil = Number(t.teplota);
+    if (!Number.isFinite(cil)) continue;
+    if (saunaTimers.length >= 10) break;
+    if (saunaTimers.some(x => x.time === t.time)) continue;
+    saunaTimerPridej(t.time, cil);
+    pridano.sauna++;
+  }
+
   if (pridano.relay) {
     relayTimers.sort((a, b2) => a.time.localeCompare(b2.time));
     broadcast('relayTimers', { timers: relayTimers });
@@ -5469,6 +5482,10 @@ app.post('/api/timers/restore', (req, res) => {
   if (pridano.aircon) {
     airconTimers.sort((a, b2) => a.time.localeCompare(b2.time));
     broadcast('airconTimers', { timers: airconTimers });
+  }
+  if (pridano.sauna) {
+    saunaTimers.sort((a, b2) => a.time.localeCompare(b2.time));
+    broadcast('saunaTimers', { timers: saunaTimers });
   }
   const celkem = pridano.relay + pridano.blinds + pridano.aircon;
   if (celkem) addLog(`Časovače obnoveny z telefonu (${celkem})`);
@@ -6647,6 +6664,72 @@ async function pollHuum() {
 function huumPayload() {
   return { ...state.huum, enabled: huumEnabled };
 }
+
+// ---------- Časovač sauny (jednorázové zapnutí v daný čas) ----------
+// Jen zapnout: vypnout si kamna umí sama, mají vlastní limit doby topení.
+// Teplota se bere z číselníku v appce a uloží se s časovačem — kdyby se brala
+// až při spuštění, pozdější posun číselníku by změnil i naplánované topení.
+let saunaTimers = [];
+let saunaTimerSeq = 1;
+
+function saunaTimerPridej(time, teplota) {
+  const { min, max } = huumMezeTeplot();
+  const t = Math.round(Math.min(max, Math.max(min, teplota)));
+  const timer = { id: saunaTimerSeq++, time, teplota: t };
+  saunaTimers.push(timer);
+  saunaTimers.sort((a, b) => a.time.localeCompare(b.time));
+  return timer;
+}
+
+app.post('/api/sauna/timer', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
+  const { time, teplota } = req.body || {};
+  const cil = Number(teplota);
+  if (!validTimerTime(time) || !Number.isFinite(cil)) {
+    return res.status(400).json({ error: 'Chybí čas (HH:MM) nebo teplota.' });
+  }
+  if (saunaTimers.length >= 10) return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
+  const t = saunaTimerPridej(time, cil);
+  addLog(`Sauna: časovač na ${t.time} (${t.teplota} °C)`);
+  broadcast('saunaTimers', { timers: saunaTimers });
+  res.json({ timers: saunaTimers });
+});
+
+app.delete('/api/sauna/timer/:id', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const id = Number(req.params.id);
+  if (saunaTimers.some(t => t.id === id)) {
+    saunaTimers = saunaTimers.filter(t => t.id !== id);
+    broadcast('saunaTimers', { timers: saunaTimers });
+  }
+  res.json({ timers: saunaTimers });
+});
+
+setInterval(async () => {
+  if (!saunaTimers.length || !huumEnabled) return;
+  const p = pragueTime();
+  const pad2 = n => String(n).padStart(2, '0');
+  const current = `${pad2(p.hour)}:${pad2(p.minute)}`;
+  const due = saunaTimers.filter(t => t.time === current);
+  if (!due.length) return;
+  // Vyhodit z fronty PŘED spuštěním: kdyby se čekalo na výsledek, tik po třiceti
+  // vteřinách by stihl přijít znovu a pustil by saunu podruhé.
+  saunaTimers = saunaTimers.filter(t => t.time !== current);
+  broadcast('saunaTimers', { timers: saunaTimers });
+  for (const t of due) {
+    try {
+      await huumPovel('start', { targetTemperature: t.teplota });
+      addLog(`Sauna: zapnuta na ${t.teplota} °C (časovač ${t.time})`);
+      nahrevStart('casovac');
+      const po = await huumOverStav(true);
+      // „Přijato" není „topí" — když se kamna nerozjela, ať je to v logu
+      if (!po || !po.heating) addLog(`Sauna: časovač ${t.time} — kamna se nerozjela`);
+    } catch (err) {
+      addLog(`Sauna: časovač ${t.time} selhal (${err.message.slice(0, 100)})`);
+    }
+  }
+}, 30000);
 
 // Kolik stupňů pod cílem se považuje za „už tam skoro je". Pět proto, že
 // poslední stupně lezou nejpomaleji a než dojdeš, je dotopeno.
@@ -8962,7 +9045,8 @@ function storeSnapshot() {
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
     '/api/timers/restore': {
-      savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers
+      savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers,
+      sauna: saunaTimers
     },
     // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },

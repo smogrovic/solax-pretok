@@ -1568,6 +1568,72 @@
      9 stupňům je nerozhodí. */
   .huum-temps{display:flex;width:100%;margin-top:12px;padding:4px 0 0;box-shadow:none;background:none;}
   .huum-temps .boiler-name{white-space:nowrap;}
+  /* Kruhový ovladač teploty. `touch-action:none` je tu to podstatné: bez něj by
+     appka tažení po kruhu vzala jako listování stránek, stejně jako to dělala
+     u jezdce naklopení u žaluzií. */
+  .huum-dial{
+    position:relative;
+    width:100%;
+    max-width:268px;
+    margin:0 auto;
+    aspect-ratio:1;
+    touch-action:none;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+  }
+  .huum-dial svg{display:block;width:100%;height:100%;}
+  .huum-dial-stred{
+    position:absolute;
+    inset:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    pointer-events:none;   /* tažení po kruhu nesmí vázat na textu uprostřed */
+  }
+  .huum-power{
+    position:relative;
+    width:88px;
+    height:88px;
+    border:none;
+    border-radius:50%;
+    background:rgba(44,62,80,0.06);
+    color:var(--navy);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    pointer-events:auto;
+    touch-action:none;
+  }
+  .huum-power.topi{background:var(--orange);color:#fff;}
+  .huum-power-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);}
+  #huumPowerRing{stroke:var(--orange);opacity:0;}
+  .huum-power.drzi #huumPowerRing{opacity:1;}
+  .huum-power-ico{width:34px;height:34px;}
+  .huum-dial-val{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
+  .huum-dial-popis{
+    font-size:11px;
+    color:var(--grey-text);
+    text-align:center;
+    max-width:150px;
+    line-height:1.35;
+  }
+  /* Skutečný ovládací prvek: nevidět, ale zaostřitelný — klávesnice a odečítač
+     tím mají co chytit. `pointer-events:none`, aby nebral tažení po kruhu. */
+  .huum-dial-input{
+    position:absolute;
+    left:50%;
+    bottom:0;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
+    margin:0;
+  }
+  .huum-dial-input:focus-visible ~ svg,
+  .huum-dial:focus-within svg{outline:2px solid var(--orange);outline-offset:4px;border-radius:50%;}
   /* „33 °C" se na úzkém telefonu lámalo mezi číslo a jednotku a stupeň zůstal
      viset na druhém řádku. Písmo se radši zmenší, než aby se to zalomilo. */
   /* Stejná velikost i barva jako `.hp-temp` u bazénu (34 px, navy) — obě stránky
@@ -2762,8 +2828,8 @@
         <div class="wbsrc-note">Ze sítě se nejdřív započítá auto, pak bazén a nakonec zbytek domu — všechny tři karty dohromady dají celý odběr ze sítě.</div>
       </div>
 
-      <div class="card stats-card jen-full">
-        <div class="graph-title">Jak vyšel dnešní čas solinátoru</div>
+      <button class="sbal-btn jen-full" data-sbal="solinator" type="button" aria-expanded="false">Jak vyšel čas solinátoru<i>▾</i></button>
+      <div class="card stats-card jen-full" data-sbal-obsah="solinator">
         <div id="solinatorCalc"></div>
       </div>
 
@@ -2803,18 +2869,42 @@
       <!-- Topení. Jediné místo v appce, které umí rozpálit něco na devadesát
            stupňů, takže se ZAPNOUT ptá na potvrzení a server povel ověřuje. -->
       <div class="card lockable" id="huumTopeniCard" hidden>
-        <div class="tempauto-thr" style="margin-top:0;padding-top:0;border-top:none">
-          <div class="tempauto-thr-row">
-            <span class="tempauto-thr-label">Nahřát na</span>
-            <span class="tempauto-thr-val" id="huumCilVal">– °C</span>
+        <!-- Číselník: SVG je jen obrázek, hodnotu drží skutečný `range` pod ním.
+             Klávesnice i odečítač tím fungují bez řádky kódu navíc. -->
+        <div class="huum-dial" id="huumDial">
+          <svg viewBox="0 0 240 240" aria-hidden="true">
+            <g id="huumDialRysky"></g>
+            <path id="huumDialOblouk" fill="none" stroke-linecap="round" stroke-width="7"></path>
+            <circle id="huumDialPuntik" r="10" fill="#fff" stroke-width="4"></circle>
+          </svg>
+          <div class="huum-dial-stred">
+            <button class="huum-power" id="huumTopeniBtn" type="button" aria-label="Zapnout saunu">
+              <svg viewBox="0 0 44 44" class="huum-power-ring" aria-hidden="true">
+                <circle cx="22" cy="22" r="20" fill="none" stroke-width="3" id="huumPowerRing"></circle>
+              </svg>
+              <svg viewBox="0 0 24 24" class="huum-power-ico" fill="none" stroke="currentColor"
+                   stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <path d="M12 3v9"></path>
+                <path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path>
+              </svg>
+            </button>
+            <div class="huum-dial-val" id="huumCilVal">– °C</div>
+            <div class="huum-dial-popis" id="huumTopeniPopis"></div>
           </div>
-          <input type="range" min="40" max="110" step="1" value="85" id="huumCilSlider">
-          <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
+          <input type="range" min="40" max="110" step="1" value="85" id="huumCilSlider"
+                 class="huum-dial-input" aria-label="Cílová teplota sauny">
         </div>
-        <div class="power-buttons">
-          <button class="power-btn on-btn" id="huumTopeniOnBtn">ON</button>
-          <button class="power-btn off-btn" id="huumTopeniOffBtn">OFF</button>
+        <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
+      </div>
+
+      <div class="card lockable timer-card" id="huumTimerCard" hidden>
+        <div class="graph-title">Časovač sauny</div>
+        <div class="timer-form-row">
+          <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
+          <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
+        <div class="tempauto-thr-hint">Zapne kamna na teplotu nastavenou na číselníku.</div>
+        <div class="timer-list" id="huumTimerList"></div>
       </div>
 
 
@@ -3015,8 +3105,8 @@
         <div class="wbsrc-note" id="tydenNote"></div>
       </div>
 
-      <div class="card stats-card">
-        <div class="graph-title">Odhad vs. skutečnost (10 dní)</div>
+      <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="odhad">
         <div class="pv-avg" id="pvAvg"></div>
         <canvas id="pvChart"></canvas>
         <div class="timeline-legend" id="pvLegend"></div>
@@ -7743,27 +7833,116 @@ function renderHuum() {
   renderHuumTopeni(d, zname);
 }
 
-// Topení. Jezdec drží CHTĚNOU teplotu, ne tu z kamen — dokud se nezmáčkne
-// ZAPNOUT, do sauny nejde nic. Proto se hodnota ze serveru přebírá jen dokud
-// se jezdce nikdo nedotkl; jinak by ho přepisovala uprostřed tažení.
+// Topení. Číselník drží CHTĚNOU teplotu, ne tu z kamen — dokud se nepodrží
+// vypínač, do sauny nejde nic. Proto se hodnota ze serveru přebírá jen dokud
+// se číselníku nikdo nedotkl; jinak by ho přepisovala uprostřed tažení.
+//
+// Kreslí se SVG, ale hodnotu drží schovaný `input type=range` pod ním. Díky
+// tomu jde číselník ovládat i klávesnicí a přečíst odečítačem, aniž by se to
+// muselo psát ručně přes role="slider".
 const huumTopeniEls = {
   karta: document.getElementById('huumTopeniCard'),
+  dial: document.getElementById('huumDial'),
   slider: document.getElementById('huumCilSlider'),
+  rysky: document.getElementById('huumDialRysky'),
+  oblouk: document.getElementById('huumDialOblouk'),
+  puntik: document.getElementById('huumDialPuntik'),
   val: document.getElementById('huumCilVal'),
+  popis: document.getElementById('huumTopeniPopis'),
   hint: document.getElementById('huumTopeniHint'),
-  on: document.getElementById('huumTopeniOnBtn'),
-  off: document.getElementById('huumTopeniOffBtn')
+  btn: document.getElementById('huumTopeniBtn'),
+  ring: document.getElementById('huumPowerRing')
 };
 let huumCilDotcen = false;
+let huumTopiTed = null;          // null = ještě nevíme, jestli kamna topí
+
+// Výseč 270°: od levého dolního rohu po pravý, po směru hodin. Stejně jako HUUM.
+const DIAL_OD = 135, DIAL_DO = 405, DIAL_R = 100, DIAL_S = 120;
+const DIAL_DRZENI_MS = 1000;
+const DIAL_RING_OBVOD = 2 * Math.PI * 20;
 
 function huumCil() {
   return Number(huumTopeniEls.slider.value);
+}
+const huumCilMin = () => Number(huumTopeniEls.slider.min);
+const huumCilMax = () => Number(huumTopeniEls.slider.max);
+
+function dialUhel(hodnota) {
+  const min = huumCilMin(), max = huumCilMax();
+  const podil = max > min ? (hodnota - min) / (max - min) : 0;
+  return DIAL_OD + podil * (DIAL_DO - DIAL_OD);
+}
+
+function dialBod(uhel, r) {
+  const rad = uhel * Math.PI / 180;
+  return { x: DIAL_S + r * Math.cos(rad), y: DIAL_S + r * Math.sin(rad) };
+}
+
+// Studená modrá na spodku rozsahu, teplá červená nahoře — jako rysky v HUUM
+function dialBarva(podil) {
+  const h = 205 - podil * 205;   // 205° modrá → 0° červená
+  return `hsl(${Math.round(h)}, 62%, 48%)`;
+}
+
+function dialOblouk(od, do_) {
+  const a = dialBod(od, DIAL_R), b = dialBod(do_, DIAL_R);
+  const velky = do_ - od > 180 ? 1 : 0;
+  return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${DIAL_R} ${DIAL_R} 0 ${velky} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
+}
+
+let dialRyskyOd = null, dialRyskyDo = null;
+function dialKresliRysky() {
+  const min = huumCilMin(), max = huumCilMax();
+  if (!huumTopeniEls.rysky || (dialRyskyOd === min && dialRyskyDo === max)) return;
+  dialRyskyOd = min; dialRyskyDo = max;
+  huumTopeniEls.rysky.textContent = '';
+  const kroku = Math.max(1, max - min);
+  for (let i = 0; i <= kroku; i++) {
+    const podil = i / kroku;
+    const uhel = DIAL_OD + podil * (DIAL_DO - DIAL_OD);
+    // Každý desátý stupeň delší — jinak se v ryskách nedá odhadnout hodnota
+    const velka = (min + i) % 10 === 0;
+    const a = dialBod(uhel, DIAL_R + (velka ? 8 : 5));
+    const b = dialBod(uhel, DIAL_R + 16);
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    ln.setAttribute('x1', a.x.toFixed(2)); ln.setAttribute('y1', a.y.toFixed(2));
+    ln.setAttribute('x2', b.x.toFixed(2)); ln.setAttribute('y2', b.y.toFixed(2));
+    ln.setAttribute('stroke', dialBarva(podil));
+    ln.setAttribute('stroke-width', velka ? '2.6' : '1.6');
+    ln.setAttribute('stroke-linecap', 'round');
+    huumTopeniEls.rysky.appendChild(ln);
+  }
+}
+
+function dialKresli() {
+  const e = huumTopeniEls;
+  if (!e.oblouk) return;
+  dialKresliRysky();
+  const u = dialUhel(huumCil());
+  const min = huumCilMin(), max = huumCilMax();
+  const podil = max > min ? (huumCil() - min) / (max - min) : 0;
+  // Nulová výseč by v SVG nenakreslila nic — na minimu se oblouk vynechá
+  e.oblouk.setAttribute('d', u > DIAL_OD + 0.2 ? dialOblouk(DIAL_OD, u) : '');
+  e.oblouk.setAttribute('stroke', dialBarva(podil));
+  const p = dialBod(u, DIAL_R);
+  e.puntik.setAttribute('cx', p.x.toFixed(2));
+  e.puntik.setAttribute('cy', p.y.toFixed(2));
+  e.puntik.setAttribute('stroke', dialBarva(podil));
+  e.val.textContent = huumCil() + ' °C';
+  e.slider.setAttribute('aria-valuetext', huumCil() + ' °C');
+  if (e.popis) {
+    e.popis.textContent = huumTopiTed === true ? 'Klepnutím vypneš'
+      : (huumTopiTed === false ? `Podrž pro zapnutí na ${huumCil()} °C` : '');
+  }
 }
 
 function renderHuumTopeni(d, cerstve) {
   const e = huumTopeniEls;
   if (!e.karta) return;
-  e.karta.hidden = !(d && d.enabled);
+  const zapojeno = !!(d && d.enabled);
+  e.karta.hidden = !zapojeno;
+  const timerKarta = document.getElementById('huumTimerCard');
+  if (timerKarta) timerKarta.hidden = !zapojeno;
 
   // Meze si hlásí sama jednotka — natvrdo napsaný rozsah by u jiných kamen lhal
   const l = (d && d.limits) || {};
@@ -7773,24 +7952,53 @@ function renderHuumTopeni(d, cerstve) {
   if (!huumCilDotcen && cerstve && typeof d.targetTemperature === 'number') {
     e.slider.value = String(d.targetTemperature);
   }
-  e.val.textContent = huumCil() + ' °C';
-
-  const topi = cerstve && d ? !!d.heating : null;
-  e.on.classList.toggle('active-state', topi === true);
-  e.off.classList.toggle('active-state', topi === false);
+  huumTopiTed = cerstve && d ? !!d.heating : null;
+  e.btn.classList.toggle('topi', huumTopiTed === true);
+  e.btn.setAttribute('aria-label', huumTopiTed === true ? 'Vypnout saunu' : 'Zapnout saunu');
+  dialKresli();
 }
 
-if (huumTopeniEls.slider) {
-  huumTopeniEls.slider.addEventListener('input', () => {
-    huumCilDotcen = true;
-    huumTopeniEls.val.textContent = huumCil() + ' °C';
+// ---- tažení po kruhu ----
+function dialZBodu(ev) {
+  const r = huumTopeniEls.dial.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width * 240 - DIAL_S;
+  const y = (ev.clientY - r.top) / r.height * 240 - DIAL_S;
+  let uhel = Math.atan2(y, x) * 180 / Math.PI;
+  // atan2 vrací −180…180; výseč jde od 135° do 405°, tak se spodní část přetočí
+  if (uhel < DIAL_OD - 180) uhel += 360;
+  const podil = (uhel - DIAL_OD) / (DIAL_DO - DIAL_OD);
+  const min = huumCilMin(), max = huumCilMax();
+  return Math.round(min + Math.min(1, Math.max(0, podil)) * (max - min));
+}
+
+function dialNastav(ev) {
+  const nova = dialZBodu(ev);
+  if (nova === huumCil()) return;
+  huumCilDotcen = true;
+  huumTopeniEls.slider.value = String(nova);
+  dialKresli();
+}
+
+if (huumTopeniEls.dial) {
+  let tahne = false;
+  huumTopeniEls.dial.addEventListener('pointerdown', ev => {
+    // Vypínač uprostřed má vlastní obsluhu — tažení mu ji nesmí sebrat
+    if (huumTopeniEls.btn.contains(ev.target)) return;
+    tahne = true;
+    huumTopeniEls.dial.setPointerCapture(ev.pointerId);
+    dialNastav(ev);
   });
+  huumTopeniEls.dial.addEventListener('pointermove', ev => { if (tahne) dialNastav(ev); });
+  for (const t of ['pointerup', 'pointercancel']) {
+    huumTopeniEls.dial.addEventListener(t, () => { tahne = false; });
+  }
+  // Klávesnice jde přes skrytý `input` — ten si šipky obslouží sám
+  huumTopeniEls.slider.addEventListener('input', () => { huumCilDotcen = true; dialKresli(); });
 }
 
 async function huumTopeniPovel(cesta, telo) {
   const e = huumTopeniEls;
-  const btns = [e.on, e.off];
-  btns.forEach(b => { b.disabled = true; });
+  e.btn.disabled = true;
   e.hint.textContent = cesta.endsWith('start') ? 'Zapínám…' : 'Vypínám…';
   try {
     const res = await fetch(cesta, {
@@ -7807,22 +8015,116 @@ async function huumTopeniPovel(cesta, telo) {
   } catch (err) {
     e.hint.textContent = err.message;
   }
-  btns.forEach(b => { b.disabled = false; });
+  e.btn.disabled = false;
 }
 
-if (huumTopeniEls.on) {
-  huumTopeniEls.on.addEventListener('click', () => {
-    const t = huumCil();
-    // Rozpálit kamna omylem je jiná liga než omylem rozsvítit, tak se to ptá.
-    potvrzZeptej('Zapnout saunu?',
-      `Kamna se rozjedou na ${t} °C. Zkontroluj, že na nich nic neleží a že jsou zavřené dveře.`,
-      () => huumTopeniPovel('/api/sauna/huum-start', { teplota: t }),
-      null, () => {});
+const huumZapni = () => huumTopeniPovel('/api/sauna/huum-start', { teplota: huumCil() });
+const huumVypni = () => huumTopeniPovel('/api/sauna/huum-stop');
+
+// Vypínač: ZAPNOUT se musí podržet, jako v appce HUUM. Rozpálit kamna omylem
+// ťuknutím v kapse je jiná liga než omylem rozsvítit. VYPNOUT jde klepnutím —
+// to je bezpečná strana.
+if (huumTopeniEls.btn) {
+  let drzeniOd = 0, drzeniTimer = null, drzeniRaf = null;
+  const ring = huumTopeniEls.ring;
+  if (ring) {
+    ring.setAttribute('stroke-dasharray', String(DIAL_RING_OBVOD));
+    ring.setAttribute('stroke-dashoffset', String(DIAL_RING_OBVOD));
+  }
+  const konecDrzeni = () => {
+    huumTopeniEls.btn.classList.remove('drzi');
+    if (drzeniTimer) clearTimeout(drzeniTimer);
+    if (drzeniRaf) cancelAnimationFrame(drzeniRaf);
+    drzeniTimer = null; drzeniRaf = null; drzeniOd = 0;
+    if (ring) ring.setAttribute('stroke-dashoffset', String(DIAL_RING_OBVOD));
+  };
+  const tik = () => {
+    if (!drzeniOd) return;
+    const podil = Math.min(1, (Date.now() - drzeniOd) / DIAL_DRZENI_MS);
+    if (ring) ring.setAttribute('stroke-dashoffset', String(DIAL_RING_OBVOD * (1 - podil)));
+    if (podil < 1) drzeniRaf = requestAnimationFrame(tik);
+  };
+  huumTopeniEls.btn.addEventListener('pointerdown', ev => {
+    ev.stopPropagation();
+    if (huumTopiTed === true) return;      // vypíná se klepnutím, držet netřeba
+    drzeniOd = Date.now();
+    huumTopeniEls.btn.classList.add('drzi');
+    drzeniTimer = setTimeout(() => { konecDrzeni(); huumZapni(); }, DIAL_DRZENI_MS);
+    tik();
+  });
+  for (const t of ['pointerup', 'pointercancel', 'pointerleave']) {
+    huumTopeniEls.btn.addEventListener(t, konecDrzeni);
+  }
+  huumTopeniEls.btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    // Klepnutí zapíná jen z klávesnice: tam je držení k ničemu a `click` z prstu
+    // přijde až po `pointerup`, který držení stornoval.
+    if (huumTopiTed === true) { huumVypni(); return; }
+    if (ev.detail === 0) huumZapni();
   });
 }
-if (huumTopeniEls.off) {
-  // Vypnutí se neptá — je to ta bezpečná strana
-  huumTopeniEls.off.addEventListener('click', () => huumTopeniPovel('/api/sauna/huum-stop'));
+
+// ---- časovač sauny ----
+const huumTimerEls = {
+  cas: document.getElementById('huumTimerTime'),
+  pridat: document.getElementById('huumTimerAdd'),
+  seznam: document.getElementById('huumTimerList')
+};
+let huumTimersData = [];
+
+function renderHuumTimers() {
+  const el = huumTimerEls.seznam;
+  if (!el) return;
+  el.textContent = '';
+  for (const t of huumTimersData) {
+    const row = document.createElement('div');
+    row.className = 'timer-row';
+    const cas = document.createElement('span');
+    cas.className = 'timer-row-time';
+    cas.textContent = t.time;
+    const txt = document.createElement('span');
+    txt.className = 'timer-row-text';
+    txt.textContent = `zapnout na ${t.teplota} °C`;
+    const x = document.createElement('button');
+    x.className = 'timer-del';
+    x.type = 'button';
+    x.textContent = '\u2715';
+    x.setAttribute('aria-label', `Zrušit časovač ${t.time}`);
+    x.addEventListener('click', () => huumTimerSmaz(t.id));
+    row.appendChild(cas);
+    row.appendChild(txt);
+    row.appendChild(x);
+    el.appendChild(row);
+  }
+}
+
+async function huumTimerPosli(cesta, init) {
+  try {
+    const res = await fetch(cesta, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken, ...(init.headers || {}) }
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+    if (Array.isArray(data.timers)) { huumTimersData = data.timers; renderHuumTimers(); }
+    huumTopeniEls.hint.textContent = '';
+  } catch (err) {
+    huumTopeniEls.hint.textContent = err.message;
+  }
+}
+
+const huumTimerSmaz = id => huumTimerPosli('/api/sauna/timer/' + id, { method: 'DELETE' });
+
+if (huumTimerEls.pridat) {
+  huumTimerEls.pridat.addEventListener('click', () => {
+    // Teplota se bere z číselníku nad tím — stejně jako časovač žaluzií bere
+    // naklopení ze svého jezdce
+    huumTimerPosli('/api/sauna/timer', {
+      method: 'POST',
+      body: JSON.stringify({ time: huumTimerEls.cas.value, teplota: huumCil() })
+    });
+  });
 }
 
 // Světlo v sauně. Ovládání je na dvou stránkách (Sauna i Ovládání), proto pole
@@ -9903,6 +10205,8 @@ function applySnapshot(snap) {
   // v Upstashi.
   saunaNahrevData = snap.saunaNahrev || null;
   bezpecne(renderSaunaNahrev);
+  huumTimersData = snap.saunaTimers || [];
+  bezpecne(renderHuumTimers);
   if (snap.assistantEnabled === false) hideAssistantSlide();
   bezpecne(() => renderAssistantLog(snap.assistantLog || []));
   bezpecne(() => renderSceny(snap.sceny));
@@ -10311,6 +10615,10 @@ function connectStream() {
     monthsData = mergeMonths(JSON.parse(e.data).months || [], monthsData);
     renderMonths();
     saveMonthsLocal();
+  });
+  es.addEventListener('saunaTimers', e => {
+    huumTimersData = JSON.parse(e.data).timers || [];
+    bezpecne(renderHuumTimers);
   });
   es.addEventListener('saunaNahrev', e => {
     saunaNahrevData = JSON.parse(e.data).saunaNahrev || null;

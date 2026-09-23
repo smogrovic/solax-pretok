@@ -21,7 +21,10 @@ setTimeout(() => {
   check('karta je na Přehledu', karta.closest('.slide').dataset.title, 'Přehled');
   check('přepínač odhadů je pryč', !!document.getElementById('pvTabs'), false);
   check('  ani tlačítka nezbyla', document.querySelectorAll('.pv-tab').length, 0);
-  check('nadpis zůstal', /Odhad vs. skutečnost/.test(karta.textContent), true);
+  // Nadpis se přestěhoval do sbalovacího tlačítka nad kartou
+  check('nadpis zůstal', /Odhad vs. skutečnost/.test(
+    document.querySelector('.sbal-btn[data-sbal="odhad"]').textContent), true);
+  check('  a karta se sbaluje pod ním', karta.dataset.sbalObsah, 'odhad');
 
   // Ranní odhad 20 kWh, večerní 10 — skutečnost 10. Podle ranního je to 50 %,
   // podle večerního 100 %; musí vyjít 50.

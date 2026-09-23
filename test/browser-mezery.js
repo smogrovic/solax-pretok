@@ -83,7 +83,8 @@ setTimeout(() => {
   const klice = [...document.querySelectorAll('.sbal-btn[data-sbal]')].map(b => b.dataset.sbal);
   check('tlačítka jsou na všech stránkách, kde mají být',
     // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Přehled
-    klice.join(', '), 'fve, klima, rozvrh, wallbox, bazen, nahrev, sauna, zavlaha, prehled');
+    klice.join(', '),
+    'fve, klima, rozvrh, wallbox, bazen, solinator, nahrev, sauna, zavlaha, prehled, odhad');
   // Na Přehledu jdou pod jedno tlačítko oba boxy — dnešek i týden
   check('Přehled sbalí oba boxy',
     document.querySelectorAll('[data-sbal-obsah="prehled"]').length, 2);

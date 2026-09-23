@@ -209,7 +209,8 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('kamna HUUM jsou prvn\u00ed karta', karty[0].contains(huumLight), 'true');
   // Zapínání patří hned pod teploty — je to jedna věc
   check('  zap\u00edn\u00e1n\u00ed hned pod nimi', karty[1].id, 'huumTopeniCard');
-  check('  m\u011b\u0159\u00e1k 3EM a\u017e t\u0159et\u00ed', karty[2].contains(saunaLight), 'true');
+  check('  \u010dasova\u010d hned za n\u00edm', karty[2].id, 'huumTimerCard');
+  check('  m\u011b\u0159\u00e1k 3EM a\u017e \u010dtvrt\u00fd', karty[3].contains(saunaLight), 'true');
   // „33 °C" se lámalo mezi číslo a jednotku a stupeň zůstával viset níž
   check('teplota se nel\u00e1me', getComputedStyle(huumTemp).whiteSpace, 'nowrap');
   check('  a c\u00edl taky', getComputedStyle(huumTarget).whiteSpace, 'nowrap');
@@ -316,13 +317,13 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('nep\u0159ipojen\u00e1 kamna sv\u011btlo taky neukazuj\u00ed',
     document.getElementById('huumSvetloCard').getClientRects().length, 0);
 
-  OUT.push('\\n8e) Topen\u00ed');
+  OUT.push('\\n8e) \u010c\u00edseln\u00edk topen\u00ed');
   const top = id => document.getElementById(id);
   POSLANO.length = 0;
   window.fetch = async (adresa, opts) => {
     POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
                    telo: opts && opts.body ? JSON.parse(opts.body) : null });
-    return { ok: true, status: 200, json: async () => ({ ok: true, teplota: 85, huum: {
+    return { ok: true, status: 200, json: async () => ({ ok: true, teplota: 85, timers: [], huum: {
       ...huumData, heating: true, statusCode: 231, statusText: 'top\u00ed',
       targetTemperature: 85, fetchedAt: new Date().toISOString() } }) };
   };
@@ -330,6 +331,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumData = { enabled: false, error: null };
   renderHuum();
   check('nep\u0159ipojen\u00e1 kamna topen\u00ed neukazuj\u00ed', top('huumTopeniCard').hidden, 'true');
+  check('  ani \u010dasova\u010d', top('huumTimerCard').hidden, 'true');
 
   huumData = { enabled: true, statusCode: 232, statusText: 'p\u0159ipraven\u00e1', heating: false,
     temperature: 33, targetTemperature: 79, doorClosed: true, light: 0, config: 2,
@@ -338,65 +340,98 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('po p\u0159ipojen\u00ed je karta vid\u011bt', top('huumTopeniCard').hidden, 'false');
   // Meze si hlásí sama jednotka — natvrdo napsaný rozsah by u jiných kamen lhal
-  check('jezdec m\u00e1 meze z jednotky',
-    top('huumCilSlider').min + '\u2013' + top('huumCilSlider').max, '40\u201390');
-  check('  a p\u0159evezme cíl z kamen', top('huumCilSlider').value, '79');
-  check('  a je vid\u011bt \u010d\u00edslem', top('huumCilVal').textContent, '79 \u00b0C');
-  check('tla\u010d\u00edtka se jmenuj\u00ed ON a OFF',
-    top('huumTopeniOnBtn').textContent + '/' + top('huumTopeniOffBtn').textContent, 'ON/OFF');
-  check('OFF je zv\u00fdrazn\u011bn\u00e9, kdy\u017e netop\u00ed',
-    top('huumTopeniOffBtn').classList.contains('active-state'), 'true');
+  const jezdec = top('huumCilSlider');
+  check('\u010d\u00edseln\u00edk m\u00e1 meze z jednotky', jezdec.min + '\u2013' + jezdec.max, '40\u201390');
+  check('  a p\u0159evezme c\u00edl z kamen', jezdec.value, '79');
+  check('  \u010d\u00edslo uprost\u0159ed sed\u00ed', top('huumCilVal').textContent, '79 \u00b0C');
 
-  // Jezdec drží CHTĚNOU teplotu. Dokud se nezmáčkne ZAPNOUT, do sauny nejde nic.
-  top('huumCilSlider').value = '72';
-  top('huumCilSlider').dispatchEvent(new Event('input'));
-  check('ta\u017een\u00edm jezdce se nic neode\u0161le', POSLANO.length, 0);
-  check('  jen se p\u0159ep\u00ed\u0161e \u010d\u00edslo', top('huumCilVal').textContent, '72 \u00b0C');
-  // A příchozí data už ho nesmí přepsat — jinak by mizel pod prstem
+  // Bez tohohle by tažení po kruhu appka vzala jako listování stránek — stejná
+  // past jako u jezdce naklopení u žaluzií
+  check('kruh nepou\u0161t\u00ed ta\u017een\u00ed d\u00e1l',
+    getComputedStyle(top('huumDial')).touchAction, 'none');
+
+  // Puntík má sedět na úhlu odpovídajícím hodnotě: výseč jde od 135° po 405°
+  const puntik = top('huumDialPuntik');
+  const uhelPuntiku = () => {
+    const x = Number(puntik.getAttribute('cx')) - 120, y = Number(puntik.getAttribute('cy')) - 120;
+    let u = Math.atan2(y, x) * 180 / Math.PI;
+    if (u < -45) u += 360;
+    return Math.round(u);
+  };
+  jezdec.value = '40'; jezdec.dispatchEvent(new Event('input'));
+  check('na minimu je punt\u00edk na za\u010d\u00e1tku v\u00fdse\u010de', uhelPuntiku(), 135);
+  jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
+  check('na maximu na konci', uhelPuntiku(), 45);
+  jezdec.value = '65'; jezdec.dispatchEvent(new Event('input'));
+  check('v p\u016flce uprost\u0159ed', uhelPuntiku(), 270);
+  check('  a \u010d\u00edslo se p\u0159episuje', top('huumCilVal').textContent, '65 \u00b0C');
+  // Data ze serveru už jím nesmí hýbat — jinak by mizel pod prstem
   huumData = { ...huumData, targetTemperature: 79, fetchedAt: new Date().toISOString() };
   renderHuum();
-  check('  a data ze serveru ho nep\u0159ep\u00ed\u0161ou', top('huumCilSlider').value, '72');
+  check('  a data ze serveru s n\u00edm nehnou', jezdec.value, '65');
 
-  // Rozpálit kamna omýlem je jiná liga než omýlem rozsvítit
-  top('huumTopeniOnBtn').click();
-  await wait(40);
-  check('ON se nejd\u0159\u00edv zept\u00e1', POSLANO.length, 0);
-  check('  a \u0159ekne, na kolik to pojede',
-    /72 \u00b0C/.test(document.getElementById('potvrzText').textContent), 'true');
-  check('  a p\u0159ipomene dve\u0159e a co le\u017e\u00ed na kamnech',
-    /dve\u0159e/.test(document.getElementById('potvrzText').textContent), 'true');
-  document.getElementById('potvrzZpet').click();
-  await wait(40);
-  check('zru\u0161en\u00ed nic nepo\u0161le', POSLANO.length, 0);
-
-  top('huumTopeniOnBtn').click();
-  await wait(40);
-  document.getElementById('potvrzAno').click();
-  await wait(80);
-  check('po potvrzen\u00ed se povel po\u0161le', POSLANO[0].adresa, '/api/sauna/huum-start');
-  check('  POSTem', POSLANO[0].metoda, 'POST');
-  check('  s teplotou z jezdce', POSLANO[0].telo.teplota, 72);
-  // Server povel ověřuje dalším dotazem, takže v odpovědi je skutečný stav
-  check('stav se p\u0159evezme z odpov\u011bdi', huumState.textContent, 'top\u00ed');
-  check('  a ON je zv\u00fdrazn\u011bn\u00e9',
-    top('huumTopeniOnBtn').classList.contains('active-state'), 'true');
-
+  OUT.push('\\n8e2) Vyp\u00edna\u010d se mus\u00ed podr\u017eet');
+  const btn = top('huumTopeniBtn');
+  const dotyk = typ => btn.dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 1 }));
   POSLANO.length = 0;
-  top('huumTopeniOffBtn').click();
-  await wait(80);
-  // Vypnutí se neptá — je to ta bezpečná strana
-  check('OFF jde rovnou', POSLANO[0].adresa, '/api/sauna/huum-stop');
+  // Rozpálit kamna omýlem ťuknutím v kapse je jiná liga než omýlem rozsvítit
+  dotyk('pointerdown');
+  await wait(120);
+  dotyk('pointerup');
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  await wait(60);
+  check('kr\u00e1tk\u00e9 klepnut\u00ed saunu NEZAPNE', POSLANO.length, 0);
+  check('  a popisek \u0159ekne, \u017ee se m\u00e1 dr\u017eet',
+    /Podr\u017e pro zapnut\u00ed na 65 \u00b0C/.test(top('huumTopeniPopis').textContent), 'true');
 
-  // Chyba ze serveru musí být vidět u tlačítka, ne jen v konzoli
-  window.fetch = async () => ({ ok: false, status: 409, json: async () => ({
-    error: 'Sauna m\u00e1 otev\u0159en\u00e9 dve\u0159e \u2014 zav\u0159i je a zkus to znovu.' }) });
-  top('huumTopeniOnBtn').click();
-  await wait(40);
-  document.getElementById('potvrzAno').click();
+  dotyk('pointerdown');
+  await wait(1200);
+  check('podr\u017een\u00ed zapne', POSLANO[0].adresa, '/api/sauna/huum-start');
+  check('  s teplotou z \u010d\u00edseln\u00edku', POSLANO[0].telo.teplota, 65);
+  dotyk('pointerup');
+  await wait(60);
+  check('stav se p\u0159evezme z odpov\u011bdi', huumState.textContent, 'top\u00ed');
+  check('  a vyp\u00edna\u010d je rozsv\u00edcen\u00fd', btn.classList.contains('topi'), 'true');
+
+  // Vypínání je bezpečná strana — držet se nemusí
+  POSLANO.length = 0;
+  window.fetch = async (adresa, opts) => {
+    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
+                   telo: opts && opts.body ? JSON.parse(opts.body) : null });
+    return { ok: true, status: 200, json: async () => ({ ok: true, huum: {
+      ...huumData, heating: false, statusCode: 232, fetchedAt: new Date().toISOString() } }) };
+  };
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  await wait(60);
+  check('klepnut\u00ed p\u0159i topen\u00ed vypne', POSLANO[0].adresa, '/api/sauna/huum-stop');
+  check('  a popisek se zm\u011bn\u00ed', /Podr\u017e pro zapnut\u00ed/.test(top('huumTopeniPopis').textContent), 'true');
+
+  OUT.push('\\n8e3) \u010casova\u010d sauny');
+  POSLANO.length = 0;
+  window.fetch = async (adresa, opts) => {
+    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
+                   telo: opts && opts.body ? JSON.parse(opts.body) : null });
+    return { ok: true, status: 200, json: async () => ({
+      timers: [{ id: 7, time: '18:30', teplota: 65 }] }) };
+  };
+  // Po povelu si číselník vzal hodnotu ze serveru, tak se před časovačem nastaví znovu
+  jezdec.value = '72'; jezdec.dispatchEvent(new Event('input'));
+  top('huumTimerTime').value = '18:30';
+  top('huumTimerAdd').click();
   await wait(80);
-  check('otev\u0159en\u00e9 dve\u0159e se \u0159eknou u tla\u010d\u00edtka',
-    /otev\u0159en\u00e9 dve\u0159e/.test(top('huumTopeniHint').textContent), 'true');
-  check('  a tla\u010d\u00edtka se zase povol\u00ed', top('huumTopeniOnBtn').disabled, 'false');
+  check('\u010dasova\u010d se po\u0161le', POSLANO[0].adresa, '/api/sauna/timer');
+  check('  POSTem', POSLANO[0].metoda, 'POST');
+  check('  s \u010dasem', POSLANO[0].telo.time, '18:30');
+  // Teplota se bere z číselníku, ne z vlastního políčka
+  check('  a s teplotou z \u010d\u00edseln\u00edku', POSLANO[0].telo.teplota, 72);
+  const casRadek = document.querySelector('#huumTimerList .timer-row');
+  check('a objev\u00ed se v seznamu', casRadek.textContent.includes('18:30'), 'true');
+  check('  i s teplotou', /65 \u00b0C/.test(casRadek.textContent), 'true');
+  POSLANO.length = 0;
+  casRadek.querySelector('.timer-del').click();
+  await wait(80);
+  check('k\u0159\u00ed\u017eek ho zru\u0161\u00ed', POSLANO[0].metoda, 'DELETE');
+  check('  a m\u00ed\u0159\u00ed na spr\u00e1vn\u00e9 id', POSLANO[0].adresa, '/api/sauna/timer/7');
 
   OUT.push('\\n8f) Jak dlouho se nah\u0159\u00edv\u00e1');
   const seznam = document.getElementById('nahrevList');
