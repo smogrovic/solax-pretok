@@ -104,6 +104,7 @@
   }
   .kal-meta{font-size:11px;color:var(--muted);text-align:right;}
   .kal-obnov{
+    height:24px;
     border:none;
     border-radius:12px;
     padding:5px 12px;
@@ -186,28 +187,39 @@
   @media (min-width: 1000px) {
     .kal-den-pohled{display:flex;}
     .kal-dny{display:none;}
+    /* Mřížka sahá o 1,5 × výšky „Aktualizovat" níž, než by jí patička nechala:
+       původně 100 % − (24 px tlačítko + 6 px mezera), teď o 36 px víc. Patička
+       tím zajede pod spodní hranu — dorolovat se k ní dá. */
+    .kal-den-pohled{flex:0 0 auto;height:calc(100% - 30px + 36px);}
   }
+  /* Lišta nad mřížkou: nadpisy dnů mají stejné sloupce jako mřížka pod nimi, takže
+     „Dnes" sedí uprostřed nad dneškem a „Zítra" nad zítřkem. Šipky jsou u okrajů. */
   .kal-den-lista{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:14px;
-    margin-bottom:10px;
+    position:relative;
+    margin-bottom:8px;
+    min-height:32px;
   }
-  /* Datum je zároveň tlačítko „zpátky na dnešek" — po prolistování týdne je to
+  /* Klik na nadpisy je zároveň „zpátky na dnešek" — po prolistování týdne je to
      kratší cesta než šestkrát šipka. */
   .kal-den-nazev{
-    font-size:14px;
-    font-weight:700;
-    color:var(--grey-text);
-    min-width:260px;
-    text-align:center;
-    border:none;
-    background:none;
-    font-family:inherit;
-    padding:4px 8px;
+    display:grid;
+    grid-template-columns:54px repeat(var(--sloupcu, 1), minmax(0, 1fr));
+    align-items:center;
+    min-height:32px;
+    cursor:pointer;
   }
+  .kal-den-hlava{
+    font-size:16px;
+    font-weight:800;
+    text-align:center;
+    color:var(--grey-text);
+    white-space:nowrap;
+  }
+  .kal-den-hlava.dnes{color:var(--orange);}
   .kal-sipka{
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
     border:none;
     border-radius:50%;
     width:32px;
@@ -216,7 +228,10 @@
     color:var(--grey-text);
     font-size:18px;
     line-height:1;
+    z-index:1;
   }
+  #kalPrev{left:0;}
+  #kalNext{right:0;}
   .kal-sipka:disabled{opacity:0.3;}
   /* Panel je na zdi — celých 24 h musí být vidět naráz, nikam se neroluje.
      Mřížka proto vyplní zbylou výšku a bloky se umisťují v PROCENTECH, ne v pixelech;
@@ -226,7 +241,7 @@
     min-height:0;
     display:grid;
     grid-template-columns:54px repeat(var(--sloupcu, 1), minmax(0, 1fr));
-    grid-template-rows:auto auto auto minmax(0, 1fr);
+    grid-template-rows:auto auto minmax(0, 1fr);
     background:var(--card);
     border-radius:18px;
     overflow:hidden;
@@ -244,16 +259,6 @@
     text-overflow:ellipsis;
   }
   .kal-hlava-prazdna{border-bottom:1px solid rgba(44,62,80,0.08);}
-  /* Nadpis dne nad jeho skupinou sloupců; dnešek oranžově jako na telefonu */
-  .kal-den-hlava{
-    padding:8px 8px 4px;
-    font-size:14px;
-    font-weight:800;
-    text-align:center;
-    color:var(--grey-text);
-    border-bottom:1px solid rgba(44,62,80,0.08);
-  }
-  .kal-den-hlava.dnes{color:var(--orange);}
   /* Předěl mezi dny — silnější než čára mezi kalendáři */
   .kal-den-predel{border-left:2px solid rgba(44,62,80,0.22) !important;}
   /* Celodenní události nemají v ose kde být — mají vlastní pruh nad ní */
@@ -3410,7 +3415,7 @@
   <div class="kal-den-pohled" id="kalDenPohled">
     <div class="kal-den-lista">
       <button class="kal-sipka" id="kalPrev" aria-label="Předchozí den">‹</button>
-      <button class="kal-den-nazev" id="kalDenNazev" type="button" title="Zpátky na dnešek"></button>
+      <div class="kal-den-nazev" id="kalDenNazev" role="button" tabindex="0" title="Zpátky na dnešek"></div>
       <button class="kal-sipka" id="kalNext" aria-label="Další den">›</button>
     </div>
     <div class="kal-mrizka" id="kalMrizka"></div>
@@ -11195,7 +11200,14 @@ function stranaNaStred(i) {
 }
 
 function updateDots() {
-  if (!pageTabsEl || !sliderWrap.clientWidth) return;
+  if (!pageTabsEl) return;
+  // Kalendář zakrývá pás stránek (ten má pak nulovou šířku) — svítí jen jeho záložka
+  if (kalPanelEl && !kalPanelEl.hidden) {
+    pageTabsEl.querySelectorAll('.page-tab:not(.page-tab-kal)').forEach(t => t.classList.remove('active'));
+    bezpecne(pripZalozkaObnov);
+    return;
+  }
+  if (!sliderWrap.clientWidth) return;
   const w = sirkaStranky();
   const prvni = Math.round(sliderWrap.scrollLeft / w);
   const kolik = viditelnychStranek();
@@ -11596,13 +11608,24 @@ function renderKalDen() {
   const vidim = dny.slice(kalDenIndex, kalDenIndex + 2);
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
   if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 2;
-  if (kalDenNazevEl) {
-    kalDenNazevEl.textContent = vidim.map((den, j) => kalNadpisDne(den, kalDenIndex + j)).join(' · ');
-  }
-
   kalMrizkaEl.textContent = '';
   const N = Math.max(1, kalendare.length);
-  kalMrizkaEl.style.setProperty('--sloupcu', String(N * Math.max(1, vidim.length)));
+  const sloupcu = String(N * Math.max(1, vidim.length));
+  kalMrizkaEl.style.setProperty('--sloupcu', sloupcu);
+  // Nadpisy dnů v liště nad mřížkou — stejné sloupce, takže každý sedí
+  // uprostřed nad svým dnem (prázdná buňka vlevo je nad časovou osou)
+  if (kalDenNazevEl) {
+    kalDenNazevEl.textContent = '';
+    kalDenNazevEl.style.setProperty('--sloupcu', sloupcu);
+    kalDenNazevEl.appendChild(document.createElement('span'));
+    vidim.forEach((den, j) => {
+      const h = document.createElement('div');
+      h.className = 'kal-den-hlava' + (kalDenIndex + j === 0 ? ' dnes' : '');
+      h.textContent = kalNadpisDne(den, kalDenIndex + j);
+      h.style.gridColumn = `span ${N}`;
+      kalDenNazevEl.appendChild(h);
+    });
+  }
   if (!vidim.length || !kalendare.length) return;
 
   const div = (trida, rodic) => {
@@ -11614,16 +11637,7 @@ function renderKalDen() {
   // Předěl mezi dny: první sloupec druhého dne dostane silnější čáru vlevo
   const predel = (e, j, i) => { if (j > 0 && i === 0) e.classList.add('kal-den-predel'); };
 
-  // 1. řádek: nadpisy dnů přes jejich skupinu sloupců
-  div('kal-hlava-prazdna');
-  vidim.forEach((den, j) => {
-    const h = div('kal-den-hlava' + (kalDenIndex + j === 0 ? ' dnes' : ''));
-    h.textContent = kalNadpisDne(den, kalDenIndex + j);
-    h.style.gridColumn = `span ${N}`;
-    predel(h, j, 0);
-  });
-
-  // 2. řádek: názvy kalendářů
+  // 1. řádek: názvy kalendářů
   div('kal-hlava-prazdna');
   vidim.forEach((den, j) => kalendare.forEach((k, i) => {
     const h = div('kal-hlava');
@@ -11632,7 +11646,7 @@ function renderKalDen() {
     predel(h, j, i);
   }));
 
-  // 3. řádek: celodenní události
+  // 2. řádek: celodenní události
   const popisCely = div('kal-cely-popis');
   popisCely.textContent = 'celý den';
   vidim.forEach((den, j) => kalendare.forEach((k, i) => {
@@ -11648,7 +11662,7 @@ function renderKalDen() {
     }
   }));
 
-  // 4. řádek: osa a sloupce
+  // 3. řádek: osa a sloupce
   const osa = div('kal-osa');
   for (let h = 0; h < 24; h++) {
     const p = div('kal-hod', osa);
@@ -11719,6 +11733,9 @@ const kalNextBtn = document.getElementById('kalNext');
 if (kalPrevBtn) kalPrevBtn.addEventListener('click', () => kalPrehod(-1));
 if (kalNextBtn) kalNextBtn.addEventListener('click', () => kalPrehod(1));
 // Klik na datum je skok na dnešek — po prolistování týdne kratší než šestkrát šipka
+if (kalDenNazevEl) kalDenNazevEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); kalDenNazevEl.click(); }
+});
 if (kalDenNazevEl) kalDenNazevEl.addEventListener('click', () => {
   if (kalDenIndex === 0) return;
   kalDenIndex = 0;
@@ -11840,7 +11857,8 @@ function kalOtevri(otevrit) {
   const zalozka = pageTabsEl && pageTabsEl.querySelector('.page-tab-kal');
   if (zalozka) zalozka.classList.toggle('active', otevrit);
   if (otevrit) renderKalendar();
-  else updateDots();
+  // I při otevření: záložky stránek pod kalendářem nesmí dál svítit jako aktivní
+  updateDots();
 }
 
 // Tři tlačítka, která v dětském režimu nahradí celou stránku Asistent.
@@ -11947,13 +11965,15 @@ function rebuildDots() {
     });
     pageTabsEl.appendChild(tab);
   });
-  // Kalendář není stránka v pásu — má vlastní záložku, která přepne celou obrazovku
+  // Kalendář není stránka v pásu — má vlastní záložku, která přepne celou obrazovku.
+  // Stojí hned za Připomínkami (když nejsou, na konci).
   if (kalPanelEl) {
     const kal = document.createElement('button');
     kal.className = 'page-tab page-tab-kal';
     kal.textContent = 'Kalendář';
     kal.addEventListener('click', () => kalOtevri(kalPanelEl.hidden));
-    pageTabsEl.appendChild(kal);
+    const za = [...pageTabsEl.querySelectorAll('.page-tab')].find(t => t.textContent === 'Připomínky');
+    if (za) za.after(kal); else pageTabsEl.appendChild(kal);
   }
   updateDots();
 }
@@ -12037,8 +12057,10 @@ const KAL_SWIPE_PX = 50;
 let kalSwipeOd = null;
 function kalZpetNaStranky() {
   kalOtevri(false);
-  // Kalendář je v liště až za všemi stránkami, takže se vychází na ty poslední
-  sliderWrap.scrollTo({ left: sliderWrap.scrollWidth, behavior: 'smooth' });
+  // Kalendář je v liště hned za Připomínkami, takže se vychází na ně
+  const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  const i = slides.indexOf(document.getElementById('pripominkySlide'));
+  sliderWrap.scrollTo({ left: i >= 0 ? stranaNaStred(i) : sliderWrap.scrollWidth, behavior: 'smooth' });
 }
 if (kalPanelEl) {
   kalPanelEl.addEventListener('pointerdown', e => { kalSwipeOd = { x: e.clientX, y: e.clientY }; });

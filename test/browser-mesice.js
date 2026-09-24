@@ -27,8 +27,9 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
     'Asistent · FVE · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Závlaha · Úklid · Připomínky · Přehled · Log · Logika automatiky');
   const slides = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
-  check('  a kalendář je až za nimi',
-    Array.from(document.querySelectorAll('#pageTabs .page-tab')).pop().textContent, 'Kalendář');
+  // Kalendář není stránka v pásu, jeho záložka stojí hned za Připomínkami
+  const vsechny = Array.from(document.querySelectorAll('#pageTabs .page-tab')).map(t => t.textContent);
+  check('  a kalendář je hned za Připomínkami', vsechny[vsechny.indexOf('Připomínky') + 1], 'Kalendář');
 
   // Pořadí panelů v grafu FVE hlídá test/browser-fve.js (má tam blíž k ostatním
   // kontrolám grafu), tady zůstává jen to, že wallbox v tom grafu vůbec je

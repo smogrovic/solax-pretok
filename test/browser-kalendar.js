@@ -106,15 +106,35 @@ setTimeout(async () => {
   check('sloupců je 2 × pět', hlavy.length, 10);
   check('  v zadaném pořadí', hlavy.slice(0, 5).join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
   check('  a u zítřka znovu', hlavy.slice(5).join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
-  const dnyHlavy = [...document.querySelectorAll('#kalMrizka .kal-den-hlava')];
+  // Nadpisy dnů jsou v liště nad mřížkou, každý uprostřed nad svým dnem
+  const dnyHlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')];
   check('nad sloupci jsou dva dny', dnyHlavy.length, 2);
+  check('  v mřížce se neopakují', document.querySelectorAll('#kalMrizka .kal-den-hlava').length, 0);
   check('  dnešek vlevo', /^Dnes /.test(dnyHlavy[0].textContent), true);
   check('  a oranžově', dnyHlavy[0].classList.contains('dnes'), true);
   check('  zítřek vpravo', /^Zítra /.test(dnyHlavy[1].textContent), true);
-  check('  každý přes svých pět sloupců', dnyHlavy[1].style.gridColumn, 'span 5');
-  check('nadpis dne leží nad svými sloupci',
-    Math.abs(dnyHlavy[1].getBoundingClientRect().left
-      - document.querySelectorAll('#kalMrizka .kal-hlava')[5].getBoundingClientRect().left) < 2, true);
+  const stred = r => (r.left + r.right) / 2;
+  const hl = [...document.querySelectorAll('#kalMrizka .kal-hlava')].map(h => h.getBoundingClientRect());
+  const stredSkupiny = (a, b) => (hl[a].left + hl[b].right) / 2;
+  check('„Dnes" je uprostřed nad dneškem',
+    Math.abs(stred(dnyHlavy[0].getBoundingClientRect()) - stredSkupiny(0, 4)) <= 2, true);
+  check('„Zítra" uprostřed nad zítřkem',
+    Math.abs(stred(dnyHlavy[1].getBoundingClientRect()) - stredSkupiny(5, 9)) <= 2, true);
+  // Šipky u okrajů obrazovky, ne vedle nadpisu
+  const pr = panel.getBoundingClientRect();
+  check('šipka zpět u levého okraje', document.getElementById('kalPrev').getBoundingClientRect().left - pr.left <= 24, true);
+  // Pravý okraj bez posuvníku (v headless prohlížeči zabírá místo, na iPadu ne)
+  check('šipka vpřed u pravého okraje',
+    pr.left + panel.clientLeft + panel.clientWidth - document.getElementById('kalNext').getBoundingClientRect().right <= 24, true);
+  // Mřížka je o 1,5 × výšky „Aktualizovat" delší, patička zajede pod spodní hranu
+  const pohled = document.getElementById('kalDenPohled').getBoundingClientRect();
+  const obnovH = document.getElementById('kalObnov').getBoundingClientRect().height;
+  const cs = getComputedStyle(panel);
+  const vnitrek = panel.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  check('tlačítko „Aktualizovat" má 24 px', Math.round(obnovH), 24);
+  check('mřížka je o 1,5 × tlačítka delší než místo nad patičkou',
+    Math.abs(pohled.height - (vnitrek - 30 + 1.5 * obnovH)) <= 2, true);
+  check('  patička je pod spodní hranou', document.querySelector('.kal-pata').getBoundingClientRect().top >= pr.bottom - parseFloat(cs.paddingBottom), true);
   const sloupce = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
   check('každý kalendář má svůj sloupec v obou dnech', sloupce.length, 10);
   check('  mezi dny je předěl', sloupce[5].classList.contains('kal-den-predel') && !sloupce[4].classList.contains('kal-den-predel'), true);
@@ -166,7 +186,7 @@ setTimeout(async () => {
   document.getElementById('kalNext').click();
   check('dopředu ano (zítra a pozítří)', /^Zítra /.test(document.getElementById('kalDenNazev').textContent), true);
   for (let i = 0; i < 10; i++) document.getElementById('kalNext').click();
-  check('na konci dat vpravo pořád dva dny', document.querySelectorAll('#kalMrizka .kal-den-hlava').length, 2);
+  check('na konci dat vpravo pořád dva dny', document.querySelectorAll('#kalDenNazev .kal-den-hlava').length, 2);
   check('  a dál se nedá', document.getElementById('kalNext').disabled, true);
   document.getElementById('kalDenNazev').click();
   document.getElementById('kalNext').click();
@@ -174,6 +194,8 @@ setTimeout(async () => {
   document.getElementById('kalPrev').click();
   check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
 
+  check('s otevřeným kalendářem svítí jen jeho záložka',
+    [...document.querySelectorAll('#pageTabs .page-tab.active')].map(t => t.textContent).join(','), 'Kalendář');
   R.push('\\n3d) Nadpis pryč, „načteno" dolů');
   // Nadpis „Kalendář" nad kalendářem jen bral výšku — v liště svítí záložka téhož
   // jména. „Načteno v…" je poznámka pod čarou a patří pod kalendář, ne nad něj.
@@ -354,8 +376,16 @@ setTimeout(async () => {
   tah(-200, 400);
   check('  a svislý tah je rolování', /^Dnes /.test(nazev()), true);
   // Poslední tah doprava už nemá kam v kalendáři jít — vede zpátky do appky
+  // Kalendář leží v liště hned za Připomínkami — tah doprava vede na ně
+  const wrapK = document.getElementById('sliderWrap');
+  const puvodniScroll = wrapK.scrollTo;
+  let kamK = null;
+  wrapK.scrollTo = o => { kamK = o.left; };
   tah(200);
+  wrapK.scrollTo = puvodniScroll;
   check('z dneška doprava se vyjde na stránky', panel.hidden, true);
+  const vid = [...wrapK.querySelectorAll('.slide:not([hidden])')];
+  check('  a to na Připomínky', Math.round(kamK), Math.round(stranaNaStred(vid.indexOf(document.getElementById('pripominkySlide')))));
   check('  a pás stránek je zpátky', document.getElementById('sliderWrap').style.display, '');
 
   R.push('\\n8) Slide animace');
