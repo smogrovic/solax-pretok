@@ -11449,13 +11449,15 @@ function pripZalozkaObnov(now = Date.now()) {
   // Zvoneček je vidět i na stránce Připomínky — jen když nic nesvítí, schová se
   pripZalozkaEl.hidden = !kolik;
   pripZalozkaEl.textContent = '🔔 ' + kolik;
-  // Záložky psa: vidět, když krmení svítí (i na stránce Připomínky), a 5 s po
-  // odťuknutí jako „Zpět“
+  // Záložky psa: jen na iPadu (široký displej), vidět, když krmení svítí (i na
+  // stránce Připomínky), a 5 s po odťuknutí jako „Zpět“. Na telefonu je krmení
+  // jen v seznamu Připomínek.
+  const ipad = window.matchMedia('(min-width: 1000px)').matches;
   for (const def of PRIPOMINKY.filter(d => d.zalozka)) {
     const el = document.getElementById(def.zalozka);
     if (!el) continue;
     const zpet = (pripZpet[def.id] || 0) > now;
-    el.hidden = !zpet && !pripominkaStav(def, pripData && pripData[def.id], now).sviti;
+    el.hidden = !ipad || (!zpet && !pripominkaStav(def, pripData && pripData[def.id], now).sviti);
     el.textContent = zpet ? '↩︎ Zpět' : def.symbol;
   }
   if (!pripPlovouciEl) return;

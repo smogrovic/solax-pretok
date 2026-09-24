@@ -213,9 +213,19 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('nakrmeno ráno → odpočet do zítřejších 5:00',
     pripominkaStav(def('pesRano'), nakrmeno, praha('2026-09-24', 20)).dalsi, praha('2026-09-25', 5));
 
-  OUT.push('\\n10) Záložky psa přes všechny stránky');
+  OUT.push('\\n10) Záložky psa přes všechny stránky — jen na iPadu');
   const psR = document.getElementById('pesRanoZalozka'), psV = document.getElementById('pesVecerZalozka');
   const skupina = document.getElementById('pripPlovouci');
+  // Telefon (tohle okno): záložky psa nejsou, krmení je jen v seznamu
+  pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
+               popelnice: { hotovo: Date.now() }, pesRano: { hotovo: 0, aktivovano: Date.now() }, pesVecer: { hotovo: 0, aktivovano: Date.now() } };
+  renderPripominky();
+  check('na telefonu záložky psa nejsou', psR.hidden + ',' + psV.hidden, 'true,true');
+  check('  a když nic jiného nesvítí, není ani skupina', skupina.hidden, 'true');
+  check('  krmení je dál v seznamu', radek('pesRano').classList.contains('sviti'), 'true');
+  // Dál jako na iPadu — široký displej se podvrhne
+  const puvodniMM = window.matchMedia;
+  window.matchMedia = q => /min-width: 1000px/.test(q) ? { matches: true } : puvodniMM.call(window, q);
   check('záložky psa jsou v plovoucí skupině se zvonečkem',
     skupina.contains(psR) && skupina.contains(psV) && skupina.contains(document.getElementById('pripZalozka')), 'true');
   pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
@@ -253,6 +263,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('tažení posune celou skupinu', Math.round(s1.left - s0.left) + ',' + Math.round(s1.top - s0.top), '100,40');
   check('  a psa nenakrmí', POSLANO.length, 0);
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
+  window.matchMedia = puvodniMM;
 
   OUT.push('\\n7) Dětský režim');
   pouzijRezim('miky');

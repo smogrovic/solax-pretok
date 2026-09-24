@@ -139,6 +139,9 @@ setTimeout(() => {
   const zv = document.getElementById('pripZalozka');
   check('na iPadu 2× větší než na telefonu (28,8 px)', getComputedStyle(zv).fontSize, '28.8px');
 
+  pripData = { pesRano: { hotovo: 0, aktivovano: Date.now() } };
+  renderPripominky();
+  check('na iPadu je záložka psa vidět', document.getElementById('pesRanoZalozka').hidden, false);
   R.push('\\n9) Zvoneček jde odtáhnout');
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
   // Pes nakrmený, ať je ve skupině jen zvoneček (psy testuje browser-pripominky)
