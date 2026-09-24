@@ -155,7 +155,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   const listaDole = document.querySelector('.page-tabs-bar').getBoundingClientRect().bottom;
   check('zvoneček je vlevo pod lištou záložek', rz.left < 30 && rz.top >= listaDole && rz.top < listaDole + 30, 'true');
   check('  s aurou kolem', getComputedStyle(zal, '::before').backdropFilter, 'blur(6px)');
-  check('  o 30 % větší (18 px místo 14)', getComputedStyle(zal).fontSize, '18px');
+  check('  o 20 % menší než dřív (14,4 px místo 18)', getComputedStyle(zal).fontSize, '14.4px');
   // Plynulé rolování headless prohlížeč nedojede — zachytí se, kam se rolovalo
   const slides = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
   const cil = slides.indexOf(document.getElementById('pripominkySlide'));
@@ -166,7 +166,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   sliderWrap.scrollTo = puvodni;
   check('klepnutí přejede na Připomínky', Math.round(kam / sirkaStranky()), cil);
   sliderWrap.scrollLeft = cil * sirkaStranky(); updateDots();
-  check('na Připomínkách záložka není', zal.hidden, 'true');
+  check('i na Připomínkách je zvoneček vidět', zal.hidden, 'false');
   sliderWrap.scrollLeft = 0; updateDots();
   check('zpátky jinde je zase vidět', zal.hidden, 'false');
   pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };

@@ -137,7 +137,7 @@ setTimeout(() => {
 
   R.push('\\n8) Zvoneček je na iPadu 2× větší');
   const zv = document.getElementById('pripZalozka');
-  check('36 px místo 18', getComputedStyle(zv).fontSize, '36px');
+  check('na iPadu 2× větší než na telefonu (28,8 px)', getComputedStyle(zv).fontSize, '28.8px');
 
   R.push('\\n9) Zvoneček jde odtáhnout');
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
