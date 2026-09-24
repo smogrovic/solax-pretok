@@ -5408,7 +5408,6 @@ window.addEventListener('resize', renderObehTimeline);
 const blindsList1El = document.getElementById('blindsList1');
 const blindsList2El = document.getElementById('blindsList2');
 let blinds = [];
-let blindsReloadTimer = null;
 
 // Rozložení místností: co nesedí do seznamů, přijde na konec druhé stránky
 const BLINDS_PAGE1 = ['obyvak', 'kuchyn', 'terasa', 'garaz'];
@@ -5439,9 +5438,66 @@ function roomPageIndex(room) {
   return { page: 2, order: 99 };
 }
 
+// Co jsme žaluziím naposledy poručili. Overkiz hlásí novou polohu až po dojetí
+// (a naklopení po dojetí přijde ještě později), takže obnova seznamu by jinak
+// ukazovala stav z doby před povelem. Cíl platí 2 min nebo dokud ho server
+// nepotvrdí (±2 %); potom vždy vyhraje skutečnost.
+const BLIND_CIL_MS = 2 * 60 * 1000;
+const BLIND_OBNOVA_MS = [8000, 18000, 30000, 60000, 90000, 120000];
+const blindCile = {};   // deviceURL -> { closure?, orientation?, do }
+let blindsReloadTimers = [];
+
+function blindCilNastav(deviceURL, action, value, tilt, now = Date.now()) {
+  const c = blindCile[deviceURL] || {};
+  const num = v => Math.round(Math.min(100, Math.max(0, Number(v))));
+  if (action === 'closure') {
+    c.closure = num(value);
+    if (Number.isFinite(tilt)) c.orientation = num(tilt);
+  } else if (action === 'up' || action === 'down') {
+    // Pergola jezdí obráceně (deploy/undeploy) a garáž polohu v % neukazuje —
+    // tam se krajní poloha nehádá, počká se na server
+    const b = blinds.find(x => x.deviceURL === deviceURL);
+    const jina = !b || b.uiClass === 'GarageDoor' || /pergol/i.test(normalizeName(b.label || ''))
+      || /garaz/.test(normalizeName(b.label || '') + normalizeName(b.room || ''));
+    if (jina) return;
+    c.closure = action === 'up' ? 0 : 100;
+  } else if (action === 'orientation') c.orientation = num(value);
+  else if (action === 'stop') {
+    delete c.closure;                       // kde zastaví, neví nikdo
+    if (Number.isFinite(value)) c.orientation = num(value);
+  } else return;
+  c.do = now + BLIND_CIL_MS;
+  blindCile[deviceURL] = c;
+  blindCilPouzij(blinds, now);
+}
+
+// Přepíše hodnoty ze serveru cíli, které ještě nedojely. Potvrzený nebo
+// prošlý cíl se smaže.
+function blindCilPouzij(list, now = Date.now()) {
+  for (const b of list || []) {
+    const c = blindCile[b.deviceURL];
+    if (!c) continue;
+    if (now > c.do) { delete blindCile[b.deviceURL]; continue; }
+    for (const k of ['closure', 'orientation']) {
+      if (typeof c[k] !== 'number') continue;
+      if (typeof b[k] === 'number' && Math.abs(b[k] - c[k]) <= 2) delete c[k];
+      else b[k] = c[k];
+    }
+    if (typeof c.closure !== 'number' && typeof c.orientation !== 'number') delete blindCile[b.deviceURL];
+  }
+}
+
 async function blindCommand(deviceURL, action, value, btn, tilt) {
   if (btn) btn.disabled = true;
   let ok = false;
+  // Hned ukázat, kam žaluzie jede — ne až po odpovědi (ta u zřetězeného
+  // naklopení přijde až po dojetí)
+  const predtim = blindCile[deviceURL] ? { ...blindCile[deviceURL] } : null;
+  const mame = blinds.some(b => b.deviceURL === deviceURL);
+  if (mame) {
+    blindCilNastav(deviceURL, action, value, tilt);
+    bezpecne(renderBlinds);
+  }
   try {
     const res = await fetch('/api/blinds/command', {
       method: 'POST',
@@ -5457,12 +5513,15 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
     errorEl.classList.remove('show');
     ok = data || true;
     // Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
-    // konečný stav (Overkiz hlásí novou polohu až po zastavení pohonu)
-    clearTimeout(blindsReloadTimer);
-    for (const delay of [8000, 18000, 30000]) {
-      blindsReloadTimer = setTimeout(loadBlinds, delay);
-    }
+    // konečný stav. Nový povel ruší všechny dřív naplánované obnovy.
+    for (const t of blindsReloadTimers) clearTimeout(t);
+    blindsReloadTimers = BLIND_OBNOVA_MS.map(ms => setTimeout(loadBlinds, ms));
   } catch (err) {
+    // Povel neodešel — cíl se vrátí, jak byl
+    if (mame) {
+      if (predtim) blindCile[deviceURL] = predtim; else delete blindCile[deviceURL];
+      loadBlinds();
+    }
     errorEl.textContent = 'Rolety: ' + err.message;
     errorEl.classList.add('show');
   }
@@ -5933,6 +5992,7 @@ async function loadBlinds() {
       return;
     }
     blinds = data.blinds || [];
+    blindCilPouzij(blinds);
     renderBlinds();
     renderTahomaSvetla();
     renderBlindTimerDevices();

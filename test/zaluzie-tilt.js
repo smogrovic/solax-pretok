@@ -15,8 +15,10 @@ function build() {
   const bezi = new Set();        // execId, které TaHoma hlásí v /exec/current
   let dalsiId = 1;
   const cekani = [];             // čekající delay() — pouští je test
+  let ted = 1790000000000, cteni = 0;   // podvržené hodiny a kolikrát se četla zařízení
   const tahomaFetch = async (cesta, opts) => {
     if (cesta === '/setup/devices') {
+      cteni++;
       return [{ deviceURL: URL, label: 'Obývák', uiClass: 'ExteriorVenetianBlind', placeOID: 'o',
         definition: { commands: ['open', 'close', 'stop', 'setClosure', 'setOrientation'].map(c => ({ commandName: c })) },
         states: [] }];
@@ -34,14 +36,16 @@ function build() {
   // Čekání mezi dotazy na dojetí (2 s) pouští test sám; ostatní (obnova stavů
   // v getBlinds) proběhne hned
   const delay = ms => ms === 2000 ? new Promise(r => cekani.push(r)) : Promise.resolve();
-  const api = new Function('tahomaFetch', 'delay', 'console',
-    CODE + '\n; return { blindCommand, ceka: () => tahomaNaklopeniCeka };'
-  )(tahomaFetch, delay, { error() {}, log() {} });
+  const FakeDate = class extends Date { static now() { return ted; } };
+  const api = new Function('tahomaFetch', 'delay', 'console', 'Date',
+    CODE + '\n; return { blindCommand, getBlinds, ceka: () => tahomaNaklopeniCeka };'
+  )(tahomaFetch, delay, { error() {}, log() {} }, FakeDate);
   // Pustí všechna čekání a nechá doběhnout, co na ně navazuje
   const tik = async () => {
     for (let i = 0; i < 5; i++) { while (cekani.length) cekani.shift()(); await new Promise(r => setImmediate(r)); }
   };
-  return { api, poslano, bezi, tik, posledniId: () => 'e' + (dalsiId - 1) };
+  return { api, poslano, bezi, tik, posledniId: () => 'e' + (dalsiId - 1),
+    posun: ms => { ted += ms; }, cteni: () => cteni };
 }
 
 (async () => {
@@ -94,6 +98,28 @@ function build() {
     // Jízda doběhla (v /exec/current už není) — naklopení jde rovnou
     await h.api.blindCommand(URL, 'orientation', 80);
     check('po dojeté jízdě taky hned', h.poslano.slice(-1)[0], 'setOrientation:80');
+  }
+
+  nadpis('5) Během jízdy se seznam nedrží minutu v cache');
+  {
+    const h = build();
+    await h.api.getBlinds();
+    const n = h.cteni();
+    h.posun(6000);
+    await h.api.getBlinds();
+    check('bez jízdy platí minutová cache', h.cteni(), n);
+    await h.api.blindCommand(URL, 'closure', 60);     // povel cache zneplatní a čte se znovu
+    await h.api.getBlinds();
+    const m = h.cteni();
+    h.posun(6000);
+    await h.api.getBlinds();
+    check('po jízdě se za 6 s čte znovu', h.cteni(), m + 1);
+    h.posun(3 * 60000);
+    await h.api.getBlinds();
+    const k = h.cteni();
+    h.posun(6000);
+    await h.api.getBlinds();
+    check('2 min po jízdě zase minutová cache', h.cteni(), k);
   }
 
   konec();

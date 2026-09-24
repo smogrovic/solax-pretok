@@ -103,6 +103,59 @@ setTimeout(async () => {
   check('  a po okam\u017eit\u00e9m naklopen\u00ed zmiz\u00ed', ceka.hidden, 'true');
   window.fetch = puvodniFetch;
   R.push('');
+  R.push('4c) Po povelu se ukazuje c\u00edl, ne star\u00fd stav');
+  // Overkiz hl\u00e1s\u00ed novou polohu a\u017e po doje\u0161t\u00ed \u2014 appka do t\u00e9 doby ukazovala star\u00e9 hodnoty
+  const url = 'io://LoznCil';
+  const vzor = () => ({ deviceURL: url, label: 'Lo\u017enice c\u00edl', room: 'Lo\u017enice', type: 'cover',
+    hasOrientation: true, orientation: 50, hasClosure: true, closure: 100 });
+  blinds = [vzor()];
+  renderBlinds();
+  const pct = () => { const r = [...document.querySelectorAll('.blind-row')].find(x => /Lo\u017enice c\u00edl/.test(x.textContent));
+    return r.querySelector('.blind-meter-pct').textContent; };
+  const naklon = () => { const w = [...document.querySelectorAll('.blind-room')].find(x => /Lo\u017enice c\u00edl/.test(x.textContent));
+    return w.querySelector('.blind-tilt input[type=range]').value; };
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true }) });
+  await blindCommand(url, 'closure', 30, null, 70);
+  check('poloha hned uk\u00e1\u017ee c\u00edl', pct(), '30 %');
+  check('  i naklopen\u00ed', naklon(), '70');
+  // Obnova ze serveru uprost\u0159ed j\u00edzdy (star\u00e1 data) c\u00edl nep\u0159ep\u00ed\u0161e
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ enabled: true, blinds: [vzor()] }) });
+  await loadBlinds();
+  check('star\u00e1 data ze serveru c\u00edl nep\u0159ep\u00ed\u0161ou', pct() + ' ' + naklon(), '30 % 70');
+  // Server potvrd\u00ed (\u00b12 %) \u2014 d\u00e1l plat\u00ed on
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ enabled: true,
+    blinds: [{ ...vzor(), closure: 31, orientation: 69 }] }) });
+  await loadBlinds();
+  check('potvrzen\u00fd c\u00edl vyst\u0159\u00edd\u00ed skute\u010dnost', pct() + ' ' + naklon(), '31 % 69');
+  check('  a c\u00edl je pry\u010d', !!blindCile[url], 'false');
+  // Naklopen\u00ed samotn\u00e9
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true, ceka: true }) });
+  await blindCommand(url, 'orientation', 20, null);
+  check('naklopen\u00ed se uk\u00e1\u017ee hned', naklon(), '20');
+  // Pro\u0161l\u00fd c\u00edl (2 min) u\u017e nevyhr\u00e1v\u00e1 \u2014 t\u0159eba kdy\u017e \u017ealuzii zastavil v\u00edtr
+  blindCile[url].do = Date.now() - 1;
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ enabled: true, blinds: [vzor()] }) });
+  await loadBlinds();
+  check('po 2 min vyhraje server', naklon(), '50');
+  // Stop: kde zastav\u00ed, nikdo nev\u00ed \u2014 c\u00edl polohy se zru\u0161\u00ed
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true }) });
+  await blindCommand(url, 'closure', 10, null);
+  await blindCommand(url, 'stop', 40, null);
+  check('stop zru\u0161\u00ed c\u00edl polohy', 'closure' in (blindCile[url] || {}), 'false');
+  check('  ale naklopen\u00ed z jezdce plat\u00ed', naklon(), '40');
+  // Neodeslan\u00fd povel c\u00edl vr\u00e1t\u00ed
+  delete blindCile[url];
+  blinds = [vzor()]; renderBlinds();
+  window.fetch = async (adr) => String(adr).includes('/command')
+    ? { ok: false, status: 502, json: async () => ({ error: 'TaHoma nejede' }) }
+    : { ok: true, status: 200, json: async () => ({ enabled: true, blinds: [vzor()] }) };
+  await blindCommand(url, 'closure', 0, null);
+  await new Promise(r => setTimeout(r, 30));
+  check('povel, kter\u00fd neode\u0161el, c\u00edl nenech\u00e1', pct(), '100 %');
+  for (const t of blindsReloadTimers) clearTimeout(t);
+  errorEl.classList.remove('show');
+  window.fetch = puvodniFetch;
+  R.push('');
   R.push('5) Poloha se nep\u00ed\u0161e slovy');
   // Vedle v řádku ji kreslí ukazatel pruhem a píše pod něj procenta — text
   // „zavřeno" byl tatáž informace podruhé. Na zataženou roletu je navíc vidět.

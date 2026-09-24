@@ -3901,8 +3901,19 @@ function tahomaSpinacStav(deviceURL, stavZTahomy) {
   return z ? { onState: z.on, onStateOdhad: true } : { onState: null, onStateOdhad: false };
 }
 
+// Dokud se po našem povelu něco hýbe (nebo čeká naklopení), drží se seznam jen
+// chvilku — jinak by obnova uprostřed jízdy zamrazila polohu na celou minutu.
+const BLINDS_CACHE_MS = 60 * 1000;
+const BLINDS_CACHE_POHYB_MS = 5 * 1000;
+const BLINDS_POHYB_OKNO_MS = 2 * 60 * 1000;
+function blindsCacheMs(now = Date.now()) {
+  const jizdy = typeof tahomaJizda === 'object' ? Object.values(tahomaJizda) : [];
+  const ceka = typeof tahomaNaklopeniCeka === 'object' && Object.keys(tahomaNaklopeniCeka).length > 0;
+  return ceka || jizdy.some(j => now - j.at < BLINDS_POHYB_OKNO_MS) ? BLINDS_CACHE_POHYB_MS : BLINDS_CACHE_MS;
+}
+
 async function getBlinds() {
-  if (blindsCache.list.length && Date.now() - blindsCache.ts < 60 * 1000) {
+  if (blindsCache.list.length && Date.now() - blindsCache.ts < blindsCacheMs()) {
     return blindsCache.list;
   }
 
