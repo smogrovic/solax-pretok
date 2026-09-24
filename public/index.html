@@ -226,7 +226,7 @@
     min-height:0;
     display:grid;
     grid-template-columns:54px repeat(var(--sloupcu, 1), minmax(0, 1fr));
-    grid-template-rows:auto auto minmax(0, 1fr);
+    grid-template-rows:auto auto auto minmax(0, 1fr);
     background:var(--card);
     border-radius:18px;
     overflow:hidden;
@@ -244,6 +244,18 @@
     text-overflow:ellipsis;
   }
   .kal-hlava-prazdna{border-bottom:1px solid rgba(44,62,80,0.08);}
+  /* Nadpis dne nad jeho skupinou sloupců; dnešek oranžově jako na telefonu */
+  .kal-den-hlava{
+    padding:8px 8px 4px;
+    font-size:14px;
+    font-weight:800;
+    text-align:center;
+    color:var(--grey-text);
+    border-bottom:1px solid rgba(44,62,80,0.08);
+  }
+  .kal-den-hlava.dnes{color:var(--orange);}
+  /* Předěl mezi dny — silnější než čára mezi kalendáři */
+  .kal-den-predel{border-left:2px solid rgba(44,62,80,0.22) !important;}
   /* Celodenní události nemají v ose kde být — mají vlastní pruh nad ní */
   .kal-cely{
     padding:4px 5px;
@@ -11568,6 +11580,8 @@ function kalDoPruhu(udalosti) {
   return out;
 }
 
+// Na zdi jsou vidět DVA dny vedle sebe (vybraný a další), každý se sloupci
+// po kalendářích a se společnou časovou osou vlevo. Listuje se po jednom dni.
 function renderKalDen() {
   if (!kalMrizkaEl) return;
   const d = kalData || {};
@@ -11577,37 +11591,53 @@ function renderKalDen() {
     // Když server seznam nepošle, poskládá se z toho, co v událostech je
     : [...new Set(dny.flatMap(x => (x.udalosti || []).map(u => u.kalendar)).filter(Boolean))]
         .map(nazev => ({ nazev, barva: null }));
-  kalDenIndex = Math.max(0, Math.min(kalDenIndex, dny.length - 1));
-  const den = dny[kalDenIndex];
+  // Poslední platný začátek je předposlední den — ať je vpravo pořád co ukázat
+  kalDenIndex = Math.max(0, Math.min(kalDenIndex, dny.length - 2));
+  const vidim = dny.slice(kalDenIndex, kalDenIndex + 2);
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
-  if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 1;
-  if (kalDenNazevEl) kalDenNazevEl.textContent = den ? kalNadpisDne(den, kalDenIndex) : '';
+  if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 2;
+  if (kalDenNazevEl) {
+    kalDenNazevEl.textContent = vidim.map((den, j) => kalNadpisDne(den, kalDenIndex + j)).join(' · ');
+  }
 
   kalMrizkaEl.textContent = '';
-  kalMrizkaEl.style.setProperty('--sloupcu', String(Math.max(1, kalendare.length)));
-  if (!den || !kalendare.length) return;
+  const N = Math.max(1, kalendare.length);
+  kalMrizkaEl.style.setProperty('--sloupcu', String(N * Math.max(1, vidim.length)));
+  if (!vidim.length || !kalendare.length) return;
 
-  const pulnoc = den.od;
   const div = (trida, rodic) => {
     const e = document.createElement('div');
     e.className = trida;
     (rodic || kalMrizkaEl).appendChild(e);
     return e;
   };
+  // Předěl mezi dny: první sloupec druhého dne dostane silnější čáru vlevo
+  const predel = (e, j, i) => { if (j > 0 && i === 0) e.classList.add('kal-den-predel'); };
 
-  // 1. řádek: názvy kalendářů
+  // 1. řádek: nadpisy dnů přes jejich skupinu sloupců
   div('kal-hlava-prazdna');
-  kalendare.forEach((k, i) => {
+  vidim.forEach((den, j) => {
+    const h = div('kal-den-hlava' + (kalDenIndex + j === 0 ? ' dnes' : ''));
+    h.textContent = kalNadpisDne(den, kalDenIndex + j);
+    h.style.gridColumn = `span ${N}`;
+    predel(h, j, 0);
+  });
+
+  // 2. řádek: názvy kalendářů
+  div('kal-hlava-prazdna');
+  vidim.forEach((den, j) => kalendare.forEach((k, i) => {
     const h = div('kal-hlava');
     h.textContent = k.nazev;
     h.style.color = kalCitelna(kalBarva(k, i));
-  });
+    predel(h, j, i);
+  }));
 
-  // 2. řádek: celodenní události
+  // 3. řádek: celodenní události
   const popisCely = div('kal-cely-popis');
   popisCely.textContent = 'celý den';
-  kalendare.forEach((k, i) => {
+  vidim.forEach((den, j) => kalendare.forEach((k, i) => {
     const box = div('kal-cely');
+    predel(box, j, i);
     for (const u of (den.udalosti || [])) {
       if (!u.celodenni || u.kalendar !== k.nazev) continue;
       const chip = div('kal-cely-chip', box);
@@ -11616,52 +11646,55 @@ function renderKalDen() {
       chip.style.background = kalSvetle(cb, 0.18);
       chip.style.color = kalCitelna(cb, 0.18);
     }
-  });
+  }));
 
-  // 3. řádek: osa a sloupce
+  // 4. řádek: osa a sloupce
   const osa = div('kal-osa');
   for (let h = 0; h < 24; h++) {
     const p = div('kal-hod', osa);
     p.textContent = String(h).padStart(2, '0') + ':00';
     p.style.top = (h / 24 * 100) + '%';
   }
-  kalendare.forEach((k, i) => {
-    const sl = div('kal-sloupec');
-    for (let h = 1; h < 24; h++) {
-      const l = div('kal-linka', sl);
-      l.style.top = (h / 24 * 100) + '%';
-    }
-    const vlastni = (den.udalosti || []).filter(u => !u.celodenni && u.kalendar === k.nazev);
-    for (const u of kalDoPruhu(vlastni)) {
-      const b = div('kal-blok', sl);
-      // Vícedenní událost se v tomhle dni ořízne na půlnoc
-      const od = Math.max(u.od, pulnoc), doKdy = Math.min(u.do, pulnoc + 86400000);
-      b.style.top = kalPct(od - pulnoc) + '%';
-      // Minimum, ať je půlhodinová událost pořád vidět i na nižším displeji
-      b.style.height = `max(14px, calc(${kalPct(doKdy - od)}% - 2px))`;
-      b.style.left = `calc(${(u._pruh / u._pruhu) * 100}% + 2px)`;
-      b.style.width = `calc(${100 / u._pruhu}% - 4px)`;
-      const barva = kalBarvaU(u, k, i);
-      b.style.color = kalCitelna(barva, 0.14);
-      b.style.borderLeftColor = barva;
-      b.style.background = kalSvetle(barva, 0.14);
-      const jm = document.createElement('b');
-      jm.textContent = u.nazev;
-      b.appendChild(jm);
-      const cas = document.createElement('span');
-      cas.className = 'kal-blok-cas';
-      cas.textContent = kalCas(u);
-      b.appendChild(cas);
-      // Krátká událost nemá výšku na dvě řádky — čas jde vedle názvu, ne pod něj
-      if (doKdy - od < 90 * 60000) b.classList.add('kal-blok-uzky');
-    }
-    // Čára „teď" — na zdi to nejužitečnější vodítko. Sama se objeví jen v tom dni,
-    // do kterého ta chvíle spadá, takže se nemusí zvlášť řešit, který den se ukazuje.
-    const ted = Date.now();
-    if (ted >= pulnoc && ted < pulnoc + 86400000) {
-      const l = div('kal-ted', sl);
-      l.style.top = kalPct(ted - pulnoc) + '%';
-    }
+  const ted = Date.now();
+  vidim.forEach((den, j) => {
+    const pulnoc = den.od;
+    kalendare.forEach((k, i) => {
+      const sl = div('kal-sloupec');
+      predel(sl, j, i);
+      for (let h = 1; h < 24; h++) {
+        const l = div('kal-linka', sl);
+        l.style.top = (h / 24 * 100) + '%';
+      }
+      const vlastni = (den.udalosti || []).filter(u => !u.celodenni && u.kalendar === k.nazev);
+      for (const u of kalDoPruhu(vlastni)) {
+        const b = div('kal-blok', sl);
+        // Vícedenní událost se v tomhle dni ořízne na půlnoc
+        const od = Math.max(u.od, pulnoc), doKdy = Math.min(u.do, pulnoc + 86400000);
+        b.style.top = kalPct(od - pulnoc) + '%';
+        // Minimum, ať je půlhodinová událost pořád vidět i na nižším displeji
+        b.style.height = `max(14px, calc(${kalPct(doKdy - od)}% - 2px))`;
+        b.style.left = `calc(${(u._pruh / u._pruhu) * 100}% + 2px)`;
+        b.style.width = `calc(${100 / u._pruhu}% - 4px)`;
+        const barva = kalBarvaU(u, k, i);
+        b.style.color = kalCitelna(barva, 0.14);
+        b.style.borderLeftColor = barva;
+        b.style.background = kalSvetle(barva, 0.14);
+        const jm = document.createElement('b');
+        jm.textContent = u.nazev;
+        b.appendChild(jm);
+        const cas = document.createElement('span');
+        cas.className = 'kal-blok-cas';
+        cas.textContent = kalCas(u);
+        b.appendChild(cas);
+        // Krátká událost nemá výšku na dvě řádky — čas jde vedle názvu, ne pod něj
+        if (doKdy - od < 90 * 60000) b.classList.add('kal-blok-uzky');
+      }
+      // Čára „teď" — sama padne jen do dne, do kterého ta chvíle spadá
+      if (ted >= pulnoc && ted < pulnoc + 86400000) {
+        const l = div('kal-ted', sl);
+        l.style.top = kalPct(ted - pulnoc) + '%';
+      }
+    });
   });
 }
 

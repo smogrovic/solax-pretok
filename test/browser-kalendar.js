@@ -102,10 +102,22 @@ setTimeout(async () => {
                    fetchedAt: new Date().toISOString(), error: null });
 
   const hlavy = [...document.querySelectorAll('#kalMrizka .kal-hlava')].map(h => h.textContent);
-  check('sloupců je pět', hlavy.length, 5);
-  check('  v zadaném pořadí', hlavy.join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
+  // Dva dny vedle sebe: dnešek a zítřek, každý s pěti kalendáři
+  check('sloupců je 2 × pět', hlavy.length, 10);
+  check('  v zadaném pořadí', hlavy.slice(0, 5).join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
+  check('  a u zítřka znovu', hlavy.slice(5).join(', '), 'Family, Lukáš, Zuzka, Miki, Elenka');
+  const dnyHlavy = [...document.querySelectorAll('#kalMrizka .kal-den-hlava')];
+  check('nad sloupci jsou dva dny', dnyHlavy.length, 2);
+  check('  dnešek vlevo', /^Dnes /.test(dnyHlavy[0].textContent), true);
+  check('  a oranžově', dnyHlavy[0].classList.contains('dnes'), true);
+  check('  zítřek vpravo', /^Zítra /.test(dnyHlavy[1].textContent), true);
+  check('  každý přes svých pět sloupců', dnyHlavy[1].style.gridColumn, 'span 5');
+  check('nadpis dne leží nad svými sloupci',
+    Math.abs(dnyHlavy[1].getBoundingClientRect().left
+      - document.querySelectorAll('#kalMrizka .kal-hlava')[5].getBoundingClientRect().left) < 2, true);
   const sloupce = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
-  check('každý kalendář má svůj sloupec', sloupce.length, 5);
+  check('každý kalendář má svůj sloupec v obou dnech', sloupce.length, 10);
+  check('  mezi dny je předěl', sloupce[5].classList.contains('kal-den-predel') && !sloupce[4].classList.contains('kal-den-predel'), true);
   check('osa jde od půlnoci do půlnoci',
     [...document.querySelectorAll('#kalMrizka .kal-hod')].map(h => h.textContent).slice(0, 3).join(','), '00:00,01:00,02:00');
   check('  a je jich čtyřiadvacet', document.querySelectorAll('#kalMrizka .kal-hod').length, 24);
@@ -132,12 +144,32 @@ setTimeout(async () => {
     document.querySelectorAll('#kalMrizka .kal-cely-chip').length, 1);
   check('  a není v ose', sloupce[0].querySelectorAll('.kal-blok').length, 0);
   check('dnešek má čáru „teď"', document.querySelectorAll('#kalMrizka .kal-ted').length, 5);
+  check('  jen v dnešních sloupcích', sloupce.slice(5).some(sl => sl.querySelector('.kal-ted')), false);
+  // Událost zítřka patří do sloupců zítřka
+  const dz = dny(7);
+  dz[1].udalosti = [{ uid: 'z', kalendar: 'Miki', od: denMs(1) + 8 * 3600000, do: denMs(1) + 12 * 3600000,
+    celodenni: false, nazev: 'Škola zítra', misto: null }];
+  renderKalendar({ enabled: true, dnu: 7, days: dz, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+  const sz = [...document.querySelectorAll('#kalMrizka .kal-sloupec')];
+  check('zítřejší událost je ve sloupci Miki zítřka', sz[8].textContent.includes('Škola zítra'), true);
+  check('  a ne v dnešku', sz.slice(0, 5).some(sl => sl.textContent.includes('Škola zítra')), false);
+  check('dva dny se vejdou bez rolování do šířky',
+    document.getElementById('kalMrizka').scrollWidth <= document.getElementById('kalMrizka').clientWidth + 1, true);
+  // S jediným dnem v datech je vidět jen ten
+  renderKalendar({ enabled: true, dnu: 1, days: dny(1), kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+  check('jediný den = jen jeho sloupce', document.querySelectorAll('#kalMrizka .kal-sloupec').length, 5);
+  renderKalendar({ enabled: true, dnu: 7, days: dd, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
 
   R.push('\\n3b) Přepínání dnů');
   check('název říká, že je dnes', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
   check('zpátky se nedá', document.getElementById('kalPrev').disabled, true);
   document.getElementById('kalNext').click();
-  check('dopředu ano', /^Zítra /.test(document.getElementById('kalDenNazev').textContent), true);
+  check('dopředu ano (zítra a pozítří)', /^Zítra /.test(document.getElementById('kalDenNazev').textContent), true);
+  for (let i = 0; i < 10; i++) document.getElementById('kalNext').click();
+  check('na konci dat vpravo pořád dva dny', document.querySelectorAll('#kalMrizka .kal-den-hlava').length, 2);
+  check('  a dál se nedá', document.getElementById('kalNext').disabled, true);
+  document.getElementById('kalDenNazev').click();
+  document.getElementById('kalNext').click();
   check('  a zítřek už čáru „teď" nemá', document.querySelectorAll('#kalMrizka .kal-ted').length, 0);
   document.getElementById('kalPrev').click();
   check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
@@ -376,7 +408,7 @@ setTimeout(async () => {
   window.fetch = puvodniFetch;
   check('tlačítko si o stažení řekne', volani.join(','), 'POST /api/calendar/refresh');
   check('  a překreslí tím, co přišlo zpátky',
-    document.querySelectorAll('#kalMrizka .kal-hlava').length, 5);
+    document.querySelectorAll('#kalMrizka .kal-hlava').length, 10);
   check('  a zase se dá zmáčknout', obnov.disabled, false);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
