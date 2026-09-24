@@ -6870,8 +6870,27 @@ function huumUloz(d) {
   return d;
 }
 
+// Světlo se změnilo a neudělala to naše appka (ta po povelu uloží nový stav hned,
+// takže další čtení rozdíl nevidí). Zapisuje se, ať je z Logu poznat, kdy a za
+// jaké situace ho rozsvěcí nebo zhasíná appka HUUM nebo sama jednotka — třeba
+// s koncem saunování.
+function huumSvetloZmenaMimo(pred, po, now = Date.now()) {
+  if (!pred || !po || typeof pred.light !== 'number' || typeof po.light !== 'number') return;
+  if (!!pred.light === !!po.light) return;
+  const co = [po.heating ? 'sauna topí' : 'sauna netopí'];
+  if (typeof po.temperature === 'number') co.push(`${Math.round(po.temperature)} °C`);
+  const konec = typeof po.endDate === 'number' ? po.endDate * 1000 : 0;
+  if (konec && konec <= now && now - konec <= 10 * 60000) {
+    co.push('konec saunování ' + new Date(konec).toLocaleTimeString('cs-CZ',
+      { timeZone: 'Europe/Prague', hour: '2-digit', minute: '2-digit' }));
+  }
+  addLog(`Sauna: světlo ${po.light ? 'se rozsvítilo' : 'zhaslo'} mimo appku (${co.join(', ')})`);
+}
+
 async function huumSvetlo(chci) {
+  const pred = state.huum;
   const ted = huumUloz(await fetchHuum());
+  huumSvetloZmenaMimo(pred, ted);
   if (ted.light === null) throw new Error('HUUM neřekl, jestli světlo svítí.');
   if (!!ted.light === chci) return ted;      // už je, jak má být — přepnout by ho vyplo
 
@@ -6897,7 +6916,9 @@ async function pollHuum() {
   if (!huumEnabled || huumPollRunning) return;
   huumPollRunning = true;
   try {
+    const pred = state.huum;
     state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
+    huumSvetloZmenaMimo(pred, state.huum);
     checkHuumNahrata(state.huum);
     nahrevVzorek(state.huum.temperature);
     // Zapnutí z appky HUUM nebo z panelu na kamnech měřák nemusí vidět hned

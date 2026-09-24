@@ -63,7 +63,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
-         + ' casovace: () => saunaTimers };'
+         + ' huumSvetloZmenaMimo, casovace: () => saunaTimers };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -776,6 +776,52 @@ nadpis('19) Zapnuto v — zdroj z kamen');
   await h.api.pollHuum();
   check('  netopící jen zkontrolují vypršení', h.zapnuti.join(','), 'topi,kontrola');
 }
+
+  nadpis('Světlo se změnilo mimo appku');
+  {
+    const h = build();
+    const mimo = () => h.zapisy.filter(t => /mimo appku/.test(t));
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ light: 1, temperature: '74' })) });
+    await h.api.pollHuum();
+    check('první čtení nic nezapíše (není s čím srovnat)', mimo().length, 0);
+    await h.api.pollHuum();
+    check('stejný stav nic nezapíše', mimo().length, 0);
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ light: 0, temperature: '74' })) });
+    await h.api.pollHuum();
+    check('zhasnutí v HUUM se zapíše', mimo()[0], 'Sauna: světlo zhaslo mimo appku (sauna netopí, 74 °C)');
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ light: 1, statusCode: 231, temperature: '60' })) });
+    await h.api.pollHuum();
+    check('rozsvícení taky', mimo()[1], 'Sauna: světlo se rozsvítilo mimo appku (sauna topí, 60 °C)');
+    h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ light: undefined })) });
+    await h.api.pollHuum();
+    check('neznámý stav nic nezapíše', mimo().length, 2);
+  }
+  {
+    // Vlastní přepnutí naší appkou se jako „mimo appku“ nezapisuje
+    const h = build();
+    const mimo = () => h.zapisy.filter(t => /mimo appku/.test(t));
+    let svetlo = 1;
+    h.odpovez = async (n) => {
+      const v = h.volani[h.volani.length - 1];
+      if (v.adresa.endsWith('/light')) { svetlo = svetlo ? 0 : 1; return { stav: 200, text: '{}' }; }
+      return { stav: 200, text: JSON.stringify(odpoved({ light: svetlo })) };
+    };
+    await h.api.pollHuum();
+    await h.api.huumSvetlo(false);
+    await h.api.pollHuum();
+    check('naše vlastní zhasnutí se nepočítá jako cizí', mimo().length, 0);
+  }
+  {
+    // Když zhasne s koncem saunování, je to v zápisu vidět
+    const h = build();
+    const pred = { light: 1 };
+    h.api.huumSvetloZmenaMimo(pred, { light: 0, heating: false, temperature: 70, endDate: Math.floor(Date.parse('2026-09-24T19:40:00Z') / 1000) },
+      Date.parse('2026-09-24T19:43:00Z'));
+    check('konec saunování se uvede', h.zapisy.slice(-1)[0], 'Sauna: světlo zhaslo mimo appku (sauna netopí, 70 °C, konec saunování 21:40)');
+    h.api.huumSvetloZmenaMimo(pred, { light: 0, heating: false, temperature: 70, endDate: Math.floor(Date.parse('2026-09-24T19:00:00Z') / 1000) },
+      Date.parse('2026-09-24T19:43:00Z'));
+    check('  starý konec ne', h.zapisy.slice(-1)[0], 'Sauna: světlo zhaslo mimo appku (sauna netopí, 70 °C)');
+  }
 
 konec();
 })().catch(err => {
