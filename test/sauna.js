@@ -55,7 +55,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     CODE2 + '\n; return { saunaTopi, saunaBlokuje, saunaPayload, updateSauna, recordSaunaDay,'
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
-          + ' nahrevStart, nahrevVzorek, nahrevKonec, NAHREV_PRAHY, NAHREV_MAX,'
+          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, NAHREV_MAX,'
           + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
           + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
   )(
@@ -372,6 +372,64 @@ nadpis('Měření nahřívání');
   check('  a vypadla ta nejstarší', h.state.saunaNahrev.zaznamy[0].body[1].c, 45);
   check('  poslední je ta nejnovější',
     h.state.saunaNahrev.zaznamy[h.api.NAHREV_MAX - 1].body[1].c, 40 + h.api.NAHREV_MAX + 4);
+}
+{
+  // Po restartu uprostřed saunování (nasazení appky) server viděl odběr a založil
+  // nové měření, jenže kamna už hřála na 72 °C. Takový záznam tvrdil „60 °C za
+  // půl minuty“ — nezapisuje se.
+  const h = build({ drzeni: 1, huum: { temperature: 72, targetTemperature: 76 } });
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.nahrevVzorek(74, h.now);
+  h.posun(3); h.api.updateSauna(50);
+  check('teplý start se nezapíše', h.state.saunaNahrev.zaznamy.length, 0);
+  check('  a v logu je proč', h.log.some(t => /zahozeno/.test(t)), 'true');
+  // Studený start pořád ano (stejná délka, jen od 30 °C)
+  const s = build({ drzeni: 1, huum: { temperature: 30, targetTemperature: 76 } });
+  s.api.updateSauna(6000);
+  s.posun(2); s.api.nahrevVzorek(34, s.now);
+  s.posun(3); s.api.updateSauna(50);
+  check('  studený ano', s.state.saunaNahrev.zaznamy.length, 1);
+}
+
+nadpis('Měření nahřívání přežije nasazení');
+{
+  const h = build();
+  const T = h.now;
+  const zal = { start: T - 30 * 60000, duvod: 'appka', venkuC: 9, odC: 25, cilC: 80,
+    prahy: { 60: { min: 24, c: 61 } }, body: [{ min: 0, c: 25 }, { min: 24, c: 61 }], maxC: 61 };
+  const tepla = { start: T - 900000000, body: [{ min: 0.5, c: 72 }, { min: 2.5, c: 73 }], prahy: { 60: { min: 0.5, c: 72 } } };
+  const studena = { start: T - 800000000, body: [{ min: 0, c: 20 }, { min: 30, c: 70 }], prahy: {} };
+  check('obnova projde', h.api.nahrevObnov({ zaznamy: [tepla, studena], bezici: zal }, T), 'true');
+  check('teplý záznam ze zálohy se vyřadí', h.state.saunaNahrev.zaznamy.length, 1);
+  check('  studený zůstane', h.state.saunaNahrev.zaznamy[0].body[0].c, 20);
+  check('rozběhnuté měření se vrátí', h.state.saunaNahrev.bezici && h.state.saunaNahrev.bezici.start, T - 30 * 60000);
+  h.posun(2); h.api.nahrevVzorek(66, h.now);
+  check('  a měří se dál od původního startu', h.state.saunaNahrev.bezici.body.slice(-1)[0].min, 32);
+}
+{
+  // Server po startu uviděl odběr a založil vlastní měření dřív, než přišla záloha
+  const h = build({ huum: { temperature: 64, targetTemperature: 80 } });
+  const T = h.now;
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.nahrevVzorek(71, h.now);
+  const zal = { start: T - 30 * 60000, duvod: 'appka', venkuC: 9, odC: 25, cilC: 80,
+    prahy: { 60: { min: 24, c: 61 } }, body: [{ min: 0, c: 25 }, { min: 24, c: 61 }], maxC: 61 };
+  h.api.nahrevObnov({ zaznamy: [], bezici: zal }, h.now);
+  const b = h.state.saunaNahrev.bezici;
+  check('vyhraje dřívější měření ze zálohy', b.start, T - 30 * 60000);
+  check('  s původní startovní teplotou', b.odC, 25);
+  check('  vzorky nového se připojí s přepočtenými minutami', JSON.stringify(b.body.slice(-2)),
+    '[{"min":30,"c":64},{"min":32,"c":71}]');
+  check('  práh 60 zůstane z původního měření', b.prahy[60].min, 24);
+  check('  práh 70 se doplní z nového', b.prahy[70].min, 32);
+  check('  a maximum sedí', b.maxC, 71);
+}
+{
+  const h = build();
+  const stare = { start: h.now - 5 * 3600000, body: [{ min: 0, c: 25 }], prahy: {} };
+  h.api.nahrevObnov({ zaznamy: [], bezici: stare }, h.now);
+  check('měření starší než 4 h se neobnoví', h.state.saunaNahrev.bezici, 'null');
+  check('bez zaznamy obnova neprojde', h.api.nahrevObnov({ bezici: stare }, h.now), 'false');
 }
 
 nadpis('Zapnuto v');

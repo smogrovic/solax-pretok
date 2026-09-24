@@ -1100,6 +1100,14 @@ function nahrevVzorek(c, now = Date.now()) {
   if (typeof b.cilC === 'number' && c >= b.cilC && !b.prahy.cil) b.prahy.cil = { min, c };
 }
 
+// Měření, které začalo už teplé (první vzorek nad prvním prahem), o nahřívání
+// nic neříká — typicky po restartu serveru uprostřed saunování, kdy kamna už
+// hřála. Tvrdilo by „60 °C za půl minuty“ a kazilo odhad.
+function nahrevTepleOdStartu(b) {
+  return !!(b && Array.isArray(b.body) && b.body.length && typeof b.body[0].c === 'number'
+    && b.body[0].c >= NAHREV_PRAHY[0]);
+}
+
 function nahrevKonec(now = Date.now()) {
   const n = state.saunaNahrev;
   const b = n.bezici;
@@ -1107,11 +1115,48 @@ function nahrevKonec(now = Date.now()) {
   n.bezici = null;
   // Krátké bliknutí odběru není nahřívání — bez druhého vzorku není co měřit
   if (b.body.length < 2 && !Object.keys(b.prahy).length) return;
+  if (nahrevTepleOdStartu(b)) {
+    addLog('Sauna: měření nahřívání zahozeno — začalo už teplé');
+    return;
+  }
   b.konec = now;
   n.zaznamy.push(b);
   if (n.zaznamy.length > NAHREV_MAX) n.zaznamy = n.zaznamy.slice(-NAHREV_MAX);
   addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min)`);
   broadcast('saunaNahrev', { saunaNahrev: n });
+}
+
+// Obnova ze zálohy. Hotové záznamy se berou, jen když jich je víc než na
+// serveru (po nasazení je prázdný), a teplé starty se vyřadí. Rozběhnuté měření
+// (`bezici`) se vrátí, aby nasazení uprostřed nahřívání měření neuřízlo. Když
+// si ho server po startu mezitím založil znovu sám, vyhraje to ze zálohy —
+// začalo dřív — a vzorky z nového se připojí na konec.
+function nahrevObnov(telo, now = Date.now()) {
+  const n = state.saunaNahrev;
+  const z = telo && Array.isArray(telo.zaznamy) ? telo.zaznamy : null;
+  if (!z) return false;
+  const platne = z.filter(r => r && typeof r.start === 'number' && Array.isArray(r.body)
+    && !nahrevTepleOdStartu(r));
+  let zmena = false;
+  if (platne.length > n.zaznamy.length) { n.zaznamy = platne.slice(-NAHREV_MAX); zmena = true; }
+  const zal = telo.bezici;
+  if (zal && typeof zal.start === 'number' && Array.isArray(zal.body) && zal.prahy && typeof zal.prahy === 'object'
+      && zal.start <= now && now - zal.start <= NAHREV_STROP_MS
+      && (!n.bezici || n.bezici.start > zal.start)) {
+    const nove = n.bezici;
+    const b = { ...zal, body: zal.body.slice(0, NAHREV_BODU_MAX), prahy: { ...zal.prahy } };
+    if (nove) {
+      const posun = (nove.start - b.start) / 60000;
+      const min = x => Math.round((x + posun) * 10) / 10;
+      for (const v of nove.body) if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min: min(v.min), c: v.c });
+      for (const [k, v] of Object.entries(nove.prahy)) if (!b.prahy[k]) b.prahy[k] = { min: min(v.min), c: v.c };
+      if (typeof nove.maxC === 'number') b.maxC = typeof b.maxC === 'number' ? Math.max(b.maxC, nove.maxC) : nove.maxC;
+    }
+    n.bezici = b;
+    zmena = true;
+  }
+  if (zmena) broadcast('saunaNahrev', { saunaNahrev: n });
+  return true;
 }
 
 // ---------- Kdy se saunování zaplo ----------
@@ -1932,14 +1977,8 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
-  const z = req.body && Array.isArray(req.body.zaznamy) ? req.body.zaznamy : null;
-  if (!z) return res.status(400).json({ error: 'Chybí zaznamy.' });
-  const platne = z.filter(r => r && typeof r.start === 'number' && Array.isArray(r.body));
-  if (platne.length > state.saunaNahrev.zaznamy.length) {
-    state.saunaNahrev.zaznamy = platne.slice(-NAHREV_MAX);
-    broadcast('saunaNahrev', { saunaNahrev: state.saunaNahrev });
-  }
-  res.json({ ok: true, zaznamu: state.saunaNahrev.zaznamy.length });
+  if (!nahrevObnov(req.body)) return res.status(400).json({ error: 'Chybí zaznamy.' });
+  res.json({ ok: true, zaznamu: state.saunaNahrev.zaznamy.length, bezi: !!state.saunaNahrev.bezici });
 });
 
 // Obnova denní řady sítě a bojlerů po deployi — stejný princip jako u sauny
@@ -3971,6 +4010,9 @@ async function tahomaExec(label, deviceURL, commands) {
   });
   // Až když TaHoma povel přijala — neodeslaný povel stav nemění
   tahomaSpinacZapis(deviceURL, commands);
+  if ((commands || []).some(c => c && TAHOMA_JIZDNI.has(c.name))) {
+    tahomaJizda[deviceURL] = { execId: out && out.execId ? out.execId : null, at: Date.now() };
+  }
   return out && out.execId ? out.execId : null;
 }
 
@@ -3992,6 +4034,43 @@ async function waitForExec(execId) {
   }
 }
 
+// ---- Naklopení až po dojetí ----
+// Změnit polohu a hned po ní naklopení: povel naklopení by rozjetou žaluzii
+// zastavil (TaHoma nový povel na stejném zařízení bere jako přerušení). Pamatujeme
+// si proto poslední vlastní jízdu každé žaluzie, a když ještě běží, naklopení se
+// odloží a pošle až po dojetí. Víc naklopení za sebou se slije — platí poslední.
+const TAHOMA_JIZDNI = new Set(['up', 'down', 'open', 'close', 'deploy', 'undeploy',
+  'setClosure', 'setPosition', 'setDeployment', 'setClosureAndOrientation']);
+const tahomaJizda = {};           // deviceURL -> { execId, at }
+const tahomaNaklopeniCeka = {};   // deviceURL -> { label, cmd, hodnota }
+
+async function tahomaJizdaBezi(deviceURL) {
+  const j = tahomaJizda[deviceURL];
+  if (!j || Date.now() - j.at > EXEC_WAIT_MAX_MS) return false;
+  // Bez execId nevíme, jestli jede — pár vteřin po povelu to bereme, že ano
+  if (!j.execId) return Date.now() - j.at < 5000;
+  try {
+    const running = await tahomaFetch('/exec/current');
+    return Array.isArray(running) && running.some(e => e && e.id === j.execId);
+  } catch {
+    return false;   // nevíme → radši naklopit hned, než nenaklopit vůbec
+  }
+}
+
+async function tahomaNaklopPoDojeti(deviceURL) {
+  try {
+    while (await tahomaJizdaBezi(deviceURL)) await delay(2000);
+    const c = tahomaNaklopeniCeka[deviceURL];
+    delete tahomaNaklopeniCeka[deviceURL];
+    if (!c) return;       // mezitím zrušeno (stop, jízda s vlastním naklopením)
+    await tahomaExec(c.label, deviceURL, [{ name: c.cmd, parameters: [c.hodnota] }]);
+    blindsCache = { ts: 0, list: [] };
+  } catch (err) {
+    delete tahomaNaklopeniCeka[deviceURL];
+    console.error('Naklopení po dojetí selhalo:', err.message);
+  }
+}
+
 // action: up / down / stop / on / off / orientation / closure
 // value:  u 'orientation' a 'closure' cílová hodnota, u pohybů cílové naklopení
 // tilt:   naklopení k akci 'closure' (u ostatních akcí ho nese už `value`)
@@ -4004,6 +4083,18 @@ async function blindCommand(deviceURL, action, value, tilt) {
 
   const label = `SMG home: ${blind.label} ${action}`;
   const num = v => Math.round(Math.min(100, Math.max(0, v)));
+
+  if (action === 'orientation' && await tahomaJizdaBezi(deviceURL)) {
+    const uzCeka = !!tahomaNaklopeniCeka[deviceURL];
+    tahomaNaklopeniCeka[deviceURL] = { label, cmd, hodnota: num(value) };
+    if (!uzCeka) tahomaNaklopPoDojeti(deviceURL);   // v pozadí, odpověď se nezdržuje
+    return { ...blind, ceka: true };
+  }
+  // Povel, který nese vlastní naklopení (nebo zastavení), čekající naklopení ruší
+  if (action === 'stop' || ((action === 'up' || action === 'down') && Number.isFinite(value))
+      || (action === 'closure' && Number.isFinite(tilt))) {
+    delete tahomaNaklopeniCeka[deviceURL];
+  }
 
   if (action === 'closure') {
     // Zatažení na konkrétní %. Když je zadané i naklopení, musí se to udělat tak, aby
@@ -4106,8 +4197,8 @@ app.post('/api/blinds/command', async (req, res) => {
   }
   try {
     // Ovládání rolet/žaluzií se do logu nezapisuje
-    await blindCommand(deviceURL, action, v, t);
-    res.json({ success: true });
+    const vysledek = await blindCommand(deviceURL, action, v, t);
+    res.json({ success: true, ceka: !!(vysledek && vysledek.ceka) });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
   }
@@ -9192,7 +9283,7 @@ function storeSnapshot() {
     '/api/pool-days/restore': { poolDays: state.poolDays },
     '/api/usage-days/restore': { usageDays: state.usageDays },
     '/api/sauna-days/restore': { saunaDays: state.saunaDays },
-    '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy },
+    '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy, bezici: state.saunaNahrev.bezici },
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
     '/api/site-dny/restore': { siteDny: state.siteDny },

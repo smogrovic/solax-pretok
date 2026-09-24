@@ -5,7 +5,9 @@ const { check, nadpis, konec } = suite('světla TaHoma');
 
 const CODE = between('let blindsCache = { ts: 0, list: [] };', 'async function getBlinds() {') + '\n'
   + fn('async function getBlinds() {') + '\n'
-  + fn('async function tahomaExec(label, deviceURL, commands) {');
+  + fn('async function tahomaExec(label, deviceURL, commands) {') + '\n'
+  // tahomaExec si pamatuje i jízdy žaluzií (naklopení po dojetí)
+  + between('const EXEC_WAIT_MAX_MS', '// action: up / down / stop / on / off / orientation / closure');
 
 function build(zarizeni) {
   const volani = [];

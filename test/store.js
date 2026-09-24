@@ -279,6 +279,9 @@ nadpis('5) Přímé hodnoty');
   const h = build({ env: UPSTASH });
   const now = Date.now();
   h.tahoma['rts://terasa'] = { on: true, at: now - 1000 };
+  h.state.saunaNahrev.bezici = { start: now - 60000, body: [{ min: 0, c: 30 }], prahy: {} };
+  check('rozběhnuté nahřívání sauny jde do zálohy',
+    (h.api.storeSnapshot().posts['/api/sauna/nahrev/restore'].bezici || {}).start, now - 60000);
   check('stav světla jde do zálohy', h.api.storeSnapshot().primo.tahomaSpinace['rts://terasa'].on, true);
   const h2 = build({ env: UPSTASH, state: prazdnyStav() });
   h2.tahoma['rts://pergola'] = { on: false, at: now };

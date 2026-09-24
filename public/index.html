@@ -539,6 +539,8 @@
     color:var(--navy);
   }
   .light-cell .power-buttons{margin-top:0;}
+  .blind-tilt-ceka{font-size:11px;color:var(--grey-text);text-align:center;margin-top:2px;}
+  .blind-tilt-ceka[hidden]{display:none;}
   .light-odhad{font-size:11px;color:var(--grey-text);margin-top:-4px;}
   .light-odhad:empty{display:none;}
   /* `display:flex` výš by atributu `hidden` přebilo jeho display:none z prohlížeče.
@@ -5453,7 +5455,7 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
     }
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
-    ok = true;
+    ok = data || true;
     // Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
     // konečný stav (Overkiz hlásí novou polohu až po zastavení pohonu)
     clearTimeout(blindsReloadTimer);
@@ -5784,12 +5786,22 @@ function renderBlindRow(b) {
     val.className = 'blind-tilt-val';
     val.textContent = tiltSlider.value + ' %';
     tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
-    tiltSlider.addEventListener('change', () => blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null));
+    // Když žaluzie ještě jede, server naklopení odloží až po dojetí — jinak by ji
+    // zastavil. Ať se nezdá, že se povel ztratil, řekne se to pod jezdcem.
+    const ceka = document.createElement('div');
+    ceka.className = 'blind-tilt-ceka';
+    ceka.hidden = true;
+    ceka.textContent = 'Naklopí se po dojetí';
+    tiltSlider.addEventListener('change', async () => {
+      const r = await blindCommand(b.deviceURL, 'orientation', Number(tiltSlider.value), null);
+      ceka.hidden = !(r && r.ceka);
+    });
     tilt.appendChild(val);
     tilt.appendChild(tiltSlider);
     // Prázdná buňka vpravo drží jezdec na středu karty — procenta jsou vlevo
     tilt.appendChild(document.createElement('span'));
     wrap.appendChild(tilt);
+    wrap.appendChild(ceka);
   }
 
   return wrap;

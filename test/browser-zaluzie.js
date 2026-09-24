@@ -16,7 +16,7 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno.padEnd(52) + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
-setTimeout(() => {
+setTimeout(async () => {
  try {
   // Tak, jak to chodí z TaHomy: tři žaluzie přízemí hlásí tutéž místnost
   const zaluzie = (label, room) => ({
@@ -87,6 +87,21 @@ setTimeout(() => {
     document.querySelector('.timer-card .blind-tilt .blind-tilt-label').textContent, 'Naklopen\u00ed');
   check('  i v rozvrhu',
     document.getElementById('rozvrhNaklonLabel').textContent, 'Naklopen\u00ed');
+  R.push('');
+  R.push('4b) Naklopen\u00ed b\u011bhem j\u00edzdy');
+  // Server naklopen\u00ed odlo\u017e\u00ed, kdy\u017e \u017ealuzie je\u0161t\u011b jede \u2014 appka to \u0159ekne
+  const ceka = box.querySelector('.blind-tilt-ceka');
+  check('hl\u00e1\u0161ka je schovan\u00e1', ceka.hidden, 'true');
+  const puvodniFetch = window.fetch;
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true, ceka: true }) });
+  jezdec.value = '30'; jezdec.dispatchEvent(new Event('change'));
+  await new Promise(r => setTimeout(r, 50));
+  check('kdy\u017e server \u010dek\u00e1, uk\u00e1\u017ee se', ceka.hidden + ' ' + ceka.textContent, 'false Naklop\u00ed se po dojet\u00ed');
+  window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true, ceka: false }) });
+  jezdec.value = '40'; jezdec.dispatchEvent(new Event('change'));
+  await new Promise(r => setTimeout(r, 50));
+  check('  a po okam\u017eit\u00e9m naklopen\u00ed zmiz\u00ed', ceka.hidden, 'true');
+  window.fetch = puvodniFetch;
   R.push('');
   R.push('5) Poloha se nep\u00ed\u0161e slovy');
   // Vedle v řádku ji kreslí ukazatel pruhem a píše pod něj procenta — text
