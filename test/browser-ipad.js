@@ -141,7 +141,8 @@ setTimeout(() => {
 
   R.push('\\n9) Zvoneček jde odtáhnout');
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
-  pripData = { kytky: { hotovo: 0 } };
+  // Pes nakrmený, ať je ve skupině jen zvoneček (psy testuje browser-pripominky)
+  pripData = { kytky: { hotovo: 0 }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
   kalOtevri(false); wrap.scrollLeft = 0; updateDots(); renderPripominky();
   check('zvoneček je vidět', zv.hidden, false);
   let otevreno = 0;
@@ -153,7 +154,7 @@ setTimeout(() => {
   ptr('pointermove', r0.left + 60, r0.top + 210);
   ptr('pointermove', r0.left + 510, r0.top + 410);
   ptr('pointerup', r0.left + 510, r0.top + 410);
-  zv.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  zv.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
   const r1 = zv.getBoundingClientRect();
   check('posune se s prstem', Math.round(r1.left - r0.left) + ',' + Math.round(r1.top - r0.top), '500,400');
   check('  a tažení Připomínky neotevře', otevreno, 0);
@@ -166,10 +167,12 @@ setTimeout(() => {
   ptr('pointerdown', r1.left + 10, r1.top + 10);
   ptr('pointermove', r1.left + 13, r1.top + 12);
   ptr('pointerup', r1.left + 13, r1.top + 12);
-  zv.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  zv.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
   check('klepnutí Připomínky otevře', otevreno, 1);
   // Po otevření se zvoneček schová, takže se měří jeho nastavená poloha
-  check('  a zvoneček se nehne', zv.style.left, Math.round(r1.left) + 'px');
+  // Poloha patří celé plovoucí skupině se zvonečkem a záložkami psa
+  const skupina = document.getElementById('pripPlovouci');
+  check('  a zvoneček se nehne', skupina.style.left, Math.round(r1.left) + 'px');
   zv.hidden = false;
   // Ven z okna se odtáhnout nedá
   ptr('pointerdown', r1.left + 10, r1.top + 10);

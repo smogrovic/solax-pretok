@@ -1258,15 +1258,19 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 // Kytky, vysavač a popelnice. Server drží jen to, kdy se co naposledy odťuklo, a
 // přepínač BIO (běžná popelnice jede celý rok, ta ho nemá). Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
-const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice'];
+const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer'];
 const PRIPOMINKY_S_PREPINACEM = ['bio'];
 
 function pripominkyVychozi() {
   return {
-    kytky: { hotovo: 0, predtim: 0 },
-    vysavac: { hotovo: 0, predtim: 0 },
-    bio: { zapnuto: true, hotovo: 0, predtim: 0 },
-    popelnice: { hotovo: 0, predtim: 0 }
+    // `aktivovano` = ručně rozsvíceno („Aktivovat teď“) — svítí, dokud se neodťukne
+    kytky: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    vysavac: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    bio: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
+    popelnice: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    // Krmení psa: ráno od 5:00, večer od 16:00, den se láme ve 3:00 (počítá appka)
+    pesRano: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    pesVecer: { hotovo: 0, predtim: 0, aktivovano: 0 }
   };
 }
 
@@ -1276,6 +1280,15 @@ function pripominkaHotovo(id, zpet, now = Date.now()) {
   if (!p) return false;
   if (zpet) { p.hotovo = p.predtim || 0; p.predtim = 0; }
   else { p.predtim = p.hotovo; p.hotovo = now; }
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+// „Aktivovat teď“: připomínka se rozsvítí hned, bez ohledu na čas
+function pripominkaAktivuj(id, now = Date.now()) {
+  const p = state.pripominky[id];
+  if (!p) return false;
+  p.aktivovano = now;
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }
@@ -1300,6 +1313,8 @@ function pripominkyObnov(b) {
       const predtim = Number(z.predtim);
       p.predtim = Number.isFinite(predtim) && predtim >= 0 ? predtim : 0;
     }
+    const aktivovano = Number(z.aktivovano);
+    if (Number.isFinite(aktivovano) && aktivovano > (p.aktivovano || 0)) p.aktivovano = aktivovano;
     if (PRIPOMINKY_S_PREPINACEM.includes(id) && typeof z.zapnuto === 'boolean') p.zapnuto = z.zapnuto;
   }
   broadcast('pripominky', { pripominky: state.pripominky });
@@ -1314,6 +1329,11 @@ app.post('/api/pripominky/restore', (req, res) => {
 app.post('/api/pripominky/:id/hotovo', (req, res) => {
   const zpet = !!(req.body && req.body.zpet === true);
   if (!pripominkaHotovo(req.params.id, zpet)) return res.status(404).json({ error: 'Neznámá připomínka.' });
+  res.json({ ok: true, pripominky: state.pripominky });
+});
+
+app.post('/api/pripominky/:id/aktivovat', (req, res) => {
+  if (!pripominkaAktivuj(req.params.id)) return res.status(404).json({ error: 'Neznámá připomínka.' });
   res.json({ ok: true, pripominky: state.pripominky });
 });
 

@@ -34,7 +34,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   const tituly = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('stránka je hned za Úklidem', tituly[tituly.indexOf('Úklid') + 1], 'Připomínky');
   pripData = null; renderPripominky();
-  check('čtyři připomínky', document.querySelectorAll('#pripSeznam .prip-radek').length, 4);
+  check('šest připomínek (i pes ráno a večer)', document.querySelectorAll('#pripSeznam .prip-radek').length, 6);
   check('přepínač má jen BIO (běžná popelnice jede celý rok)',
     Array.from(document.querySelectorAll('#pripSeznam .prip-prepinac')).map(s => s.closest('.prip-radek').dataset.id).join(','),
     'bio');
@@ -172,6 +172,87 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };
   renderPripominky();
   check('když nic nesvítí, záložka není', zal.hidden, 'true');
+
+  OUT.push('\\n8) Aktivovat teď');
+  const T0 = praha('2026-09-23', 10);
+  const kytkyHotove = { hotovo: T0 - 2 * DEN };
+  check('hotové kytky nesvítí', sviti('kytky', kytkyHotove, T0), 'false');
+  check('po aktivaci svítí', sviti('kytky', { ...kytkyHotove, aktivovano: T0 - MIN }, T0), 'true');
+  check('  s textem', pripominkaStav(def('kytky'), { ...kytkyHotove, aktivovano: T0 - MIN }, T0).text, 'Aktivováno ručně');
+  check('po odťuknutí zhasne a běží 7 dní',
+    pripominkaStav(def('kytky'), { hotovo: T0, aktivovano: T0 - MIN }, T0 + MIN).dalsi, T0 + 7 * DEN);
+  check('aktivace svítí i u vypnutého BIO', sviti('bio', { zapnuto: false, aktivovano: T0 }, T0), 'true');
+  check('i mimo okno svozu', sviti('popelnice', { aktivovano: T0 }, praha('2026-09-26', 10)), 'true');
+  pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
+               popelnice: { hotovo: Date.now() }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
+  renderPripominky();
+  check('tlačítko „Aktivovat teď“ je u nesvítících', !!radek('kytky').querySelector('.prip-aktivovat'), 'true');
+  POSLANO.length = 0;
+  radek('kytky').querySelector('.prip-aktivovat').click();
+  await wait(30);
+  check('  pošle aktivaci', POSLANO[0] && POSLANO[0].adresa, '/api/pripominky/kytky/aktivovat');
+  check('  a hned svítí', radek('kytky').classList.contains('sviti'), 'true');
+  check('  u svítící už tlačítko není', !!radek('kytky').querySelector('.prip-aktivovat'), 'false');
+  check('  a zvoneček ji počítá', document.getElementById('pripZalozka').textContent, '🔔 1');
+
+  OUT.push('\\n9) Krmení psa');
+  const pes = { hotovo: 0 };
+  check('ráno 4:59 nesvítí', sviti('pesRano', pes, praha('2026-09-24', 4, 59)), 'false');
+  check('  a řekne od kdy', pripominkaStav(def('pesRano'), pes, praha('2026-09-24', 4, 59)).text, 'Od 5:00');
+  check('ráno 5:00 svítí', sviti('pesRano', pes, praha('2026-09-24', 5)), 'true');
+  const nakrmeno = { hotovo: praha('2026-09-24', 6, 12) };
+  check('nakrmeno v 6:12 nesvítí', sviti('pesRano', nakrmeno, praha('2026-09-24', 20)), 'false');
+  check('  s časem', pripominkaStav(def('pesRano'), nakrmeno, praha('2026-09-24', 20)).text, 'Nakrmeno v 6:12');
+  check('  ani ve 2:59 dalšího dne', sviti('pesRano', nakrmeno, praha('2026-09-25', 2, 59)), 'false');
+  check('ve 3:00 se vynuluje (od 5:00)', pripominkaStav(def('pesRano'), nakrmeno, praha('2026-09-25', 3)).text, 'Od 5:00');
+  check('  a v 5:00 zase svítí', sviti('pesRano', nakrmeno, praha('2026-09-25', 5)), 'true');
+  check('nenakrmeno ráno svítí až do 3:00', sviti('pesRano', pes, praha('2026-09-25', 2, 30)), 'true');
+  check('večer 15:59 nesvítí', sviti('pesVecer', pes, praha('2026-09-24', 15, 59)), 'false');
+  check('večer 16:00 svítí', sviti('pesVecer', pes, praha('2026-09-24', 16)), 'true');
+  check('  ranní krmení večerní neruší', sviti('pesVecer', pes, praha('2026-09-24', 17)), 'true');
+  check('nakrmeno ráno → odpočet do zítřejších 5:00',
+    pripominkaStav(def('pesRano'), nakrmeno, praha('2026-09-24', 20)).dalsi, praha('2026-09-25', 5));
+
+  OUT.push('\\n10) Záložky psa přes všechny stránky');
+  const psR = document.getElementById('pesRanoZalozka'), psV = document.getElementById('pesVecerZalozka');
+  const skupina = document.getElementById('pripPlovouci');
+  check('záložky psa jsou v plovoucí skupině se zvonečkem',
+    skupina.contains(psR) && skupina.contains(psV) && skupina.contains(document.getElementById('pripZalozka')), 'true');
+  pripData = { kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
+               popelnice: { hotovo: Date.now() }, pesRano: { hotovo: 0, aktivovano: Date.now() }, pesVecer: { hotovo: Date.now() } };
+  renderPripominky();
+  check('hladový pes (ráno) = záložka vidět', psR.hidden, 'false');
+  check('  se symbolem', psR.textContent, '☀️🐕🥣');
+  check('nakrmený (večer) = schovaná', psV.hidden, 'true');
+  check('zvoneček psa nepočítá', document.getElementById('pripZalozka').hidden, 'true');
+  check('skupina je vidět', skupina.hidden, 'false');
+  // Na stránce Připomínky zvoneček mizí, pes ne
+  const vid = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
+  sliderWrap.scrollLeft = vid.indexOf(document.getElementById('pripominkySlide')) * sirkaStranky(); updateDots();
+  check('pes je vidět i na stránce Připomínky', psR.hidden, 'false');
+  sliderWrap.scrollLeft = 0; updateDots();
+  // Klepnutí = nakrmeno, 5 s jde vrátit
+  POSLANO.length = 0;
+  const r = psR.getBoundingClientRect();
+  const ptr = (typ, x, y) => psR.dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 9, clientX: x, clientY: y }));
+  ptr('pointerdown', r.left + 5, r.top + 5); ptr('pointerup', r.left + 5, r.top + 5);
+  await wait(30);
+  check('klepnutí = nakrmeno', POSLANO[0] && POSLANO[0].adresa, '/api/pripominky/pesRano/hotovo');
+  check('  a záložka nabídne Zpět', psR.textContent, '↩︎ Zpět');
+  ptr('pointerdown', r.left + 5, r.top + 5); ptr('pointerup', r.left + 5, r.top + 5);
+  await wait(30);
+  check('Zpět krmení vrátí', JSON.stringify(POSLANO[1] && POSLANO[1].telo), '{"zpet":true}');
+  // Tažením se posune celá skupina, psa nenakrmí
+  POSLANO.length = 0;
+  const s0 = skupina.getBoundingClientRect();
+  ptr('pointerdown', r.left + 5, r.top + 5);
+  ptr('pointermove', r.left + 105, r.top + 45);
+  ptr('pointerup', r.left + 105, r.top + 45);
+  await wait(30);
+  const s1 = skupina.getBoundingClientRect();
+  check('tažení posune celou skupinu', Math.round(s1.left - s0.left) + ',' + Math.round(s1.top - s0.top), '100,40');
+  check('  a psa nenakrmí', POSLANO.length, 0);
+  try { localStorage.removeItem('pripZvonekPozice'); } catch {}
 
   OUT.push('\\n7) Dětský režim');
   pouzijRezim('miky');

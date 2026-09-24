@@ -26,7 +26,8 @@ function build() {
 nadpis('1) Výchozí stav');
 {
   const h = build();
-  check('čtyři připomínky', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice');
+  check('šest připomínek (i pes ráno a večer)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer');
+  check('nic není aktivované ručně', Object.values(h.state.pripominky).every(p => p.aktivovano === 0), true);
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
   check('BIO má přepínač zapnutý', h.state.pripominky.bio.zapnuto, true);
   check('běžná popelnice přepínač nemá (jede celý rok)', 'zapnuto' in h.state.pripominky.popelnice, false);
@@ -56,6 +57,12 @@ nadpis('3) Endpointy');
   check('zpet vrátí na nulu', h.state.pripominky.vysavac.hotovo, 0);
   r = h.zavolej('/api/pripominky/:id/hotovo', { id: 'nic' }, {});
   check('neznámá připomínka → 404', r.status, 404);
+  r = h.zavolej('/api/pripominky/:id/aktivovat', { id: 'kytky' }, {});
+  check('aktivovat → 200', r.status, 200);
+  check('  a zapíše čas', h.state.pripominky.kytky.aktivovano > 0, true);
+  check('aktivovat neznámou → 404', h.zavolej('/api/pripominky/:id/aktivovat', { id: 'kocka' }, {}).status, 404);
+  r = h.zavolej('/api/pripominky/:id/hotovo', { id: 'pesRano' }, {});
+  check('pes ráno jde odťuknout', r.status + ' ' + (h.state.pripominky.pesRano.hotovo > 0), '200 true');
   r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'bio' }, { zapnuto: false });
   check('vypnutí BIO → 200', r.status, 200);
   check('  a je vypnuté', h.state.pripominky.bio.zapnuto, false);
@@ -73,7 +80,8 @@ nadpis('4) Obnova ze zálohy');
   const h = build();
   h.api.pripominkaHotovo('kytky', false, 9000);
   const r = h.zavolej('/api/pripominky/restore', {}, { pripominky: {
-    kytky: { hotovo: 5000 },
+    kytky: { hotovo: 5000, aktivovano: 12000 },
+    pesVecer: { hotovo: 4000 },
     vysavac: { hotovo: 7000, predtim: 3000 },
     bio: { hotovo: 'x', zapnuto: false },
     popelnice: { zapnuto: false },
@@ -81,6 +89,8 @@ nadpis('4) Obnova ze zálohy');
   } });
   check('restore → 200', r.status, 200);
   check('novější odťuknutí se nepřepíše', h.state.pripominky.kytky.hotovo, 9000);
+  check('aktivace ze zálohy se vezme', h.state.pripominky.kytky.aktivovano, 12000);
+  check('pes večer se obnoví taky', h.state.pripominky.pesVecer.hotovo, 4000);
   check('starší ze zálohy se vezme', h.state.pripominky.vysavac.hotovo, 7000);
   check('  i s předchozím', h.state.pripominky.vysavac.predtim, 3000);
   check('nečíslo se zahodí', h.state.pripominky.bio.hotovo, 0);

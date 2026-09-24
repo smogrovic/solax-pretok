@@ -2093,17 +2093,28 @@
   .prip-akce .sek-btn.sviti{background:var(--orange);color:#fff;}
   .prip-akce .sek-btn.schovane{visibility:hidden;}
   .prip-akce .sek-btn.odpocet{opacity:1;color:var(--grey-text);}
-  /* Zvoneček vlevo pod lištou záložek, klidně přes kartu — je vidět na všech
-     ostatních stránkách. Přesnou výšku mu dopočítá pripZalozkaObnov() podle lišty;
-     tady je jen výchozí odhad. Pod překryvnými okny (z-index 60). */
-  .prip-zalozka{
+  /* Plovoucí skupina přes všechny stránky: zvoneček a pod ním záložky krmení psa.
+     Vlevo pod lištou záložek, klidně přes kartu; přesnou výšku dopočítá
+     pripZalozkaObnov() podle lišty. Táhne se celá. Pod překryvnými okny (z-index 60). */
+  .prip-plovouci{
     position:fixed;left:12px;top:calc(max(8px, env(safe-area-inset-top)) + 74px);z-index:55;
+    display:flex;flex-direction:column;align-items:flex-start;gap:14px;
+    touch-action:none;user-select:none;-webkit-user-select:none;
+  }
+  .prip-plovouci[hidden]{display:none;}
+  .prip-plovouci.tahne{cursor:grabbing;opacity:0.9;}
+  .prip-zalozka{
+    position:relative;
     border:none;border-radius:16px;padding:3px 13px;
     background:var(--orange);color:#fff;font-size:18px;font-weight:700;line-height:1.2;
     box-shadow:0 0 0 5px rgba(245,147,61,0.18), 0 0 20px 6px rgba(245,147,61,0.45);
-    cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;
+    cursor:pointer;touch-action:none;white-space:nowrap;
   }
-  .prip-zalozka.tahne{cursor:grabbing;opacity:0.9;}
+  /* Krmení psa: ráno slunečně žlutá, večer noční modrá */
+  .prip-zalozka.pes-rano{background:#ffd54a;color:#5a3d00;
+    box-shadow:0 0 0 5px rgba(255,213,74,0.25), 0 0 20px 6px rgba(255,190,40,0.5);}
+  .prip-zalozka.pes-vecer{background:#2c3e70;color:#fff;
+    box-shadow:0 0 0 5px rgba(44,62,112,0.2), 0 0 20px 6px rgba(44,62,112,0.45);}
   /* Aura: rozmazané okolí, které se ke krajům ztrácí */
   .prip-zalozka::before{
     content:"";position:absolute;inset:-14px;z-index:-1;border-radius:32px;
@@ -2114,13 +2125,20 @@
     pointer-events:none;
   }
   .prip-zalozka[hidden]{display:none;}
-  /* Na iPadu na zdi je zvoneček 2× větší — kouká se na něj z dálky */
+  /* Na iPadu na zdi je to 2× větší — kouká se na to z dálky */
   @media (min-width: 1000px) {
+    .prip-plovouci{gap:28px;}
     .prip-zalozka{
       font-size:36px;padding:6px 26px;border-radius:32px;
       box-shadow:0 0 0 10px rgba(245,147,61,0.18), 0 0 40px 12px rgba(245,147,61,0.45);
     }
+    .prip-zalozka.pes-rano{box-shadow:0 0 0 10px rgba(255,213,74,0.25), 0 0 40px 12px rgba(255,190,40,0.5);}
+    .prip-zalozka.pes-vecer{box-shadow:0 0 0 10px rgba(44,62,112,0.2), 0 0 40px 12px rgba(44,62,112,0.45);}
     .prip-zalozka::before{inset:-28px;border-radius:64px;}
+  }
+  .prip-aktivovat{
+    margin-top:4px;border:none;border-radius:10px;padding:3px 9px;
+    background:rgba(44,62,80,0.07);color:var(--grey-text);font-size:11px;font-weight:600;font-family:inherit;
   }
   .slide[hidden]{display:none;}
   body[data-rezim="miky"] .jen-full,
@@ -2167,7 +2185,11 @@
   <div class="page-tabs" id="pageTabs"></div>
 </div>
 
-<button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
+<div class="prip-plovouci" id="pripPlovouci" hidden>
+  <button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
+  <button class="prip-zalozka pes-rano" id="pesRanoZalozka" type="button" hidden aria-label="Nakrmeno ráno">☀️🐕🥣</button>
+  <button class="prip-zalozka pes-vecer" id="pesVecerZalozka" type="button" hidden aria-label="Nakrmeno večer">🌙🐕🥣</button>
+</div>
 <div class="slider-wrap" id="sliderWrap">
 
   <!-- Asistent (první stránka) -->
@@ -11233,8 +11255,12 @@ const PRIPOMINKY = [
   { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7 },
   { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7 },
   { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí; v zimě jde vypnout
-  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 }     // čtvrtek dopoledne, celý rok
+  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 },    // čtvrtek dopoledne, celý rok
+  // Krmení psa: každý den, den se láme ve 3:00. Mají vlastní plovoucí záložky.
+  { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣' },
+  { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣' }
 ];
+const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
 const PRIP_DEN = 86400000;
 const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
 const pripSeznamEl = document.getElementById('pripSeznam');
@@ -11264,6 +11290,24 @@ const pripDatum = w => { const d = new Date(w); return d.getUTCDate() + '. ' + (
 function pripominkaStav(def, p, now = Date.now()) {
   p = p || {};
   const hotovo = Number(p.hotovo) || 0;
+  // „Aktivovat teď“: svítí, dokud se po aktivaci neodťukne — bez ohledu na čas
+  const aktivovano = Number(p.aktivovano) || 0;
+  if (aktivovano && aktivovano >= hotovo) return { sviti: true, text: 'Aktivováno ručně', dalsi: null };
+  if (def.denne) {
+    // Den se láme ve 3:00 — co je odťuknuté od té doby, platí pro dnešek
+    const W = pripNastenne(now);
+    const H = 3600000;
+    const zlom = Math.floor((W - PRIP_DEN_ZLOM_H * H) / PRIP_DEN) * PRIP_DEN + PRIP_DEN_ZLOM_H * H;
+    const od = zlom + (def.denne.od - PRIP_DEN_ZLOM_H) * H;
+    const naReal = w => w - (W - now);
+    if (hotovo && pripNastenne(hotovo) >= zlom) {
+      const d = new Date(pripNastenne(hotovo));
+      return { sviti: false, dalsi: naReal(od + PRIP_DEN),
+        text: 'Nakrmeno v ' + d.getUTCHours() + ':' + String(d.getUTCMinutes()).padStart(2, '0') };
+    }
+    if (W >= od) return { sviti: true, text: 'Nakrmit (od ' + def.denne.od + ':00)', dalsi: null };
+    return { sviti: false, text: 'Od ' + def.denne.od + ':00', dalsi: naReal(od) };
+  }
   if (def.dni) {
     const perioda = def.dni * PRIP_DEN;
     if (!hotovo) return { sviti: true, text: 'Zatím neodťuknuto', dalsi: null };
@@ -11303,8 +11347,10 @@ function pripOdpocet(ms) {
   return 'za ' + d + (d === 1 ? ' den' : d < 5 ? ' dny' : ' dní');
 }
 
+// Zvoneček počítá jen připomínky bez vlastní záložky — pes má svoje
 function pripSviticich(now = Date.now()) {
-  return PRIPOMINKY.filter(def => pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
+  return PRIPOMINKY.filter(def => !def.zalozka
+    && pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
 }
 
 async function pripPost(adresa, telo) {
@@ -11342,6 +11388,20 @@ function renderPripominky(now = Date.now()) {
     text.className = 'prip-text';
     text.textContent = st.text;
     telo.append(nazev, text);
+    // Rozsvítit hned, i když na ni ještě není čas (zvoneček / záložka psa se objeví)
+    if (!st.sviti) {
+      const akt = document.createElement('button');
+      akt.type = 'button';
+      akt.className = 'prip-aktivovat';
+      akt.textContent = 'Aktivovat teď';
+      akt.addEventListener('click', () => {
+        pripData = pripData || {};
+        pripData[def.id] = { ...(pripData[def.id] || {}), aktivovano: Date.now() };
+        renderPripominky();
+        pripPost('/api/pripominky/' + def.id + '/aktivovat', {});
+      });
+      telo.appendChild(akt);
+    }
     const akce = document.createElement('div');
     akce.className = 'prip-akce';
     const btn = document.createElement('button');
@@ -11392,15 +11452,42 @@ function pripNaOcich() {
   return i >= prvni && i < prvni + viditelnychStranek();
 }
 
+const pripPlovouciEl = document.getElementById('pripPlovouci');
+
 function pripZalozkaObnov(now = Date.now()) {
   if (!pripZalozkaEl) return;
   const kolik = pripSviticich(now);
   pripZalozkaEl.hidden = !kolik || pripNaOcich();
   pripZalozkaEl.textContent = '🔔 ' + kolik;
-  if (pripZalozkaEl.hidden || pripPoziceUmisti()) return;
+  // Záložky psa: vidět, když krmení svítí (i na stránce Připomínky), a 5 s po
+  // odťuknutí jako „Zpět“
+  for (const def of PRIPOMINKY.filter(d => d.zalozka)) {
+    const el = document.getElementById(def.zalozka);
+    if (!el) continue;
+    const zpet = (pripZpet[def.id] || 0) > now;
+    el.hidden = !zpet && !pripominkaStav(def, pripData && pripData[def.id], now).sviti;
+    el.textContent = zpet ? '↩︎ Zpět' : def.symbol;
+  }
+  if (!pripPlovouciEl) return;
+  pripPlovouciEl.hidden = [...pripPlovouciEl.children].every(e => e.hidden);
+  if (pripPlovouciEl.hidden || pripPoziceUmisti()) return;
   // Výchozí místo: pod lištou záložek — její výška se mění s výřezem displeje
   const lista = document.querySelector('.page-tabs-bar');
-  if (lista) pripZalozkaEl.style.top = Math.round(lista.getBoundingClientRect().bottom + 10) + 'px';
+  if (lista) pripPlovouciEl.style.top = Math.round(lista.getBoundingClientRect().bottom + 10) + 'px';
+}
+
+// Klepnutí na záložku psa = nakrmeno. Pět vteřin jde omyl vrátit („Zpět“).
+function pesKlepnuti(def) {
+  if ((pripZpet[def.id] || 0) > Date.now()) {
+    delete pripZpet[def.id];
+    renderPripominky();
+    pripPost('/api/pripominky/' + def.id + '/hotovo', { zpet: true });
+    return;
+  }
+  pripZpet[def.id] = Date.now() + 5000;
+  setTimeout(() => bezpecne(renderPripominky), 5100);
+  renderPripominky();
+  pripPost('/api/pripominky/' + def.id + '/hotovo', {});
 }
 
 function pripOtevri() {
@@ -11426,52 +11513,62 @@ function pripPoziceNacti() {
 function pripPoziceUloz(p) {
   try { localStorage.setItem('pripZvonekPozice', JSON.stringify(p)); } catch {}
 }
-// Umístí zvoneček na uloženou polohu, oříznutou do okna. Bez uložené → false.
+// Umístí plovoucí skupinu na uloženou polohu, oříznutou do okna. Bez uložené → false.
 function pripPoziceUmisti() {
   const p = pripPoziceNacti();
-  if (!p || !pripZalozkaEl) return false;
-  const r = pripZalozkaEl.getBoundingClientRect();
+  if (!p || !pripPlovouciEl) return false;
+  const r = pripPlovouciEl.getBoundingClientRect();
   const x = Math.max(0, Math.min(p.x * window.innerWidth, window.innerWidth - r.width));
   const y = Math.max(0, Math.min(p.y * window.innerHeight, window.innerHeight - r.height));
-  pripZalozkaEl.style.left = Math.round(x) + 'px';
-  pripZalozkaEl.style.top = Math.round(y) + 'px';
+  pripPlovouciEl.style.left = Math.round(x) + 'px';
+  pripPlovouciEl.style.top = Math.round(y) + 'px';
   return true;
 }
-if (pripZalozkaEl) {
-  let tah = null, taziloSe = false;
-  pripZalozkaEl.addEventListener('pointerdown', ev => {
-    const r = pripZalozkaEl.getBoundingClientRect();
-    tah = { x: ev.clientX, y: ev.clientY, dx: ev.clientX - r.left, dy: ev.clientY - r.top, jede: false };
-    taziloSe = false;
-    try { pripZalozkaEl.setPointerCapture(ev.pointerId); } catch {}
+// Co dělá které tlačítko skupiny po klepnutí
+function pripPlovouciAkce(el) {
+  if (el === pripZalozkaEl) { pripOtevri(); return; }
+  const def = PRIPOMINKY.find(d => d.zalozka && d.zalozka === el.id);
+  if (def) pesKlepnuti(def);
+}
+if (pripPlovouciEl) {
+  // Táhne se celá skupina, kteroukoli částí. Klepnutí (pohyb do 8 px) se vyřídí
+  // tady při puštění — `click` z prstu po zachycení ukazatele nemusí přijít na
+  // tlačítko, takže se na něj nespoléhá.
+  let tah = null;
+  pripPlovouciEl.addEventListener('pointerdown', ev => {
+    const r = pripPlovouciEl.getBoundingClientRect();
+    const cil = ev.target && ev.target.closest ? ev.target.closest('.prip-zalozka') : null;
+    tah = { x: ev.clientX, y: ev.clientY, dx: ev.clientX - r.left, dy: ev.clientY - r.top, jede: false, cil };
+    try { pripPlovouciEl.setPointerCapture(ev.pointerId); } catch {}
   });
-  pripZalozkaEl.addEventListener('pointermove', ev => {
+  pripPlovouciEl.addEventListener('pointermove', ev => {
     if (!tah) return;
     if (!tah.jede && Math.hypot(ev.clientX - tah.x, ev.clientY - tah.y) < PRIP_TAH_PX) return;
     tah.jede = true;
-    const r = pripZalozkaEl.getBoundingClientRect();
+    const r = pripPlovouciEl.getBoundingClientRect();
     const x = Math.max(0, Math.min(ev.clientX - tah.dx, window.innerWidth - r.width));
     const y = Math.max(0, Math.min(ev.clientY - tah.dy, window.innerHeight - r.height));
-    pripZalozkaEl.style.left = Math.round(x) + 'px';
-    pripZalozkaEl.style.top = Math.round(y) + 'px';
-    pripZalozkaEl.classList.add('tahne');
+    pripPlovouciEl.style.left = Math.round(x) + 'px';
+    pripPlovouciEl.style.top = Math.round(y) + 'px';
+    pripPlovouciEl.classList.add('tahne');
   });
-  const pust = () => {
+  pripPlovouciEl.addEventListener('pointerup', () => {
     if (!tah) return;
-    if (tah.jede) {
-      const r = pripZalozkaEl.getBoundingClientRect();
-      pripPoziceUloz({ x: r.left / window.innerWidth, y: r.top / window.innerHeight });
-      taziloSe = true;
-    }
+    const t = tah;
     tah = null;
-    pripZalozkaEl.classList.remove('tahne');
-  };
-  pripZalozkaEl.addEventListener('pointerup', pust);
-  pripZalozkaEl.addEventListener('pointercancel', pust);
-  // Po odtažení přijde ještě `click` — ten nesmí otevřít Připomínky
-  pripZalozkaEl.addEventListener('click', () => {
-    if (taziloSe) { taziloSe = false; return; }
-    pripOtevri();
+    pripPlovouciEl.classList.remove('tahne');
+    if (t.jede) {
+      const r = pripPlovouciEl.getBoundingClientRect();
+      pripPoziceUloz({ x: r.left / window.innerWidth, y: r.top / window.innerHeight });
+    } else if (t.cil) {
+      pripPlovouciAkce(t.cil);
+    }
+  });
+  pripPlovouciEl.addEventListener('pointercancel', () => { tah = null; pripPlovouciEl.classList.remove('tahne'); });
+  // Klávesnice (Enter/mezerník dává `click` s detail 0) — prst se vyřídil výš
+  pripPlovouciEl.addEventListener('click', ev => {
+    const el = ev.target && ev.target.closest ? ev.target.closest('.prip-zalozka') : null;
+    if (el && ev.detail === 0) pripPlovouciAkce(el);
   });
   window.addEventListener('resize', () => bezpecne(pripPoziceUmisti));
 }
