@@ -56,6 +56,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
           + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, NAHREV_MAX,'
+          + ' odhadNabehu, saunaOdhad, SAUNA_TERMOSTAT,'
           + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
           + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
   )(
@@ -255,7 +256,7 @@ nadpis('Měření nahřívání');
   check('  s venkovní teplotou', b().venkuC, 8);
   check('  s teplotou v sauně', b().odC, 22);
   check('  a s cílem z kamen', b().cilC, 79);
-  check('  teplota na startu je první bod', JSON.stringify(b().body), '[{"min":0,"c":22}]');
+  check('  teplota na startu je první bod', JSON.stringify(b().body), '[{"min":0,"c":22,"topi":true}]');
 
   // Vzorky chodí z dotazů na kamna, po dvou minutách
   h.posun(2); h.api.nahrevVzorek(31, h.now);
@@ -389,6 +390,49 @@ nadpis('Měření nahřívání');
   s.posun(2); s.api.nahrevVzorek(34, s.now);
   s.posun(3); s.api.updateSauna(50);
   check('  studený ano', s.state.saunaNahrev.zaznamy.length, 1);
+}
+
+nadpis('Model náběhu');
+{
+  const h = build();
+  const T = Date.UTC(2026, 8, 24, 16, 0, 0);
+  const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
+  const blizko = (x, y) => x !== null && Math.abs(x - y) <= 1;
+  check('venku 11,6, start 12, cíl 75 → ~59 min', blizko(o(11.6, 12, 75).minut, 59), 'true');
+  check('venku −20, start −20, cíl 85 → ~105 min', blizko(o(-20, -20, 85).minut, 105), 'true');
+  check('venku 0, start 0, cíl 85 → ~89 min', blizko(o(0, 0, 85).minut, 89), 'true');
+  check('cíl 90 je nedosažitelný (termostat)', JSON.stringify(o(10, 20, 90)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
+  check('cíl nad stropem taky, bez výjimky', o(-400, 20, 80).dosazitelne, 'false');
+  check('cíl pod startem = hned', o(10, 70, 60).minut + ' ' + o(10, 70, 60).dosazitelne, '0 true');
+  check('chybí venkovní teplota → null', o(null, 20, 80), 'null');
+  check('chybí start → null', o(10, undefined, 80), 'null');
+  check('hotovo v = teď + minuty, na minutu', o(11.6, 12, 75).hotovoV, T + Math.round(o(11.6, 12, 75).minut) * 60000);
+  // Běžící topení: odhad na cíl z kamen, nebo na prahy, když cíl chybí
+  const s = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
+    fetchedAt: new Date(h.now).toISOString() } });
+  const od = s.api.saunaOdhad(s.now);
+  check('při topení odhad na cíl z kamen', od.cile.map(c => c.c).join(','), '80');
+  check('  ze skutečné teploty v sauně', od.tStartC, 40);
+  const bezCile = build({ venku: 10, huum: { temperature: 65, heating: true, fetchedAt: new Date(h.now).toISOString() } });
+  check('bez cíle prahy 60/70/80/85, jen nedosažené',
+    bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
+  const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
+  const n = netopi.api.saunaOdhad(netopi.now);
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau, '0 20 10 57.7');
+  const bezCidla = build({ venku: 10, huum: {} });
+  check('bez teploty v sauně se bere venkovní', bezCidla.api.saunaOdhad(bezCidla.now).tStartC, 10);
+}
+{
+  // Data pro přefitování: odC doplněné z prvního vzorku a u bodů, jestli topí
+  const h = build({ huum: {} });
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.nahrevVzorek(24, h.now);
+  const b = h.state.saunaNahrev.bezici;
+  check('chybějící odC se doplní z prvního vzorku', b.odC, 24);
+  check('  bod nese, jestli kamna topí', b.body[0].topi, 'true');
+  h.api.updateSauna(50);
+  h.posun(2); h.api.nahrevVzorek(26, h.now);
+  check('  i když netopí', b.body[1].topi, 'false');
 }
 
 nadpis('Měření nahřívání přežije nasazení');

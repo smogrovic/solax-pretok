@@ -1609,6 +1609,8 @@
   /* Když topí, je tlačítko samo oranžové — oranžový obvod by na něm při vypínání zmizel */
   .huum-power.topi #huumPowerRing{stroke:#fff;}
   .huum-power-ico{width:34px;height:34px;}
+  .huum-odhad{text-align:center;font-size:13px;font-weight:600;color:var(--grey-text);margin-top:4px;min-height:18px;}
+  .huum-odhad:empty{display:none;}
   .huum-dial-val{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
   .huum-dial-popis{
     font-size:11px;
@@ -2933,6 +2935,8 @@
           <input type="range" min="40" max="110" step="1" value="85" id="huumCilSlider"
                  class="huum-dial-input" aria-label="Cílová teplota sauny">
         </div>
+        <!-- Odhad náběhu podle modelu (teplota v sauně + venku) -->
+        <div class="huum-odhad" id="huumOdhad"></div>
         <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
         <!-- Světlo patří ke kamnům, ne na vlastní kartu — je to ta samá věc,
              jen druhý vypínač. Oddělovač nahoře ho odděluje od číselníku. -->
@@ -2950,12 +2954,12 @@
       </div>
 
       <div class="card lockable timer-card" id="huumTimerCard" hidden>
-        <div class="graph-title">Časovač sauny</div>
+        <div class="graph-title">Půjdu do sauny v</div>
         <div class="timer-form-row">
           <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
           <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
-        <div class="tempauto-thr-hint">Zapne kamna na teplotu nastavenou na číselníku.</div>
+        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. 10 min předem se rozsvítí světlo v sauně, vytáhnou žaluzie v ložnici a po západu slunce zahrada dole.</div>
         <div class="timer-list" id="huumTimerList"></div>
       </div>
 
@@ -8131,6 +8135,39 @@ function dialKresli() {
     e.popis.textContent = huumTopiTed === true ? 'Podrž pro vypnutí'
       : (huumTopiTed === false ? `Podrž pro zapnutí na ${huumCil()} °C` : '');
   }
+  bezpecne(renderHuumOdhad);
+}
+
+// ---- Odhad náběhu ----
+// Stejný model jako na serveru (konstanty chodí z něj v huumData.odhad.model):
+//   T_max = a + b · venku,  t = τ · ln((T_max − start) / (T_max − cíl))
+function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
+  if (!m || typeof venkuC !== 'number' || typeof tStartC !== 'number' || typeof cilC !== 'number') return null;
+  if (cilC <= tStartC) return { minut: 0, hotovoV: now, dosazitelne: true };
+  const tMax = m.a + m.b * venkuC;
+  if (cilC >= m.termostat || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
+  const minut = m.tau * Math.log((tMax - tStartC) / (tMax - cilC));
+  return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
+}
+
+function renderHuumOdhad() {
+  const el = document.getElementById('huumOdhad');
+  if (!el) return;
+  const o = huumData && huumData.odhad;
+  if (!o || huumTopiTed === null) { el.textContent = ''; return; }
+  if (huumTopiTed) {
+    // Topí: kdy bude cíl (nebo nedosažené prahy), podle serveru
+    el.textContent = (o.cile || []).map(c => c.dosazitelne === false
+      ? `${c.c} °C je nad možnostmi kamen`
+      : (typeof c.hotovoV === 'number' ? `${c.c} °C v ${fmtSolTime(c.hotovoV)}` : '')).filter(Boolean).join(' · ');
+    return;
+  }
+  // Netopí: za jak dlouho by se nahřála na cíl z číselníku
+  const cil = huumCil();
+  const r = odhadNabehuJs(o.model, o.venkuC, o.tStartC, cil);
+  el.textContent = !r ? ''
+    : (!r.dosazitelne ? `${cil} °C je nad možnostmi kamen`
+    : (r.minut === 0 ? `Na ${cil} °C už je` : `Na ${cil} °C za ~${Math.round(r.minut)} min`));
 }
 
 function renderHuumTopeni(d, cerstve) {
@@ -8318,7 +8355,8 @@ function renderHuumTimers() {
     cas.textContent = t.time;
     const txt = document.createElement('span');
     txt.className = 'timer-row-text';
-    txt.textContent = `zapnout na ${t.teplota} °C`;
+    txt.textContent = `${t.teplota} °C · ` + (t.zapnuto ? 'topí'
+      : (typeof t.zapneV === 'number' ? `zapne se v ${fmtSolTime(t.zapneV)}` : 'zapne se podle odhadu'));
     const x = document.createElement('button');
     x.className = 'timer-del';
     x.type = 'button';

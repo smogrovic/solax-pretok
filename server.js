@@ -1063,6 +1063,55 @@ const NAHREV_MAX = 40;            // kolik měření se drží
 const NAHREV_BODU_MAX = 90;       // strop vzorků na měření (~3 h po dvou minutách)
 const NAHREV_STROP_MS = 4 * 3600000;
 
+// ---- Model náběhu sauny ----
+// Pracovní odhad z prvního měření: teplota se exponenciálně blíží stropu, který
+// závisí na venkovní teplotě. Konstanty jdou přebít v Render → Environment, až
+// se model přefituje z dalších měření (záznamy níž).
+//   T_max = A + B · venkuC
+//   t     = τ · ln((T_max − T_start) / (T_max − T_cíl))
+const saunaEnvNum = (klic, vychozi) => {
+  const v = process.env[klic];
+  return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
+};
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 57.7);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 108.3);
+const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.15);
+const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
+const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
+
+// → { minut, hotovoV, dosazitelne }, nebo null, když chybí vstup. Nikdy nepadá.
+function odhadNabehu(venkuC, tStartC, cilC, now = Date.now()) {
+  if (typeof venkuC !== 'number' || typeof tStartC !== 'number' || typeof cilC !== 'number'
+      || !Number.isFinite(venkuC) || !Number.isFinite(tStartC) || !Number.isFinite(cilC)) return null;
+  const naMinutu = ms => Math.round(ms / 60000) * 60000;
+  if (cilC <= tStartC) return { minut: 0, hotovoV: naMinutu(now), dosazitelne: true };
+  const tMax = SAUNA_TMAX_A + SAUNA_TMAX_B * venkuC;
+  if (cilC >= SAUNA_TERMOSTAT || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
+  const minut = SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC));
+  return { minut, hotovoV: naMinutu(now + minut * 60000), dosazitelne: true };
+}
+
+// Pro appku: vstupy modelu a u běžícího topení odhad na cíl (nebo na prahy)
+function saunaOdhad(now = Date.now()) {
+  const venkuC = state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null;
+  const h = state.huum || {};
+  const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
+  const tStartC = vSaune !== null ? vSaune : venkuC;
+  const model = { tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT };
+  const out = { venkuC, tStartC, model, cile: [] };
+  if (!h.heating) return out;
+  const b = state.saunaNahrev && state.saunaNahrev.bezici;
+  const cil = typeof h.targetTemperature === 'number' ? h.targetTemperature
+    : (b && typeof b.cilC === 'number' ? b.cilC : null);
+  const cile = cil !== null ? [cil] : SAUNA_ODHAD_PRAHY;
+  for (const c of cile) {
+    if (tStartC !== null && c <= tStartC) continue;      // už dosažené
+    const o = odhadNabehu(venkuC, tStartC, c, now);
+    out.cile.push({ c, ...(o || { minut: null, hotovoV: null, dosazitelne: null }) });
+  }
+  return out;
+}
+
 function nahrevStart(duvod, now = Date.now()) {
   const n = state.saunaNahrev;
   if (n.bezici) return;           // z appky i z odběru přijde obojí — zakládá se jednou
@@ -1088,7 +1137,11 @@ function nahrevVzorek(c, now = Date.now()) {
   // Zapomenutá sauna by jinak sbírala vzorky do nekonečna
   if (now - b.start > NAHREV_STROP_MS) { nahrevKonec(now); return; }
   const min = Math.round((now - b.start) / 6000) / 10;
-  if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min, c });
+  // Pro přefitování modelu: topí kamna zrovna? (příkon ze Shelly nad prahem)
+  const topi = typeof saunaTopi === 'function' ? saunaTopi() : null;
+  if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min, c, topi });
+  // Když při zapnutí nebyla teplota z kamen známá, bere se první vzorek
+  if (b.odC === null || b.odC === undefined) b.odC = c;
   b.maxC = b.maxC === null ? c : Math.max(b.maxC, c);
   // Práh se zapisuje při PRVNÍM vzorku nad hranicí a nese i teplotu, která tam
   // zrovna byla. Dotazy chodí po dvou minutách, takže se dá práh přeskočit
@@ -5716,7 +5769,10 @@ app.post('/api/timers/restore', (req, res) => {
     if (!Number.isFinite(cil)) continue;
     if (saunaTimers.length >= 10) break;
     if (saunaTimers.some(x => x.time === t.time)) continue;
-    saunaTimerPridej(t.time, cil);
+    if (t.zapnuto === true && t.pripraveno === true) continue;
+    // Co už před nasazením proběhlo (zapnutí, příprava), se nesmí pustit znovu
+    saunaTimerPridej(t.time, cil, now, { jdu: timerNextRun(t.time, savedAt),
+      zapnuto: t.zapnuto === true, pripraveno: t.pripraveno === true });
     pridano.sauna++;
   }
 
@@ -6934,23 +6990,58 @@ async function pollHuum() {
 }
 
 function huumPayload() {
-  return { ...state.huum, enabled: huumEnabled };
+  const odhad = typeof saunaOdhad === 'function' ? saunaOdhad() : null;
+  return { ...state.huum, enabled: huumEnabled, odhad };
 }
 
-// ---------- Časovač sauny (jednorázové zapnutí v daný čas) ----------
-// Jen zapnout: vypnout si kamna umí sama, mají vlastní limit doby topení.
+// ---------- Časovač sauny: „Půjdu do sauny v“ ----------
+// Nastavuje se čas PŘÍCHODU, ne zapnutí. Kamna se pustí o odhad náběhu dřív
+// (model výš podle teploty v sauně a venku) a 10 min před příchodem se rozsvítí
+// světlo v sauně, vytáhnou žaluzie v ložnici a po západu slunce zahrada dole.
+// Vypnout si kamna umí sama, mají vlastní limit doby topení.
 // Teplota se bere z číselníku v appce a uloží se s časovačem — kdyby se brala
 // až při spuštění, pozdější posun číselníku by změnil i naplánované topení.
+const SAUNA_PRIPRAVA_MS = 10 * 60000;
+const SAUNA_REZERVA_MIN = 120;      // když model nemá z čeho počítat
+const SAUNA_NEDOSAZ_CIL = 85;       // nedosažitelný cíl se plánuje jako tenhle
 let saunaTimers = [];
 let saunaTimerSeq = 1;
 
-function saunaTimerPridej(time, teplota) {
+// `obnova` = stav ze zálohy (po nasazení): kdy se jde a co už proběhlo
+function saunaTimerPridej(time, teplota, now = Date.now(), obnova = null) {
   const { min, max } = huumMezeTeplot();
   const t = Math.round(Math.min(max, Math.max(min, teplota)));
-  const timer = { id: saunaTimerSeq++, time, teplota: t };
+  const o = obnova || {};
+  const timer = { id: saunaTimerSeq++, time, teplota: t,
+    jdu: Number.isFinite(o.jdu) ? o.jdu : timerNextRun(time, now),
+    zapnuto: !!o.zapnuto, pripraveno: !!o.pripraveno, zapneV: null };
+  saunaTimerPlan(timer, now);
   saunaTimers.push(timer);
-  saunaTimers.sort((a, b) => a.time.localeCompare(b.time));
+  saunaTimers.sort((a, b) => a.jdu - b.jdu);
   return timer;
+}
+
+// Kolik minut před příchodem pustit kamna — a z čeho se to spočítalo
+function saunaTimerNabeh(cil, now = Date.now()) {
+  const venkuC = state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null;
+  const h = state.huum || {};
+  const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
+  const odC = vSaune !== null ? vSaune : venkuC;
+  let o = odhadNabehu(venkuC, odC, cil, now);
+  if (o && !o.dosazitelne) o = odhadNabehu(venkuC, odC, SAUNA_NEDOSAZ_CIL, now);
+  const minut = o && typeof o.minut === 'number' ? Math.ceil(o.minut) : SAUNA_REZERVA_MIN;
+  return { minut, odC, venkuC, zModelu: !!(o && typeof o.minut === 'number') };
+}
+
+// Přepočítá čas zapnutí. Vrací true, když se posunul o minutu a víc.
+function saunaTimerPlan(t, now = Date.now()) {
+  if (t.zapnuto) return false;
+  const n = saunaTimerNabeh(t.teplota, now);
+  const zapneV = Math.round((t.jdu - n.minut * 60000) / 60000) * 60000;
+  const zmena = t.zapneV === null || Math.abs(zapneV - t.zapneV) >= 60000;
+  t.zapneV = zapneV;
+  t.nabeh = n;
+  return zmena;
 }
 
 app.post('/api/sauna/timer', (req, res) => {
@@ -6963,7 +7054,10 @@ app.post('/api/sauna/timer', (req, res) => {
   }
   if (saunaTimers.length >= 10) return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
   const t = saunaTimerPridej(time, cil);
-  addLog(`Sauna: časovač na ${t.time} (${t.teplota} °C)`);
+  const n = t.nabeh;
+  addLog(`Sauna: časovač — půjdeš v ${t.time}, zapnu v ${fmtPragueTime(t.zapneV)} (odhad ${n.minut} min`
+    + (n.zModelu ? ` z ${Math.round(n.odC)} °C, venku ${Math.round(n.venkuC)} °C)` : ', bez venkovní teploty)')
+    + `, ${t.teplota} °C`);
   broadcast('saunaTimers', { timers: saunaTimers });
   res.json({ timers: saunaTimers });
 });
@@ -6978,30 +7072,54 @@ app.delete('/api/sauna/timer/:id', (req, res) => {
   res.json({ timers: saunaTimers });
 });
 
-setInterval(async () => {
-  if (!saunaTimers.length || !huumEnabled) return;
-  const p = pragueTime();
-  const pad2 = n => String(n).padStart(2, '0');
-  const current = `${pad2(p.hour)}:${pad2(p.minute)}`;
-  const due = saunaTimers.filter(t => t.time === current);
-  if (!due.length) return;
-  // Vyhodit z fronty PŘED spuštěním: kdyby se čekalo na výsledek, tik po třiceti
-  // vteřinách by stihl přijít znovu a pustil by saunu podruhé.
-  saunaTimers = saunaTimers.filter(t => t.time !== current);
-  broadcast('saunaTimers', { timers: saunaTimers });
-  for (const t of due) {
-    try {
-      await huumPovel('start', { targetTemperature: t.teplota });
-      addLog(`Sauna: zapnuta na ${t.teplota} °C (časovač ${t.time})`);
-      nahrevStart('casovac');
-      const po = await huumOverStav(true);
-      // „Přijato" není „topí" — když se kamna nerozjela, ať je to v logu
-      if (!po || !po.heating) addLog(`Sauna: časovač ${t.time} — kamna se nerozjela`);
-    } catch (err) {
-      addLog(`Sauna: časovač ${t.time} selhal (${err.message.slice(0, 100)})`);
+// Tik každých 30 s. Zapnutí a příprava jsou dva samostatné kroky jednoho
+// časovače; označí se PŘED provedením, ať je další tik nespustí podruhé.
+let saunaTimerTikBezi = false;
+async function saunaTimerTik(now = Date.now()) {
+  if (!saunaTimers.length || !huumEnabled || saunaTimerTikBezi) return;
+  saunaTimerTikBezi = true;
+  try {
+    let zmena = false;
+    for (const t of saunaTimers.slice()) {
+      if (!t.zapnuto) {
+        if (saunaTimerPlan(t, now)) zmena = true;
+        if (now >= t.zapneV) {
+          t.zapnuto = true;
+          zmena = true;
+          if (state.huum && state.huum.heating) {
+            addLog(`Sauna: časovač ${t.time} — kamna už topí, nezapínám znovu`);
+          } else {
+            try {
+              await huumPovel('start', { targetTemperature: t.teplota });
+              addLog(`Sauna: zapnuta na ${t.teplota} °C (časovač, příchod v ${t.time}, odhad ${t.nabeh.minut} min)`);
+              nahrevStart('casovac');
+              const po = await huumOverStav(true);
+              if (!po || !po.heating) addLog(`Sauna: časovač ${t.time} — kamna se nerozjela`);
+            } catch (err) {
+              addLog(`Sauna: časovač ${t.time} selhal (${err.message.slice(0, 100)})`);
+            }
+          }
+        }
+      }
+      if (!t.pripraveno && now >= t.jdu - SAUNA_PRIPRAVA_MS) {
+        t.pripraveno = true;
+        zmena = true;
+        try {
+          const kroky = await saunaPriprava(`časovač sauny ${t.time}`);
+          addLog(`Sauna: příprava na ${t.time} — ${kroky.join(' ')}`);
+        } catch (err) {
+          addLog(`Sauna: příprava na ${t.time} selhala (${err.message.slice(0, 100)})`);
+        }
+      }
     }
+    const zbyva = saunaTimers.filter(t => !(t.zapnuto && t.pripraveno));
+    if (zbyva.length !== saunaTimers.length) { saunaTimers = zbyva; zmena = true; }
+    if (zmena) broadcast('saunaTimers', { timers: saunaTimers });
+  } finally {
+    saunaTimerTikBezi = false;
   }
-}, 30000);
+}
+setInterval(() => { saunaTimerTik().catch(() => {}); }, 30000);
 
 // Kolik stupňů pod cílem se považuje za „už tam skoro je". Pět proto, že
 // poslední stupně lezou nejpomaleji a než dojdeš, je dotopeno.
@@ -9047,7 +9165,20 @@ async function scenaSauna() {
     } catch (err) {
       kroky.push(`Saunu se nepodařilo zapnout (${err.message}).`);
     }
-    // Světlo až po topení: kdyby se nepovedlo, ať už je aspoň zatopeno
+  }
+  // Světlo až po topení: kdyby se nepovedlo, ať už je aspoň zatopeno. S otevřenými
+  // dveřmi se nesvítí — sauna se nezapnula a svítit do prázdna nemá smysl.
+  const sSvetlem = !(state.huum && state.huum.doorClosed === false);
+  kroky.push(...await saunaPriprava('tlačítko sauna', sSvetlem));
+  return kroky.join(' ');
+}
+
+// Příchod do sauny: světlo v sauně, žaluzie v ložnici nahoru a po západu slunce
+// zahrada dole. Volá to tlačítko Sauna i časovač „Půjdu do sauny v“ (10 min
+// předem). Každý krok zvlášť — výpadek jednoho nesmí sebrat ostatní.
+async function saunaPriprava(zdroj, sSvetlem = true) {
+  const kroky = [];
+  if (huumEnabled && sSvetlem) {
     try {
       await huumSvetlo(true);
       kroky.push('Světlo v sauně svítí.');
@@ -9063,7 +9194,7 @@ async function scenaSauna() {
   // Ve dne by se svítilo zbytečně — venku je světlo a stejně se to zapomene zhasnout
   if (poZapaduSlunce()) {
     try {
-      await actuateRelay('lightDole', true, 'tlačítko sauna');
+      await actuateRelay('lightDole', true, zdroj);
       kroky.push('Zahrada dole: rozsvíceno.');
     } catch (err) {
       kroky.push(`Zahradu dole se nepodařilo rozsvítit (${err.message}).`);
@@ -9071,7 +9202,7 @@ async function scenaSauna() {
   } else {
     kroky.push('Zahrada dole zůstala zhasnutá — ještě nezapadlo slunce.');
   }
-  return kroky.join(' ');
+  return kroky;
 }
 
 // Zhasne celý venek: zahradu dole i nahoře, světlo u bazénu, pergolu a světlo

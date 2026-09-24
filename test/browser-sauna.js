@@ -572,6 +572,42 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('k\u0159\u00ed\u017eek ho zru\u0161\u00ed', POSLANO[0].metoda, 'DELETE');
   check('  a m\u00ed\u0159\u00ed na spr\u00e1vn\u00e9 id', POSLANO[0].adresa, '/api/sauna/timer/7');
 
+  OUT.push('\\n8e4) P\u016fjdu do sauny v');
+  check('karta \u010dasova\u010de m\u00e1 nov\u00fd n\u00e1zev', top('huumTimerCard').querySelector('.graph-title').textContent, 'P\u016fjdu do sauny v');
+  const zapneV = new Date(); zapneV.setHours(17, 58, 0, 0);
+  huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), zapnuto: false }];
+  renderHuumTimers();
+  check('\u0159\u00e1dek \u0159ekne, kdy se zapne', document.querySelector('#huumTimerList .timer-row').textContent.includes('85 \u00b0C \u00b7 zapne se v 17:58'), 'true');
+  huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), zapnuto: true }];
+  renderHuumTimers();
+  check('  po zapnut\u00ed \u201etop\u00ed\u201c', document.querySelector('#huumTimerList .timer-row').textContent.includes('85 \u00b0C \u00b7 top\u00ed'), 'true');
+  huumTimersData = []; renderHuumTimers();
+
+  OUT.push('\\n8e5) Odhad n\u00e1b\u011bhu');
+  const odhadEl = top('huumOdhad');
+  const model = { tau: 57.7, a: 108.3, b: 0.15, termostat: 90 };
+  // Netop\u00ed: sauna 12 \u00b0C, venku 11,6 \u00b0C, c\u00edl 75 \u2192 ~59 min
+  huumData = { enabled: true, statusCode: 232, heating: false, temperature: 12, fetchedAt: new Date().toISOString(),
+    odhad: { venkuC: 11.6, tStartC: 12, model, cile: [] } };
+  huumCilDotcen = true;
+  jezdec.value = '75'; jezdec.dispatchEvent(new Event('input'));
+  renderHuum();
+  check('p\u0159ed zapnut\u00edm: za jak dlouho na c\u00edl z \u010d\u00edseln\u00edku', odhadEl.textContent, 'Na 75 \u00b0C za ~59 min');
+  jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
+  check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, '90 \u00b0C je nad mo\u017enostmi kamen');
+  check('  vzorec sed\u00ed i pro mr\u00e1z (\u221220 \u2192 85 \u00b0C ~105 min)',
+    Math.round(odhadNabehuJs(model, -20, -20, 85).minut), 105);
+  // Top\u00ed: kdy bude c\u00edl, podle serveru
+  const kdy = new Date(); kdy.setHours(18, 42, 0, 0);
+  huumData = { ...huumData, statusCode: 231, heating: true, targetTemperature: 80,
+    odhad: { venkuC: 10, tStartC: 50, model, cile: [{ c: 80, minut: 40, hotovoV: kdy.getTime(), dosazitelne: true }] } };
+  renderHuum();
+  check('p\u0159i topen\u00ed \u201e80 \u00b0C v 18:42\u201c', odhadEl.textContent, '80 \u00b0C v 18:42');
+  huumData = { ...huumData, statusCode: 232, heating: false, odhad: null };
+  huumCilDotcen = false;
+  renderHuum();
+  check('bez dat nic', odhadEl.textContent, '');
+
   OUT.push('\\n8f) Jak dlouho se nah\u0159\u00edv\u00e1');
   const seznam = document.getElementById('nahrevList');
   saunaNahrevData = { bezici: null, zaznamy: [] };

@@ -14,7 +14,9 @@ const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('HUUM');
 
 const CODE = between('// ---------- Kamna HUUM (UKU WiFi) ----------',
-                     '// ---------- Teplota bazénu: platí jen při proudící vodě ----------');
+                     '// ---------- Teplota bazénu: platí jen při proudící vodě ----------')
+  // Časovač „Půjdu do sauny v“ plánuje podle modelu náběhu
+  + '\n' + between('const saunaEnvNum', 'function saunaOdhad(');
 
 // Odpověď tak, jak ji API vrací (viz dokumentace HUUM i knihovna pyhuum)
 const odpoved = (o = {}) => ({
@@ -38,6 +40,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     nahrevy: [],
     tiky: [],
     zapnuti: [],
+    pripravy: [],
+    pulnoc: Date.UTC(2026, 8, 24),
     hodiny: { hour: 18, minute: 30 },
     // Co má stub odpovědět; sekce si to přepisují
     odpovez: async () => ({ stav: 200, text: JSON.stringify(odpoved()) })
@@ -59,11 +63,12 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
+    'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
-         + ' huumSvetloZmenaMimo, casovace: () => saunaTimers };'
+         + ' huumSvetloZmenaMimo, saunaTimerTik, odhadNabehu, casovace: () => saunaTimers };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -86,7 +91,16 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     () => h.hodiny,
     (fn, ms) => { h.tiky.push({ fn, ms }); return 0; },
     () => h.zapnuti.push('topi'),
-    () => h.zapnuti.push('kontrola')
+    () => h.zapnuti.push('kontrola'),
+    // Příchod se počítá od půlnoci testovacího dne (UTC stačí, sada je o plánu)
+    (time, from) => {
+      const [hh, mm] = time.split(':').map(Number);
+      const t = h.pulnoc + hh * 3600000 + mm * 60000;
+      return t > from ? t : t + 24 * 3600000;
+    },
+    ts => { const d = new Date(ts); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); },
+    ts => !!ts,
+    async zdroj => { h.pripravy.push(zdroj); return ['Světlo v sauně svítí.']; }
   );
   return h;
 }
@@ -647,7 +661,7 @@ nadpis('16) Vypnutí topení');
   check('  a nikam nechodí', h.volani.length, 0);
 }
 
-nadpis('17) Časovač sauny');
+nadpis('17) Časovač „Půjdu do sauny v“');
 const volejD = async (h, cesta, params) => {
   let out = null, kod = 200;
   const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -659,15 +673,13 @@ const volejD = async (h, cesta, params) => {
   const { out, kod } = await volej(h, 'POST /api/sauna/timer', { time: '18:30', teplota: 85 });
   check('přidá se', kod, 200);
   check('  a vrátí se seznam', out.timers.length, 1);
-  check('  s časem', out.timers[0].time, '18:30');
+  check('  s časem příchodu', out.timers[0].time, '18:30');
   check('  i teplotou', out.timers[0].teplota, 85);
-  check('  a je to v logu', h.zapisy.some(t => /časovač na 18:30 \(85 °C\)/.test(t)), true);
+  check('  i s plánovaným zapnutím', typeof out.timers[0].zapneV, 'number');
+  check('  a je to v logu', h.zapisy.some(t => /půjdeš v 18:30, zapnu v/.test(t)), true);
 
-  // Řadí se podle času, ne podle pořadí přidání
   await volej(h, 'POST /api/sauna/timer', { time: '06:00', teplota: 70 });
-  check('řadí se podle času', h.api.casovace().map(t => t.time).join(','), '06:00,18:30');
-
-  const id = h.api.casovace()[0].id;
+  const id = h.api.casovace().find(t => t.time === '06:00').id;
   const smaz = await volejD(h, 'DELETE /api/sauna/timer/:id', { id: String(id) });
   check('křížek smaže', smaz.out.timers.length, 1);
   check('  a zůstane ten druhý', smaz.out.timers[0].time, '18:30');
@@ -683,7 +695,6 @@ const volejD = async (h, cesta, params) => {
   check('  a nic se nepřidalo', h.api.casovace().length, 0);
 }
 {
-  // Meze si hlásí jednotka — časovač na 200 °C nesmí vzniknout
   const h = build();
   h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({
     saunaConfig: { minTemp: 40, maxTemp: 90 } })) });
@@ -710,59 +721,102 @@ const volejD = async (h, cesta, params) => {
     (await volej(h, 'POST /api/sauna/timer', { time: '18:30', teplota: 85 })).kod, 401);
 }
 
-nadpis('18) Tik časovače');
+nadpis('18) Tik: zapnutí o odhad dřív, příprava 10 min předem');
+const MINUTA = 60000;
+// Sauna 20 °C, venku 10 °C: model dá na 80 °C ln((109,8−20)/(109,8−80))·57,7 ≈ 63,6 → 64 min
+const stavKamen = (h, o = {}) => {
+  h.state.weather = { tempC: 10 };
+  h.state.huum = { temperature: 20, heating: false, fetchedAt: new Date().toISOString(), error: null, ...o };
+};
 {
   const h = build();
-  h.api.saunaTimerPridej('18:30', 85);
-  h.api.saunaTimerPridej('06:00', 70);
-  const tik = h.tiky.find(t => t.ms === 30000).fn;
-  h.volani.length = 0;
-  h.odpovez = async n => (n === 1
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;           // 19:00
+  const od = jdu - 5 * 3600000;                   // nastaveno ve 14:00
+  h.api.saunaTimerPridej('19:00', 80, od);
+  const t = h.api.casovace()[0];
+  const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
+  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 64);
+  check('zapnutí = příchod − odhad', t.zapneV, jdu - cekane * MINUTA);
+  h.odpovez = async n => (h.volani[h.volani.length - 1].adresa.endsWith('/start')
     ? { stav: 200, text: '{"ok":true}' }
     : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
-  await tik();
-  check('pustí se ten, co sedí na minutu', h.volani[0].adresa,
-    'https://sauna.huum.eu/action/home/start');
-  check('  s uloženou teplotou', JSON.parse(h.volani[0].opts.body).targetTemperature, 85);
-  // „Přijato" není „topí" — i časovač povel ověřuje
-  check('  a ověří se', h.volani[1].adresa, 'https://sauna.huum.eu/action/home/status');
-  check('  a založí se měření nahřívání', h.nahrevy[0], 'casovac');
-  check('vyhodí se z fronty', h.api.casovace().map(t => t.time).join(','), '06:00');
-  // Vyhazuje se PŘED spuštěním: tik po třiceti vteřinách by jinak stihl přijít
-  // znovu a pustil by saunu podruhé
+  await h.api.saunaTimerTik(t.zapneV - MINUTA);
+  check('minutu před tím se nic nepustí', h.volani.length, 0);
+  await h.api.saunaTimerTik(t.zapneV);
+  check('v čase zapnutí se pustí kamna', h.volani[0] && h.volani[0].adresa, 'https://sauna.huum.eu/action/home/start');
+  check('  s uloženou teplotou', JSON.parse(h.volani[0].opts.body).targetTemperature, 80);
+  check('  a založí se měření', h.nahrevy[0], 'casovac');
+  check('  příprava ještě ne', h.pripravy.length, 0);
   h.volani.length = 0;
-  await tik();
-  check('  a podruhé se už nepustí', h.volani.length, 0);
+  await h.api.saunaTimerTik(t.zapneV + 30000);
+  check('podruhé se kamna nepustí', h.volani.length, 0);
+  await h.api.saunaTimerTik(jdu - 11 * MINUTA);
+  check('11 min před příchodem ještě bez přípravy', h.pripravy.length, 0);
+  await h.api.saunaTimerTik(jdu - 10 * MINUTA);
+  check('10 min před příchodem příprava (světlo, žaluzie, zahrada)', h.pripravy.length, 1);
+  check('  a časovač je hotový', h.api.casovace().length, 0);
+}
+{
+  // Nastaveno pozdě: do příchodu je míň, než trvá náběh → zapne hned
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 30 * MINUTA);
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+  await h.api.saunaTimerTik(jdu - 30 * MINUTA);
+  check('pozdě nastavený časovač zapne hned', h.volani.some(v => v.adresa.endsWith('/start')), true);
+}
+{
+  // Nedosažitelný cíl (90 = termostat) se plánuje jako 85
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 90, jdu - 5 * 3600000);
+  check('cíl 90 se plánuje podle 85',
+    h.api.casovace()[0].zapneV, jdu - Math.ceil(h.api.odhadNabehu(10, 20, 85).minut) * MINUTA);
+}
+{
+  // Bez venkovní teploty model nepočítá — rezerva 120 min
+  const h = build();
+  stavKamen(h);
+  h.state.weather = {};
+  h.state.huum.temperature = undefined;
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  check('bez dat rezerva 120 min', h.api.casovace()[0].zapneV, jdu - 120 * MINUTA);
+}
+{
+  // Když kamna už topí, znovu se nepouštějí
+  const h = build();
+  stavKamen(h, { heating: true });
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 20 * MINUTA);
+  await h.api.saunaTimerTik(jdu - 20 * MINUTA);
+  check('už topící kamna se znovu nepouštějí', h.volani.some(v => v.adresa.endsWith('/start')), false);
+  check('  a v logu je proč', h.zapisy.some(t => /už topí/.test(t)), true);
 }
 {
   const h = build();
-  h.api.saunaTimerPridej('06:00', 70);
-  const tik = h.tiky.find(t => t.ms === 30000).fn;
-  await tik();
-  check('co na minutu nesedí, se nepustí', h.volani.length, 0);
-  check('  a zůstane ve frontě', h.api.casovace().length, 1);
-}
-{
-  const h = build();
-  h.api.saunaTimerPridej('18:30', 85);
-  const tik = h.tiky.find(t => t.ms === 30000).fn;
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 85, jdu - 20 * MINUTA);
   h.odpovez = async () => ({ stav: 503, text: 'rozbito' });
-  await tik();
-  check('selhání se zapíše do logu',
-    h.zapisy.some(t => /časovač 18:30 selhal/.test(t)), true);
-  // Nevracet zpátky: v 18:31 by se zkusil znovu a v 18:32 zase
-  check('  a časovač se nevrací', h.api.casovace().length, 0);
+  await h.api.saunaTimerTik(jdu - 20 * MINUTA);
+  check('selhání se zapíše do logu', h.zapisy.some(t => /časovač 19:00 selhal/.test(t)), true);
+  // Nezkouší se znovu každých 30 s
+  h.volani.length = 0;
+  await h.api.saunaTimerTik(jdu - 19 * MINUTA);
+  check('  a znovu se nezkouší', h.volani.some(v => v.adresa.endsWith('/start')), false);
 }
 {
   const h = build();
-  h.api.saunaTimerPridej('18:30', 85);
-  const tik = h.tiky.find(t => t.ms === 30000).fn;
-  h.odpovez = async n => (n === 1
-    ? { stav: 200, text: '{"ok":true}' }
-    : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
-  await tik();
-  check('nerozjetá kamna se nezamlčí',
-    h.zapisy.some(t => /kamna se nerozjela/.test(t)), true);
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 85, jdu - 20 * MINUTA);
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  await h.api.saunaTimerTik(jdu - 20 * MINUTA);
+  check('nerozjetá kamna se nezamlčí', h.zapisy.some(t => /kamna se nerozjela/.test(t)), true);
 }
 
 nadpis('19) Zapnuto v — zdroj z kamen');
