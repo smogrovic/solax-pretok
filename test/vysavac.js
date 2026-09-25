@@ -38,7 +38,7 @@ function podstrc(odpovedi) {
     const u = new URL(String(url));
     videno.push({
       url: String(url), cesta: u.pathname, metoda: opts.method || 'GET',
-      hlavicky: opts.headers || {}, telo: opts.body ? String(opts.body) : null
+      hlavicky: opts.headers || {}, telo: opts.body ? String(opts.body) : null, redirect: opts.redirect || 'follow'
     });
     // Delší klíč vyhrává: /pass/serviceLogin by jinak pohltil i serviceLoginAuth2
     const klic = Object.keys(odpovedi).sort((a, b) => b.length - a.length)
@@ -49,7 +49,10 @@ function podstrc(odpovedi) {
     return {
       ok: v.ok !== false,
       status: v.status || 200,
-      headers: { getSetCookie: () => v.cookies || [] },
+      headers: {
+        getSetCookie: () => v.cookies || [],
+        get: n => { const h = v.hlavicky || {}; const k = Object.keys(h).find(x => x.toLowerCase() === n.toLowerCase()); return k ? h[k] : null; }
+      },
       text: async () => (typeof v.telo === 'string' ? v.telo : JSON.stringify(v.telo || {})),
       json: async () => v.telo
     };
@@ -203,6 +206,114 @@ nadpis('6) Přihlášení');
   let zprava3 = '';
   try { await V.prihlas(NASTAVENI); } catch (e) { zprava3 = e.message; }
   check('chybějící serviceToken se přizná', zprava3.includes('serviceToken'), true);
+}
+
+nadpis('6b) Stálé ID zařízení');
+{
+  // S novým ID při každém běhu je skript pro Xiaomi pokaždé nové zařízení
+  // a chce ověření pořád dokola
+  const slozka = fs.mkdtempSync(path.join(os.tmpdir(), 'vysavac-id-'));
+  const cesta = path.join(slozka, 'vysavac.config.json');
+  fs.writeFileSync(cesta, JSON.stringify({ email: 'a@b.cz', heslo: 'x', region: 'de' }));
+  const prvni = V.nactiKonfig(cesta).nastaveni.zarizeni;
+  check('ID se vygeneruje', typeof prvni === 'string' && prvni.length >= 6, true);
+  check('  a uloží do konfigurace', JSON.parse(fs.readFileSync(cesta, 'utf8')).zarizeni, prvni);
+  check('  heslo v konfiguraci zůstane', JSON.parse(fs.readFileSync(cesta, 'utf8')).heslo, 'x');
+  check('druhý běh použije totéž', V.nactiKonfig(cesta).nastaveni.zarizeni, prvni);
+  const videno = podstrc({
+    '/pass/serviceLogin': { telo: V.BALAST + JSON.stringify({ _sign: 's' }) },
+    '/pass/serviceLoginAuth2': { telo: V.BALAST + JSON.stringify({ code: 70016 }) }
+  });
+  try { await V.prihlas(V.nactiKonfig(cesta).nastaveni); } catch {}
+  check('přihlášení se hlásí tím ID', (videno[0].hlavicky.Cookie || '').includes('deviceId=' + prvni), true);
+  // S --qr heslo není potřeba
+  fs.writeFileSync(cesta, JSON.stringify({ email: '', heslo: '', region: 'de', zarizeni: 'abcdef' }));
+  check('bez hesla to s --qr projde', V.nactiKonfig(cesta, 'vysavac-test.js', { qr: true }).nastaveni.zarizeni, 'abcdef');
+  check('  bez --qr ne', !!V.nactiKonfig(cesta).chyba, true);
+  fs.rmSync(slozka, { recursive: true, force: true });
+}
+
+nadpis('6c) Ověření účtu kódem z e-mailu');
+const NOTIF = 'https://account.xiaomi.com/fe/service/identity/authStart?sid=xiaomiio&context=CTX1&_locale=cs_CZ';
+const overovaciCloud = (o = {}) => podstrc({
+  '/pass/serviceLogin': { telo: V.BALAST + JSON.stringify({ _sign: 's' }) },
+  '/pass/serviceLoginAuth2': { telo: V.BALAST + JSON.stringify({ notificationUrl: NOTIF }) },
+  '/fe/service/identity/authStart': { telo: '<html>', cookies: ['identity_session=IS1; Path=/'] },
+  '/identity/list': { telo: '{"code":0}', cookies: ['ick=ICK1; Path=/'] },
+  '/identity/auth/sendEmailTicket': { telo: '{"code":0}' },
+  '/identity/auth/verifyEmail': o.verify || { telo: JSON.stringify({ code: 0, location: 'https://account.xiaomi.com/identity/result/check?sid=xiaomiio&context=CTX1' }) },
+  '/identity/result/check': { status: 302, hlavicky: { Location: 'https://account.xiaomi.com/pass/serviceLoginAuth2/end?x=1' } },
+  '/pass/serviceLoginAuth2/end': { status: 302, telo: '',
+    hlavicky: { 'extension-pragma': JSON.stringify({ ssecurity: 'SSEC-Z-HLAVICKY' }), Location: 'https://sts.api.io.mi.com/sts?d=2' } },
+  'https://sts.api.io.mi.com/sts': { telo: 'ok', cookies: ['serviceToken=TOK2; Path=/', 'userId=777; Path=/'] }
+});
+{
+  const videno = overovaciCloud();
+  const otazky = [];
+  const p = await V.prihlas({ ...NASTAVENI, zarizeni: 'stale1' }, { zeptej: async q => { otazky.push(q); return ' 123456 '; } });
+  const cesty = videno.map(v => v.cesta);
+  check('ověří se v té samé relaci', cesty.join(' > '),
+    '/pass/serviceLogin > /pass/serviceLoginAuth2 > /fe/service/identity/authStart > /identity/list > /identity/auth/sendEmailTicket > /identity/auth/verifyEmail > /identity/result/check > /pass/serviceLoginAuth2/end > /sts');
+  check('zeptá se na kód z e-mailu', otazky.length === 1 && /e-mail/.test(otazky[0]), true);
+  const over = videno.find(v => v.cesta === '/identity/auth/verifyEmail');
+  const t = new URLSearchParams(over.telo);
+  check('kód jde jako ticket (oříznutý)', t.get('ticket'), '123456');
+  check('  s důvěrou v zařízení', t.get('trust'), 'true');
+  check('  a s ick z relace', t.get('ick'), 'ICK1');
+  check('context z adresy ověření', new URL(over.url).searchParams.get('context'), 'CTX1');
+  check('cookies relace se nesou dál', (over.hlavicky.Cookie || '').includes('identity_session=IS1'), true);
+  check('result/check a end bez přesměrování',
+    videno.filter(v => /result\/check|Auth2\/end/.test(v.cesta)).every(v => v.redirect === 'manual'), true);
+  check('ssecurity z hlavičky extension-pragma', p.ssecurity, 'SSEC-Z-HLAVICKY');
+  check('serviceToken ze STS', p.serviceToken, 'TOK2');
+  check('userId z cookies', p.userId, '777');
+}
+{
+  // verifyEmail bez location → záloha přes result/check
+  const videno = overovaciCloud({ verify: { telo: '' } });
+  const p = await V.prihlas(NASTAVENI, { zeptej: async () => '1' });
+  check('bez location se jde přes result/check', videno.filter(v => v.cesta === '/identity/result/check').length >= 1 && p.serviceToken === 'TOK2', true);
+}
+{
+  overovaciCloud({ verify: { telo: JSON.stringify({ code: 70014, tips: 'Nesprávný kód' }) } });
+  let zprava = '';
+  try { await V.prihlas(NASTAVENI, { zeptej: async () => '000' }); } catch (e) { zprava = e.message; }
+  check('špatný kód se řekne', /kód z e-mailu nesedí/.test(zprava), true);
+}
+{
+  overovaciCloud();
+  let zprava = '';
+  try { await V.prihlas(NASTAVENI, { zeptej: null }); } catch (e) { zprava = e.message; }
+  check('bez terminálu jen rada: --qr', /--qr/.test(zprava) && /Heslo je nejspíš v pořádku/.test(zprava), true);
+}
+
+nadpis('6d) Přihlášení QR kódem');
+{
+  let pokusu = 0;
+  const videno = podstrc({
+    '/longPolling/loginUrl': { telo: V.BALAST + JSON.stringify({ qr: 'https://account.xiaomi.com/qr.png', loginUrl: 'https://account.xiaomi.com/login?x', lp: 'https://lp.account.xiaomi.com/lp/abc', timeout: 300 }) },
+    'https://lp.account.xiaomi.com/lp/abc': () => (++pokusu < 3 ? { ok: false, status: 408, telo: '' }
+      : { telo: V.BALAST + JSON.stringify({ ssecurity: 'SSEC-QR', userId: 42, cUserId: 'c', passToken: 'PT', location: 'https://sts.api.io.mi.com/sts?q=1' }) }),
+    'https://sts.api.io.mi.com/sts': { telo: 'ok', cookies: ['serviceToken=TOKQR; Path=/'] }
+  });
+  const radky = [];
+  const p = await V.prihlasQr({ zarizeni: 'stale2' }, { vypis: t => radky.push(t), cekaniLpMs: 50 });
+  const vypis = radky.join('\n');
+  check('vypíše adresu QR obrázku', vypis.includes('https://account.xiaomi.com/qr.png'), true);
+  check('  a poradí, kde skenovat', vypis.includes('Mi Home'), true);
+  check('čeká na naskenování (lp víckrát)', pokusu, 3);
+  check('ssecurity a serviceToken', p.ssecurity + ' ' + p.serviceToken, 'SSEC-QR TOKQR');
+  check('heslo se nikam neposílá (není)', videno.some(v => v.cesta.includes('serviceLoginAuth2')), false);
+  check('tajnosti nejsou ve výpisu', /SSEC-QR|TOKQR|PT/.test(vypis), false);
+}
+{
+  podstrc({
+    '/longPolling/loginUrl': { telo: JSON.stringify({ qr: 'q', lp: 'https://lp.account.xiaomi.com/lp/x', timeout: 0.05 }) },
+    'https://lp.account.xiaomi.com/lp/x': { ok: false, status: 408, telo: '' }
+  });
+  let zprava = '';
+  try { await V.prihlasQr({}, { vypis: () => {}, cekaniLpMs: 10 }); } catch (e) { zprava = e.message; }
+  check('nenaskenovaný QR včas → srozumitelná chyba', /nenaskenoval včas/.test(zprava), true);
 }
 
 nadpis('7) Dotaz do cloudu');

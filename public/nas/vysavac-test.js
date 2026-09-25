@@ -17,7 +17,9 @@
 //   node /volume1/family/scripts/vysavac/vysavac-test.js
 //
 // Heslo k účtu Xiaomi se píše do vysavac.config.json vedle skriptu — zůstává
-// u tebe, do repozitáře ani do chatu nepatří.
+// u tebe, do repozitáře ani do chatu nepatří. Bez hesla to jde QR kódem:
+//   node /volume1/family/scripts/vysavac/vysavac-test.js --qr
+// Když Xiaomi chce ověření účtu, skript se v terminálu zeptá na kód z e-mailu.
 //
 // Pět kroků:
 //   1. přihlášení heslem            → ssecurity + serviceToken
@@ -193,15 +195,114 @@ function overeniPotreba(data) {
   return null;
 }
 
-async function prihlas(nastaveni) {
-  const cookies = { sdkVersion: SDK, deviceId: nahodneId() };
+// Odpověď, která nemusí být JSON (balast, prázdné tělo, HTML) — nepadá, vrátí null
+function zkusJson(text) {
+  try { return odbal(String(text || '')); } catch { return null; }
+}
 
-  const krok1 = await fetch(`${UCET}/pass/serviceLogin?sid=xiaomiio&_json=true`, {
+function hlavickaOdpovedi(res, jmeno) {
+  return res && res.headers && typeof res.headers.get === 'function' ? res.headers.get(jmeno) : null;
+}
+
+// GET/POST na účet Xiaomi s cookies relace; `bezPresmerovani` = vrátit 3xx tak,
+// jak přišlo (potřebujeme z něj hlavičky Location a extension-pragma)
+async function dotazUctu(url, cookies, { metoda = 'GET', telo = null, bezPresmerovani = false } = {}) {
+  const res = await fetch(url, {
+    method: metoda,
     headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieHlavicka(cookies) },
+    body: telo,
+    redirect: bezPresmerovani ? 'manual' : 'follow',
     signal: AbortSignal.timeout(CEKANI_MS)
   });
+  posbirejCookies(res, cookies);
+  return res;
+}
+
+// Dokončení přihlášení z adresy `location` (STS) → cookie serviceToken
+async function dokonciPresSts(location, cookies, data) {
+  const krok3 = await dotazUctu(location, cookies);
+  if (!krok3.ok) throw new Error(`přihlášení (STS): HTTP ${krok3.status}`);
+  if (!cookies.serviceToken) throw new Error('nepřišel serviceToken');
+  return {
+    ssecurity: data.ssecurity,
+    userId: String(data.userId || cookies.userId || ''),
+    cUserId: String(data.cUserId || cookies.cUserId || ''),
+    passToken: String(data.passToken || ''),
+    serviceToken: cookies.serviceToken
+  };
+}
+
+// Ověření účtu kódem z e-mailu, v TÉ SAMÉ relaci jako přihlášení. Potvrzení
+// v prohlížeči ověří prohlížeč, ne tenhle skript — proto to dřív chtělo ověření
+// pořád dokola. Postup podle PiotrMachowski/Xiaomi-cloud-tokens-extractor
+// (do_2fa_email_flow).
+async function overEmailem(notificationUrl, cookies, zeptej) {
+  const context = new URL(notificationUrl).searchParams.get('context') || '';
+  await dotazUctu(notificationUrl, cookies);
+  const zaklad = { sid: 'xiaomiio', context, _locale: 'cs_CZ' };
+  await dotazUctu(`${UCET}/identity/list?${new URLSearchParams(zaklad)}`, cookies);
+
+  const poslat = await dotazUctu(
+    `${UCET}/identity/auth/sendEmailTicket?${new URLSearchParams({ _dc: String(Date.now()), ...zaklad, mask: '0' })}`,
+    cookies, { metoda: 'POST', telo: new URLSearchParams({ retry: '0', icode: '', _json: 'true', ick: cookies.ick || '' }).toString() });
+  const odeslano = zkusJson(await poslat.text());
+  if (odeslano && odeslano.code && odeslano.code !== 0) {
+    throw new Error(`Xiaomi kód na e-mail neposlalo (kód ${odeslano.code}${odeslano.tips || odeslano.desc ? `, ${odeslano.tips || odeslano.desc}` : ''})`);
+  }
+
+  const kod = String(await zeptej('Xiaomi poslalo kód na e-mail. Opiš ho sem a dej Enter: ') || '').trim();
+  if (!kod) throw new Error('kód z e-mailu nebyl zadaný');
+
+  const over = await dotazUctu(
+    `${UCET}/identity/auth/verifyEmail?${new URLSearchParams({ _flag: '8', _json: 'true', ...zaklad, mask: '0' })}`,
+    cookies, { metoda: 'POST', telo: new URLSearchParams({
+      _flag: '8', ticket: kod, trust: 'true', _json: 'true', ick: cookies.ick || '' }).toString() });
+  const vysledek = zkusJson(await over.text());
+  let dal = (vysledek && vysledek.location) || hlavickaOdpovedi(over, 'location');
+  if (!dal && vysledek && vysledek.code && vysledek.code !== 0) {
+    throw new Error(`kód z e-mailu nesedí (kód ${vysledek.code}${vysledek.tips || vysledek.desc ? `, ${vysledek.tips || vysledek.desc}` : ''}). Spusť skript znovu, přijde nový.`);
+  }
+  if (!dal) {
+    const kontrola = await dotazUctu(`${UCET}/identity/result/check?${new URLSearchParams(zaklad)}`, cookies, { bezPresmerovani: true });
+    dal = hlavickaOdpovedi(kontrola, 'location');
+  }
+  if (!dal) throw new Error('po ověření kódu nepřišlo, kam pokračovat');
+
+  let konec = dal;
+  if (dal.includes('identity/result/check')) {
+    const kontrola = await dotazUctu(dal, cookies, { bezPresmerovani: true });
+    konec = hlavickaOdpovedi(kontrola, 'location');
+    if (!konec) throw new Error('po ověření chybí adresa pro dokončení přihlášení');
+  }
+
+  let posledni = await dotazUctu(konec, cookies, { bezPresmerovani: true });
+  let telo = await posledni.text();
+  // Někdy nejdřív přijde stránka „Tips" a teprve druhý dotaz přesměruje
+  if (posledni.status === 200 && telo.includes('Xiaomi Account - Tips')) {
+    posledni = await dotazUctu(konec, cookies, { bezPresmerovani: true });
+    telo = await posledni.text();
+  }
+  // ssecurity chodí v hlavičce extension-pragma, ne v těle
+  let ssecurity = null;
+  try { ssecurity = JSON.parse(hlavickaOdpovedi(posledni, 'extension-pragma') || '{}').ssecurity || null; } catch {}
+  if (!ssecurity) throw new Error('po ověření nepřišlo ssecurity');
+  let sts = hlavickaOdpovedi(posledni, 'location');
+  if (!sts) {
+    const i = telo.indexOf('https://sts.api.io.mi.com/sts');
+    if (i >= 0) sts = telo.slice(i, telo.indexOf('"', i) > i ? telo.indexOf('"', i) : i + 300);
+  }
+  if (!sts) throw new Error('po ověření chybí adresa STS');
+  return dokonciPresSts(sts, cookies, { ssecurity });
+}
+
+// `zeptej(otazka)` → Promise<odpověď>, když skript běží v terminálu; jinak null
+// a ověření účtu se jen popíše (Plánovač úloh v DSM nemá kam kód napsat).
+async function prihlas(nastaveni, { zeptej = null } = {}) {
+  // Stálé ID: s novým při každém běhu je skript pro Xiaomi pokaždé nové zařízení
+  const cookies = { sdkVersion: SDK, deviceId: nastaveni.zarizeni || nahodneId() };
+
+  const krok1 = await dotazUctu(`${UCET}/pass/serviceLogin?sid=xiaomiio&_json=true`, cookies);
   if (!krok1.ok) throw new Error(`přihlášení (krok 1): HTTP ${krok1.status}`);
-  posbirejCookies(krok1, cookies);
   const uvod = odbal(await krok1.text());
 
   const pole = new URLSearchParams({
@@ -214,41 +315,73 @@ async function prihlas(nastaveni) {
   });
   if (uvod._sign) pole.set('_sign', uvod._sign);
 
-  const krok2 = await fetch(`${UCET}/pass/serviceLoginAuth2`, {
-    method: 'POST',
-    headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieHlavicka(cookies) },
-    body: pole.toString(),
-    signal: AbortSignal.timeout(CEKANI_MS)
-  });
+  const krok2 = await dotazUctu(`${UCET}/pass/serviceLoginAuth2`, cookies, { metoda: 'POST', telo: pole.toString() });
   if (!krok2.ok) throw new Error(`přihlášení (krok 2): HTTP ${krok2.status}`);
-  posbirejCookies(krok2, cookies);
   const data = odbal(await krok2.text());
 
   const overeni = overeniPotreba(data);
+  if (overeni && overeni.druh === 'ověření účtu' && zeptej) {
+    return overEmailem(overeni.kde, cookies, zeptej);
+  }
   if (overeni) {
-    const e = new Error(`Xiaomi chce ${overeni.druh}. Heslo je nejspíš v pořádku — účet jen žádá potvrzení.\n  Otevři v prohlížeči: ${overeni.kde}\n  Potvrď to a spusť skript znovu.`);
+    const e = new Error(`Xiaomi chce ${overeni.druh}. Heslo je nejspíš v pořádku — účet jen žádá potvrzení.\n  Nejsnáz: spusť skript s --qr a přihlas se naskenováním QR kódu v Mi Home.\n  Nebo ho spusť v terminálu (přes SSH) — zeptá se na kód z e-mailu.\n  (Adresa k ověření: ${overeni.kde})`);
     e.overeni = overeni;
     throw e;
   }
   if (!data.ssecurity || !data.location) {
     throw new Error(`přihlášení neprošlo (kód ${data.code === undefined ? '?' : data.code}${data.desc ? `, ${data.desc}` : ''})`);
   }
+  return dokonciPresSts(data.location, cookies, data);
+}
 
-  const krok3 = await fetch(data.location, {
-    headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieHlavicka(cookies) },
-    signal: AbortSignal.timeout(CEKANI_MS)
+// Přihlášení QR kódem naskenovaným v appce Mi Home — bez hesla a bez ověřování.
+// Postup podle QrCodeXiaomiCloudConnector z Xiaomi-cloud-tokens-extractor.
+async function prihlasQr(nastaveni, { vypis = console.log, cekaniLpMs = 10000 } = {}) {
+  const cookies = { sdkVersion: SDK, deviceId: nastaveni.zarizeni || nahodneId() };
+  const parametry = new URLSearchParams({
+    _qrsize: '480', qs: '%3Fsid%3Dxiaomiio%26_json%3Dtrue', callback: 'https://sts.api.io.mi.com/sts',
+    _hasLogo: 'false', sid: 'xiaomiio', serviceParam: '', _locale: 'cs_CZ', _dc: String(Date.now())
   });
-  if (!krok3.ok) throw new Error(`přihlášení (krok 3): HTTP ${krok3.status}`);
-  posbirejCookies(krok3, cookies);
-  if (!cookies.serviceToken) throw new Error('nepřišel serviceToken');
+  const uvod = await dotazUctu(`${UCET}/longPolling/loginUrl?${parametry}`, cookies);
+  const u = zkusJson(await uvod.text());
+  if (!uvod.ok || !u || !u.qr || !u.lp) throw new Error('Xiaomi nevydalo QR kód pro přihlášení');
 
-  return {
-    ssecurity: data.ssecurity,
-    userId: String(data.userId || ''),
-    cUserId: String(data.cUserId || ''),
-    passToken: String(data.passToken || ''),
-    serviceToken: cookies.serviceToken
-  };
+  vypis('Přihlášení QR kódem:');
+  vypis(`  1. Na Macu otevři v prohlížeči tenhle obrázek:\n     ${u.qr}`);
+  vypis('  2. V telefonu otevři Mi Home → Profil (vpravo dole) → ikona skeneru vpravo nahoře a naskenuj ho.');
+  if (u.loginUrl) vypis(`  (Nebo tuhle adresu otevři přímo v telefonu: ${u.loginUrl})`);
+  vypis('  Čekám na naskenování…');
+
+  const konec = Date.now() + (Number(u.timeout) > 0 ? Number(u.timeout) * 1000 : 300000);
+  let data = null;
+  while (Date.now() < konec) {
+    let res;
+    try {
+      res = await fetch(u.lp, {
+        headers: { 'User-Agent': UA, Cookie: cookieHlavicka(cookies) },
+        signal: AbortSignal.timeout(cekaniLpMs)
+      });
+    } catch {
+      continue;                       // dlouhé čekání vypršelo — ptá se znovu
+    }
+    posbirejCookies(res, cookies);
+    if (res.status === 200) {
+      data = zkusJson(await res.text());
+      if (data && data.ssecurity && data.location) break;
+      data = null;
+    }
+  }
+  if (!data) throw new Error('QR kód nikdo nenaskenoval včas — spusť skript znovu');
+  return dokonciPresSts(data.location, cookies, data);
+}
+
+// Otázka v terminálu. Bez terminálu (Plánovač úloh) null — nemá kdo odpovědět.
+function zeptejSeVTerminalu() {
+  if (!process.stdin.isTTY) return null;
+  return otazka => new Promise(resolve => {
+    const rl = require('node:readline').createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(otazka, odpoved => { rl.close(); resolve(odpoved); });
+  });
 }
 
 // ---------- Dotazy do cloudu ----------
@@ -449,10 +582,12 @@ function miioHello(adresa, cekani = MIIO_CEKANI_MS) {
 
 // ---------- Konfigurace ----------
 
-function nactiKonfig(cesta = KONFIG, skript = 'vysavac-test.js') {
+function nactiKonfig(cesta = KONFIG, skript = 'vysavac-test.js', { qr = false } = {}) {
   if (!fs.existsSync(cesta)) {
-    fs.writeFileSync(cesta, JSON.stringify({ email: '', heslo: '', region: REGION_VYCHOZI }, null, 2) + '\n');
-    return { chyba: `Založil jsem ${cesta}.\nDopiš do něj e-mail a heslo k účtu Xiaomi (ten, do kterého se hlásíš v Mi Home), pak skript spusť znovu:\n  node ${SLOZKA}/${skript}` };
+    fs.writeFileSync(cesta, JSON.stringify({ email: '', heslo: '', region: REGION_VYCHOZI, zarizeni: nahodneId() }, null, 2) + '\n');
+    if (!qr) {
+      return { chyba: `Založil jsem ${cesta}.\nDopiš do něj e-mail a heslo k účtu Xiaomi (ten, do kterého se hlásíš v Mi Home), pak skript spusť znovu:\n  node ${SLOZKA}/${skript}\nNebo bez hesla, QR kódem:\n  node ${SLOZKA}/${skript} --qr` };
+    }
   }
   let data;
   try {
@@ -463,11 +598,18 @@ function nactiKonfig(cesta = KONFIG, skript = 'vysavac-test.js') {
   const email = String(data && data.email || '').trim();
   const heslo = String(data && data.heslo || '').trim();
   const region = String(data && data.region || REGION_VYCHOZI).trim().toLowerCase();
-  if (!email || !heslo) {
-    const chybi = !email && !heslo ? 'e-mail i heslo' : !email ? 'e-mail' : 'heslo';
-    return { chyba: `V ${cesta} chybí ${chybi}.\nDopiš to a spusť znovu:\n  node ${SLOZKA}/${skript}` };
+  // Stálé ID zařízení: s novým při každém běhu chce Xiaomi ověření pořád dokola.
+  // Není tajné — je to jen náhodné jméno, pod kterým se skript hlásí.
+  let zarizeni = String(data && data.zarizeni || '').trim();
+  if (!zarizeni) {
+    zarizeni = nahodneId();
+    try { fs.writeFileSync(cesta, JSON.stringify({ ...data, zarizeni }, null, 2) + '\n'); } catch {}
   }
-  return { nastaveni: { email, heslo, region } };
+  if (!qr && (!email || !heslo)) {
+    const chybi = !email && !heslo ? 'e-mail i heslo' : !email ? 'e-mail' : 'heslo';
+    return { chyba: `V ${cesta} chybí ${chybi}.\nDopiš to a spusť znovu:\n  node ${SLOZKA}/${skript}\nNebo bez hesla, QR kódem:\n  node ${SLOZKA}/${skript} --qr` };
+  }
+  return { nastaveni: { email, heslo, region, zarizeni } };
 }
 
 // ---------- Výpis ----------
@@ -526,13 +668,14 @@ function radkyVypisu(vysavac, mistnosti, spec, hodnoty) {
 
 // ---------- Hlavní ----------
 
-async function hlavni(argv = process.argv.slice(2), cesta = KONFIG) {
+async function hlavni(argv = process.argv.slice(2), cesta = KONFIG, moznosti = {}) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log(`Ohmatávací skript pro vysavač Xiaomi. Nic nespíná, jen se ptá.\n\n  node ${SLOZKA}/vysavac-test.js          čitelný výpis\n  node ${SLOZKA}/vysavac-test.js --raw    uloží i celou specifikaci a hodnoty do souborů\n\nÚčet je v ${cesta}.`);
+    console.log(`Ohmatávací skript pro vysavač Xiaomi. Nic nespíná, jen se ptá.\n\n  node ${SLOZKA}/vysavac-test.js          čitelný výpis (přihlášení heslem, kód z e-mailu se zadá v terminálu)\n  node ${SLOZKA}/vysavac-test.js --qr     přihlášení QR kódem z appky Mi Home, bez hesla\n  node ${SLOZKA}/vysavac-test.js --raw    uloží i celou specifikaci a hodnoty do souborů\n\nÚčet je v ${cesta}.`);
     return 0;
   }
   const syrove = argv.includes('--raw');
-  const konfig = nactiKonfig(cesta);
+  const qr = argv.includes('--qr');
+  const konfig = nactiKonfig(cesta, 'vysavac-test.js', { qr });
   if (konfig.chyba) {
     console.log(konfig.chyba);
     return 1;
@@ -541,7 +684,9 @@ async function hlavni(argv = process.argv.slice(2), cesta = KONFIG) {
   console.log('Vysavač Xiaomi — ohmatávací test\n');
   let prihlaseni;
   try {
-    prihlaseni = await prihlas(konfig.nastaveni);
+    prihlaseni = qr
+      ? await prihlasQr(konfig.nastaveni)
+      : await prihlas(konfig.nastaveni, { zeptej: moznosti.zeptej !== undefined ? moznosti.zeptej : zeptejSeVTerminalu() });
     console.log('Přihlášení: v pořádku');
   } catch (e) {
     console.log(`Přihlášení neprošlo: ${e.message}`);
@@ -620,7 +765,7 @@ if (require.main === module) {
 
 module.exports = {
   md5, odbal, rc4, rc4Drop1024, nonce, podepsanyNonce, podpisProsty, podpisSifrovany,
-  zasifrujParametry, desifrujOdpoved, adresaSluzby, overeniPotreba, prihlas, dotaz,
+  zasifrujParametry, desifrujOdpoved, adresaSluzby, overeniPotreba, prihlas, prihlasQr, overEmailem, dotaz,
   najdiVariantu, zarizeni, vlastnosti, najdiUrn, nactiSpec, rozeberSpec, kratkyNazev,
   jeVysavac, mistnostiZDomacnosti, zkratToken, miioHello, nactiKonfig, radkyVypisu, hlavni,
   BALAST, REGION_VYCHOZI
