@@ -6,3 +6,4 @@ public/nas/zavlaha.config.json
 public/nas/uklid.config.json
 # Heslo k účtu Xiaomi (vysavač) — zůstává u člověka doma
 public/nas/vysavac.config.json
+public/nas/vysavac.relace.json

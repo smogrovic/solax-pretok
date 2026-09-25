@@ -176,6 +176,59 @@ setTimeout(async () => {
   const slide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Úklid');
   check('  a má zámek jako ostatní', !!slide.querySelector('.lock-panel'), true);
   check('  a zamykatelnou kartu', !!slide.querySelector('.card.lockable'), true);
+
+  R.push('\\n8) Vysavač Xiaomi');
+  const vys = id => document.getElementById(id);
+  renderVysavac(null);
+  check('bez mostu: nepřipojený', vys('vysStav').textContent, 'nepřipojený');
+  check('  tlačítka zhasnutá', vys('vysUklidBtn').disabled && vys('vysDokBtn').disabled, true);
+  check('  a řekne, že ovládá most na NASu', /most na NASu/.test(vys('vysHint').textContent), true);
+  const VS = { status: { kod: 13, popis: 'Charging Completed' }, porucha: { kod: 0, popis: 'No Error' },
+    uloha: { kod: 0, popis: 'Idle' }, baterie: 100, nabiji: true, uklidMin: 0, uklidM2: 0,
+    kartac: 24, filtr: 37, mop: 20, mistnosti: [], posledniPovel: null, relaceVyprsela: false, chyba: null };
+  renderVysavac({ stav: VS, kdy: Date.now(), zive: true });
+  check('stav česky', vys('vysStav').textContent, 'v doku, nabito');
+  check('baterie', vys('vysBaterie').textContent, '100 %');
+  check('opotřebení v řádku', /Kartáč 24 % · filtr 37 % · mop 20 %/.test(vys('vysMeta').textContent), true);
+  check('bez poruchy řádek o poruše není', /Porucha/.test(vys('vysMeta').textContent), false);
+  check('semafor v doku nesvítí zeleně', vys('vysLight').className, 'traffic-light');
+  check('tlačítka jdou', vys('vysUklidBtn').disabled || vys('vysStopBtn').disabled, false);
+  renderVysavac({ stav: { ...VS, status: { kod: 1, popis: 'Sweeping' }, nabiji: false, uklidMin: 12, uklidM2: 18 }, kdy: Date.now() });
+  check('při vysávání zeleně', vys('vysLight').className, 'traffic-light on');
+  check('  s časem a plochou', /Uklízí 12 min · 18 m²/.test(vys('vysMeta').textContent), true);
+  renderVysavac({ stav: { ...VS, status: { kod: 99, popis: 'Some New State' } }, kdy: Date.now() });
+  check('neznámý stav se nevymýšlí', vys('vysStav').textContent, 'Some New State');
+  renderVysavac({ stav: { ...VS, porucha: { kod: 12, popis: 'Wheels stuck' } }, kdy: Date.now() });
+  check('porucha červeně', vys('vysLight').className, 'traffic-light off');
+  check('  i řádkem', /Porucha: Wheels stuck/.test(vys('vysMeta').textContent), true);
+  // Povely
+  renderVysavac({ stav: VS, kdy: Date.now() });
+  POSLANO.length = 0;
+  ODPOVED = { ok: true, status: 200, telo: { success: true, message: 'Odesláno — vysavač povel dostane do půl minuty.' } };
+  POTVRZENO = false;
+  vys('vysUklidBtn').click();
+  await pockej();
+  check('vysát vše se ptá (zrušeno = nic)', POSLANO.length, 0);
+  POTVRZENO = true;
+  vys('vysUklidBtn').click();
+  await pockej();
+  check('vysát vše → povel uklid', POSLANO[0] && POSLANO[0].url + ' ' + POSLANO[0].telo.typ, '/api/vysavac/povel uklid');
+  check('  s tokenem', POSLANO[0].token !== undefined, true);
+  check('  a hláška', /půl minuty/.test(vys('vysHint').textContent), true);
+  POSLANO.length = 0;
+  vys('vysStopBtn').click(); await pockej();
+  vys('vysDokBtn').click(); await pockej();
+  check('zastavit a do doku bez ptaní', POSLANO.map(p => p.telo.typ).join(','), 'stop,dok');
+  // Mlčící most, vypršelé přihlášení, neúspěšný povel
+  renderVysavac({ stav: VS, kdy: Date.now() - 4 * 60000 });
+  check('mlčící most: neozývá se', vys('vysStav').textContent, 'neozývá se');
+  check('  tlačítka zhasnutá', vys('vysDokBtn').disabled, true);
+  renderVysavac({ stav: { relaceVyprsela: true, chyba: 'Přihlášení vypršelo — na NASu spusť vysavac-most.js --prihlas', mistnosti: [] }, kdy: Date.now() });
+  check('vypršelé přihlášení: nepřihlášený', vys('vysStav').textContent, 'nepřihlášený');
+  check('  s radou', /--prihlas/.test(vys('vysHint').textContent), true);
+  check('  a červeně', vys('vysLight').className, 'traffic-light off');
+  renderVysavac({ stav: { ...VS, posledniPovel: { typ: 'dok', ok: false, zprava: 'vysavač odmítl (kód -704)' } }, kdy: Date.now() });
+  check('neúspěšný povel se ukáže', /-704/.test(vys('vysHint').textContent), true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

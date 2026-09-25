@@ -3129,6 +3129,27 @@
         </div>
         <div class="zavlaha-hint" id="sekHint"></div>
       </div>
+
+      <!-- Vysavač Xiaomi X20+ — ovládá ho most na NASu přes cloud Xiaomi -->
+      <div class="card" id="vysKarta">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="vysLight"></div>
+            <div class="shelly-label">Vysavač <span class="state" id="vysStav">–</span></div>
+          </div>
+          <div class="sek-baterie" id="vysBaterie">– %</div>
+          <div class="zavlaha-meta" id="vysMeta"></div>
+        </div>
+      </div>
+
+      <div class="card lockable">
+        <div class="sek-tlacitka">
+          <button class="sek-btn hlavni" id="vysUklidBtn" type="button">Vysát vše</button>
+          <button class="sek-btn stop" id="vysStopBtn" type="button">Zastavit</button>
+          <button class="sek-btn" id="vysDokBtn" type="button">Do doku</button>
+        </div>
+        <div class="zavlaha-hint" id="vysHint"></div>
+      </div>
     </div>
   </div>
 
@@ -10427,6 +10448,110 @@ if (sekSekatBtnEl) sekSekatBtnEl.addEventListener('click', () => sekackaPovel('s
 if (sekStopBtnEl) sekStopBtnEl.addEventListener('click', () => sekackaPovel('stop', 'zastavit', sekStopBtnEl));
 if (sekDokBtnEl) sekDokBtnEl.addEventListener('click', () => sekackaPovel('dok', 'poslat do doku', sekDokBtnEl));
 
+// ---------- Vysavač Xiaomi (most na NASu) ----------
+// Stav a povely chodí přes most na NASu (vysavac-most.js), který drží
+// přihlášení do cloudu Xiaomi. Appka jen ukazuje, co most hlásí, a řadí povely.
+const VYS_TICHO_MS = 3 * 60 * 1000;
+// Popisy stavů chodí ze specifikace vysavače anglicky — běžné se přeloží,
+// neznámé zůstanou, jak přišly (radši anglicky než vymyšleně)
+const VYS_CZ = {
+  'sweeping': 'vysává', 'idle': 'stojí', 'paused': 'pozastaveno', 'error': 'chyba',
+  'go charging': 'jede do doku', 'charging': 'nabíjí se', 'charging completed': 'v doku, nabito',
+  'mopping': 'vytírá', 'sweeping and mopping': 'vysává a vytírá', 'drying': 'suší mop',
+  'washing': 'myje mop', 'go washing': 'jede mýt mop', 'building map': 'mapuje',
+  'returning': 'vrací se', 'remote control': 'dálkové ovládání', 'upgrading': 'aktualizuje se',
+  'dusting': 'vysypává prach', 'no error': 'bez poruchy', 'low battery': 'slabá baterie'
+};
+const vysCesky = t => (t ? (VYS_CZ[String(t).trim().toLowerCase()] || t) : null);
+const vysEls = {
+  light: document.getElementById('vysLight'), stav: document.getElementById('vysStav'),
+  baterie: document.getElementById('vysBaterie'), meta: document.getElementById('vysMeta'),
+  hint: document.getElementById('vysHint'),
+  uklid: document.getElementById('vysUklidBtn'), stop: document.getElementById('vysStopBtn'),
+  dok: document.getElementById('vysDokBtn')
+};
+let vysavacData = null;
+
+function vysavacZive(now = Date.now()) {
+  return !!(vysavacData && vysavacData.kdy && now - vysavacData.kdy < VYS_TICHO_MS);
+}
+
+function vysavacPracuje(s) {
+  return !!(s && s.status && /sweep|mop|clean|vacuum/i.test(s.status.popis || '')
+    && !/complet|charg|pause|dry|wash/i.test(s.status.popis || ''));
+}
+
+function vysavacMaPoruchu(s) {
+  return !!(s && s.porucha && s.porucha.kod && s.porucha.popis && !/no ?(error|fault)/i.test(s.porucha.popis));
+}
+
+function renderVysavac(d) {
+  if (d !== undefined) vysavacData = d || null;
+  const e = vysEls;
+  if (!e.stav) return;
+  const s = vysavacData && vysavacData.stav;
+  const zive = vysavacZive() && !!s;
+  const vyprselo = !!(s && s.relaceVyprsela);
+  const naPrijmu = zive && !vyprselo && !(s && s.chyba);
+  e.light.className = 'traffic-light' + (!zive ? '' : (vyprselo || vysavacMaPoruchu(s) || s.chyba) ? ' off'
+    : vysavacPracuje(s) ? ' on' : '');
+  e.stav.textContent = !vysavacData || !vysavacData.kdy ? 'nepřipojený'
+    : !zive ? 'neozývá se'
+    : vyprselo ? 'nepřihlášený'
+    : (vysCesky(s.status && s.status.popis) || (s.status && s.status.kod !== null ? `stav ${s.status.kod}` : '–'));
+  e.baterie.textContent = zive && typeof s.baterie === 'number' ? `${s.baterie} %` : '– %';
+  e.meta.textContent = '';
+  const radky = [];
+  if (zive && s) {
+    if (s.nabiji) radky.push('Nabíjí se');
+    if (vysavacPracuje(s) && (s.uklidMin || s.uklidM2)) radky.push(`Uklízí ${s.uklidMin || 0} min · ${s.uklidM2 || 0} m²`);
+    if (vysavacMaPoruchu(s)) radky.push('Porucha: ' + vysCesky(s.porucha.popis));
+    const opo = [['Kartáč', s.kartac], ['filtr', s.filtr], ['mop', s.mop]].filter(([, v]) => typeof v === 'number');
+    if (opo.length) radky.push(opo.map(([n, v]) => `${n} ${v} %`).join(' · '));
+  }
+  if (vysavacData && vysavacData.kdy) radky.push('Naposledy ' + logCas(vysavacData.kdy));
+  for (const t of radky) {
+    const div = document.createElement('div');
+    div.textContent = t;
+    e.meta.appendChild(div);
+  }
+  for (const b of [e.uklid, e.stop, e.dok]) if (b) b.disabled = !naPrijmu;
+  const p = s && s.posledniPovel;
+  e.hint.textContent = !vysavacData || !vysavacData.kdy
+    ? 'Vysavač ovládá most na NASu (vysavac-most.js). Zatím se neozval.'
+    : !zive ? 'Most na NASu se neozývá — vysavač teď ovládat nejde.'
+    : vyprselo || (s && s.chyba) ? (s.chyba || 'Přihlášení vypršelo — na NASu spusť vysavac-most.js --prihlas.')
+    : p && p.ok === false ? `Poslední povel se nepovedl: ${p.zprava || '?'}`
+    : '';
+}
+
+async function vysavacPovel(typ, btn) {
+  if (typ === 'uklid' && !confirm('Vysavač: vysát celý byt?')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/vysavac/povel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ typ })
+    });
+    const data = await res.json();
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Povel se nepodařilo poslat.');
+    if (vysEls.hint && data.message) vysEls.hint.textContent = data.message;
+    errorEl.classList.remove('show');
+  } catch (err) {
+    errorEl.textContent = 'Vysavač: ' + err.message;
+    errorEl.classList.add('show');
+  }
+  if (btn) btn.disabled = false;
+}
+
+if (vysEls.uklid) vysEls.uklid.addEventListener('click', () => vysavacPovel('uklid', vysEls.uklid));
+if (vysEls.stop) vysEls.stop.addEventListener('click', () => vysavacPovel('stop', vysEls.stop));
+if (vysEls.dok) vysEls.dok.addEventListener('click', () => vysavacPovel('dok', vysEls.dok));
+// Mlčící most se má ukázat i bez nové zprávy — stav stárne sám
+setInterval(() => bezpecne(() => renderVysavac()), 30000);
+
 function bezpecne(fn) {
   try { fn(); } catch (err) { console.error('render:', err); }
 }
@@ -10653,6 +10778,7 @@ function applySnapshot(snap) {
   bezpecne(renderBlindTimers);
   bezpecne(() => renderZavlaha(snap.zavlaha));
   bezpecne(() => renderSekacka(snap.sekacka));
+  bezpecne(() => renderVysavac(snap.vysavac || null));
   bezpecne(() => renderPrazdniny(snap.prazdniny));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
@@ -10972,6 +11098,7 @@ function connectStream() {
   });
   es.addEventListener('zavlaha', e => { renderZavlaha(JSON.parse(e.data).zavlaha); });
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
+  es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('siteDny', e => {

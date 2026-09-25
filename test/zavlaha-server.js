@@ -12,7 +12,7 @@ const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('závlaha (appka)');
 
 const CODE = between('// ---------- Závlaha Rain Bird (most na NASu) ----------',
-                     '// ---------- Sekačka Anthbot (cloud) ----------');
+                     '// ---------- Vysavač Xiaomi (most na NASu) ----------');
 
 const MIN = 60000;
 

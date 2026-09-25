@@ -530,6 +530,7 @@ function snapshot() {
     store: storePayload(),
     nukiEnabled,
     zavlaha: zavlahaPayload(),
+    vysavac: vysavacPayload(),
     sekacka: sekackaPayload(),
     pushEnabled,
     lockEnabled,
@@ -8609,6 +8610,134 @@ app.post('/api/zavlaha/dny/restore', (req, res) => {
     zavlahaPosli();
   }
   res.json({ ok: true, dny: state.zavlahaDny.length });
+});
+
+// ---------- Vysavač Xiaomi (most na NASu) ----------
+// Xiaomi X20+ jde ovládat jen přes cloud Xiaomi a přihlásit se do něj z Renderu
+// nejde (captcha / SMS z datového centra). Přihlášení proto drží most na NASu
+// (public/nas/vysavac-most.js): čte stav z cloudu, posílá ho sem a odváží si
+// frontu povelů. Stejný princip jako závlaha.
+const VYSAVAC_TICHO_MS = 3 * 60 * 1000;       // déle mlčící most bereme jako odpojený
+const VYSAVAC_UKOL_PLATI_MS = 2 * 60 * 1000;  // starší povel se zahodí, ať nepřekvapí
+const VYSAVAC_FRONTA_MAX = 5;
+const VYSAVAC_MISTNOSTI_MAX = 60;
+const VYSAVAC_TYPY = ['uklid', 'stop', 'dok', 'mistnosti'];
+const VYSAVAC_POPIS_TYPU = { uklid: 'vysát vše', stop: 'zastavit', dok: 'do doku', mistnosti: 'vysát místnosti' };
+
+let vysavacStav = null;    // poslední hlášení mostu (očištěné)
+let vysavacKdy = 0;        // kdy dorazilo
+let vysavacFronta = [];    // co si most odveze při nejbližším ozvání
+
+function vysavacZive(at = Date.now()) {
+  return vysavacKdy > 0 && at - vysavacKdy < VYSAVAC_TICHO_MS;
+}
+
+function vysavacPayload() {
+  return { stav: vysavacStav, kdy: vysavacKdy || null, zive: vysavacZive(), cekaPovelu: vysavacFronta.length };
+}
+
+function vysavacPosli() {
+  broadcast('vysavac', { vysavac: vysavacPayload() });
+}
+
+// Z mostu se bere jen to, co má tvar — cokoli dalšího se zahodí
+function vysavacOcisti(t) {
+  if (!t || typeof t !== 'object') return null;
+  const cislo = (v, min, max) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : null);
+  const text = (v, max = 80) => (typeof v === 'string' ? v.slice(0, max) : null);
+  const dvojice = v => (v && typeof v === 'object' ? { kod: cislo(v.kod, -1e6, 1e6), popis: text(v.popis) } : { kod: null, popis: null });
+  const mistnosti = Array.isArray(t.mistnosti) ? t.mistnosti
+    .filter(m => m && (typeof m.id === 'string' || typeof m.id === 'number') && typeof m.jmeno === 'string')
+    .slice(0, VYSAVAC_MISTNOSTI_MAX)
+    .map(m => ({ id: String(m.id).slice(0, 24), jmeno: m.jmeno.slice(0, 40) })) : [];
+  return {
+    relaceVyprsela: t.relaceVyprsela === true,
+    chyba: text(t.chyba, 200),
+    status: dvojice(t.status),
+    porucha: dvojice(t.porucha),
+    uloha: dvojice(t.uloha),
+    baterie: cislo(t.baterie, 0, 100),
+    nabiji: typeof t.nabiji === 'boolean' ? t.nabiji : null,
+    uklidMin: cislo(t.uklidMin, 0, 1e4),
+    uklidM2: cislo(t.uklidM2, 0, 1e4),
+    kartac: cislo(t.kartac, 0, 100),
+    filtr: cislo(t.filtr, 0, 100),
+    mop: cislo(t.mop, 0, 100),
+    mistnosti,
+    posledniPovel: t.posledniPovel && typeof t.posledniPovel === 'object'
+      ? { typ: text(t.posledniPovel.typ, 20), ok: t.posledniPovel.ok === true, zprava: text(t.posledniPovel.zprava, 300) }
+      : null
+  };
+}
+
+// Co stojí za zápis do Logu: změna stavu slovy, nová porucha, výsledek povelu
+function vysavacZmena(stary, novy) {
+  const zapisy = [];
+  if (!novy) return zapisy;
+  if (novy.relaceVyprsela && !(stary && stary.relaceVyprsela)) zapisy.push('Vysavač: přihlášení na NASu vypršelo');
+  const sPopis = stary && stary.status && stary.status.popis;
+  if (novy.status.popis && novy.status.popis !== sPopis) zapisy.push(`Vysavač: ${novy.status.popis}`);
+  const sPor = stary && stary.porucha && stary.porucha.kod;
+  if (novy.porucha.kod && novy.porucha.kod !== sPor && novy.porucha.popis && !/no ?(error|fault)|žádná/i.test(novy.porucha.popis)) {
+    zapisy.push(`Vysavač: porucha — ${novy.porucha.popis}`);
+  }
+  const p = novy.posledniPovel;
+  const sp = stary && stary.posledniPovel;
+  if (p && p.typ && (!sp || sp.typ !== p.typ || sp.zprava !== p.zprava || sp.ok !== p.ok)) {
+    zapisy.push(p.ok ? `Vysavač: ${VYSAVAC_POPIS_TYPU[p.typ] || p.typ} — provedeno` : `Vysavač: ${VYSAVAC_POPIS_TYPU[p.typ] || p.typ} selhal (${p.zprava || '?'})`);
+  }
+  return zapisy;
+}
+
+function vysavacZarad(ukol, at = Date.now()) {
+  if (ukol.typ === 'stop') vysavacFronta = [];
+  vysavacFronta.push({ ...ukol, at });
+  if (vysavacFronta.length > VYSAVAC_FRONTA_MAX) vysavacFronta = vysavacFronta.slice(-VYSAVAC_FRONTA_MAX);
+  vysavacPosli();
+}
+
+function vysavacVyzvedni(at = Date.now()) {
+  const ukoly = vysavacFronta.filter(u => at - u.at < VYSAVAC_UKOL_PLATI_MS);
+  vysavacFronta = [];
+  return ukoly.map(({ at: _, ...u }) => u);
+}
+
+// Povel z appky → úkol pro most. Místnosti jen ty, které most sám hlásí.
+function vysavacUkol(telo) {
+  const typ = telo && telo.typ;
+  if (!VYSAVAC_TYPY.includes(typ)) return { chyba: 'Neznámý povel.' };
+  if (typ !== 'mistnosti') return { ukol: { typ } };
+  const zname = new Set(((vysavacStav && vysavacStav.mistnosti) || []).map(m => m.id));
+  const ids = Array.isArray(telo.ids) ? [...new Set(telo.ids.map(String))].filter(id => zname.has(id)) : [];
+  if (!ids.length) return { chyba: 'Vyber aspoň jednu místnost.' };
+  return { ukol: { typ, ids } };
+}
+
+app.post('/api/vysavac/stav', (req, res) => {
+  const stav = vysavacOcisti(req.body);
+  if (!stav) return res.status(400).json({ error: 'Chybí stav.' });
+  const bylTicho = !vysavacZive();
+  for (const z of vysavacZmena(vysavacStav, stav)) addLog(z);
+  if (bylTicho && vysavacKdy) addLog('Vysavač: most na NASu se zase ozývá');
+  vysavacStav = stav;
+  vysavacKdy = Date.now();
+  const ukoly = vysavacVyzvedni();
+  vysavacPosli();
+  res.json({ ok: true, ukoly });
+});
+
+app.post('/api/vysavac/povel', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { ukol, chyba } = vysavacUkol(req.body);
+  if (chyba) return res.status(400).json({ error: chyba });
+  if (!vysavacZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — vysavač teď ovládat nejde.' });
+  if (vysavacStav && vysavacStav.relaceVyprsela) {
+    return res.status(503).json({ error: 'Přihlášení vysavače na NASu vypršelo — spusť tam vysavac-most.js --prihlas.' });
+  }
+  vysavacZarad(ukol);
+  const mistnosti = ukol.ids ? ` (${ukol.ids.map(id => (vysavacStav.mistnosti.find(m => m.id === id) || {}).jmeno || id).join(', ')})` : '';
+  addLog(`Vysavač: ${VYSAVAC_POPIS_TYPU[ukol.typ]}${mistnosti} — odesláno`);
+  res.json({ success: true, message: 'Odesláno — vysavač povel dostane do půl minuty.' });
 });
 
 // ---------- Sekačka Anthbot (cloud) ----------
