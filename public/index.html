@@ -362,6 +362,24 @@
     color:var(--navy);
     letter-spacing:-0.01em;
   }
+  /* Emoji zařízení v levém horním rohu boxu — na první pohled je jasné, o co jde */
+  /* Odznak sedí na horní hraně boxu, takže nikdy nepřekryje jeho obsah */
+  .card[data-emoji],.device-block[data-emoji]{position:relative;}
+  .card[data-emoji]::before{
+    content:attr(data-emoji);position:absolute;top:-10px;left:14px;z-index:1;
+    width:28px;height:28px;border-radius:50%;background:var(--card);
+    display:flex;align-items:center;justify-content:center;
+    font-size:15px;line-height:1;pointer-events:none;
+    box-shadow:0 1px 4px rgba(44,62,80,0.18);
+  }
+  /* Druhé zařízení uvnitř jednoho boxu (solinátor pod bazénem): odznak na čáře mezi nimi */
+  .device-block[data-emoji]::before{
+    content:attr(data-emoji);position:absolute;top:-14px;left:-2px;z-index:1;
+    width:28px;height:28px;border-radius:50%;background:var(--card);
+    display:flex;align-items:center;justify-content:center;
+    font-size:15px;line-height:1;pointer-events:none;
+    box-shadow:0 1px 4px rgba(44,62,80,0.18);
+  }
   .card{
     width:100%;
     background:var(--card);
@@ -2280,7 +2298,7 @@
   <div class="slide slide-stats" data-title="FVE" data-rezim="full">
     <div class="page">
       <div class="error-banner" id="errorBanner"></div>
-      <div class="card">
+      <div class="card" data-emoji="🔆">
         <div class="nodes">
           <div class="node">
             <div class="icon-slot">
@@ -2397,7 +2415,7 @@
         </div>
       </div>
 
-      <div class="card boilers-card">
+      <div class="card boilers-card" data-emoji="🛁">
         <div class="boiler-cell">
           <div class="boiler-name">Bojler 1 (TČ)</div>
           <div class="boiler-temp" id="boiler1Temp">– °C</div>
@@ -2449,7 +2467,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable blinds-card">
+      <div class="card lockable blinds-card" data-emoji="🌬️">
         <div class="blinds-list" id="airconList">
           <div class="log-empty">Načítám klimatizace…</div>
         </div>
@@ -2492,7 +2510,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable blinds-card">
+      <div class="card lockable blinds-card" data-emoji="🪟">
         <div class="blinds-list" id="blindsList1">
           <div class="log-empty">Načítám rolety…</div>
         </div>
@@ -2605,7 +2623,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable blinds-card">
+      <div class="card lockable blinds-card" data-emoji="🪟">
         <div class="blinds-list" id="blindsList2"></div>
       </div>
 
@@ -2642,7 +2660,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable jen-full">
+      <div class="card lockable jen-full" data-emoji="🛁">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="shellyLight"></div>
@@ -2659,7 +2677,7 @@
 
       <!-- Oběhové čerpadlo: jen ruční ON, konec si hlídá auto-off v relé (15 min).
            OFF tlačítko tu schválně není. -->
-      <div class="card lockable jen-full" id="obehCard">
+      <div class="card lockable jen-full" data-emoji="🔄" id="obehCard">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="obehLight"></div>
@@ -2673,7 +2691,7 @@
         </div>
       </div>
 
-      <div class="card pool-card lockable">
+      <div class="card pool-card lockable" data-emoji="💡">
         <div class="lights-grid">
           <div class="light-cell">
             <div class="shelly-row">
@@ -2737,7 +2755,7 @@
         </div>
       </div>
 
-      <div class="card lockable jen-full" id="nukiCard">
+      <div class="card lockable jen-full" data-emoji="🔑" id="nukiCard">
         <button class="home-btn home-btn-sm" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
         <div class="home-msg" id="homeMsg"></div>
       </div>
@@ -2771,7 +2789,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable">
+      <div class="card lockable" data-emoji="⚡">
         <div class="wb-stats">
           <div class="wb-stat">
             <div class="wb-stat-label">Výkon</div>
@@ -2838,7 +2856,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card pool-card" id="heatpumpCard" hidden>
+      <div class="card pool-card" data-emoji="🌡️" id="heatpumpCard" hidden>
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="hpLight"></div>
@@ -2849,7 +2867,7 @@
         </div>
       </div>
 
-      <div class="card pool-card lockable jen-full">
+      <div class="card pool-card lockable jen-full" data-emoji="🌊">
         <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="poolLight"></div>
@@ -2869,7 +2887,7 @@
           </div>
         </div>
 
-        <div class="device-block last">
+        <div class="device-block last" data-emoji="🧂">
           <div class="shelly-row">
             <div class="traffic-light" id="solinatorLight"></div>
             <div class="shelly-label">Solinátor</div>
@@ -2892,7 +2910,7 @@
         </div>
       </div>
 
-      <div class="card pool-card lockable">
+      <div class="card pool-card lockable" data-emoji="💡">
         <div class="lights-grid one">
           <div class="light-cell">
             <div class="shelly-row">
@@ -2930,7 +2948,7 @@
     <div class="page">
       <!-- Kamna napřed: teplota v sauně je to, kvůli čemu se na stránku chodí.
            Měření z 3EM je pod tím — je to hlídač jističe, ne displej. -->
-      <div class="card">
+      <div class="card" data-emoji="🔥">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="huumLight"></div>
@@ -3003,7 +3021,7 @@
       </div>
 
 
-      <div class="card">
+      <div class="card" data-emoji="🔥">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="saunaLight"></div>
@@ -3062,7 +3080,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card">
+      <div class="card" data-emoji="💧">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="zavlahaLight"></div>
@@ -3110,7 +3128,7 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card">
+      <div class="card" data-emoji="🌱">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="sekLight"></div>
@@ -3131,7 +3149,7 @@
       </div>
 
       <!-- Vysavač Xiaomi X20+ — ovládá ho most na NASu přes cloud Xiaomi -->
-      <div class="card" id="vysKarta">
+      <div class="card" data-emoji="🧹" id="vysKarta">
         <div class="device-block last">
           <div class="shelly-row">
             <div class="traffic-light" id="vysLight"></div>
