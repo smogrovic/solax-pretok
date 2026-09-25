@@ -16,7 +16,7 @@ const CODE = between('// ---------- Tlačítka na Asistentovi (scény) a „nejs
 function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetla = [],
                  zamekSelze = false, huum = true, dvere = true,
                  saunaSelze = false, saunaNejede = false, svetloSelze = false,
-                 pergolaSelze = false, releSelze = null } = {}) {
+                 pergolaSelze = false, releSelze = null, pergola = false } = {}) {
   const akce = [];
   const logy = [];
   const routy = {};
@@ -37,7 +37,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'assistantControlBlinds', 'assistantSetRelay', 'assistantSetAircon', 'actuateRelay',
     'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
-    'assistantSetTerasaLight', 'DEVICE_LABELS',
+    'assistantSetTerasaLight', 'DEVICE_LABELS', 'getBlinds', 'cz',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -80,7 +80,9 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
       akce.push(`pergola:${on ? 'on' : 'off'}`);
     },
     { lightDole: 'Zahrada dole', lightNahore: 'Zahrada nahoře',
-      lightBazen: 'Světlo bazén', lightNocni: 'Noční světla' }
+      lightBazen: 'Světlo bazén', lightNocni: 'Noční světla' },
+    async () => [{ type: 'switch', label: 'Světlo terasa', onState: pergola }],
+    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   );
   return { api, state, akce, logy, routy };
 }
@@ -269,7 +271,7 @@ nadpis('4) Nejsme doma — odpočet');
   // Zatáhnout a zaklopit do zavřeno (100 %) jde jedním povelem — zřetězené by si
   // pohyb přerušily a žaluzie by zůstaly zataženy s otevřenými lamelami
   check('zamkne, zhasne, vypne klimu a zatáhne', h.akce.join(' | '),
-    'zamek:lock | rele:všechna světla:off | klima:Obývák:off | zaluzie:vše:down:100');
+    'zamek:lock | rele:všechna světla:off | huumsvetlo:off | klima:Obývák:off | zaluzie:vše:down:100');
   const kroku = h.akce.length;
   await h.api.enforceAway();
   check('  a podruhé už se odjezd neopakuje', h.akce.length > kroku, true);
@@ -286,6 +288,52 @@ nadpis('4) Nejsme doma — odpočet');
   await h.api.enforceAway();
   check('rozsvícené světlo se během nepřítomnosti zhasne',
     h.akce.slice(pred).join(','), 'auto:lightNocni:off (nejsme doma)');
+}
+{
+  // Při odjezdu se vypne i běžící čerpadlo a sauna
+  const h = build({ svetla: ['obeh'] });
+  h.state.huum.heating = true;
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  check('odjezd vypne čerpadlo, saunu i světlo v ní', h.akce.join(' | '),
+    'zamek:lock | rele:všechna světla:off | auto:obeh:off (nejsme doma) | huum:stop:undefined | huumsvetlo:off | zaluzie:vše:down:100');
+}
+{
+  // Kdo během nepřítomnosti zapne čerpadlo, saunu, světlo v ní nebo pergolu,
+  // tomu se to do pěti minut zase vypne — stejně jako noční světla
+  const h = build();
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  const pred = h.akce.length;
+  h.state.devices.obeh.isOn = true;
+  h.state.huum.heating = true;
+  h.state.huum.light = true;
+  await h.api.enforceAway();
+  check('drží vypnuté čerpadlo, saunu i světlo v ní', h.akce.slice(pred).join(' | '),
+    'auto:obeh:off (nejsme doma) | huum:stop:undefined | huumsvetlo:off');
+}
+{
+  const h = build({ pergola: true });
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  const pred = h.akce.length;
+  await h.api.enforceAway();
+  check('drží zhasnutou pergolu', h.akce.slice(pred).join(' | '), 'pergola:off');
+}
+{
+  // Když TaHoma neodpoví, zbytek se stejně vypne
+  const h = build({ pergolaSelze: true, pergola: true });
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  h.state.devices.lightDole.isOn = true;
+  const pred = h.akce.length;
+  await h.api.enforceAway();
+  check('výpadek TaHomy nezastaví zhasnutí zahrady', h.akce.slice(pred).join(' | '), 'auto:lightDole:off (nejsme doma)');
+  check('  a zapíše se', h.logy.some(t => /pergolu se nepodařilo/.test(t)), true);
 }
 {
   const h = build({ klimy: ['Obývák'] });

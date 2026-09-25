@@ -229,7 +229,7 @@ setTimeout(async () => {
     /je zamčený/.test(document.getElementById('awayHint').textContent), false);
   renderAway({ away: true, awaySince: T - 20 * MIN, awayAt: T - 5 * MIN, awayActive: true });
   check('po odpočtu řekne, co platí',
-    /Dům je zamčený, světla zhasnutá, bojler se nezapíná./.test(document.getElementById('awayHint').textContent), true);
+    /Dům je zamčený, světla, sauna i oběhové čerpadlo vypnuté, bojler se nezapíná./.test(document.getElementById('awayHint').textContent), true);
 
   R.push('\\n4) Potvrzení u poloh, které dům utlumí');
   // Návrat domů se neptá: zapnout dům zpátky není nic, co by šlo litovat

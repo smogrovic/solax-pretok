@@ -63,7 +63,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
-    'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava',
+    'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
@@ -100,7 +100,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     },
     ts => { const d = new Date(ts); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); },
     ts => !!ts,
-    async zdroj => { h.pripravy.push(zdroj); return ['Světlo v sauně svítí.']; }
+    async zdroj => { h.pripravy.push(zdroj); return ['Světlo v sauně svítí.']; },
+    () => !!h.pryc
   );
   return h;
 }
@@ -756,6 +757,22 @@ const stavKamen = (h, o = {}) => {
   await h.api.saunaTimerTik(jdu - 10 * MINUTA);
   check('10 min před příchodem příprava (světlo, žaluzie, zahrada)', h.pripravy.length, 1);
   check('  a časovač je hotový', h.api.casovace().length, 0);
+}
+{
+  // Když jsme pryč, sauna se drží vypnutá — časovač ji nezapne ani nepřipraví
+  const h = build();
+  stavKamen(h);
+  h.pryc = true;
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  h.odpovez = async () => ({ stav: 200, text: '{"ok":true}' });
+  await h.api.saunaTimerTik(t.zapneV);
+  await h.api.saunaTimerTik(jdu - 10 * MINUTA);
+  check('nejsme doma: časovač kamna nepustí', h.volani.some(v => v.adresa.endsWith('/start')), false);
+  check('  ani nepřipraví zahradu', h.pripravy.length, 0);
+  check('  a řekne to v Logu', h.zapisy.some(z => /nejsme doma, nezapínám/.test(z)), true);
+  check('  časovač skončil', h.api.casovace().length, 0);
 }
 {
   // Nastaveno pozdě: do příchodu je míň, než trvá náběh → zapne hned

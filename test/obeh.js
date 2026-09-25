@@ -14,7 +14,7 @@ const CODE = between('// ---------- Oběhové čerpadlo: rozvrh ----------',
                      '// ---------- Automatika přebytků');
 
 // `den` je zkratka jako z Intl (Mon…Sun), `cas` je 'HH:MM' pražského času.
-function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false } = {}) {
+function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc = false } = {}) {
   const povely = [];      // co šlo přes autoSet (tedy i do logu)
   const primo = [];       // připomenutí ON nízkou cestou
   let now = 1_700_000_000_000;
@@ -22,7 +22,7 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false } = {})
 
   const api = new Function(
     'pragueTime', 'Intl', 'DEVICES', 'setShellyState', 'noteCmd', 'autoSet',
-    'manualHeld', 'autoRunning', 'scheduleEvery', 'RELAY_AUTO_OFF_MS',
+    'manualHeld', 'autoRunning', 'scheduleEvery', 'RELAY_AUTO_OFF_MS', 'awayActive',
     CODE + '\n; return { obehOknoNyni, obehPracovniDen, runObehSchedule, OBEH_ROZVRH,'
          + ' OBEH_TICK_MS, OBEH_KEEPALIVE_MS };'
   )(
@@ -41,7 +41,8 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false } = {})
     () => rucni,
     () => rezim !== 'off',
     () => {},
-    15 * MIN
+    15 * MIN,
+    () => pryc
   );
 
   return {
@@ -176,7 +177,17 @@ nadpis('6) Hlavní vypínač automatiky');
   check('v zimě rozvrh jede dál', h.povely[0], 'obeh:on (rozvrh 06:15–07:15)');
 }
 
-nadpis('7) Rozvrh sám');
+nadpis('7) Nejsme doma');
+{
+  // Teplou vodu v prázdném domě nikdo nepotřebuje — okno se vůbec neotevře
+  const h = build({ den: 'Mon', cas: '06:14', pryc: true });
+  await h.tik();
+  await h.tik(MIN, '06:15');
+  await h.tik(MIN, '06:30');
+  check('když jsme pryč, rozvrh čerpadlo nezapne', h.povely.length + h.primo.length, 0);
+}
+
+nadpis('8) Rozvrh sám');
 {
   const r = build().api.OBEH_ROZVRH;
   check('pracovní dny mají dvě okna', JSON.stringify(r.pracovni),

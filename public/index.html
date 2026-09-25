@@ -9360,7 +9360,7 @@ function renderAway(d) {
   if (!awayData.away) {
     awayHintEl.textContent = '';
   } else if (awayData.awayActive) {
-    awayHintEl.textContent = 'Dům je zamčený, světla zhasnutá, bojler se nezapíná.';
+    awayHintEl.textContent = 'Dům je zamčený, světla, sauna i oběhové čerpadlo vypnuté, bojler se nezapíná.';
   } else {
     awayHintEl.textContent = `Zamkne se a zhasne v ${fmtSolTime(awayData.awayAt)} — ať se stihne odejít.`;
   }

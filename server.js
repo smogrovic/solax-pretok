@@ -2800,7 +2800,8 @@ async function obehPripomenON(now) {
 async function runObehSchedule(now = Date.now()) {
   // Hlavní vypínač automatiky platí i tady. Okno se zapomene, takže po zapnutí
   // automatiky uprostřed okna naskočí náběžná hrana a čerpadlo se rozjede.
-  if (!autoRunning()) {
+  // „Nejsme doma" stejně: teplou vodu nikdo nepotřebuje, vypnutí drží enforceAway.
+  if (!autoRunning() || awayActive(now)) {
     obehOkno = null;
     return;
   }
@@ -7107,7 +7108,9 @@ async function saunaTimerTik(now = Date.now()) {
         if (now >= t.zapneV) {
           t.zapnuto = true;
           zmena = true;
-          if (state.huum && state.huum.heating) {
+          if (awayActive(now)) {
+            addLog(`Sauna: časovač ${t.time} — nejsme doma, nezapínám`);
+          } else if (state.huum && state.huum.heating) {
             addLog(`Sauna: časovač ${t.time} — kamna už topí, nezapínám znovu`);
           } else {
             try {
@@ -7125,11 +7128,14 @@ async function saunaTimerTik(now = Date.now()) {
       if (!t.pripraveno && now >= t.jdu - SAUNA_PRIPRAVA_MS) {
         t.pripraveno = true;
         zmena = true;
-        try {
-          const kroky = await saunaPriprava(`časovač sauny ${t.time}`);
-          addLog(`Sauna: příprava na ${t.time} — ${kroky.join(' ')}`);
-        } catch (err) {
-          addLog(`Sauna: příprava na ${t.time} selhala (${err.message.slice(0, 100)})`);
+        // Když jsme pryč, příprava by rozsvítila zahradu, kterou enforceAway drží zhasnutou
+        if (!awayActive(now)) {
+          try {
+            const kroky = await saunaPriprava(`časovač sauny ${t.time}`);
+            addLog(`Sauna: příprava na ${t.time} — ${kroky.join(' ')}`);
+          } catch (err) {
+            addLog(`Sauna: příprava na ${t.time} selhala (${err.message.slice(0, 100)})`);
+          }
         }
       }
     }
@@ -9465,6 +9471,16 @@ async function awayOdchod() {
   };
   if (nukiEnabled) await zkus('zamčeno', async () => { await nukiLock(); return 'zamčeno'; });
   await zkus('světla zhasnuta', async () => { await assistantSetRelay('všechna světla', false); return 'světla zhasnuta'; });
+  const obeh = state.devices.obeh;
+  if (obeh && obeh.isOn === true) {
+    await zkus('oběhové čerpadlo vypnuto', async () => { await autoSet('obeh', 'off', 'nejsme doma', { force: true }); return 'oběhové čerpadlo vypnuto'; });
+  }
+  if (huumEnabled) {
+    if (state.huum && state.huum.heating) {
+      await zkus('sauna vypnuta', async () => { await huumPovel('stop', {}); return 'sauna vypnuta'; });
+    }
+    await zkus('světlo v sauně zhasnuto', async () => { await huumSvetlo(false); return 'světlo v sauně zhasnuto'; });
+  }
   for (const dev of (state.aircon.devices || [])) {
     if (dev.power) await zkus(`${dev.name} vypnuta`, async () => { await assistantSetAircon({ room: dev.name, power: 'off' }); return `${dev.name} vypnuta`; });
   }
@@ -9484,10 +9500,31 @@ async function enforceAway() {
     await awayOdchod();
     return;
   }
-  // Dokud jsme pryč, světla se drží dole — kdyby je někdo (nebo časovač) rozsvítil
-  for (const key of LIGHT_KEYS) {
+  // Dokud jsme pryč, světla, oběhové čerpadlo i sauna se drží vypnuté — kdyby je
+  // někdo (nebo časovač) zapnul. Každý krok zvlášť: výpadek HUUM nebo TaHomy
+  // nesmí nechat svítit zahradu.
+  const drz = async (popis, fn) => {
+    try { await fn(); } catch (err) { addLog(`Nejsme doma: ${popis} se nepodařilo (${String(err.message).slice(0, 80)})`, 'error'); }
+  };
+  for (const key of [...LIGHT_KEYS, 'obeh']) {
     const d = state.devices[key];
-    if (d && d.isOn === true) await autoSet(key, 'off', 'nejsme doma', { force: true });
+    if (d && d.isOn === true) await drz(`vypnout ${key}`, () => autoSet(key, 'off', 'nejsme doma', { force: true }));
+  }
+  if (huumEnabled && state.huum) {
+    if (state.huum.heating) {
+      await drz('vypnout saunu', async () => { await huumPovel('stop', {}); addLog('Sauna: vypnuta (nejsme doma)'); });
+    }
+    if (state.huum.light === true) {
+      await drz('zhasnout světlo v sauně', async () => { await huumSvetlo(false); addLog('Sauna: světlo vypnuto (nejsme doma)'); });
+    }
+  }
+  // Pergola je RTS: stav je jen náš poslední povel, vypínač na zdi se nezachytí
+  if (tahomaEnabled) {
+    await drz('zhasnout pergolu', async () => {
+      const sw = (await getBlinds()).find(b => b.type === 'switch'
+        && (cz(b.label).includes('terasa') || cz(b.label).includes('pergola')));
+      if (sw && sw.onState === true) await assistantSetTerasaLight(false);
+    });
   }
 }
 
