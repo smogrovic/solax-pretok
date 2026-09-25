@@ -395,10 +395,16 @@
      modifikátoru se tiše nalepila na sousedku — tak vznikl #nukiCard i dvě slepené
      karty na saune. První karta okraj nedostane, o odsazení odshora se stará .page. */
   /* `:not(.lock-panel)` je schválně: zámkový panel je při odemčeném domě
-     `display:none`, ale sousedem v DOMu zůstává. Karta hned za ním si tak drží
-     to, co měla dosud (na Bazénu 12 px z vlastní třídy, na Ovládání nic) a tahle
-     oprava nikam jinam nesahá. */
+     `display:none`, ale sousedem v DOMu zůstává. Karta hned za ním okraj
+     nedostane (viz i pravidlo o první viditelné kartě níž). */
   .page > .card:not(.lock-panel) + .card{margin-top:12px;}
+  /* První VIDITELNÁ karta okraj nemá, i když před ní v DOMu stojí schovaná sousedka
+     (#heatpumpCard `hidden`, dětská karta v plném režimu a naopak). Jinak by
+     mezera z pravidla výš (nebo z vlastní třídy .pool-card/.stats-card) posunula
+     první box o 12 px níž než na ostatních stránkách. */
+  .page > .card:not(:not(.lock-panel, [hidden]) ~ .card),
+  body[data-rezim="full"] .page > .card:not(:not(.lock-panel, [hidden], .jen-deti) ~ .card),
+  body:is([data-rezim="miky"], [data-rezim="elenka"]) .page > .card:not(:not(.lock-panel, [hidden], .jen-full) ~ .card){margin-top:0;}
   .nodes{
     width:100%;
     display:grid;

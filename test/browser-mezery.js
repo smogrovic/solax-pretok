@@ -70,7 +70,8 @@ setTimeout(() => {
   };
   check('Ovládání se kvůli zámku neposune', mezera(prvniViditelna('Ovládání')), 0);
   check('  a Wallbox taky ne', mezera(prvniViditelna('Wallbox')), 0);
-  check('Bazén si svých 12 px nechá', mezera(prvniViditelna('Bazén')), 12);
+  // Dřív si Bazén 12 px nechával a první box seděl níž než jinde — už ne
+  check('Bazén se se zbytkem srovná', mezera(prvniViditelna('Bazén')), 0);
 
   // První karta na stránce okraj z obecného pravidla nedostane
   const log = stranky.find(s => s.dataset.title === 'Log');
