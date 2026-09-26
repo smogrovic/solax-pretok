@@ -825,14 +825,6 @@
   .sauna-meta b{font-weight:700;color:var(--navy);}
   .sauna-meta .skript-ne{color:var(--grey-text);}
   .mesic-total{font-size:28px;font-weight:800;color:var(--navy);text-align:center;margin:6px 0 2px;}
-  .sauna-set{margin-top:10px;padding-top:10px;border-top:1px solid rgba(44,62,80,0.10);}
-  .sauna-set-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;color:var(--grey-text);}
-  .sauna-set-row label{flex:1;}
-  .sauna-set input{width:78px;padding:5px 6px;border:1px solid rgba(44,62,80,0.18);border-radius:6px;
-    font-size:14px;font-weight:700;color:var(--navy);text-align:right;background:#fff;}
-  .sauna-set-unit{width:96px;font-size:12px;}
-  .sauna-set .mode-btn{width:100%;margin-top:4px;}
-  .sauna-set-hint{font-size:11px;color:var(--grey-text);margin-top:6px;line-height:1.35;}
   .traffic-light.warm{background:var(--orange);}
   .log-day{
     font-size:12px;
@@ -3298,82 +3290,63 @@
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
             <li>Hlavní přepínač (Asistent): <b>vypnuto · zapnuto · zima</b>.</li>
-            <li>„Přebytek" = <b>přetok do sítě + nabíjení baterie</b>. Data ze střídače platí <b>10 min</b>.</li>
-            <li>Vypnutí po západu proběhne i bez dat ze střídače.</li>
+            <li>Přebytek = <b>přetok do sítě + nabíjení baterie</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Zima</div>
           <ul class="logic-list">
-            <li><b>Bazén i solinátor spí</b>, dluh se nedělá. <b>Bojler 1</b> topí z přebytku i bez bazénu.</li>
-            <li><b>Wallbox</b> jede pořád FAST, <b>klimatizace</b> drží nastavenou teplotu.</li>
-            <li><b>Světlo u bazénu</b> se drží zhasnuté — i to, co někdo zapnul mimo appku. Pod plachtou nemá co svítit.</li>
+            <li><b>Bazén a solinátor stojí.</b> Bojler 1 topí z přebytku i bez bazénu.</li>
+            <li><b>Wallbox</b> pořád FAST, <b>klimatizace</b> drží nastavenou teplotu.</li>
+            <li><b>Světlo u bazénu</b> se drží zhasnuté.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
-            <li>Okno <b>8:00</b> → hodina před západem. <b>Zapne</b> 2× přebytek nad <b>1850 W</b>, <b>vypne</b> 3× pod <b>−200 W</b> (po 30 min běhu).</li>
-            <li>Minimální SOC roste odpoledne: 12h <b>50 %</b> → 17h+ <b>90 %</b>.</li>
-            <li><b>Aspoň 2 h denně.</b> Co do 13:00 nevyjde z přebytku, dožene se natvrdo mezi <b>13:00 a 15:00</b> — bez ohledu na přebytek i SOC.</li>
-            <li><b>+24 h</b> jede natvrdo bez ohledu na cokoli (do 72 h); ruší to <b>Zrušit</b> nebo ruční OFF.</li>
+            <li>Okno <b>8:00</b> → hodina před západem.</li>
+            <li><b>Zapne</b> při přebytku nad <b>1850 W</b>, <b>vypne</b> pod <b>−200 W</b> (nejdřív po 30 min).</li>
+            <li>Minimální SOC: 12h <b>50 %</b> → 17h+ <b>90 %</b>.</li>
+            <li><b>Aspoň 2 h denně.</b> Co chybí, dožene natvrdo mezi <b>13:00 a 15:00</b>.</li>
+            <li><b>+24 h</b> jede natvrdo (do 72 h), ruší ho <b>Zrušit</b> nebo ruční OFF.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Sauna</div>
           <ul class="logic-list">
-            <li>Sauna, bazén a solinátor visí na <b>stejném jističi</b>.</li>
-            <li>Odběr nad prahem = topí → <b>bazén i solinátor jdou dolů</b> a zůstanou dole ještě nastavenou dobu po posledním nátopu.</li>
-            <li>Přebíjí to ruční zapnutí i bazénové „+24 h". Solinátor si nedoběhnutý čas přenese.</li>
-            <li>Do vteřiny vypíná <b>skript v Shelly</b>, appka je pomalejší pojistka.</li>
-            <li>Notifikace po <b>2 h</b> topení v kuse, pak připomínka po 6 h.</li>
-            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, světlo v sauně, žaluzie v ložnici, po západu i zahradu dole (ve dne ne). Ptá se oknem.</li>
+            <li>Když topí (nad <b>500 W</b>), <b>bazén a solinátor jdou dolů</b> a zůstanou dole <b>30 min</b> po posledním nátopu.</li>
+            <li>Platí i přes ruční zapnutí a „+24 h".</li>
+            <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
+            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, světlo v sauně, žaluzie v ložnici, po západu i zahradu dole (ve dne ne).</li>
           </ul>
-          <div class="sauna-set">
-            <div class="sauna-set-row">
-              <label for="saunaLimitInput">Topí od</label>
-              <input type="number" id="saunaLimitInput" min="50" max="10000" step="50" inputmode="numeric">
-              <span class="sauna-set-unit">W</span>
-            </div>
-            <div class="sauna-set-row">
-              <label for="saunaHoldInput">Držet vypnuté</label>
-              <input type="number" id="saunaHoldInput" min="5" max="240" step="5" inputmode="numeric">
-              <span class="sauna-set-unit">min po nátopu</span>
-            </div>
-            <button class="mode-btn" id="saunaSaveBtn" type="button">Uložit</button>
-            <div class="sauna-set-hint" id="saunaSaveHint">Odběr nad prahem se bere jako „sauna topí". Mezi nátopy klesá skoro k nule, proto se bazén se solinátorem drží dole ještě tu dobu po posledním nátopu. Práh ve skriptu uvnitř Shelly je vlastní — ten se mění zvlášť.</div>
-          </div>
-
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Oběhové čerpadlo</div>
           <ul class="logic-list">
             <li id="obehPlan">Rozvrh se načítá…</li>
-            <li>Relé se <b>samo vypne po 15 min</b>. Ruční <b>ON</b> jede vždycky a doběhne na ně.</li>
+            <li>Ruční <b>ON</b> jede <b>15 min</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Bojler 1 (TČ)</div>
           <ul class="logic-list">
-            <li>Okno <b>10:00</b> → hodina před západem, a jen <b>když běží bazén</b> (v zimě i bez něj).</li>
-            <li><b>Zapne</b> přebytek nad prahem podle SOC: &lt;50 % <b>2600 W</b> · &lt;80 % <b>2000 W</b> · jinak <b>1400 W</b>.</li>
-            <li><b>Vypne</b> odběr ze sítě pod <b>−300 W</b> nebo nádrž <b>nad 70 °C</b>.</li>
+            <li>Okno <b>10:00</b> → hodina před západem, jen <b>když běží bazén</b> (v zimě i bez něj).</li>
+            <li><b>Zapne</b> při přebytku podle SOC: &lt;50 % <b>2600 W</b> · &lt;80 % <b>2000 W</b> · jinak <b>1400 W</b>.</li>
+            <li><b>Vypne</b> při odběru ze sítě (<b>−300 W</b>) nebo nad <b>70 °C</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Solinátor — denní rozpočet hodin</div>
           <ul class="logic-list">
-            <li><b>Cíl</b> = 1 h + 1 h nad 20 °C + 1 h nad 25 °C, nejvýš <b>3 h</b>. Rozhoduje nejvyšší předpovídaná teplota dne.</li>
-            <li>Okno <b>11:00</b> → hodina před západem; mimo něj je vypnutý.</li>
-            <li><b>Jede s bazénem</b> — zapne se, jakmile bazén běží, nejpozději ve <b>13:00</b>. Když by se zbytek cíle jinak do okna nevešel, jede dřív.</li>
-            <li><b>+1 h / −1 h</b> se sčítají (strop 8 h); na další den přejde jen nevyužitý boost, nejvýš 3 h. <b>−1 den</b> se sčítá do 3 dnů.</li>
-            <li>Po restartu čeká na odběhnutý čas z telefonu (max 15 min). Relé spíná i čerpadlo.</li>
+            <li><b>Cíl</b> = 1 h + 1 h nad 20 °C + 1 h nad 25 °C předpovědi, nejvýš <b>3 h</b>.</li>
+            <li>Okno <b>11:00</b> → hodina před západem. <b>Jede s bazénem</b>, nejpozději ve <b>13:00</b>.</li>
+            <li><b>+1 h / −1 h</b> se sčítají (nejvýš 8 h), <b>−1 den</b> až na 3 dny.</li>
           </ul>
         </div>
 
@@ -3381,32 +3354,28 @@
           <div class="logic-h">Wallbox</div>
           <ul class="logic-list">
             <li><b>Pracovní den</b>: GREEN 0:00–4:00 · FAST 4:00–7:00 · pak podle přebytku. <b>Víkend</b> o 4 h později.</li>
-            <li><b>Podle přebytku:</b> 10 min nad <b>3,5 kW</b> → FAST, 10 min pod <b>2,5 kW</b> → ECO. Počítá se před autem.</li>
-            <li><b>Baterie pod 20 % po 12:00</b> → FAST až do ranního FAST okna. FVE už dnes nevyrobí, auto by stejně bralo ze sítě.</li>
-            <li><b>Zima</b> = pořád FAST. Ruční přepnutí drží <b>3 h</b>, automatika do toho nemluví.</li>
-            <li>Ve střídači nastav: ECO i GREEN <b>6 A</b>, „Battery charge EVC" Enable, Min SOC ~10 %.</li>
+            <li><b>Podle přebytku</b> (před autem): 10 min nad <b>3,5 kW</b> → FAST, 10 min pod <b>2,5 kW</b> → ECO.</li>
+            <li><b>Baterie pod 20 % po 12:00</b> → FAST až do ranního FAST okna.</li>
+            <li><b>Zima</b> = pořád FAST. Ruční přepnutí drží <b>3 h</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Klimatizace (Obývák, Ložnice, Elenka, Miky)</div>
           <ul class="logic-list">
-            <li>Zapíná se <b>per pokoj přepínačem</b>; hlavní vypínač automatiky se jich netýká.</li>
-            <li>Na „Vypnuto" jedou letním pravidlem, zimní držení teploty jen v poloze <b>Zima</b>.</li>
-            <li>Rozhoduje <b>nástěnné Shelly čidlo</b> v pokoji, ne čidlo v jednotce (to visí u stropu). Ticho čidla není chyba — hlásí jen při změně.</li>
-            <li>Jezdec: obývák <b>22–26 °C</b>, ostatní tři pokoje jeden společný <b>18–25 °C</b>.</li>
+            <li>Zapíná se <b>přepínačem u každého pokoje</b>, řídí ji nástěnné čidlo v pokoji.</li>
+            <li>Jezdec: obývák <b>22–26 °C</b>, ostatní pokoje <b>18–25 °C</b>.</li>
             <li><b>Léto:</b> nad mezí chladí na <b>mez − 2 °C</b>, vypne pod <b>mez − 1 °C</b>; obývák nejvýš na 22 °C.</li>
-            <li><b>Zima:</b> jezdec je cíl <b>18–24 °C</b>, zapne při rozdílu <b>2 °C</b>, vypne do <b>1 °C</b>.</li>
-            <li>Ložnice, Elenka a Miky <b>tiše</b>, obývák naplno. Po přepnutí drží <b>20 min</b>.</li>
-            <li><b>Jakýkoliv zásah přepínač shodí</b> (tlačítka, ovladač, časovač, asistent); vypnutí přepínače vypne i klimatizaci.</li>
+            <li><b>Zima</b> (jen v poloze Zima): topí na <b>18–24 °C</b>, zapne při rozdílu <b>2 °C</b>, vypne do <b>1 °C</b>.</li>
+            <li>Ložnice, Elenka a Miky jedou <b>tiše</b>, obývák naplno.</li>
+            <li><b>Ruční zásah přepínač vypne.</b></li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Ruční zásah vs. automatika</div>
           <ul class="logic-list">
-            <li>Ruční ON i OFF bojleru, bazénu a solinátoru má <b>30 min přednost</b>, pak převezme automatika.</li>
-            <li>Dokdy odklad platí je vidět pod tlačítky i v logu.</li>
+            <li>Ruční ON i OFF bojleru, bazénu a solinátoru má <b>30 min přednost</b>.</li>
             <li>Přebijí ho: nádrž <b>nad 70 °C</b>, <b>sauna</b> a solinátorové <b>„−1 den"</b>.</li>
           </ul>
         </div>
@@ -3414,26 +3383,32 @@
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Priorita auta</div>
           <ul class="logic-list">
-            <li>Bazén a bojler dostanou jen přebytek <b>nad autem</b>; rezerva (až 3,4 kW) se drží, jen když se auto rozjíždí.</li>
+            <li>Bazén a bojler dostanou jen přebytek <b>nad autem</b>.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Korekce podle předpovědi</div>
           <ul class="logic-list">
-            <li><b>Volný přebytek</b> = (odhad výroby − vyrobeno) − (co chybí do plné baterie, 11,6 kWh).</li>
-            <li>☀️ <b>Silný den</b> (≥ 15 kWh): bazén SOC <b>−15 %</b>, bojler práh <b>−400 W</b>.</li>
+            <li>☀️ <b>Silný den</b> (≥ 15 kWh volného přebytku): bazén SOC <b>−15 %</b>, bojler <b>−400 W</b>.</li>
             <li>☁️ <b>Slabý den</b> (≤ 5 kWh a SOC &lt; 85 %): bazén SOC <b>+10 %</b>, bojler <b>+400 W</b>.</li>
-            <li>Nad SOC 85 % se neutahuje; bez dat z Infigy se korekce neuplatní.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec" data-rezim="full">
+          <div class="logic-h">Nejsme doma</div>
+          <ul class="logic-list">
+            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie a vypne světla, klimu, saunu i oběhové čerpadlo.</li>
+            <li>Dokud jsme pryč, drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
           </ul>
         </div>
 
         <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
-            <li>„Západ slunce" v rozvrhu znamená <b>západ + tohle zpoždění</b> — venku je ještě dlouho vidět.</li>
-            <li>O <b>prázdninách</b> (tlačítko na Asistentovi) se den počítá jako neděle, takže jede víkendová sada.</li>
-            <li>Rozvrh mlčí na <b>vypnuto</b> i když <b>jsme pryč</b>; po nasazení dožene, co propásl, do 20 min.</li>
+            <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
+            <li>O <b>prázdninách</b> jede víkendová sada.</li>
+            <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
           <div class="zapad-row">
             <span class="zapad-label">Zpoždění po západu</span>
@@ -3449,16 +3424,8 @@
           <div class="logic-h">Data, notifikace, časovače</div>
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
-            <li>Na Shelly jde jeden dotaz za <b>1 s</b>; <b>Aktualizovat</b> načte všechno hned.</li>
-            <li>Grafy na FVE a Wallboxu mají jednu osu a jdou posunout prstem <b>4 dny</b> zpátky; po minutě se vrátí na teď.</li>
-            <li>Data starší než den se ukládají po 6 min, čerstvý den po 2 min. Denní kWh se počítají jen z dat do 10 min stáří.</li>
-            <li>Notifikace: 🔋 baterie <b>99 %</b> (1× denně) · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 2 h · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
-            <li>Každá hláška přijde jednou, odjistí se, až stav pomine, a jde i <b>do logu</b>. Log si pamatuje <b>týden</b>.</li>
-            <li>Hlídá se <b>každé relé i měřák zvlášť</b>, k tomu Solax, wallbox, Infigy, klima, počasí a sauna.</li>
-            <li>Ticho <b>15 min</b> = červený řádek a notifikace; dokud výpadek trvá, řádek jen ukazuje <b>rozsah</b> (11:15–12:10).</li>
-            <li><b>Nedostupné relé:</b> šedý semafor, vyčárkovaný příkon, poslední známý stav; jeho odběr spadne do spotřeby domu.</li>
-            <li>Relé se v Shelly <b>sama vypnou</b> (bazén a bojler po 15 min), běžícímu appka posílá ON 4× častěji. Vypnutému už ne.</li>
-            <li><b>Časovače přežijí nasazení</b>, doběhlé se nevrací. „Všechny žaluzie" platí pro tu stránku, kde ho zakládáš.</li>
+            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 2 h · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
+            <li>Log si pamatuje <b>týden</b>. Časovače přežijí nasazení.</li>
           </ul>
         </div>
       </div>
@@ -8662,11 +8629,9 @@ let saunaData = null;
 let saunaDaysData = [];
 let saunaEnabledFlag = null;   // null = ještě nevíme, false = chybí měřák
 
-const saunaLimitInput = document.getElementById('saunaLimitInput');
-const saunaHoldInput = document.getElementById('saunaHoldInput');
-const saunaSaveBtn = document.getElementById('saunaSaveBtn');
-const saunaSaveHint = document.getElementById('saunaSaveHint');
-const SAUNA_SET_HINT = 'Práh ve skriptu uvnitř Shelly je vlastní — ten se mění zvlášť.';
+// Práh 500 W a 30 min jsou natvrdo na serveru. Záloha dřívějšího nastavení
+// z telefonu už nemá kam jít.
+try { localStorage.removeItem('saunaSet'); } catch {}
 
 function saunaBlokujeUi() {
   return !!(saunaData && saunaData.blockUntil > Date.now());
@@ -8701,8 +8666,6 @@ function renderSauna() {
   saunaLightEl.className = 'traffic-light' + (topi ? ' on' : (blok ? ' warm' : ' off'));
   saunaStateEl.textContent = topi ? 'topí' : (blok ? 'v pauze' : 'vypnutá');
   saunaPowerEl.textContent = (d.powerW / 1000).toFixed(1).replace('.', ',') + ' kW';
-  // Práh, od kterého se odběr počítá jako „topí", patří k políčku na Logice
-  // automatiky, kde se nastavuje — na kartě to byla jen věta navíc
   saunaHintEl.textContent = d.since ? `Topí ${fmtSolDur(Date.now() - d.since)}` : '';
   renderSaunaMeta();
 }
@@ -8733,72 +8696,6 @@ function renderSaunaMeta() {
   saunaMetaEl.appendChild(veta);
 }
 setInterval(renderSauna, 30000);   // „topí 1:20" musí běžet i bez zprávy ze serveru
-
-// Meze sauny (práh a jak dlouho držet relé dole) se nastavují na stránce Logika
-// automatiky. Do políček se nesahá, když v nich zrovna někdo píše.
-function renderSaunaSet() {
-  if (!saunaLimitInput || !saunaHoldInput) return;
-  const d = saunaData || {};
-  if (document.activeElement !== saunaLimitInput && typeof d.limitW === 'number') {
-    saunaLimitInput.value = d.limitW;
-  }
-  if (document.activeElement !== saunaHoldInput && typeof d.holdMin === 'number') {
-    saunaHoldInput.value = d.holdMin;
-  }
-}
-
-function saveSaunaSetLocal() {
-  try {
-    const d = saunaData || {};
-    if (typeof d.limitW === 'number' && typeof d.holdMin === 'number') {
-      localStorage.setItem('saunaSet', JSON.stringify({ limitW: d.limitW, holdMin: d.holdMin }));
-    }
-  } catch {}
-}
-function loadSaunaSetLocal() {
-  try {
-    const o = JSON.parse(localStorage.getItem('saunaSet') || 'null');
-    return o && typeof o.limitW === 'number' && typeof o.holdMin === 'number' ? o : null;
-  } catch { return null; }
-}
-// Server po deployi startuje s výchozími mezemi — telefon mu vrátí ty poslední
-async function maybeRestoreSaunaSet(server) {
-  const local = loadSaunaSetLocal();
-  if (!local || !server) return;
-  if (local.limitW === server.limitW && local.holdMin === server.holdMin) return;
-  try {
-    await fetch('/api/sauna/limits/restore', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(local)
-    });
-  } catch {}
-}
-
-if (saunaSaveBtn) {
-  saunaSaveBtn.addEventListener('click', async () => {
-    const limitW = Number(saunaLimitInput.value);
-    const holdMin = Number(saunaHoldInput.value);
-    saunaSaveBtn.disabled = true;
-    try {
-      const res = await fetch('/api/sauna/limits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ limitW, holdMin })
-      });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
-      if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
-      saunaData = { ...(saunaData || {}), limitW: data.limitW, holdMin: data.holdMin };
-      renderSauna();
-      renderSaunaSet();
-      saveSaunaSetLocal();
-      saunaSaveHint.textContent = `Uloženo: topí od ${data.limitW} W, drží ${data.holdMin} min. ` + SAUNA_SET_HINT;
-    } catch (err) {
-      saunaSaveHint.textContent = err.message;
-    }
-    saunaSaveBtn.disabled = false;
-  });
-}
 
 const saunaDnyListEl = document.getElementById('saunaDnyList');
 
@@ -10645,9 +10542,6 @@ function applySnapshot(snap) {
   bezpecne(renderHuum);
   heatpumpData = snap.heatpump || null;
   bezpecne(renderHeatpump);
-  bezpecne(renderSaunaSet);
-  saveSaunaSetLocal();
-  maybeRestoreSaunaSet(snap.sauna);
   {
     monthsData = mergeMonths(snap.months || [], loadMonthsLocal());
     bezpecne(renderMonths);
@@ -11072,8 +10966,6 @@ function connectStream() {
   es.addEventListener('sauna', e => {
     saunaData = JSON.parse(e.data).sauna || null;
     renderSauna();
-    renderSaunaSet();
-    saveSaunaSetLocal();
     renderManualHold();   // „vypnuto saunou" u bazénu a solinátoru
   });
   es.addEventListener('months', e => {

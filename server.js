@@ -70,8 +70,8 @@ const TUYA_HEATPUMP_ID = process.env.TUYA_HEATPUMP_ID || '281020088caab5e8f028';
 const tuyaEnabled = !!(TUYA_ACCESS_ID && TUYA_ACCESS_SECRET && TUYA_HEATPUMP_ID);
 
 // Výchozí meze; obojí se dá přenastavit z appky (stránka Logika automatiky)
-const SAUNA_ON_W = Number(process.env.SAUNA_ON_W) || 500;      // nad tímhle sauna „topí"
-const SAUNA_HOLD_MIN = Number(process.env.SAUNA_HOLD_MIN) || 30; // držet vypnuté po posledním nátopu
+const SAUNA_ON_W = 500;       // nad tímhle sauna „topí" (natvrdo, v appce se nenastavuje)
+const SAUNA_HOLD_MIN = 30;    // držet vypnuté po posledním nátopu
 const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení notifikace
 const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
 const SAUNA_DAYS_MAX = 7;
@@ -1932,44 +1932,6 @@ function denniRestore(pole, strop) {
 app.post('/api/wbdays/restore', denniRestore('wbDays', 300000));
 app.post('/api/pool-days/restore', denniRestore('poolDays', 300000));
 app.post('/api/usage-days/restore', denniRestore('usageDays', 500000));
-
-// Meze sauny se dají přenastavit z appky (stránka Logika automatiky). Práh ve
-// skriptu uvnitř Shelly je vlastní — ten se musí změnit ručně, viz SAUNA.md.
-app.post('/api/sauna/limits', (req, res) => {
-  if (!requireAuth(req, res)) return;
-  const b = req.body || {};
-  let changed = false;
-  const limitW = Number(b.limitW);
-  if (Number.isFinite(limitW) && limitW >= 50 && limitW <= 10000 && limitW !== state.saunaLimitW) {
-    state.saunaLimitW = Math.round(limitW); changed = true;
-  }
-  const holdMin = Number(b.holdMin);
-  if (Number.isFinite(holdMin) && holdMin >= 5 && holdMin <= 240 && holdMin !== state.saunaHoldMin) {
-    state.saunaHoldMin = Math.round(holdMin); changed = true;
-  }
-  if (changed) {
-    addLog(`Sauna: práh ${state.saunaLimitW} W, drží ${state.saunaHoldMin} min po nátopu`);
-    broadcast('sauna', { sauna: saunaPayload() });
-  }
-  res.json({ ok: true, limitW: state.saunaLimitW, holdMin: state.saunaHoldMin });
-});
-
-// Po deployi server startuje s výchozími mezemi — telefon mu vrátí poslední
-// nastavené (bez tokenu, stejně jako ostatní /restore).
-app.post('/api/sauna/limits/restore', (req, res) => {
-  const b = req.body || {};
-  let changed = false;
-  const limitW = Number(b.limitW);
-  if (Number.isFinite(limitW) && limitW >= 50 && limitW <= 10000 && limitW !== state.saunaLimitW) {
-    state.saunaLimitW = Math.round(limitW); changed = true;
-  }
-  const holdMin = Number(b.holdMin);
-  if (Number.isFinite(holdMin) && holdMin >= 5 && holdMin <= 240 && holdMin !== state.saunaHoldMin) {
-    state.saunaHoldMin = Math.round(holdMin); changed = true;
-  }
-  if (changed) broadcast('sauna', { sauna: saunaPayload() });
-  res.json({ ok: true, limitW: state.saunaLimitW, holdMin: state.saunaHoldMin });
-});
 
 // Rychlá cesta ze Shelly: webhook (nebo skript) u sauny sem střelí, jakmile odběr
 // přeskočí práh, a blokace naskočí hned — nečeká se na poller (až 2 min). Bez tokenu,
@@ -9572,7 +9534,6 @@ const STORE_TIMEOUT_MS = 8000;
 const STORE_POSTS = [
   '/api/automation/restore',
   '/api/tempauto/restore',
-  '/api/sauna/limits/restore',
   '/api/pool/force/restore',
   '/api/pool/temp/restore',
   '/api/away/restore',
@@ -9616,7 +9577,6 @@ function storeSnapshot() {
       tempAutoWinter: state.tempAutoWinter,
       tempAutoWinterRooms: state.tempAutoWinterRooms
     },
-    '/api/sauna/limits/restore': { limitW: state.saunaLimitW, holdMin: state.saunaHoldMin },
     '/api/pool/force/restore': { until: state.poolForce.until },
     '/api/pool/temp/restore': { c: state.poolTemp.c, at: state.poolTemp.at },
     '/api/away/restore': { since: (state.away && state.away.since) || 0 },

@@ -225,7 +225,7 @@ nadpis('6) Nastavitelné meze');
 }
 {
   const h = build();
-  h.state.saunaLimitW = 1200;            // přenastaveno za běhu z appky
+  h.state.saunaLimitW = 1200;            // jiný práh za běhu
   h.api.updateSauna(1000);
   check('změna prahu platí hned', h.api.saunaTopi(), 'false');
   h.api.recordSaunaDay(1000, 1);

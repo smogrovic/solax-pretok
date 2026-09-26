@@ -21,8 +21,6 @@ o svůj denní rozpočet nepřijde — nedoběhnutý čas se přenáší na dal�
 |---|---|---|
 | `SAUNA_DEVICE_ID` | ID toho 3EM v Shelly Cloud. Je zapojený a v kódu je jako výchozí `d885ac0cfb80` (Shelly 3EM-63 Gen3). | `d885ac0cfb80` |
 | `SAUNA_SERVER_URI` | Server Shelly Cloud, když je jiný než u ostatních zařízení | `SHELLY_SERVER_URI` |
-| `SAUNA_ON_W` | Od kolika wattů se bere, že sauna topí (dá se přenastavit v appce) | `500` |
-| `SAUNA_HOLD_MIN` | Kolik minut po posledním nátopu držet relé dole (taky v appce) | `30` |
 
 > **Pozor:** appka běží na Renderu, takže do domácí sítě nevidí — **lokální IP jí je
 > k ničemu**. Potřebuje ID zařízení ze Shelly Cloud (appka Shelly → zařízení →
@@ -81,9 +79,9 @@ Soubor: [`shelly/sauna.js`](shelly/sauna.js)
 3. Vlož obsah `shelly/sauna.js`. Nastavení nahoře už je vyplněné pro tuhle
    instalaci (bazén `192.168.188.131`, solinátor `192.168.188.171`, appka na
    Renderu). Měnit se dá:
-   - `PRAH_W` — stejné číslo jako `SAUNA_ON_W` na Renderu,
-   - `BLOKACE_MIN` — jak dlouho po nátopu držet relé dole (appka má vlastní,
-     stejně dlouhou blokaci),
+   - `PRAH_W` — stejné číslo jako práh v appce (natvrdo 500 W),
+   - `BLOKACE_MIN` — jak dlouho po nátopu držet relé dole (appka má vlastní
+     blokaci natvrdo 30 min),
    - `RELE` — kdyby se změnily IP adresy relé. Jsou to Gen3, takže poslouchají
      na `/rpc/Switch.Set`; staré Gen1 by potřebovaly `/relay/0?turn=off`.
 4. **Save** → **Start** a zaškrtni **Run on startup**, ať se skript pustí i po výpadku
@@ -97,8 +95,8 @@ by, aby byl Render chvíli nedostupný, a skript by na něj pálil dotaz co chv�
 Proto se zkusí jednou na začátku topení a pak nejvýš jednou za `KONTROLA_S`.
 Na rychlost vypnutí to nemá vliv — to je lokální a na appce nezávisí.
 
-**Práh je ve skriptu vlastní.** Když ho přenastavíš v appce, `PRAH_W` ve skriptu se
-tím **nezmění** — skript o appce neví. Měň ho na obou místech, ať se nerozejdou.
+**Práh je ve skriptu vlastní.** Appka má natvrdo 500 W, `PRAH_W` ve skriptu drž
+na stejném čísle — skript o appce neví.
 
 **Nutná podmínka:** obě relé musí mít v routeru **pevnou IP** (rezervace v DHCP).
 Jinak po restartu routeru skript střílí do prázdna. Když mají relé zapnuté heslo
@@ -116,9 +114,8 @@ podmínka „Active power over 500 W" a tři URL:
 - **Stránka Sauna**: semafor (zeleně topí, oranžově pauza mezi nátopy, červeně
   vypnutá, šedě nedostupný měřák), aktuální odběr a **spotřeba za 7 dní** (kWh
   a jak dlouho topila).
-- **Meze se nastavují v appce**: stránka *Logika automatiky* → sekce *Sauna* →
-  „Topí od (W)" a „Držet vypnuté (min po nátopu)". Hodnoty přežijí nasazení
-  (telefon je serveru vrátí).
+- **Meze jsou natvrdo**: topí od **500 W**, bazén a solinátor drží dole
+  **30 min** po posledním nátopu. V appce se nenastavují.
 - **Bazén a solinátor** mají pod tlačítky „Vypnuto saunou — vrátí se po 19:40".
 - Vypnutí kvůli sauně **přebíjí i ruční zapnutí a bazénové „+24 h"** — jistič má
   přednost před vším ostatním.

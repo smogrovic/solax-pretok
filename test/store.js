@@ -139,7 +139,7 @@ nadpis('2) Balení');
   check('runtime nese datum', snap.posts['/api/runtime/restore'].date, '2026-08-31');
   check('měsíční rozpad na síť se ukládá', snap.posts['/api/months/restore'].months[0].poolGrid, 4000);
   check('zimní režim se ukládá', snap.posts['/api/automation/restore'].mode, 'winter');
-  check('meze sauny taky', snap.posts['/api/sauna/limits/restore'].holdMin, 45);
+  check('meze sauny se už neukládají (jsou natvrdo)', '/api/sauna/limits/restore' in snap.posts, false);
   check('časovače mají razítko', typeof snap.posts['/api/timers/restore'].savedAt, 'number');
   check('přepínač wallboxu jde mimo endpointy', snap.primo.wbAuto, false);
   check('poslední povely relé taky', typeof snap.primo.lastCmd, 'object');
