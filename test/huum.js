@@ -68,7 +68,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
-         + ' huumSvetloZmenaMimo, saunaTimerTik, odhadNabehu, casovace: () => saunaTimers };'
+         + ' huumSvetloZmenaMimo, saunaTimerTik, odhadNabehu, saunaRelaceSleduj, saunaAktivni,'
+         + ' casovace: () => saunaTimers };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -893,6 +894,26 @@ nadpis('19) Zapnuto v — zdroj z kamen');
       Date.parse('2026-09-24T19:43:00Z'));
     check('  starý konec ne', h.zapisy.slice(-1)[0], 'Sauna: světlo zhaslo mimo appku (sauna netopí, 70 °C)');
   }
+
+nadpis('Saunování podle kamen a světla');
+{
+  const h = build();
+  h.state.saunaRelace = { od: 0, konec: 0 };
+  const sl = (pred, po, t) => h.api.saunaRelaceSleduj(pred, po, t);
+  sl({ heating: false, light: 0 }, { heating: true, light: 0 }, 1000);
+  check('zapnutí kamen začne saunování', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":0}');
+  sl({ heating: true, light: 0 }, { heating: true, light: 1 }, 2000);
+  check('  rozsvícení ho nezačne znovu', h.state.saunaRelace.od, 1000);
+  sl({ heating: true, light: 1 }, { heating: false, light: 1 }, 3000);
+  check('  vypnutá kamna se svítícím světlem ho neukončí', h.state.saunaRelace.konec, 0);
+  sl({ heating: false, light: 1 }, { heating: false, light: 0 }, 4000);
+  check('konec = až zhasne i světlo', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":4000}');
+  sl({ heating: false, light: 0 }, { heating: false, light: 1 }, 5000);
+  check('samotné světlo začne nové', JSON.stringify(h.state.saunaRelace), '{"od":5000,"konec":0}');
+  h.state.saunaRelace = { od: 0, konec: 0 };
+  sl({ error: null }, { heating: false, light: 0 }, 6000);
+  check('po restartu vypnutá sauna nic nezačne', JSON.stringify(h.state.saunaRelace), '{"od":0,"konec":0}');
+}
 
 konec();
 })().catch(err => {

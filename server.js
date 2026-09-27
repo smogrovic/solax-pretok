@@ -268,6 +268,7 @@ const state = {
   saunaHoldMin: SAUNA_HOLD_MIN, // jak dlouho po posledním nátopu držet relé dole
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
+  saunaRelace: { od: 0, konec: 0 },  // saunování podle HUUM: od zapnutí kamen/světla do vypnutí obojího
   saunaNahrev: { bezici: null, zaznamy: [] },  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),  // kdy se co naposledy odťuklo + přepínače popelnic
@@ -4523,11 +4524,33 @@ app.post('/api/zapad-delay/restore', (req, res) => {
 // nátopu sauny neuplynulo zadaných pár minut, tik pravidlo přeskočí a NEZAPÍŠE ho
 // jako splněné — zkusí to zas za minutu. Ložnice se tím po západu zavře jen tehdy,
 // když se zrovna nesaunuje, jinak až po sauně.
+//
+// S kamny HUUM se čeká, dokud jsou zapnutá kamna nebo světlo v sauně, a pak ještě
+// zadané minuty od toho, co z nich zhaslo později. Bez HUUM zbývá jen odběr z měřáku.
 function rozvrhOdlozeno(p, at = Date.now()) {
   if (!p.odloz || p.odloz.typ !== 'sauna') return false;
+  const cekej = p.odloz.minut * 60000;
+  if (huumEnabled) {
+    const h = state.huum || {};
+    // Po restartu, dokud kamna neodpověděla, se čeká — radši o chvíli později než do sauny
+    if (!h.fetchedAt) return true;
+    if (saunaAktivni(h)) return true;
+    const konec = (state.saunaRelace && state.saunaRelace.konec) || 0;
+    return !!konec && at < konec + cekej;
+  }
   const naposled = (state.sauna && state.sauna.lastHeatAt) || 0;
   if (!naposled) return false;
-  return at < naposled + p.odloz.minut * 60000;
+  return at < naposled + cekej;
+}
+
+// Po sauně znovu: když saunování začalo AŽ po tom, co pravidlo proběhlo (příprava
+// sauny ložnici vytáhne), pravidlo se po sauně pustí ještě jednou — i po půlnoci.
+// Okno hlídá, aby ranní sauna nezatáhla ložnici podle včerejšího večera.
+const ROZVRH_PO_SAUNE_OKNO_MS = 8 * 3600000;
+function rozvrhPoSaune(p) {
+  if (!p.zapnuto || !p.odloz || p.odloz.typ !== 'sauna' || !p.spustenoAt) return false;
+  const r = state.saunaRelace;
+  return !!(r && r.od > p.spustenoAt && r.od - p.spustenoAt <= ROZVRH_PO_SAUNE_OKNO_MS);
 }
 
 // Pořadí v appce je chronologické, ne podle toho, jak pravidla vznikla. Čas u slunce
@@ -4548,6 +4571,7 @@ function rozvrhSerad(at = Date.now()) {
 
 function rozvrhSpustit(p, at = Date.now()) {
   if (!p.zapnuto) return false;
+  if (rozvrhPoSaune(p)) return !rozvrhOdlozeno(p, at);
   const den = rozvrhDenIndex(at);
   if (den < 0 || !p.dny[den]) return false;
   if (p.spustenoDne === pragueDateString(at)) return false;
@@ -4613,15 +4637,19 @@ async function runBlindSchedule(at = Date.now()) {
   const dnes = pragueDateString(at);
   let neco = false;
   for (const p of blindRules) {
+    const poSaune = rozvrhPoSaune(p);
     if (!rozvrhSpustit(p, at)) continue;
-    // Zapsat PŘED povelem: TaHoma odpovídá pomalu a další tik by pravidlo pustil znovu
-    p.spustenoDne = dnes;
+    // Zapsat PŘED povelem: TaHoma odpovídá pomalu a další tik by pravidlo pustil znovu.
+    // Opakování po sauně den neodškrtává — po půlnoci by jinak propadl dnešní večer.
+    if (!poSaune) p.spustenoDne = dnes;
+    p.spustenoAt = at;
     neco = true;
     const v = await rozvrhProved(p);
+    const kdy = poSaune ? ' po sauně' : '';
     if (v.chyby.length) {
-      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}`, 'error');
+      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}`, 'error');
     } else {
-      addLog(`Rozvrh žaluzií: ${rozvrhPopis(p)} — hotovo (${v.ok})`);
+      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — hotovo (${v.ok})`);
     }
   }
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
@@ -4659,7 +4687,7 @@ async function rozvrhStavTed(at = Date.now()) {
   }
   // Zapsat PŘED povely, stejně jako tik — ten by jinak pustil dnešní pravidla znovu
   const den = pragueDateString(at);
-  for (const p of pouzite) p.spustenoDne = den;
+  for (const p of pouzite) { p.spustenoDne = den; p.spustenoAt = at; }
   let ok = 0;
   const chyby = [];
   for (const [cil, { poloha, naklon }] of cile) {
@@ -6978,7 +7006,21 @@ async function fetchHuum() {
 //
 // Uložit a rozeslat se musí i stav ZE ČTENÍ: karta v appce může být o dvě minuty
 // pozadu a po klepnutí na tlačítko má ukazovat pravdu, i když se nic nepřepínalo.
+// Saunování podle kamen HUUM: začne zapnutím kamen NEBO světla a skončí, až je
+// vypnuté obojí. Termostat mezitím kamna nechává i dvě hodiny odpočívat (sauna drží
+// teplo setrvačností) — proto se konec nebere z odběru, ale z vypnutí kamen/světla.
+function saunaAktivni(h) {
+  return !!(h && (h.heating === true || h.light));
+}
+function saunaRelaceSleduj(pred, po, now = Date.now()) {
+  const byla = saunaAktivni(pred);
+  const je = saunaAktivni(po);
+  if (je && !byla) state.saunaRelace = { od: now, konec: 0 };
+  else if (!je && byla) state.saunaRelace = { od: (state.saunaRelace && state.saunaRelace.od) || 0, konec: now };
+}
+
 function huumUloz(d) {
+  saunaRelaceSleduj(state.huum, d);
   state.huum = { ...d, error: null, fetchedAt: new Date().toISOString() };
   broadcast('huum', { huum: huumPayload() });
   return d;
@@ -7032,6 +7074,7 @@ async function pollHuum() {
   try {
     const pred = state.huum;
     state.huum = { ...(await fetchHuum()), error: null, fetchedAt: new Date().toISOString() };
+    saunaRelaceSleduj(pred, state.huum);
     huumSvetloZmenaMimo(pred, state.huum);
     checkHuumNahrata(state.huum);
     nahrevVzorek(state.huum.temperature);

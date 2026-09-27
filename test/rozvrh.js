@@ -17,7 +17,7 @@ const CODE = between('// ---------- Rozvrh žaluzií (opakovaná pravidla místo
 const PO_6 = Date.UTC(2026, 8, 14, 4, 0);
 const H = 3600000, MIN = 60000, DEN = 86400000;
 
-function build({ auto = true, pryc = false, pocasi = {} } = {}) {
+function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
   const h = { zlobi: null };     // cíl, na kterém TaHoma spadne
   const povely = [];
   const logy = [];
@@ -31,7 +31,7 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'scheduleEvery',
     'pragueTime', 'pragueDateString', 'naMinuty', 'validTimerTime',
-    'assistantControlBlinds', 'autoRunning', 'awayActive',
+    'assistantControlBlinds', 'autoRunning', 'awayActive', 'huumEnabled', 'saunaAktivni',
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
@@ -60,7 +60,9 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
       return `${target}: hotovo.`;
     },
     () => auto,
-    () => pryc
+    () => pryc,
+    huum,
+    h => !!(h && (h.heating === true || h.light))
   );
   return Object.assign(h, { api, povely, logy, routy, state });
 }
@@ -320,6 +322,83 @@ nadpis('6d) Odklad kvůli sauně');
     d.api.rozvrhSpustit(p, zapad + 2 * H), true);
   check('  ale neodložené ano',
     d.api.rozvrhSpustit(pravidlo({ kdy: { typ: 'zapad', posunMin: 0 } }), zapad + 2 * H), false);
+}
+
+nadpis('6d2) Odklad podle kamen a světla HUUM, po sauně znovu');
+{
+  // Termostat nechává kamna i dvě hodiny odpočívat — odběr nerozhoduje. Čeká se,
+  // dokud jsou zapnutá kamna nebo světlo, a pak 30 min od toho, co zhaslo později.
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);          // 20:15
+  const s = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  s.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  s.state.huum = { heating: true, light: 1, fetchedAt: 'x' };
+  s.state.sauna.lastHeatAt = zapad - 3 * H;             // odběr naposled dávno — nevadí
+  s.state.saunaRelace = { od: zapad - H, konec: 0 };
+  await s.api.runBlindSchedule(zapad + 90 * MIN);
+  check('kamna zapnutá → ložnice čeká, i když dávno netopila', s.povely.length, 0);
+  s.state.huum = { heating: false, light: 1, fetchedAt: 'x' };
+  await s.api.runBlindSchedule(zapad + 100 * MIN);
+  check('kamna vypnutá, světlo svítí → pořád čeká', s.povely.length, 0);
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  s.state.saunaRelace = { od: zapad - H, konec: zapad + 110 * MIN };
+  await s.api.runBlindSchedule(zapad + 139 * MIN);
+  check('29 min po zhasnutí ještě ne', s.povely.length, 0);
+  await s.api.runBlindSchedule(zapad + 140 * MIN);
+  check('30 min po tom, co zhaslo později, se zatáhne', s.povely.join(','), 'Ložnice:down:100');
+}
+{
+  // Po restartu, dokud HUUM neodpověděl, se nezatahuje naslepo
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const r = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  r.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  r.state.huum = { error: null };
+  await r.api.runBlindSchedule(zapad);
+  check('bez dat z kamen se čeká', r.povely.length, 0);
+  r.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  await r.api.runBlindSchedule(zapad + MIN);
+  check('  a s daty bez sauny se zatáhne', r.povely.length, 1);
+}
+{
+  // Ložnice se zatáhla po západu, pak přišla sauna (příprava ložnici vytáhne).
+  // Po sauně se má zatáhnout znovu — i když pravidlo dnes už jednou proběhlo.
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);          // 20:15
+  const s = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  s.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 }, dny: [true, true, true, true, true, true, true],
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  await s.api.runBlindSchedule(zapad);
+  check('po západu zatáhne', s.povely.length, 1);
+  s.state.huum = { heating: true, light: 1, fetchedAt: 'x' };
+  s.state.saunaRelace = { od: zapad + 30 * MIN, konec: 0 };
+  await s.api.runBlindSchedule(zapad + 2 * H);
+  check('během sauny nic', s.povely.length, 1);
+  // Sauna skončila po půlnoci (vypnuto v 0:10)
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  s.state.saunaRelace = { od: zapad + 30 * MIN, konec: zapad + 235 * MIN };
+  await s.api.runBlindSchedule(zapad + 250 * MIN);
+  check('15 min po sauně ještě ne', s.povely.length, 1);
+  await s.api.runBlindSchedule(zapad + 265 * MIN);
+  check('30 min po sauně znovu zatáhne (i po půlnoci)', s.povely.join(','), 'Ložnice:down:100,Ložnice:down:100');
+  check('  a v Logu je, že po sauně', s.logy.some(t => /^Rozvrh žaluzií po sauně/.test(t)), true);
+  await s.api.runBlindSchedule(zapad + 280 * MIN);
+  check('  jen jednou', s.povely.length, 2);
+  // Dnešní večer (po půlnoci je nový den) tím nepropadl
+  await s.api.runBlindSchedule(zapad + 24 * H);
+  check('další večer se zatáhne normálně', s.povely.length, 3);
+}
+{
+  // Ranní sauna po večerním zatažení ložnici nezatahuje
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const s = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  s.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 }, dny: [true, true, true, true, true, true, true],
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  await s.api.runBlindSchedule(zapad);
+  s.state.saunaRelace = { od: zapad + 14 * H, konec: zapad + 15 * H };   // 10:15–11:15
+  await s.api.runBlindSchedule(zapad + 16 * H);
+  check('ranní sauna ložnici nezatáhne', s.povely.length, 1);
 }
 
 nadpis('6e) Zítra jsou prázdniny');
