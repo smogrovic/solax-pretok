@@ -3014,7 +3014,7 @@
           <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
           <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
-        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. 10 min předem se rozsvítí světlo v sauně, vytáhnou žaluzie v ložnici a po západu slunce zahrada dole.</div>
+        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. Na cíl −10 °C se vytáhnou žaluzie v ložnici, na cíl −5 °C se rozsvítí světlo v sauně a po západu slunce zahrada dole.</div>
         <div class="timer-list" id="huumTimerList"></div>
       </div>
 
@@ -3319,9 +3319,10 @@
           <ul class="logic-list">
             <li>Když topí (nad <b>500 W</b>), <b>bazén a solinátor jdou dolů</b> a zůstanou dole <b>30 min</b> po posledním nátopu.</li>
             <li>Platí i přes ruční zapnutí a „+24 h".</li>
-            <li><b>Ložnice</b> se po západu zatáhne až <b>30 min</b> po vypnutí kamen i světla v sauně (co zhasne později) — i podruhé, když ji sauna vytáhla.</li>
+            <li>Při nahřívání: <b>cíl −10 °C</b> → žaluzie v ložnici nahoru, <b>cíl −5 °C</b> → světlo v sauně a po západu zahrada dole.</li>
+            <li><b>Ložnice</b> se po západu zatáhne <b>15 min</b> po vypnutí kamen i světla v sauně (co zhasne později) — i podruhé, když ji sauna vytáhla.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
-            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, světlo v sauně, žaluzie v ložnici, po západu i zahradu dole (ve dne ne).</li>
+            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, zbytek podle teploty výš.</li>
           </ul>
         </div>
 
@@ -9166,12 +9167,12 @@ if (prazdninyBtnEl) {
 const POTVRZ_SCENY = {
   otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 10 },
   // Těch 80 °C musí sedět se `SCENA_SAUNA_C` na serveru — hlídá to test/staticka.js.
-  // Okno vypisuje všechny kroky: scéna sahá na čtyři věci naráz a z názvu
-  // „Zapni saunu" by nikdo nečekal, že se otevřou žaluzie v ložnici.
+  // Okno vypisuje i to, co přijde samo: z názvu „Zapni saunu" by nikdo nečekal,
+  // že se pak otevřou žaluzie v ložnici.
   sauna: {
     nadpis: 'Zapnout saunu?',
-    text: 'Kamna se rozjedou na 80 °C, rozsvítí se v sauně, vytáhnou se žaluzie '
-        + 'v ložnici a po západu slunce i zahrada dole. Zkontroluj, že na kamnech nic neleží.',
+    text: 'Kamna se rozjedou na 80 °C. Na 70 °C se vytáhnou žaluzie v ložnici, na 75 °C se rozsvítí '
+        + 'v sauně a po západu slunce i zahrada dole. Zkontroluj, že na kamnech nic neleží.',
     sekundy: 15
   }
 };

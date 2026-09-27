@@ -401,6 +401,27 @@ nadpis('6d2) Odklad podle kamen a světla HUUM, po sauně znovu');
   check('ranní sauna ložnici nezatáhne', s.povely.length, 1);
 }
 
+{
+  // Starší záloha nese 30 min — po obnově platí jednotných 15
+  const h = build();
+  const o = h.api.rozvrhOcisti({ dny: [true, true, true, true, true, true, true], kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] });
+  check('odklad ze zálohy se převede na 15 min', o.odloz.minut, 15);
+}
+{
+  // 15 min po vypnutí kamen i světla (dřív 30)
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const s = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  s.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 15 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  s.state.saunaRelace = { od: zapad - H, konec: zapad + 10 * MIN };
+  await s.api.runBlindSchedule(zapad + 24 * MIN);
+  check('14 min po sauně ještě ne', s.povely.length, 0);
+  await s.api.runBlindSchedule(zapad + 25 * MIN);
+  check('15 min po sauně zatáhne', s.povely.length, 1);
+}
+
 nadpis('6e) Zítra jsou prázdniny');
 {
   // Prázdninový den se počítá jako neděle: pravidla Po–Pá nespadnou, víkendová ano.
@@ -461,7 +482,7 @@ nadpis('6f) Předvyplněný rozvrh');
   check('  a dveře sjedou do 20 %',
     podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
     'Obývák Dveře:20');
-  check('ložnice má odklad na saunu', podle('Ložnice po západu').odloz.minut, 30);
+  check('ložnice má odklad na saunu 15 min', podle('Ložnice po západu').odloz.minut, 15);
 }
 
 nadpis('6f2) Chronologické pořadí');

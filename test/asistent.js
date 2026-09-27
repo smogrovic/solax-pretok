@@ -27,6 +27,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     away: { since: 0 },
     autoMode: 'on',
     tempAuto: { obyvak: false, loznice: false },
+    saunaRelace: { od: 1, konec: 0, loznice: false, svetla: false },
     assistantLog: [],
     huum: { doorClosed: dvere }
   };
@@ -41,7 +42,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
     'assistantSetTerasaLight', 'DEVICE_LABELS', 'getBlinds', 'cz',
     'delay', 'autoRunning', 'rozvrhStavTed', 'runObehSchedule', 'runAutomation',
-    CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
+    CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload, saunaPripravaTik,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
     state,
@@ -115,46 +116,32 @@ nadpis('1) Seznam tlačítek');
 
 nadpis('2) Zapni saunu');
 {
-  // Ve dne se venku svítit nemá — je světlo a stejně se to zapomene zhasnout
-  const h = build({ poZapadu: false });
-  const reply = await h.api.SCENA_FN.sauna();
-  check('zapne saunu na 80 °C', h.akce[0], 'huum:start:80');
-  check('  a rozsvítí v ní', h.akce[1], 'huumsvetlo:on');
-  check('  vytáhne žaluzie v ložnici', h.akce[2], 'zaluzie:ložnice:up');
-  check('  a zahradu dole nechá být', /nezapadlo slunce/.test(reply), true);
-  check('  řekne, na kolik topí', /Sauna topí na 80 °C/.test(reply), true);
-  check('  i že v sauně svítí', /Světlo v sauně svítí/.test(reply), true);
-  check('a je to v logu', h.logy.some(t => /zapnuta na 80 °C \(tlačítko\)/.test(t)), true);
-}
-{
+  // Tlačítko jen zatopí. Ložnici a světla dodělá příprava podle teploty (2b)
   const h = build({ poZapadu: true });
-  await h.api.SCENA_FN.sauna();
-  check('po západu rozsvítí i zahradu dole', h.akce.join(' | '),
-    'huum:start:80 | huumsvetlo:on | zaluzie:ložnice:up | lightDole:on (tlačítko sauna)');
+  const reply = await h.api.SCENA_FN.sauna();
+  check('zapne jen kamna na 80 °C', h.akce.join(' | '), 'huum:start:80');
+  check('  řekne, na kolik topí', /Sauna topí na 80 °C/.test(reply), true);
+  check('  a kdy přijde ložnice a světla', /Ložnice se vytáhne na 70 °C, světla na 75 °C/.test(reply), true);
+  check('a je to v logu', h.logy.some(t => /zapnuta na 80 °C \(tlačítko\)/.test(t)), true);
 }
 {
   // Dveře jsou pojistka v jednotce. Zkoušet to naslepo by skončilo mlhavou
   // chybou z cloudu, ze které by nebylo poznat, co je špatně.
   const h = build({ dvere: false });
   const reply = await h.api.SCENA_FN.sauna();
-  check('s otevřenými dveřmi se sauna nezapne',
-    h.akce.some(a => a.startsWith('huum:')), false);
+  check('s otevřenými dveřmi se sauna nezapne', h.akce.length, 0);
   check('  a řekne se proč', /otevřené dveře/.test(reply), true);
-  check('  ale žaluzie se stejně vytáhnou', h.akce.join(' | '), 'zaluzie:ložnice:up');
 }
 {
   const h = build({ huum: false });
   const reply = await h.api.SCENA_FN.sauna();
   check('bez nastavených kamen to řekne', /nejsou nastavená/.test(reply), true);
-  check('  a zbytek scény proběhne', h.akce.join(' | '), 'zaluzie:ložnice:up');
 }
 {
-  // Každý krok stojí sám za sebe: výpadek jednoho nesmí sebrat ostatní
-  const h = build({ poZapadu: true, saunaSelze: true });
+  const h = build({ saunaSelze: true });
   const reply = await h.api.SCENA_FN.sauna();
   check('když sauna selže, řekne se to', /nepodařilo zapnout/.test(reply), true);
-  check('  ale světlo, žaluzie i zahrada jedou dál', h.akce.join(' | '),
-    'huumsvetlo:on | zaluzie:ložnice:up | lightDole:on (tlačítko sauna)');
+  check('  a o světlech se neslibuje nic', /Ložnice se vytáhne/.test(reply), false);
 }
 {
   // „Přijato" není „topí" — kamna se nemusí rozjet a scéna to nesmí zamlčet
@@ -164,15 +151,56 @@ nadpis('2) Zapni saunu');
   check('  a netvrdí se, že topí', /Sauna topí/.test(reply), false);
 }
 {
-  const h = build({ svetloSelze: true });
-  const reply = await h.api.SCENA_FN.sauna();
-  check('když selže světlo, řekne se to', /Světlo v sauně se nepodařilo/.test(reply), true);
-  check('  ale zatopeno je', /Sauna topí na 80 °C/.test(reply), true);
-}
-{
   const h = build({ poZapadu: true });
   check('sauna má popisek o sauně', h.api.SCENY[0].label, 'Zapni saunu');
   check('  a je první v řadě', typeof h.api.SCENA_FN.sauna, 'function');
+}
+
+nadpis('2b) Příprava podle teploty v sauně');
+{
+  const h = build({ poZapadu: true });
+  const tik = t => h.api.saunaPripravaTik({ heating: true, temperature: t, targetTemperature: 80, light: 0 });
+  await tik(69);
+  check('69 °C (cíl 80): ještě nic', h.akce.length, 0);
+  await tik(70);
+  check('70 °C = cíl −10: ložnice nahoru', h.akce.join(' | '), 'zaluzie:ložnice:up');
+  await tik(72);
+  check('  jen jednou', h.akce.length, 1);
+  await tik(75);
+  check('75 °C = cíl −5: světlo v sauně a po západu zahrada', h.akce.slice(1).join(' | '),
+    'huumsvetlo:on | lightDole:on (sauna se nahřívá)');
+  await tik(79);
+  check('  taky jen jednou', h.akce.length, 3);
+  check('v Logu teplota i co se stalo', h.logy.some(t => t === 'Sauna: 75 °C (cíl 80) — světlo v sauně, zahrada dole'), true);
+  // Nové saunování (zapnutí po vypnutí) začne s čistým štítem
+  h.state.saunaRelace = { od: 2, konec: 0, loznice: false, svetla: false };
+  await tik(76);
+  check('nové saunování: teplý start udělá obojí naráz', h.akce.slice(3).join(' | '),
+    'zaluzie:ložnice:up | huumsvetlo:on | lightDole:on (sauna se nahřívá)');
+}
+{
+  const h = build({ poZapadu: false });
+  await h.api.saunaPripravaTik({ heating: true, temperature: 76, targetTemperature: 80, light: 0 });
+  check('ve dne zahrada zůstane zhasnutá', h.akce.join(' | '), 'zaluzie:ložnice:up | huumsvetlo:on');
+}
+{
+  const h = build({ poZapadu: true });
+  await h.api.saunaPripravaTik({ heating: true, temperature: 76, targetTemperature: 80, light: 1 });
+  check('svítící světlo se znovu nezapíná', h.akce.join(' | '), 'zaluzie:ložnice:up | lightDole:on (sauna se nahřívá)');
+}
+{
+  const h = build({ poZapadu: true });
+  await h.api.saunaPripravaTik({ heating: false, temperature: 78, targetTemperature: 80, light: 0 });
+  check('když kamna netopí, nic', h.akce.length, 0);
+  await h.api.saunaPripravaTik({ heating: true, temperature: null, targetTemperature: 80 });
+  check('bez teploty nic', h.akce.length, 0);
+}
+{
+  const h = build({ poZapadu: true });
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.saunaPripravaTik({ heating: true, temperature: 78, targetTemperature: 80, light: 0 });
+  check('když jsme pryč, nic', h.akce.length, 0);
 }
 
 nadpis('3) Ostatní tlačítka');

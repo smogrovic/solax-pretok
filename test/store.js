@@ -364,6 +364,22 @@ nadpis('5) Přímé hodnoty');
   check('prázdná záloha nic nerozbije', h.state.wbAuto, true);
 }
 
+{
+  // Saunování přežije nasazení — jinak by příprava ložnici vytáhla znovu
+  const st = prazdnyStav();
+  st.saunaRelace = { od: 0, konec: 0 };
+  st.saunaNahrev = { bezici: null, zaznamy: [] };
+  st.saunaZapnuto = { od: 0, naposledy: 0 };
+  const h = build({ state: st });
+  const od = Date.now() - 3600000;
+  h.api.storeApplyPrimo({ saunaRelace: { od, konec: 0, loznice: true, svetla: false } });
+  check('saunování se vrátí i s tím, co už příprava udělala',
+    JSON.stringify(h.state.saunaRelace), JSON.stringify({ od, konec: 0, loznice: true, svetla: false }));
+  check('  a jde do zálohy', h.api.storeSnapshot().primo.saunaRelace.od, od);
+  h.api.storeApplyPrimo({ saunaRelace: { od: od - 5000, konec: 0, loznice: false } });
+  check('  novější stav po startu záloha nepřepíše', h.state.saunaRelace.od, od);
+}
+
 nadpis('6) Plánování');
 {
   const h = build({ env: UPSTASH });

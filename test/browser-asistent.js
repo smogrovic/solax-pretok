@@ -166,8 +166,8 @@ setTimeout(async () => {
   check('  a zatím nic neposílá', poslano.length, 0);
   const textOkna = document.getElementById('potvrzText').textContent;
   check('  řekne, na kolik kamna pojedou', /80 °C/.test(textOkna), true);
-  check('  že se rozsvítí v sauně', /rozsvítí se v sauně/.test(textOkna), true);
-  check('  že se vytáhnou žaluzie v ložnici', /žaluzie v ložnici/.test(textOkna), true);
+  check('  že se rozsvítí v sauně až na 75 °C', /na 75 °C se rozsvítí/.test(textOkna), true);
+  check('  že se vytáhnou žaluzie v ložnici na 70 °C', /Na 70 °C se vytáhnou žaluzie v ložnici/.test(textOkna), true);
   check('  že zahrada až po západu', /po západu slunce/.test(textOkna), true);
   check('  a připomene, co leží na kamnech', /nic neleží/.test(textOkna), true);
   document.getElementById('potvrzZpet').click();

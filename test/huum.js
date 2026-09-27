@@ -723,7 +723,7 @@ const volejD = async (h, cesta, params) => {
     (await volej(h, 'POST /api/sauna/timer', { time: '18:30', teplota: 85 })).kod, 401);
 }
 
-nadpis('18) Tik: zapnutí o odhad dřív, příprava 10 min předem');
+nadpis('18) Tik: zapnutí o odhad dřív, přípravu v pevný čas už nedělá');
 const MINUTA = 60000;
 // Sauna 20 °C, venku 10 °C: model dá na 80 °C 7,5 + 123,8·ln((149,3−20)/(149,3−80)) ≈ 84,7 → 85 min
 const stavKamen = (h, o = {}) => {
@@ -749,14 +749,14 @@ const stavKamen = (h, o = {}) => {
   check('v čase zapnutí se pustí kamna', h.volani[0] && h.volani[0].adresa, 'https://sauna.huum.eu/action/home/start');
   check('  s uloženou teplotou', JSON.parse(h.volani[0].opts.body).targetTemperature, 80);
   check('  a založí se měření', h.nahrevy[0], 'casovac');
+  check('  a časovač tím skončil', h.api.casovace().length, 0);
   check('  příprava ještě ne', h.pripravy.length, 0);
   h.volani.length = 0;
   await h.api.saunaTimerTik(t.zapneV + 30000);
   check('podruhé se kamna nepustí', h.volani.length, 0);
-  await h.api.saunaTimerTik(jdu - 11 * MINUTA);
-  check('11 min před příchodem ještě bez přípravy', h.pripravy.length, 0);
   await h.api.saunaTimerTik(jdu - 10 * MINUTA);
-  check('10 min před příchodem příprava (světlo, žaluzie, zahrada)', h.pripravy.length, 1);
+  // Ložnici a světla řídí teplota v sauně (saunaPripravaTik), ne hodiny
+  check('10 min před příchodem už žádná pevná příprava', h.pripravy.length, 0);
   check('  a časovač je hotový', h.api.casovace().length, 0);
 }
 {
@@ -901,15 +901,15 @@ nadpis('Saunování podle kamen a světla');
   h.state.saunaRelace = { od: 0, konec: 0 };
   const sl = (pred, po, t) => h.api.saunaRelaceSleduj(pred, po, t);
   sl({ heating: false, light: 0 }, { heating: true, light: 0 }, 1000);
-  check('zapnutí kamen začne saunování', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":0}');
+  check('zapnutí kamen začne saunování', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":0,"loznice":false,"svetla":false}');
   sl({ heating: true, light: 0 }, { heating: true, light: 1 }, 2000);
   check('  rozsvícení ho nezačne znovu', h.state.saunaRelace.od, 1000);
   sl({ heating: true, light: 1 }, { heating: false, light: 1 }, 3000);
   check('  vypnutá kamna se svítícím světlem ho neukončí', h.state.saunaRelace.konec, 0);
   sl({ heating: false, light: 1 }, { heating: false, light: 0 }, 4000);
-  check('konec = až zhasne i světlo', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":4000}');
+  check('konec = až zhasne i světlo', JSON.stringify(h.state.saunaRelace), '{"od":1000,"konec":4000,"loznice":false,"svetla":false}');
   sl({ heating: false, light: 0 }, { heating: false, light: 1 }, 5000);
-  check('samotné světlo začne nové', JSON.stringify(h.state.saunaRelace), '{"od":5000,"konec":0}');
+  check('samotné světlo začne nové', JSON.stringify(h.state.saunaRelace), '{"od":5000,"konec":0,"loznice":false,"svetla":false}');
   h.state.saunaRelace = { od: 0, konec: 0 };
   sl({ error: null }, { heating: false, light: 0 }, 6000);
   check('po restartu vypnutá sauna nic nezačne', JSON.stringify(h.state.saunaRelace), '{"od":0,"konec":0}');
