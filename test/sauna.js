@@ -30,7 +30,7 @@ const CODE2 = CODE + '\n'
 function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
                  venku = 8, huum = { temperature: 22, targetTemperature: 79 } } = {}) {
   let now = Date.UTC(2026, 6, 15, 14, 0, 0);
-  const log = [], pushes = [], broadcasts = [], povely = [];
+  const log = [], pushes = [], broadcasts = [], povely = [], ulozeni = [];
   const state = {
     sauna: { powerW: null, fetchedAt: null, since: 0, alertAt: 0, error: null },
     saunaLimitW: prah,
@@ -51,11 +51,11 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
   const api = new Function(
     'process', 'state', 'SHELLY_AUTH_KEY', 'SHELLY_SERVER_URI', 'cerstve', 'addLog',
     'sendPushToAll', 'broadcast', 'pragueDateString', 'fmtDur', 'autoSet', 'DEVICES',
-    'setShellyState', 'Date',
+    'setShellyState', 'Date', 'storeNahrevUloz',
     CODE2 + '\n; return { saunaTopi, saunaBlokuje, saunaPayload, updateSauna, recordSaunaDay,'
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
-          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, NAHREV_MAX,'
+          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY,'
           + ' odhadNabehu, saunaOdhad, SAUNA_TERMOSTAT,'
           + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
           + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
@@ -78,10 +78,11 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     class extends Date {
       constructor(...a) { super(...(a.length ? a : [now])); }
       static now() { return now; }
-    }
+    },
+    async () => { ulozeni.push(now); }
   );
   return {
-    api, state, log, pushes, broadcasts, povely,
+    api, state, log, pushes, broadcasts, povely, ulozeni,
     posun: min => { now += min * MIN; },
     get now() { return now; }
   };
@@ -322,12 +323,12 @@ nadpis('Měření nahřívání');
   check('  pořád běží to jedno', !!h.state.saunaNahrev.bezici, 'true');
 }
 {
-  // Krátké bliknutí odběru není nahřívání
+  // Krátké bliknutí odběru není nahřívání — ale nic se nemaže, jen se označí
   const h = build({ drzeni: 30, huum: {} });
   h.api.updateSauna(6000);
   h.posun(31); h.api.updateSauna(50);
   h.posun(31); h.api.updateSauna(50);
-  check('bliknutí bez vzorků se nezapíše', h.state.saunaNahrev.zaznamy.length, 0);
+  check('bliknutí bez vzorků se zapíše jako bliknutí', h.state.saunaNahrev.zaznamy.map(z => z.kratke).join(','), 'true');
 }
 {
   // Zapomenutá sauna by jinak sbírala vzorky do nekonečna
@@ -359,37 +360,39 @@ nadpis('Měření nahřívání');
   check('  a křivka začíná prázdná', b.body.length, 0);
 }
 {
-  // Starých měření se drží jen posledních pár — jinak by záloha rostla donekonečna
+  // Nic se nemaže: každé nahřátí zůstane, dokud analýza nerozhodne jinak
   const h = build({ drzeni: 1 });
-  for (let i = 0; i < h.api.NAHREV_MAX + 5; i++) {
+  for (let i = 0; i < 50; i++) {
     h.api.updateSauna(6000);
     h.posun(1); h.api.nahrevVzorek(40 + i, h.now);
     h.posun(3); h.api.updateSauna(50);
   }
-  check('drží se nejvýš čtyřicet měření',
-    h.state.saunaNahrev.zaznamy.length, h.api.NAHREV_MAX);
-  // Každé kolo má svou teplotu (40 + i), tak je poznat, která vypadla.
-  // Nejstarších pět se mělo zahodit, takže první zbylé nese 45.
-  check('  a vypadla ta nejstarší', h.state.saunaNahrev.zaznamy[0].body[1].c, 45);
-  check('  poslední je ta nejnovější',
-    h.state.saunaNahrev.zaznamy[h.api.NAHREV_MAX - 1].body[1].c, 40 + h.api.NAHREV_MAX + 4);
+  check('padesát nahřátí = padesát měření', h.state.saunaNahrev.zaznamy.length, 50);
+  // Na desetiminutovou zálohu se nečeká — nasazení mezitím by měření ztratilo
+  check('  každé se hned uloží do vlastního klíče', h.ulozeni.length, 50);
+  check('  nejstarší pořád je', h.state.saunaNahrev.zaznamy[0].body[1].c, 40);
+  check('  nejnovější taky', h.state.saunaNahrev.zaznamy[49].body[1].c, 89);
 }
 {
-  // Po restartu uprostřed saunování (nasazení appky) server viděl odběr a založil
-  // nové měření, jenže kamna už hřála na 72 °C. Takový záznam tvrdil „60 °C za
-  // půl minuty“ — nezapisuje se.
+  // Po restartu uprostřed saunování kamna už hřála na 72 °C — takové měření o
+  // nahřívání nic neříká, ale nezahodí se, jen se označí
   const h = build({ drzeni: 1, huum: { temperature: 72, targetTemperature: 76 } });
   h.api.updateSauna(6000);
   h.posun(2); h.api.nahrevVzorek(74, h.now);
   h.posun(3); h.api.updateSauna(50);
-  check('teplý start se nezapíše', h.state.saunaNahrev.zaznamy.length, 0);
-  check('  a v logu je proč', h.log.some(t => /zahozeno/.test(t)), 'true');
-  // Studený start pořád ano (stejná délka, jen od 30 °C)
+  check('teplý start se zapíše', h.state.saunaNahrev.zaznamy.length, 1);
+  check('  s příznakem', h.state.saunaNahrev.zaznamy[0].teplyStart, 'true');
+  check('  a v logu je to vidět', h.log.some(t => /začalo už teplé/.test(t)), 'true');
   const s = build({ drzeni: 1, huum: { temperature: 30, targetTemperature: 76 } });
   s.api.updateSauna(6000);
   s.posun(2); s.api.nahrevVzorek(34, s.now);
   s.posun(3); s.api.updateSauna(50);
-  check('  studený ano', s.state.saunaNahrev.zaznamy.length, 1);
+  check('  studený bez příznaku', s.state.saunaNahrev.zaznamy[0].teplyStart, 'undefined');
+  // Bliknutí odběru bez vzorku — taky zůstane, s příznakem
+  const b = build({ drzeni: 1, huum: {} });
+  b.api.updateSauna(6000);
+  b.posun(3); b.api.updateSauna(50);
+  check('bliknutí se zapíše s příznakem', b.state.saunaNahrev.zaznamy.length + ' ' + b.state.saunaNahrev.zaznamy[0].kratke, '1 true');
 }
 
 nadpis('Model náběhu');
@@ -398,15 +401,18 @@ nadpis('Model náběhu');
   const T = Date.UTC(2026, 8, 24, 16, 0, 0);
   const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
   const blizko = (x, y) => x !== null && Math.abs(x - y) <= 1;
-  check('venku 11,6, start 12, cíl 75 → ~59 min', blizko(o(11.6, 12, 75).minut, 59), 'true');
-  check('venku −20, start −20, cíl 85 → ~105 min', blizko(o(-20, -20, 85).minut, 105), 'true');
-  check('venku 0, start 0, cíl 85 → ~89 min', blizko(o(0, 0, 85).minut, 89), 'true');
+  // Zadání modelu: rozjezd 7,5 + τ 123,8 · ln(…), T_max = 147,8 + 0,15 · venku
+  check('venku 14,94, start 27, cíl 60 → ~46 min', blizko(o(14.94, 27, 60).minut, 46), 'true');
+  check('venku 14,94, start 27, cíl 80 → ~77 min', blizko(o(14.94, 27, 80).minut, 77), 'true');
+  check('venku −20, start 10, cíl 85 → ~108 min', blizko(o(-20, 10, 85).minut, 108), 'true');
+  check('venku −20, start −20, cíl 85 → ~133 min', blizko(o(-20, -20, 85).minut, 133), 'true');
+  check('rozjezd se připočítá (cíl těsně nad startem ≈ 7,5 min)', blizko(o(10, 20, 20.01).minut, 7.5), 'true');
   check('cíl 90 je nedosažitelný (termostat)', JSON.stringify(o(10, 20, 90)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
-  check('cíl nad stropem taky, bez výjimky', o(-400, 20, 80).dosazitelne, 'false');
+  check('cíl nad stropem taky, bez výjimky', o(-600, 20, 80).dosazitelne, 'false');
   check('cíl pod startem = hned', o(10, 70, 60).minut + ' ' + o(10, 70, 60).dosazitelne, '0 true');
   check('chybí venkovní teplota → null', o(null, 20, 80), 'null');
   check('chybí start → null', o(10, undefined, 80), 'null');
-  check('hotovo v = teď + minuty, na minutu', o(11.6, 12, 75).hotovoV, T + Math.round(o(11.6, 12, 75).minut) * 60000);
+  check('hotovo v = teď + minuty, na minutu', o(14.94, 27, 60).hotovoV, T + Math.round(o(14.94, 27, 60).minut) * 60000);
   // Běžící topení: odhad na cíl z kamen, nebo na prahy, když cíl chybí
   const s = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
     fetchedAt: new Date(h.now).toISOString() } });
@@ -418,7 +424,15 @@ nadpis('Model náběhu');
     bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
   const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
   const n = netopi.api.saunaOdhad(netopi.now);
-  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau, '0 20 10 57.7');
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd, '0 20 10 123.8 7.5');
+  // Kamna už hřejí: z rozjezdu zbývá jen to, co ještě neuběhlo
+  const hreje = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
+    fetchedAt: new Date(h.now).toISOString() } });
+  const bezRozjezdu = hreje.api.odhadNabehu(10, 40, 80, hreje.now, 0).minut;
+  hreje.state.saunaNahrev.bezici = { start: hreje.now - 3 * MIN, body: [], prahy: {} };
+  check('topí 3 min → zbývá 4,5 min rozjezdu', blizko(hreje.api.saunaOdhad(hreje.now).cile[0].minut, bezRozjezdu + 4.5), 'true');
+  hreje.state.saunaNahrev.bezici.start = hreje.now - 30 * MIN;
+  check('topí 30 min → rozjezd už nic', blizko(hreje.api.saunaOdhad(hreje.now).cile[0].minut, bezRozjezdu), 'true');
   const bezCidla = build({ venku: 10, huum: {} });
   check('bez teploty v sauně se bere venkovní', bezCidla.api.saunaOdhad(bezCidla.now).tStartC, 10);
 }
@@ -444,8 +458,8 @@ nadpis('Měření nahřívání přežije nasazení');
   const tepla = { start: T - 900000000, body: [{ min: 0.5, c: 72 }, { min: 2.5, c: 73 }], prahy: { 60: { min: 0.5, c: 72 } } };
   const studena = { start: T - 800000000, body: [{ min: 0, c: 20 }, { min: 30, c: 70 }], prahy: {} };
   check('obnova projde', h.api.nahrevObnov({ zaznamy: [tepla, studena], bezici: zal }, T), 'true');
-  check('teplý záznam ze zálohy se vyřadí', h.state.saunaNahrev.zaznamy.length, 1);
-  check('  studený zůstane', h.state.saunaNahrev.zaznamy[0].body[0].c, 20);
+  check('ze zálohy se vezme všechno, i teplý start', h.state.saunaNahrev.zaznamy.length, 2);
+  check('  seřazené podle času', h.state.saunaNahrev.zaznamy.map(r => r.body[0].c).join(','), '72,20');
   check('rozběhnuté měření se vrátí', h.state.saunaNahrev.bezici && h.state.saunaNahrev.bezici.start, T - 30 * 60000);
   h.posun(2); h.api.nahrevVzorek(66, h.now);
   check('  a měří se dál od původního startu', h.state.saunaNahrev.bezici.body.slice(-1)[0].min, 32);
@@ -474,6 +488,20 @@ nadpis('Měření nahřívání přežije nasazení');
   h.api.nahrevObnov({ zaznamy: [], bezici: stare }, h.now);
   check('měření starší než 4 h se neobnoví', h.state.saunaNahrev.bezici, 'null');
   check('bez zaznamy obnova neprojde', h.api.nahrevObnov({ bezici: stare }, h.now), 'false');
+}
+
+{
+  // Sloučení: záloha nic nepřepíše a nic z ní nezmizí, i když má míň záznamů
+  const h = build();
+  const r = (start, n) => ({ start, body: Array.from({ length: n }, (_, i) => ({ min: i * 2, c: 20 + i })), prahy: {} });
+  h.state.saunaNahrev.zaznamy = [r(1000, 3), r(3000, 3), r(5000, 3)];
+  h.api.nahrevObnov({ zaznamy: [r(2000, 3), r(3000, 5)] }, h.now);
+  check('záloha s méně záznamy se přesto sloučí', h.state.saunaNahrev.zaznamy.map(z => z.start).join(','), '1000,2000,3000,5000');
+  check('  stejné měření jednou, to delší', h.state.saunaNahrev.zaznamy[2].body.length, 5);
+  h.api.nahrevObnov({ zaznamy: [r(3000, 2)] }, h.now);
+  check('  kratší verze delší nepřepíše', h.state.saunaNahrev.zaznamy[2].body.length, 5);
+  h.api.nahrevObnov({ zaznamy: [] }, h.now);
+  check('prázdná záloha nic nesmaže', h.state.saunaNahrev.zaznamy.length, 4);
 }
 
 nadpis('Zapnuto v');

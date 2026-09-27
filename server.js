@@ -1060,35 +1060,38 @@ function recordSaunaDay(w, dtH) {
 // nátopu. Jedno měření je tím jedno použití sauny: cyklování termostatu u cílové
 // teploty žádná falešná měření nevyrobí, protože `since` mezitím nespadne.
 const NAHREV_PRAHY = [60, 70, 80];
-const NAHREV_MAX = 40;            // kolik měření se drží
+// Měření se NIKDY nemažou ani neořezávají — sbírá se podklad pro analýzu modelu.
+// Nesmyslná měření (teplý start, bliknutí) se jen označí a vyřadí si je analýza.
 const NAHREV_BODU_MAX = 90;       // strop vzorků na měření (~3 h po dvou minutách)
 const NAHREV_STROP_MS = 4 * 3600000;
 
 // ---- Model náběhu sauny ----
-// Pracovní odhad z prvního měření: teplota se exponenciálně blíží stropu, který
-// závisí na venkovní teplotě. Konstanty jdou přebít v Render → Environment, až
-// se model přefituje z dalších měření (záznamy níž).
+// Přefitováno z měření: po zapnutí chvíli trvá, než kamna začnou hřát (rozjezd),
+// pak se teplota exponenciálně blíží stropu, který závisí na venkovní teplotě.
+// Konstanty jdou přebít v Render → Environment. B je zatím odhad, upřesní zimní data.
 //   T_max = A + B · venkuC
-//   t     = τ · ln((T_max − T_start) / (T_max − T_cíl))
+//   t     = rozjezd + τ · ln((T_max − T_start) / (T_max − T_cíl))
 const saunaEnvNum = (klic, vychozi) => {
   const v = process.env[klic];
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
 };
-const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 57.7);
-const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 108.3);
+const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 7.5);
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 123.8);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 147.8);
 const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.15);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
 
 // → { minut, hotovoV, dosazitelne }, nebo null, když chybí vstup. Nikdy nepadá.
-function odhadNabehu(venkuC, tStartC, cilC, now = Date.now()) {
+// `rozjezdMin`: kolik z rozjezdu ještě zbývá — u kamen, která už hřejí, je to méně.
+function odhadNabehu(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin = SAUNA_ROZJEZD_MIN) {
   if (typeof venkuC !== 'number' || typeof tStartC !== 'number' || typeof cilC !== 'number'
       || !Number.isFinite(venkuC) || !Number.isFinite(tStartC) || !Number.isFinite(cilC)) return null;
   const naMinutu = ms => Math.round(ms / 60000) * 60000;
   if (cilC <= tStartC) return { minut: 0, hotovoV: naMinutu(now), dosazitelne: true };
   const tMax = SAUNA_TMAX_A + SAUNA_TMAX_B * venkuC;
   if (cilC >= SAUNA_TERMOSTAT || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC));
+  const minut = Math.max(0, rozjezdMin) + SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC));
   return { minut, hotovoV: naMinutu(now + minut * 60000), dosazitelne: true };
 }
 
@@ -1098,16 +1101,19 @@ function saunaOdhad(now = Date.now()) {
   const h = state.huum || {};
   const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
   const tStartC = vSaune !== null ? vSaune : venkuC;
-  const model = { tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT };
+  const model = { rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT };
   const out = { venkuC, tStartC, model, cile: [] };
   if (!h.heating) return out;
   const b = state.saunaNahrev && state.saunaNahrev.bezici;
   const cil = typeof h.targetTemperature === 'number' ? h.targetTemperature
     : (b && typeof b.cilC === 'number' ? b.cilC : null);
   const cile = cil !== null ? [cil] : SAUNA_ODHAD_PRAHY;
+  // Kamna už topí: rozjezd se počítá jen ten, co ještě nedoběhl
+  const zbyva = b && typeof b.start === 'number'
+    ? Math.max(0, SAUNA_ROZJEZD_MIN - (now - b.start) / 60000) : SAUNA_ROZJEZD_MIN;
   for (const c of cile) {
     if (tStartC !== null && c <= tStartC) continue;      // už dosažené
-    const o = odhadNabehu(venkuC, tStartC, c, now);
+    const o = odhadNabehu(venkuC, tStartC, c, now, zbyva);
     out.cile.push({ c, ...(o || { minut: null, hotovoV: null, dosazitelne: null }) });
   }
   return out;
@@ -1167,21 +1173,40 @@ function nahrevKonec(now = Date.now()) {
   const b = n.bezici;
   if (!b) return;
   n.bezici = null;
-  // Krátké bliknutí odběru není nahřívání — bez druhého vzorku není co měřit
-  if (b.body.length < 2 && !Object.keys(b.prahy).length) return;
-  if (nahrevTepleOdStartu(b)) {
-    addLog('Sauna: měření nahřívání zahozeno — začalo už teplé');
-    return;
-  }
+  // Krátké bliknutí odběru ani start už teplých kamen o nahřívání nic neříká,
+  // ale zahazovat se nic nesmí — jen se to označí
+  if (b.body.length < 2 && !Object.keys(b.prahy).length) b.kratke = true;
+  if (nahrevTepleOdStartu(b)) b.teplyStart = true;
   b.konec = now;
   n.zaznamy.push(b);
-  if (n.zaznamy.length > NAHREV_MAX) n.zaznamy = n.zaznamy.slice(-NAHREV_MAX);
-  addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min)`);
+  const pozn = b.teplyStart ? ', začalo už teplé' : (b.kratke ? ', jen bliknutí' : '');
+  addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min${pozn})`);
   broadcast('saunaNahrev', { saunaNahrev: n });
+  // Hned do vlastního klíče v úložišti — na desetiminutovou zálohu se nečeká,
+  // nasazení mezitím by čerstvé měření ztratilo
+  if (typeof storeNahrevUloz === 'function') storeNahrevUloz().catch(() => {});
 }
 
-// Obnova ze zálohy. Hotové záznamy se berou, jen když jich je víc než na
-// serveru (po nasazení je prázdný), a teplé starty se vyřadí. Rozběhnuté měření
+// Sloučí měření podle času startu. Nic neubírá: co server má, zůstane, co přijde
+// navíc, přibude. Stejné měření ve dvou verzích → vyhraje to s víc vzorky.
+function nahrevSluc(zaznamy) {
+  const n = state.saunaNahrev;
+  const podle = new Map(n.zaznamy.map(r => [r.start, r]));
+  let zmena = false;
+  for (const r of zaznamy) {
+    if (!r || typeof r.start !== 'number' || !Array.isArray(r.body)) continue;
+    const mam = podle.get(r.start);
+    if (!mam || r.body.length > mam.body.length) {
+      podle.set(r.start, r);
+      zmena = true;
+    }
+  }
+  if (zmena) n.zaznamy = [...podle.values()].sort((a, b) => a.start - b.start);
+  return zmena;
+}
+
+// Obnova ze zálohy. Hotové záznamy se se serverem SLUČUJÍ — nic se nepřepíše ani
+// nevyřadí (viz nahrevSluc). Rozběhnuté měření
 // (`bezici`) se vrátí, aby nasazení uprostřed nahřívání měření neuřízlo. Když
 // si ho server po startu mezitím založil znovu sám, vyhraje to ze zálohy —
 // začalo dřív — a vzorky z nového se připojí na konec.
@@ -1189,10 +1214,7 @@ function nahrevObnov(telo, now = Date.now()) {
   const n = state.saunaNahrev;
   const z = telo && Array.isArray(telo.zaznamy) ? telo.zaznamy : null;
   if (!z) return false;
-  const platne = z.filter(r => r && typeof r.start === 'number' && Array.isArray(r.body)
-    && !nahrevTepleOdStartu(r));
-  let zmena = false;
-  if (platne.length > n.zaznamy.length) { n.zaznamy = platne.slice(-NAHREV_MAX); zmena = true; }
+  let zmena = nahrevSluc(z);
   const zal = telo.bezici;
   if (zal && typeof zal.start === 'number' && Array.isArray(zal.body) && zal.prahy && typeof zal.prahy === 'object'
       && zal.start <= now && now - zal.start <= NAHREV_STROP_MS
@@ -2003,10 +2025,8 @@ app.post('/api/sauna-days/restore', (req, res) => {
   res.json({ ok: true, days: state.saunaDays.length });
 });
 
-// Obnova měření nahřívání. Na rozdíl od denních řad se tyhle záznamy neslučují
-// po dnech — je to seznam událostí. Záloha se proto vezme jen když je v ní VÍC
-// než co má server: po nasazení je prázdný a vezme se celá, ale měření, která
-// mezitím přibyla, se nepřepíšou.
+// Obnova měření nahřívání. Je to seznam událostí, slučuje se podle startu —
+// ze zálohy se nic neztratí a na serveru se nic nepřepíše.
 app.post('/api/sauna/zapnuto/restore', (req, res) => {
   if (!saunaZapnutoObnov(req.body)) return res.status(400).json({ error: 'Chybí od a naposledy.' });
   res.json({ ok: true, od: state.saunaZapnuto.od || 0 });
@@ -9835,7 +9855,43 @@ function storeOtisk(snap) {
   return JSON.stringify(posts) + JSON.stringify(snap.primo);
 }
 
+// Měření nahřívání sauny mají vlastní klíč. Ukládají se hned po každém měření
+// a nezávisí na hlavním snímku. Klíč se smí přepsat, AŽ když se z něj jednou
+// úspěšně načetlo — jinak by výpadek při startu přepsal historii kratší.
+const STORE_NAHREV_KEY = `${process.env.STORE_PREFIX || 'solax'}:saunaNahrev`;
+let storeNahrevNacteno = false;
+let storeNahrevLast = '';
+
+async function storeNahrevNacti() {
+  const r = await storeFetch(`/get/${encodeURIComponent(STORE_NAHREV_KEY)}`);
+  const snap = storeDecode(r && r.result);
+  if (snap && Array.isArray(snap.zaznamy)) nahrevObnov(snap);
+  storeNahrevNacteno = true;
+}
+
+async function storeNahrevUloz() {
+  if (!storeEnabled) return false;
+  if (!storeNahrevNacteno) {
+    try { await storeNahrevNacti(); } catch (err) {
+      console.error('Načtení měření sauny z Upstash selhalo:', err.message);
+      return false;
+    }
+  }
+  const n = state.saunaNahrev;
+  if (!n) return false;
+  const otisk = JSON.stringify([n.zaznamy, n.bezici]);
+  if (otisk === storeNahrevLast) return false;
+  await storeFetch(`/set/${encodeURIComponent(STORE_NAHREV_KEY)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: storeEncode({ at: Date.now(), zaznamy: n.zaznamy, bezici: n.bezici })
+  });
+  storeNahrevLast = otisk;
+  return true;
+}
+
 async function storeSave() {
+  if (storeEnabled) storeNahrevUloz().catch(err => console.error('Záloha měření sauny selhala:', err.message));
   if (!storeEnabled || !storeLoaded) return false;
   const snap = storeSnapshot();
   const otisk = storeOtisk(snap);
@@ -9892,6 +9948,7 @@ async function storeLoad(port) {
   }
   storeStav.loadedAt = Date.now();
   console.log(`Záloha načtena (${obnoveno}/${STORE_POSTS.length}, ${fmtPragueTime(snap.at)})`);
+  try { await storeNahrevNacti(); } catch (err) { console.error('Načtení měření sauny z Upstash selhalo:', err.message); }
 }
 
 function storeStart() {

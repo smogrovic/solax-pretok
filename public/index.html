@@ -8198,7 +8198,7 @@ function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
   if (cilC <= tStartC) return { minut: 0, hotovoV: now, dosazitelne: true };
   const tMax = m.a + m.b * venkuC;
   if (cilC >= m.termostat || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = m.tau * Math.log((tMax - tStartC) / (tMax - cilC));
+  const minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC));
   return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
 }
 
@@ -8753,6 +8753,9 @@ function renderSaunaNahrev() {
     // Nahřívání, co se nikam nedostalo, je taky údaj — nemá se tvářit jako chyba
     casy.textContent = kusy.join(' · ')
       || ('nedostalo se na 60 °C' + (typeof z.maxC === 'number' ? ' (max ' + Math.round(z.maxC) + ' °C)' : ''));
+    // Nic se nemaže, jen označí — ať je vidět, proč měření do odhadu nepatří
+    if (z.teplyStart) casy.textContent += ' · začalo už teplé';
+    else if (z.kratke) casy.textContent += ' · jen bliknutí';
     row.appendChild(casy);
     nahrevListEl.appendChild(row);
   }
@@ -8766,7 +8769,9 @@ function renderSaunaNahrev() {
 
 async function nahrevZkopiruj() {
   if (!nahrevKopirBtnEl) return;
-  const text = JSON.stringify(saunaNahrevData || { zaznamy: [] }, null, 1);
+  // Celá historie a k ní model, se kterým appka zrovna počítá
+  const model = huumData && huumData.odhad ? huumData.odhad.model : null;
+  const text = JSON.stringify({ ...(saunaNahrevData || { zaznamy: [] }), model }, null, 1);
   const kb = Math.max(1, Math.round(text.length / 1024));
   let doSchranky = false;
   try {

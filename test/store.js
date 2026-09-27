@@ -31,17 +31,25 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     }
     volani.push({ url: String(url), init });
     if (kv.chyba) throw new Error('síť');
-    if (String(url).includes('/set/')) { kv.hodnota = init.body; return { ok: true, json: async () => ({ result: 'OK' }) }; }
-    return { ok: true, json: async () => ({ result: kv.hodnota === undefined ? null : kv.hodnota }) };
+    // Měření sauny mají vlastní klíč (kv.nahrev), všechno ostatní jde do hlavního
+    const nahrev = String(url).includes('saunaNahrev');
+    if (nahrev && kv.nahrevChyba) throw new Error('síť');
+    if (String(url).includes('/set/')) {
+      if (nahrev) kv.nahrev = init.body; else kv.hodnota = init.body;
+      return { ok: true, json: async () => ({ result: 'OK' }) };
+    }
+    const v = nahrev ? kv.nahrev : kv.hodnota;
+    return { ok: true, json: async () => ({ result: v === undefined ? null : v }) };
   };
 
   const api = new Function(
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
-    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
+      storeNahrevUloz, STORE_NAHREV_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
   )(state, zlib, fakeFetch, pushSubscriptions, [], [], [],
     [{ id: 1, zapnuto: true, dny: [true, true, true, true, true, false, false],
@@ -53,7 +61,15 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     () => '12:00', () => {}, { log() {}, error() {} },
     (fn, ms) => { timery.push({ fn, ms }); return 0; }, process, AbortController,
     lastCmd, DEVICES, RELAY_AUTO_OFF_MS,
-    [{ id: 1, time: '18:00', teplota: 85 }], tahoma);
+    [{ id: 1, time: '18:00', teplota: 85 }], tahoma,
+    // Stejné slučování jako na serveru: podle startu, nic neubere
+    telo => {
+      const n = state.saunaNahrev;
+      const m = new Map(n.zaznamy.map(r => [r.start, r]));
+      for (const r of telo.zaznamy) if (!m.has(r.start)) m.set(r.start, r);
+      n.zaznamy = [...m.values()].sort((a, b) => a.start - b.start);
+      return true;
+    });
 
   process.env = puvodni;
   return { api, state, kv, volani, posty, pushSubscriptions, timery, tahoma };
@@ -164,7 +180,8 @@ nadpis('3) Ukládání');
   const h = build({ env: UPSTASH });
   (async () => {
     check('bez načtení se NEUKLÁDÁ', await h.api.storeSave(), false);
-    check('  a nic neodešlo', h.volani.length, 0);
+    // Měření sauny mají vlastní klíč a vlastní pojistku (oddíl 7) — tady jde o hlavní
+    check('  a do hlavního klíče nic neodešlo', h.volani.filter(v => !v.url.includes('saunaNahrev')).length, 0);
     await h.api.storeLoad(3000);
     check('načtení prázdného klíče projde', h.api.nactenoFlag(), true);
     check('teď už se uloží', await h.api.storeSave(), true);
@@ -355,6 +372,32 @@ nadpis('6) Plánování');
   const v = build({});
   v.api.storeStart();
   check('vypnuté úložiště žádný časovač nezakládá', v.timery.length, 0);
+}
+
+nadpis('7) Měření nahřívání sauny — vlastní klíč, nic se neztratí');
+{
+  const zaznam = (start, c) => ({ start, body: [{ min: 0, c }, { min: 2, c: c + 5 }], prahy: {} });
+  (async () => {
+    // V úložišti už je historie tří měření, server po startu zná jen jedno nové
+    const kv = {};
+    const st = prazdnyStav();
+    st.saunaNahrev = { bezici: null, zaznamy: [zaznam(9000, 30)] };
+    const h = build({ env: UPSTASH, state: st, kv });
+    kv.nahrev = h.api.storeEncode({ zaznamy: [zaznam(1000, 20), zaznam(2000, 21), zaznam(3000, 22)] });
+    check('vlastní klíč vedle hlavního', h.api.STORE_NAHREV_KEY, 'solax:saunaNahrev');
+    await h.api.storeNahrevUloz();
+    const ulozeno = h.api.storeDecode(kv.nahrev).zaznamy.map(z => z.start).join(',');
+    check('před zápisem se načte a sloučí — nic nezmizí', ulozeno, '1000,2000,3000,9000');
+    check('  a server má celou historii taky', h.state.saunaNahrev.zaznamy.length, 4);
+
+    // Když načtení selže, klíč se nepřepíše kratší historií
+    const kv2 = { nahrevChyba: true };
+    const st2 = prazdnyStav();
+    st2.saunaNahrev = { bezici: null, zaznamy: [zaznam(9000, 30)] };
+    const h2 = build({ env: UPSTASH, state: st2, kv: kv2 });
+    check('bez načtení se klíč nepřepíše', await h2.api.storeNahrevUloz(), false);
+    check('  nic se nezapsalo', kv2.nahrev, undefined);
+  })();
 }
 
 function prazdnyStav() {
