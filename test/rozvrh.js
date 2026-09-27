@@ -35,7 +35,7 @@ function build({ auto = true, pryc = false, pocasi = {} } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
-         + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi,'
+         + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
   )(
@@ -534,6 +534,64 @@ nadpis('8) Cesty a obnova');
   check('novější přepíše celý rozvrh', h.api.pravidla.map(p => p.kroky[0].cil).join(','), 'Obývák');
   const { kod } = await volej(h.routy, 'POST /api/blinds/schedule/restore', { rules: [] });
   check('bez savedAt se obnova odmítne', kod, 400);
+}
+
+nadpis('Návrat z „jsme pryč": žaluzie jak by stály podle rozvrhu');
+{
+  // Výchozí rozvrh, pondělí; západ v 19:10
+  const ZAPAD = Date.UTC(2026, 8, 14, 17, 10);
+  const stav = at => {
+    const h = build({ pocasi: { sunsetMs: ZAPAD } });
+    h.api.rozvrhNasadVychozi();
+    return h;
+  };
+  {
+    // Ve 13:00: večer (neděle) vše dole, ráno se naklopilo a dveře vytáhly
+    const h = stav();
+    const v = await h.api.rozvrhStavTed(PO_6 + 7 * H);
+    check('ve 13:00 jen výsledný stav, jeden povel na žaluzii', h.povely.join(' | '),
+      'Kuchyň:down:25 | Obývák Okno:down:25 | Obývák Dveře:up | Elenka:down:25 | Miky:down:25 | Hosté:down:25 | Ložnice:down:100 | Garáž:down');
+    check('  a spočítá to', v.ok + '/' + v.celkem, '8/8');
+    const dnes = h.api.pravidla.filter(p => p.spustenoDne).map(p => p.nazev).join(',');
+    check('dnešní proběhlá pravidla jsou odškrtnutá', dnes, 'Ráno pokoje,Dopoledne');
+    const pred = h.povely.length;
+    await h.api.runBlindSchedule(PO_6 + 7 * H);
+    check('  a tik je znovu nepustí', h.povely.length, pred);
+  }
+  {
+    const h = stav();
+    await h.api.rozvrhStavTed(PO_6 + 15 * H);   // 21:00
+    check('po západu už jen zataženo', h.povely.join(' | '),
+      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:20 | Elenka:down:100 | Miky:down:100 | Hosté:down:100 | Ložnice:down:100 | Garáž:down');
+  }
+  {
+    // V noci dnes ještě nic neproběhlo — stav je ze včerejšího večera
+    const h = stav();
+    await h.api.rozvrhStavTed(PO_6 - 5 * H);    // 1:00
+    check('v 1:00 stav ze včerejška', h.povely.join(' | '),
+      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:20 | Elenka:down:100 | Miky:down:100 | Hosté:down:100 | Ložnice:down:100 | Garáž:down');
+    check('  a dnešní pravidla zůstávají na později', h.api.pravidla.some(p => p.spustenoDne), false);
+  }
+  {
+    // Při sauně se ložnice odkládá — dožene ji běžný tik
+    const h = stav();
+    h.state.sauna.lastHeatAt = PO_6 + 15 * H - 5 * MIN;
+    await h.api.rozvrhStavTed(PO_6 + 15 * H);
+    const loznice = h.api.pravidla.find(p => p.nazev === 'Ložnice po západu');
+    check('odložené pravidlo se neodškrtne', loznice.spustenoDne, null);
+  }
+  {
+    const h = stav();
+    h.zlobi = 'Hosté';
+    const v = await h.api.rozvrhStavTed(PO_6 + 7 * H);
+    check('výpadek jedné žaluzie nezastaví ostatní', v.ok + '/' + v.celkem + ' ' + v.chyby.length, '7/8 1');
+  }
+  {
+    const h = stav();
+    h.api.pravidla.forEach(p => { p.zapnuto = false; });
+    const v = await h.api.rozvrhStavTed(PO_6 + 7 * H);
+    check('vypnutá pravidla se nepočítají', v.celkem, 0);
+  }
 }
 
 konec();

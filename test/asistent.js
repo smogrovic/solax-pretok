@@ -25,6 +25,8 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     devices: {},
     aircon: { devices: klimy.map(n => ({ name: n, guid: n, power: true })) },
     away: { since: 0 },
+    autoMode: 'on',
+    tempAuto: { obyvak: false, loznice: false },
     assistantLog: [],
     huum: { doorClosed: dvere }
   };
@@ -38,6 +40,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
     'assistantSetTerasaLight', 'DEVICE_LABELS', 'getBlinds', 'cz',
+    'delay', 'autoRunning', 'rozvrhStavTed', 'runObehSchedule', 'runAutomation',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -82,7 +85,12 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     { lightDole: 'Zahrada dole', lightNahore: 'Zahrada nahoře',
       lightBazen: 'Světlo bazén', lightNocni: 'Noční světla' },
     async () => [{ type: 'switch', label: 'Světlo terasa', onState: pergola }],
-    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+    () => new Promise(r => setTimeout(r, 1)),     // delay: skutečné čekání, ať se stihne přepnout režim
+    () => state.autoMode !== 'off',
+    async () => { akce.push('rozvrh:obnova'); return { ok: 3, celkem: 3, chyby: [] }; },
+    async () => { akce.push('obeh:rozvrh'); },
+    async () => { akce.push('automatika'); }
   );
   return { api, state, akce, logy, routy };
 }
@@ -355,6 +363,45 @@ nadpis('4) Nejsme doma — odpočet');
   check('návratem se nic nezapíná', h.akce.length, 0);
 }
 
+nadpis('4b) Návrat: dům jako by automatika jela celou dobu');
+{
+  // Klima shodí přepínač teplotní automatiky (tempAutoDisableByHand); po návratu se vrátí
+  const h = build({ klimy: ['Obývák'] });
+  h.state.tempAuto.obyvak = true;
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  h.state.tempAuto.obyvak = false;          // tohle udělá vypnutí klimy
+  const pred = h.akce.length;
+  await volej(h.routy, '/api/away', { away: false });
+  await new Promise(r => setTimeout(r, 10));
+  check('po návratu žaluzie podle rozvrhu, čerpadlo a automatika',
+    h.akce.slice(pred).join(' | '), 'rozvrh:obnova | obeh:rozvrh | automatika');
+  check('  teplotní automatika obýváku zpátky', h.state.tempAuto.obyvak, true);
+  check('  ložnice, která zapnutá nebyla, zůstane', h.state.tempAuto.loznice, false);
+  check('  a v Logu', h.logy.some(t => /^Jsme doma: teplotní automatika zpátky \(1\), žaluzie podle rozvrhu 3 z 3, automatika spuštěna$/.test(t)), true);
+}
+{
+  // Zrušené v odpočtu: nic se nezměnilo, není co vracet
+  const h = build();
+  await volej(h.routy, '/api/away', { away: true });
+  await volej(h.routy, '/api/away', { away: false });
+  await new Promise(r => setTimeout(r, 10));
+  check('zrušení v odpočtu nic neobnovuje', h.akce.length, 0);
+}
+{
+  // Jezdec rovnou na Vypnuto: režim přijde hned po „doma" — obnova se nekoná
+  const h = build();
+  await volej(h.routy, '/api/away', { away: true });
+  h.state.away.since -= 16 * MIN;
+  await h.api.enforceAway();
+  const pred = h.akce.length;
+  await volej(h.routy, '/api/away', { away: false });
+  h.state.autoMode = 'off';
+  await new Promise(r => setTimeout(r, 10));
+  check('návrat na Vypnuto nic nespouští', h.akce.length, pred);
+}
+
 nadpis('5) Bojler se v nepřítomnosti nezapíná');
 {
   // Automatika bojleru má vlastní řetěz podmínek (přebytek, SOC, nádrž, předpověď)
@@ -378,6 +425,12 @@ nadpis('6) Nejsme doma — obnova po restartu');
   check('stav ze zálohy se převezme', h.api.awayOn(), true);
   // Odpočet se nesmí natáhnout znovu — nasazení uprostřed odchodu by ho jinak shodilo
   check('  a odpočet se nepočítá znovu', h.api.awayActive(), true);
+}
+{
+  // Nasazení během nepřítomnosti: co se má po návratu zapnout, se nesmí ztratit
+  const h = build();
+  await volej(h.routy, '/api/away/restore', { since: Date.now() - 20 * MIN, tempAutoPred: ['obyvak', 'neexistuje', 5] });
+  check('záloha vrátí i pokoje s teplotní automatikou', JSON.stringify(h.state.away.tempAutoPred), '["obyvak"]');
 }
 {
   const h = build();

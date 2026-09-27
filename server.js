@@ -4607,6 +4607,60 @@ async function runBlindSchedule(at = Date.now()) {
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
 }
 
+// Návrat z „jsme pryč": žaluzie se nastaví tak, jak by stály, kdyby rozvrh jel celou
+// dobu. Vezme se včerejšek celý a dnešek do teď a pro každý cíl jen VÝSLEDEK —
+// poslední poloha a naklopení po ní. Přehrát celý den by žaluzie honilo nahoru
+// a dolů a zřetězené povely by si pohyb přerušily.
+async function rozvrhStavTed(at = Date.now()) {
+  rozvrhSerad(at);
+  const ted = pragueTime(at);
+  const minutaTed = ted.hour * 60 + ted.minute;
+  const vcera = rozvrhDenIndex(at - 86400000);
+  const dnes = rozvrhDenIndex(at);
+  const pouzite = [];
+  const cile = new Map();      // cíl → { poloha, naklon }
+  const zapis = p => {
+    for (const k of p.kroky) {
+      const c = cile.get(k.cil) || { poloha: null, naklon: null };
+      if (k.akce === 'tilt') c.naklon = k;
+      else { c.poloha = k; c.naklon = null; }
+      cile.set(k.cil, c);
+    }
+  };
+  for (const p of blindRules) if (p.zapnuto && vcera >= 0 && p.dny[vcera]) zapis(p);
+  for (const p of blindRules) {
+    if (!p.zapnuto || dnes < 0 || !p.dny[dnes]) continue;
+    const plan = rozvrhMinuta(p, at);
+    if (plan === null || plan > minutaTed) continue;
+    // Odložené saunou dožene běžný tik, až bude po sauně
+    if (rozvrhOdlozeno(p, at)) continue;
+    zapis(p);
+    pouzite.push(p);
+  }
+  // Zapsat PŘED povely, stejně jako tik — ten by jinak pustil dnešní pravidla znovu
+  const den = pragueDateString(at);
+  for (const p of pouzite) p.spustenoDne = den;
+  let ok = 0;
+  const chyby = [];
+  for (const [cil, { poloha, naklon }] of cile) {
+    let povel;
+    if (poloha && naklon && (poloha.akce === 'up' || poloha.akce === 'down')) {
+      povel = { target: cil, action: poloha.akce, orientation: naklon.hodnota };
+    } else {
+      const k = poloha || naklon;
+      povel = { target: cil, action: ROZVRH_AKCE_CMD[k.akce], orientation: k.hodnota === null ? undefined : k.hodnota };
+    }
+    try {
+      await assistantControlBlinds(povel);
+      ok++;
+    } catch (err) {
+      chyby.push(`${cil}: ${String(err.message).slice(0, 60)}`);
+    }
+  }
+  if (pouzite.length) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  return { ok, celkem: cile.size, chyby };
+}
+
 // Očistí pravidlo z appky. Vrací null, když je nepoužitelné — tiše opravovat by
 // znamenalo, že se v domě děje něco jiného, než co je v appce vidět.
 function rozvrhOcisti(v) {
@@ -9427,6 +9481,9 @@ let awayDoneAt = 0;    // kdy se odjezdové kroky odbavily (ať neběží dokola
 // Jednorázové kroky při odchodu. Chyba jednoho kroku nesmí shodit ostatní — zamknout
 // dům je důležitější než žaluzie.
 async function awayOdchod() {
+  // Které pokoje měly zapnutou teplotní automatiku — vypnutí klimy přepínač shodí
+  // a po návratu se mají vrátit
+  state.away.tempAutoPred = Object.keys(state.tempAuto || {}).filter(k => state.tempAuto[k]);
   const kroky = [];
   const zkus = async (popis, fn) => {
     try { kroky.push(await fn() || popis); } catch (err) { kroky.push(`${popis} selhalo (${err.message})`); }
@@ -9490,12 +9547,48 @@ async function enforceAway() {
   }
 }
 
+// Po návratu se dům nastaví, jako by automatika jela celou dobu: žaluzie podle
+// rozvrhu, klima zpátky do teplotní automatiky, relé hned (ne až za pět minut).
+// Zámek, světla a sauna se nevrací — ty automatika sama nezapíná.
+const AWAY_NAVRAT_CEKANI_MS = 5000;
+
+async function awayNavrat(pred) {
+  // Jezdec posílá „doma" a režim dvěma povely — na Vypnuto se nic obnovovat nemá
+  await delay(AWAY_NAVRAT_CEKANI_MS);
+  if (awayOn() || !autoRunning()) return;
+  const kroky = [];
+  const zkus = async (popis, fn) => {
+    try { const r = await fn(); if (r) kroky.push(r); } catch (err) { kroky.push(`${popis} selhalo (${String(err.message).slice(0, 60)})`); }
+  };
+  const vratit = (pred.tempAutoPred || []).filter(k => state.tempAuto && state.tempAuto[k] === false);
+  if (vratit.length) {
+    await zkus('klima', async () => {
+      for (const k of vratit) state.tempAuto[k] = true;
+      broadcast('tempAuto', { tempAuto: state.tempAuto });
+      return `teplotní automatika zpátky (${vratit.length})`;
+    });
+  }
+  if (tahomaEnabled) {
+    await zkus('žaluzie', async () => {
+      const v = await rozvrhStavTed();
+      if (!v.celkem) return null;
+      return `žaluzie podle rozvrhu ${v.ok} z ${v.celkem}${v.chyby.length ? ` (${v.chyby.join('; ')})` : ''}`;
+    });
+  }
+  await zkus('čerpadlo', async () => { await runObehSchedule(); return null; });
+  await zkus('automatika', async () => { await runAutomation(); return 'automatika spuštěna'; });
+  addLog(`Jsme doma: ${kroky.join(', ') || 'nic k obnově'}`);
+}
+
 app.post('/api/away', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const on = !!(req.body && req.body.away);
   if (on === awayOn()) return res.json(awayPayload());
+  // Obnova jen po skutečném odjezdu — zrušení v odpočtu nic nezměnilo
+  const navrat = !on && awayActive() ? { ...state.away } : null;
   state.away = { since: on ? Date.now() : 0 };
   awayDoneAt = 0;
+  if (navrat) awayNavrat(navrat).catch(err => addLog(`Jsme doma: obnova selhala (${err.message})`, 'error'));
   addLog(on
     ? `Nejsme doma: zapnuto, dům se zavře v ${fmtPragueTime(state.away.since + AWAY_DELAY_MS)}`
     : 'Nejsme doma: vypnuto');
@@ -9508,7 +9601,10 @@ app.post('/api/away', async (req, res) => {
 app.post('/api/away/restore', (req, res) => {
   const since = Number(req.body && req.body.since);
   if (Number.isFinite(since) && since > 0 && since <= Date.now() && !awayOn()) {
-    state.away = { since };
+    const pred = Array.isArray(req.body.tempAutoPred)
+      ? req.body.tempAutoPred.filter(k => typeof k === 'string' && Object.prototype.hasOwnProperty.call(state.tempAuto || {}, k))
+      : undefined;
+    state.away = pred ? { since, tempAutoPred: pred } : { since };
     broadcast('away', awayPayload());
   }
   res.json(awayPayload());
@@ -9579,7 +9675,7 @@ function storeSnapshot() {
     },
     '/api/pool/force/restore': { until: state.poolForce.until },
     '/api/pool/temp/restore': { c: state.poolTemp.c, at: state.poolTemp.at },
-    '/api/away/restore': { since: (state.away && state.away.since) || 0 },
+    '/api/away/restore': { since: (state.away && state.away.since) || 0, tempAutoPred: (state.away && state.away.tempAutoPred) || [] },
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },
     '/api/boiler-history/restore': { points: state.boilerHistory },

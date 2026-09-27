@@ -36,7 +36,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
                    'Data, notifikace, časovače', 'Oběhové čerpadlo', 'Rozvrh žaluzií', 'Nejsme doma'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
   // Po zjednodušení jen to, jak se to chová — žádné zdůvodňování na pozadí
-  check('odrážek je nejvýš 50', li.length <= 50, 'true');   // po zjednodušení jich je 45
+  check('odrážek je nejvýš 50', li.length <= 50, 'true');   // po zjednodušení jich je 46
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);
@@ -46,6 +46,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('sauna má natvrdo práh a dobu', /nad 500 W/.test(txt) && /30 min po posledním nátopu/.test(txt), 'true');
   check('nastavení sauny už na stránce není', !!document.getElementById('saunaLimitInput'), 'false');
   check('nejsme doma drží vypnutou saunu i čerpadlo', /drží vypnutá světla/.test(txt) && /čerpadlo/.test(txt), 'true');
+  check('  a po návratu nastaví žaluzie podle rozvrhu', /žaluzie nastaví podle rozvrhu/.test(txt), 'true');
   // Tlačítko na Asistentovi dělá víc věcí naráz — ať se nemusí hádat které
   check('  i co udělá tlačítko Zapni saunu', /žaluzie v ložnici/.test(txt), 'true');
   check('  včetně zahrady po západu', /zahradu dole/.test(txt) && /ve dne ne/.test(txt), 'true');
