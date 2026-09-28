@@ -1266,6 +1266,8 @@
     gap:8px;
     margin-top:10px;
   }
+  /* Spodní mřížka navazuje na horní se stejnou mezerou jako mezi tlačítky */
+  #asstDvojice{margin-top:8px;}
   .asst-scene{
     border:none;
     border-radius:16px;
@@ -9104,9 +9106,9 @@ function hideAssistantSlide() {
 const asstScenesEl = document.getElementById('asstScenes');
 const asstDvojiceEl = document.getElementById('asstDvojice');
 
-// Tyhle scény nepatří do hlavní mřížky, ale do dvojice s prázdninami — jinak by
-// pátá scéna zbyla sama na řádku
-const ASST_PAROVE = ['otevri'];
+// Tyhle scény nepatří do hlavní mřížky, ale do spodní s prázdninami a ložnicí —
+// dohromady 2×4 tlačítka bez díry
+const ASST_PAROVE = ['otevri', 'zaluzie'];
 
 function renderSceny(sceny) {
   if (!asstScenesEl) return;

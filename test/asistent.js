@@ -108,8 +108,8 @@ const volej = (routy, cesta, telo) => {
 nadpis('1) Seznam tlačítek');
 {
   const h = build();
-  check('je jich pět', h.api.SCENY.length, 5);
-  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zahrada,zamkni,sprcha,otevri');
+  check('je jich šest', h.api.SCENY.length, 6);
+  check('  a v tomhle pořadí', h.api.SCENY.map(s => s.key).join(','), 'sauna,zahrada,zamkni,sprcha,otevri,zaluzie');
   check('každé má popisek', h.api.SCENY.every(s => s.label && s.label.length > 3), true);
   // Tlačítko bez obsluhy by v appce svítilo a nic nedělalo
   check('a každé má co dělat', h.api.SCENY.every(s => typeof h.api.SCENA_FN[s.key] === 'function'), true);
@@ -214,6 +214,15 @@ nadpis('2b) Příprava podle teploty v sauně');
   await h.api.saunaPripravaTik({ heating: true, temperature: 79, targetTemperature: 80, light: 0 }, 3000);
   check('  a čas se už neposouvá', h.state.saunaRelace.nahrataAt, 2000);
   check('  v Logu', h.logy.some(t => /nahřátá na 75 °C — oběhové čerpadlo se bude protáčet/.test(t)), true);
+}
+
+{
+  const h = build();
+  const reply = await h.api.SCENA_FN.zaluzie();
+  check('Zavři všechny žaluzie: všechny dolů a zavřít lamely jedním povelem', h.akce.join(' | '), 'zaluzie:vše:down:100');
+  check('  a řekne to', typeof reply, 'string');
+  const t = build({ tahoma: false });
+  check('bez TaHomy to řekne', await t.api.SCENA_FN.zaluzie(), 'Žaluzie nejsou nastavené.');
 }
 
 nadpis('3) Ostatní tlačítka');

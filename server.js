@@ -9641,7 +9641,8 @@ const SCENY = [
   { key: 'sprcha', label: 'Jdu do sprchy' },
   // Otevřít, ne jen odemknout. V appce se na to ptá potvrzovací okno — omylem
   // otevřené dveře jsou horší než omylem cokoliv jiného.
-  { key: 'otevri', label: 'Otevři dveře' }
+  { key: 'otevri', label: 'Otevři dveře' },
+  { key: 'zaluzie', label: 'Zavři všechny žaluzie' }
 ];
 
 function poZapaduSlunce(at = Date.now()) {
@@ -9775,6 +9776,13 @@ async function scenaZahrada() {
   return kroky.join(' ');
 }
 
+// Všechny žaluzie dolů a lamely zavřít — jedním povelem na žaluzii (blindCommand
+// pošle zatažení i naklopení atomicky, zřetězené povely by si pohyb přerušily)
+async function scenaZaluzie() {
+  if (!tahomaEnabled) return 'Žaluzie nejsou nastavené.';
+  return assistantControlBlinds({ target: 'vše', action: 'down', orientation: ZALUZIE_ZAVRENO });
+}
+
 async function scenaZamkni() {
   if (!nukiEnabled) return 'Zámek není nastavený.';
   const msg = await nukiLock();
@@ -9796,7 +9804,7 @@ async function scenaOtevri() {
 }
 
 const SCENA_FN = { sauna: scenaSauna, zahrada: scenaZahrada, zamkni: scenaZamkni,
-                   sprcha: scenaSprcha, otevri: scenaOtevri };
+                   sprcha: scenaSprcha, otevri: scenaOtevri, zaluzie: scenaZaluzie };
 
 app.post('/api/scene', async (req, res) => {
   if (!requireAuth(req, res)) return;

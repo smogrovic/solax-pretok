@@ -75,14 +75,21 @@ setTimeout(async () => {
     { key: 'zahrada', label: 'Zahrada OFF' },
     { key: 'zamkni', label: 'Zamkni dům' },
     { key: 'sprcha', label: 'Jdu do sprchy' },
-    { key: 'otevri', label: 'Otevři dveře' }
+    { key: 'otevri', label: 'Otevři dveře' },
+    { key: 'zaluzie', label: 'Zavři všechny žaluzie' }
   ]);
   check('v hlavní mřížce zůstanou čtyři', document.querySelectorAll('#asstScenes .asst-scene').length, 4);
   check('  a dveře jsou v dvojici', !!document.querySelector('#asstDvojice [data-scene="otevri"]'), true);
   const dvojice = [...document.querySelectorAll('#asstDvojice button')];
-  check('dvojice má tři tlačítka (dveře, prázdniny, ložnice)', dvojice.length, 3);
-  check('  a prázdniny jsou druhé', dvojice[1].id, 'prazdninyBtn');
-  check('  zavřená ložnice třetí', dvojice[2].id, 'lozniceZavrenoBtn');
+  check('spodní mřížka: dveře, žaluzie, prázdniny, ložnice',
+    dvojice.map(b => b.dataset.scene || b.id).join(','), 'otevri,zaluzie,prazdninyBtn,lozniceZavrenoBtn');
+  // Dohromady 2×4 bez díry a se stejnou mezerou mezi mřížkami jako mezi tlačítky
+  const vse = [...document.querySelectorAll('#asstScenes button, #asstDvojice button')].map(b => b.getBoundingClientRect());
+  const radky = [...new Set(vse.map(r => Math.round(r.top)))];
+  check('tlačítka 2×4', radky.length + '×' + (vse.length / radky.length), '4×2');
+  const mezera = (a, b) => Math.round(b.top - a.bottom);
+  check('  mezi mřížkami stejná mezera jako uvnitř', mezera(vse[3], vse[4]), mezera(vse[1], vse[2]));
+  check('  poslední řádek plný', vse[6].top === vse[7].top && vse[7].left > vse[6].left, true);
   const r0 = dvojice[0].getBoundingClientRect(), r1 = dvojice[1].getBoundingClientRect();
   check('stojí vedle sebe', Math.round(r0.top) === Math.round(r1.top) && r1.left > r0.left, true);
   check('  a jsou stejně široká', Math.round(r0.width), Math.round(r1.width));
