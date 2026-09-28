@@ -30,11 +30,13 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
   const logy = [];
   const zpravy = [];
   const routy = {};
-  const state = { sekacka: { stin: null, kdy: 0, potiz: null } };
+  const state = { sekacka: { stin: null, kdy: 0, potiz: null },
+    pripominky: { sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 } } };
   const casovace = [];
   const cekani = [];
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'crypto', 'fetch', 'process', 'scheduleEvery', 'delay',
+    'pripominkaZapnuto',
     CODE + '\n; return { anthbotEnabled, anthbotPodpisovyKlic, anthbotKoduj, anthbotOtisk,'
          + ' anthbotKanonickeHlavicky, anthbotAutorizace, anthbotCas, anthbotOverovaciToken,'
          + ' anthbotZeSeznamu, anthbotHodnota, anthbotCislo, anthbotStavZeStinu, anthbotPrectiStin,'
@@ -58,7 +60,8 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
     (fn, ms) => casovace.push({ fn, ms }),
     // Ověřování povelu čeká osm vteřin naostro. V sadě se čekat nemá — zajímá
     // nás, KOLIKRÁT se čte a co z toho vyjde, ne jak dlouho to trvá.
-    ms => { cekani.push(ms); return Promise.resolve(); }
+    ms => { cekani.push(ms); return Promise.resolve(); },
+    (id, z) => { state.pripominky[id].zapnuto = z; return true; }
   );
   return { api, state, logy, zpravy, routy, casovace, cekani };
 }
@@ -385,6 +388,37 @@ nadpis('9) Když cloud nespolupracuje');
   podstrc({ ...CESTA_CELA, '/api/v1/login': { code: 10001, msg: 'wrong password' } });
   await h3.api.sekackaNacti();
   check('špatné heslo se přizná', String(h3.state.sekacka.potiz).includes('cloud odmítl'), true);
+}
+
+nadpis('9b) Od kdy sekačka není na příjmu (připomínka Vysvobodit sekačku)');
+{
+  const h = build();
+  let online = 1, selze = false;
+  const stin = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ state: { reported: {
+    elec: { value: 40 }, robot_sta: { value: 'idle' }, online: { value: online } } } }) });
+  podstrc({ ...CESTA_CELA, aws: () => (selze ? { ok: false, status: 500, text: async () => 'x' } : stin()) });
+  await h.api.sekackaNacti();
+  check('na příjmu: žádná odmlka', h.api.sekackaPayload().offlineOd, 0);
+  online = 0;
+  const pred = Date.now();
+  await h.api.sekackaNacti();
+  const od = h.state.sekacka.offlineOd;
+  check('první čtení bez příjmu zapíše, od kdy', od >= pred && od <= Date.now(), true);
+  check('  a jde do appky', h.api.sekackaPayload().offlineOd, od);
+  await new Promise(r => setTimeout(r, 5));
+  await h.api.sekackaNacti();
+  check('další čtení bez příjmu čas neposune', h.state.sekacka.offlineOd, od);
+  selze = true;
+  await h.api.sekackaNacti();
+  check('výpadek cloudu odmlku nemění', h.state.sekacka.offlineOd, od);
+  selze = false;
+  // Přepínač vypnutý (sekačka vypnutá schválně) — návratem se zapne sám
+  h.state.pripominky.sekacka.zapnuto = false;
+  online = 1;
+  await h.api.sekackaNacti();
+  check('návrat na příjem odmlku smaže', h.state.sekacka.offlineOd, 0);
+  check('  a vypnutou připomínku zase zapne', h.state.pripominky.sekacka.zapnuto, true);
+  check('  a řekne to v Logu', h.logy.some(t => /Připomínka sekačky znovu zapnutá/.test(t)), true);
 }
 
 nadpis('10) Endpointy');

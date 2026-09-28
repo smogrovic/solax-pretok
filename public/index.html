@@ -4719,6 +4719,7 @@ function renderAutoSlider() {
 function renderAutomation(mode) {
   autoModeData = AUTO_MODES_UI.includes(mode) ? mode : 'on';
   renderAutoSlider();
+  bezpecne(renderPripominky);  // v zimě zmizí připomínka sekačky
   saveAutoModeLocal();
   renderTempAutoThreshold();   // v zimě se ukazuje jiný jezdec
   renderWbAuto();              // a jiná nápověda u wallboxu
@@ -10310,6 +10311,7 @@ function sekackaMetaRadky() {
 
 function renderSekacka(d) {
   if (d) sekackaData = { ...sekackaData, ...d };
+  bezpecne(renderPripominky);  // „Vysvobodit sekačku“ hlídá, od kdy mlčí
   const zive = sekackaZive();
   const naPrijmu = sekackaNaPrijmu();
   const jede = naPrijmu && SEK_JEDE.includes(sekackaData.stav);
@@ -11307,11 +11309,21 @@ const PRIPOMINKY = [
   { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7 },
   { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí; v zimě jde vypnout
   { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 },    // čtvrtek dopoledne, celý rok
+  // Sekačka hodinu není na příjmu — nejspíš někde uvízla. Přepínač se vypíná, když je
+  // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě se neukazuje.
+  { id: 'sekacka', nazev: 'Vysvobodit sekačku', ikona: '🆘', sekacka: true, prepinac: true },
   // Krmení psa: každý den, den se láme ve 3:00. Mají vlastní plovoucí záložky.
   { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣' },
   { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣' }
 ];
 const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
+const PRIP_SEKACKA_MS = 3600000;   // jak dlouho sekačka mlčí, než se připomínka rozsvítí
+
+// Připomínka sekačky jen tam, kde má smysl: nastavená sekačka a mimo zimu
+function pripViditelna(def) {
+  if (!def.sekacka) return true;
+  return !!(sekackaData && sekackaData.zapnuto) && !isWinterUi();
+}
 const PRIP_DEN = 86400000;
 const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
 const pripSeznamEl = document.getElementById('pripSeznam');
@@ -11344,6 +11356,16 @@ function pripominkaStav(def, p, now = Date.now()) {
   // „Aktivovat teď“: svítí, dokud se po aktivaci neodťukne — bez ohledu na čas
   const aktivovano = Number(p.aktivovano) || 0;
   if (aktivovano && aktivovano >= hotovo) return { sviti: true, text: 'Aktivováno ručně', dalsi: null };
+  if (def.sekacka) {
+    if (p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
+    const od = Number(sekackaData && sekackaData.offlineOd) || 0;
+    if (!od) return { sviti: false, text: 'Sekačka je na příjmu', dalsi: null };
+    const kdy = 'Není na příjmu od ' + fmtSolTime(od);
+    // Odťuknuto během téhle odmlky: klid, dokud se neozve a znovu neodmlčí
+    if (hotovo >= od) return { sviti: false, text: kdy + ' · vyřízeno ✓', dalsi: null };
+    if (now - od < PRIP_SEKACKA_MS) return { sviti: false, text: kdy, dalsi: od + PRIP_SEKACKA_MS };
+    return { sviti: true, text: kdy, dalsi: null };
+  }
   if (def.denne) {
     // Den se láme ve 3:00 — co je odťuknuté od té doby, platí pro dnešek
     const W = pripNastenne(now);
@@ -11400,7 +11422,7 @@ function pripOdpocet(ms) {
 
 // Zvoneček počítá jen připomínky bez vlastní záložky — pes má svoje
 function pripSviticich(now = Date.now()) {
-  return PRIPOMINKY.filter(def => !def.zalozka
+  return PRIPOMINKY.filter(def => !def.zalozka && pripViditelna(def)
     && pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
 }
 
@@ -11422,6 +11444,7 @@ function renderPripominky(now = Date.now()) {
   if (!pripSeznamEl) return;
   pripSeznamEl.textContent = '';
   for (const def of PRIPOMINKY) {
+    if (!pripViditelna(def)) continue;
     const p = pripData && pripData[def.id];
     const st = pripominkaStav(def, p, now);
     const radek = document.createElement('div');

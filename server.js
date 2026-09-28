@@ -1282,8 +1282,8 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 // Kytky, vysavač a popelnice. Server drží jen to, kdy se co naposledy odťuklo, a
 // přepínač BIO (běžná popelnice jede celý rok, ta ho nemá). Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
-const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer'];
-const PRIPOMINKY_S_PREPINACEM = ['bio'];
+const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka'];
+const PRIPOMINKY_S_PREPINACEM = ['bio', 'sekacka'];
 
 function pripominkyVychozi() {
   return {
@@ -1294,7 +1294,10 @@ function pripominkyVychozi() {
     popelnice: { hotovo: 0, predtim: 0, aktivovano: 0 },
     // Krmení psa: ráno od 5:00, večer od 16:00, den se láme ve 3:00 (počítá appka)
     pesRano: { hotovo: 0, predtim: 0, aktivovano: 0 },
-    pesVecer: { hotovo: 0, predtim: 0, aktivovano: 0 }
+    pesVecer: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    // Vysvobodit sekačku: svítí, když sekačka hodinu není na příjmu (počítá appka
+    // z `offlineOd` sekačky). Přepínač se vypíná, když je sekačka vypnutá schválně.
+    sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 }
   };
 }
 
@@ -9245,6 +9248,7 @@ function sekackaPayload() {
     kdy: state.sekacka.kdy,
     // `chyba` je chybový kód od sekačky, `potiz` problém se spojením — dvě různé věci
     potiz: state.sekacka.potiz,
+    offlineOd: state.sekacka.offlineOd || 0,
     ...anthbotPrectiStin(state.sekacka.stin)
   };
 }
@@ -9273,12 +9277,33 @@ async function sekackaNacti(znovu = false) {
       addLog(jeOnline ? 'Sekačka: zase na příjmu' : 'Sekačka: odpojila se');
     }
     state.sekacka.__drive = { online: stin.online };
+    sekackaOdmlka(jeOnline);
     sekackaPosli();
   } catch (err) {
     // 401 i 403 znamenají „přihlaš se znovu"; jednou to zkusíme, pak to přiznáme
     if (!znovu && /40[13]|cloud odmítl/.test(err.message)) return sekackaNacti(true);
     state.sekacka.potiz = err.message;
     sekackaPosli();
+  }
+}
+
+// Od kdy sekačka není na příjmu — z toho appka rozsvítí připomínku „Vysvobodit
+// sekačku". Počítá se jen z odpovědi cloudu: když neodpoví cloud (`potiz`), o
+// sekačce to nic neříká a volá se to jen při úspěšném čtení.
+function sekackaOdmlka(online, now = Date.now()) {
+  if (online === null) return;
+  if (online === 0) {
+    if (!state.sekacka.offlineOd) state.sekacka.offlineOd = now;
+    return;
+  }
+  if (!state.sekacka.offlineOd) return;
+  state.sekacka.offlineOd = 0;
+  // Vypnutý přepínač znamenal „sekačka je vypnutá schválně". Teď je zpátky, takže
+  // připomínka zase hlídá — na jaře se na to nedá zapomenout.
+  const p = state.pripominky && state.pripominky.sekacka;
+  if (p && p.zapnuto === false) {
+    pripominkaZapnuto('sekacka', true);
+    addLog('Připomínka sekačky znovu zapnutá (sekačka je na příjmu)');
   }
 }
 
@@ -9799,6 +9824,8 @@ function storeSnapshot() {
     // Saunování (od/konec a co už příprava udělala) — nasazení uprostřed sauny
     // by jinak ložnici vytáhlo znovu a po sauně nevědělo, od kdy čekat
     saunaRelace: state.saunaRelace,
+    // Od kdy sekačka mlčí — po nasazení by se hodina do připomínky počítala znovu
+    sekackaOfflineOd: (state.sekacka && state.sekacka.offlineOd) || 0,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -9816,6 +9843,10 @@ function storeApplyPrimo(p) {
     }
   }
   if (typeof p.wbAuto === 'boolean') state.wbAuto = p.wbAuto;
+  if (Number.isFinite(p.sekackaOfflineOd) && p.sekackaOfflineOd > 0 && p.sekackaOfflineOd <= now
+      && state.sekacka && !state.sekacka.offlineOd && !state.sekacka.kdy) {
+    state.sekacka.offlineOd = p.sekackaOfflineOd;
+  }
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {

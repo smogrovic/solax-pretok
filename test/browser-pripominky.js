@@ -265,6 +265,39 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
   window.matchMedia = puvodniMM;
 
+  OUT.push('\\n11) Vysvobodit sekačku');
+  const T = Date.now();
+  check('nenastavená sekačka řádek nemá', radek('sekacka'), null);
+  sekackaData = { ...sekackaData, zapnuto: true, online: true, offlineOd: 0 };
+  renderAutomation('on');
+  pripData = { sekacka: { zapnuto: true, hotovo: 0 } };
+  renderPripominky();
+  check('s nastavenou sekačkou řádek je', !!radek('sekacka'), 'true');
+  check('  s přepínačem', !!radek('sekacka').querySelector('.prip-prepinac'), 'true');
+  check('na příjmu nesvítí', sviti('sekacka', pripData.sekacka, T), 'false');
+  check('  a řekne to', pripominkaStav(def('sekacka'), pripData.sekacka, T).text, 'Sekačka je na příjmu');
+  sekackaData.offlineOd = T - 30 * MIN;
+  const pul = pripominkaStav(def('sekacka'), pripData.sekacka, T);
+  check('30 min bez příjmu ještě nesvítí', pul.sviti, 'false');
+  check('  a odpočítává, kdy se rozsvítí', pul.dalsi, T + 30 * MIN);
+  sekackaData.offlineOd = T - 61 * MIN;
+  const zvonekPred = pripSviticich(T);
+  check('hodinu bez příjmu svítí', sviti('sekacka', pripData.sekacka, T), 'true');
+  check('  s časem, od kdy mlčí', /^Není na příjmu od \\d+:\\d\\d$/.test(pripominkaStav(def('sekacka'), pripData.sekacka, T).text), 'true');
+  renderPripominky(T);
+  check('  a řádek svítí', radek('sekacka').classList.contains('sviti'), 'true');
+  check('  i ve zvonečku', pripSviticich(T) >= 1, 'true');
+  check('vypnutý přepínač nesvítí', sviti('sekacka', { zapnuto: false, hotovo: 0 }, T), 'false');
+  check('odťuknuto během odmlky nesvítí', sviti('sekacka', { zapnuto: true, hotovo: T - 5 * MIN }, T), 'false');
+  check('  ale odťuknutí z dřívější odmlky neplatí', sviti('sekacka', { zapnuto: true, hotovo: T - 2 * H }, T), 'true');
+  renderAutomation('winter');
+  check('v zimě řádek zmizí', radek('sekacka'), null);
+  check('  i ze zvonečku', pripSviticich(T), zvonekPred - 1);
+  renderAutomation('on');
+  check('mimo zimu je zpátky', !!radek('sekacka'), 'true');
+  sekackaData = { ...sekackaData, zapnuto: false, offlineOd: 0 };
+  renderPripominky();
+
   OUT.push('\\n7) Dětský režim');
   pouzijRezim('miky');
   check('dítě stránku vidí', document.getElementById('pripominkySlide').hidden, 'false');

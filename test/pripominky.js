@@ -26,7 +26,8 @@ function build() {
 nadpis('1) Výchozí stav');
 {
   const h = build();
-  check('šest připomínek (i pes ráno a večer)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer');
+  check('sedm připomínek (i pes a sekačka)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer,sekacka');
+  check('sekačka má přepínač, výchozí zapnutý', h.state.pripominky.sekacka.zapnuto, true);
   check('nic není aktivované ručně', Object.values(h.state.pripominky).every(p => p.aktivovano === 0), true);
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
   check('BIO má přepínač zapnutý', h.state.pripominky.bio.zapnuto, true);

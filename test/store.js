@@ -380,6 +380,24 @@ nadpis('5) Přímé hodnoty');
   check('  novější stav po startu záloha nepřepíše', h.state.saunaRelace.od, od);
 }
 
+{
+  // Od kdy sekačka mlčí — po nasazení se hodina nesmí počítat znovu
+  const st = prazdnyStav();
+  st.saunaNahrev = { bezici: null, zaznamy: [] };
+  st.saunaZapnuto = { od: 0, naposledy: 0 };
+  st.sekacka = { stin: null, kdy: 0, potiz: null };
+  const h = build({ state: st });
+  const od = Date.now() - 45 * 60000;
+  h.api.storeApplyPrimo({ sekackaOfflineOd: od });
+  check('odmlka sekačky se vrátí ze zálohy', h.state.sekacka.offlineOd, od);
+  check('  a jde do zálohy', h.api.storeSnapshot().primo.sekackaOfflineOd, od);
+  const st2 = prazdnyStav();
+  st2.sekacka = { stin: {}, kdy: Date.now(), potiz: null, offlineOd: 0 };
+  const h2 = build({ state: st2 });
+  h2.api.storeApplyPrimo({ sekackaOfflineOd: od });
+  check('  čerstvé čtení po startu záloha nepřepíše', h2.state.sekacka.offlineOd, 0);
+}
+
 nadpis('6) Plánování');
 {
   const h = build({ env: UPSTASH });
