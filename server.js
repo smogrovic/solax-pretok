@@ -8332,6 +8332,17 @@ let dutyChyba = null;
 // jde jen podle počtu. Poplach se z toho ale nedělá: prázdný týden je normální
 // stav (dovolená) a vymyšlená hláška „asi je to rozbité" by byla horší než mlčet.
 let dutyUdalosti = 0;
+let dutyDuplicit = 0;      // kolik letů z DutyLogu se zahodilo, protože už jsou ve Flying
+
+// Stejný let ze dvou zdrojů: DutyLog (odebíraný ICS) a slitý kalendář téhož sloupce
+// (Flying). Shoda = stejný sloupec, začátek i konec do 5 minut. Názvy se neporovnávají
+// — DutyLog a ruční záznam je píšou každý jinak.
+const KAL_DUPLICITA_MS = 5 * 60000;
+function kalBezDuplicit(duty, ostatni) {
+  const slite = ostatni.filter(u => u.zdroj === 'slouceno');
+  return duty.filter(d => !slite.some(u => u.kalendar === d.kalendar
+    && Math.abs(u.od - d.od) <= KAL_DUPLICITA_MS && Math.abs(u.do - d.do) <= KAL_DUPLICITA_MS));
+}
 let dutyKdy = 0;
 async function kalStahniDuty(od, doKdy, kal) {
   if (!DUTY_ICS_URL) return [];
@@ -8392,13 +8403,18 @@ async function pollKalendar() {
     const cil = kalendare.find(k => k.nazev === DUTY_KALENDAR)
       || { nazev: DUTY_KALENDAR, barva: null };
     kalKrok = 'stahování pracovního rozpisu';
-    vse.push(...await kalStahniDuty(od, doKdy, cil));
+    const duty = await kalStahniDuty(od, doKdy, cil);
+    // Lety, které už jsou ve slitém kalendáři (Flying), se z DutyLogu nepřidají
+    const bezDuplicit = kalBezDuplicit(duty, vse);
+    dutyDuplicit = duty.length - bezDuplicit.length;
+    dutyUdalosti = bezDuplicit.length;
+    vse.push(...bezDuplicit);
     if (DUTY_ICS_URL && !kalendare.some(k => k.nazev === cil.nazev)) kalendare.push(cil);
     state.calendar = {
       days: kalDoDnu(vse, od),
       kalendare: kalendare.map(k => ({ nazev: k.nazev, barva: k.barva })),
       duty: DUTY_ICS_URL
-        ? { kalendar: cil.nazev, error: dutyChyba, udalosti: dutyUdalosti, kdy: dutyKdy }
+        ? { kalendar: cil.nazev, error: dutyChyba, udalosti: dutyUdalosti, duplicit: dutyDuplicit, kdy: dutyKdy }
         : null,
       fetchedAt: new Date().toISOString(),
       error: null

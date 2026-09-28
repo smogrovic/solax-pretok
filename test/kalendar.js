@@ -28,7 +28,7 @@ function build({ odpovedi = [], duty = '', icloud = false } = {}) {
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
          + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev,'
-         + ' kalSerad, kalStahniDuty, pollKalendar, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS };'
+         + ' kalSerad, kalStahniDuty, pollKalendar, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS, kalBezDuplicit };'
   )(
     state,
     { get: (cesta, fn) => { routy['GET ' + cesta] = fn; },
@@ -513,11 +513,16 @@ function dalsiE() {
   const udalost = (uid, nazev) => '<multistatus><response><calendar-data>BEGIN:VEVENT\r\nUID:' + uid
     + '\r\nSUMMARY:' + nazev + '\r\nDTSTART:' + utc(Date.now() + 2 * 3600000)
     + '\r\nDTEND:' + utc(Date.now() + 5 * 3600000) + '\r\nEND:VEVENT</calendar-data></response></multistatus>';
-  const h = build({ icloud: true, duty: '',
+  // DutyLog nese tentýž let (o 3 min posunutý, jinak pojmenovaný) a jeden navíc
+  const feed = (uid, nazev, odH, doH, posun = 0) => `BEGIN:VEVENT\r\nUID:${uid}\r\nSUMMARY:${nazev}\r\n`
+    + `DTSTART:${utc(Date.now() + odH * 3600000 + posun)}\r\nDTEND:${utc(Date.now() + doH * 3600000 + posun)}\r\nEND:VEVENT\r\n`;
+  const FEED = 'BEGIN:VCALENDAR\r\n' + feed('d1', 'FLT OK123', 2, 5, 3 * 60000) + feed('d2', 'SBY', 20, 30)
+    + feed('d3', 'OK789', 2, 5, 30 * 60000) + 'END:VCALENDAR';
+  const h = build({ icloud: true, duty: 'https://dutylog/feed',
     odpovedi: [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM },
       // Stahuje se v pořadí sloupců: Lukáš, Zuzka, pak ostatní podle abecedy
       { body: udalost('l1', 'Zubař') }, { body: udalost('z1', 'Kadeřník') },
-      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('s1', 'Třídní schůzka') }] });
+      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('s1', 'Třídní schůzka') }, { body: FEED }] });
   return h.api.pollKalendar().then(() => {
     const p = h.api.calendarPayload();
     const vse = p.days.flatMap(d => d.udalosti);
@@ -531,6 +536,11 @@ function dalsiE() {
     check('vlastní události beze změny', vlastni && vlastni.kalendar + ' ' + vlastni.zdroj + ' ' + vlastni.puvod, 'Lukáš null null');
     const zuz = vse.find(u => u.uid === 'z1');
     check('  i Zuzčiny', zuz && zuz.kalendar + ' ' + zuz.puvod, 'Zuzka null');
+    // Duplicity z DutyLogu (tentýž let ve Flying) pryč
+    check('let z DutyLogu, který je ve Flying, zmizí', vse.some(u => u.uid === 'd1'), false);
+    check('  služba jen v DutyLogu zůstane', vse.some(u => u.uid === 'd2' && u.zdroj === 'duty'), true);
+    check('  posun o 30 min není duplicita', vse.some(u => u.uid === 'd3'), true);
+    check('  a appka ví, kolik se zahodilo', p.duty.duplicit + ' / ' + p.duty.udalosti, '1 / 2');
   }).catch(err => {
     check('oddíl doběhl bez výjimky', err.message, '(nic)');
   }).then(dalsiF);
