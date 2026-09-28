@@ -495,6 +495,40 @@ nadpis('6e) Výpadek rozpisu je vidět v appce');
   }).then(dalsiE);
 }
 function dalsiE() {
+  nadpis('6c) Kalendář Flying se slije do Lukáše (modře)');
+  const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
+    + `<current-user-principal><href>/1/principal/</href></current-user-principal>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const HOME = `<multistatus xmlns="DAV:"><response><href>/1/principal/</href><propstat><prop>`
+    + `<calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">`
+    + `<href xmlns="DAV:">https://p1-caldav.icloud.com/1/calendars/</href></calendar-home-set>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
+  const kal = (href, jmeno) => `<response><href>/1/calendars/${href}/</href><propstat><prop>`
+    + `<displayname>${jmeno}</displayname><resourcetype><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>`
+    + `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"><comp name="VEVENT"/></supported-calendar-component-set>`
+    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response>`;
+  const SEZNAM = `<multistatus xmlns="DAV:">${kal('lukas', 'Lukáš')}${kal('flying', 'Flying')}</multistatus>`;
+  const utc = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const udalost = (uid, nazev) => '<multistatus><response><calendar-data>BEGIN:VEVENT\r\nUID:' + uid
+    + '\r\nSUMMARY:' + nazev + '\r\nDTSTART:' + utc(Date.now() + 2 * 3600000)
+    + '\r\nDTEND:' + utc(Date.now() + 5 * 3600000) + '\r\nEND:VEVENT</calendar-data></response></multistatus>';
+  const h = build({ icloud: true, duty: '',
+    odpovedi: [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM },
+      { body: udalost('l1', 'Zubař') }, { body: udalost('f1', 'OK123 PRG-FCO') }] });
+  return h.api.pollKalendar().then(() => {
+    const p = h.api.calendarPayload();
+    const vse = p.days.flatMap(d => d.udalosti);
+    const let_ = vse.find(u => u.uid === 'f1');
+    check('Flying nemá vlastní sloupec', p.kalendare.map(k => k.nazev).join(','), 'Lukáš');
+    check('  let je v Lukášově sloupci', let_ && let_.kalendar, 'Lukáš');
+    check('  a modře (jako pracovní rozpis)', let_ && let_.zdroj, 'duty');
+    const vlastni = vse.find(u => u.uid === 'l1');
+    check('Lukášovy vlastní události beze změny', vlastni && vlastni.kalendar + ' ' + vlastni.zdroj, 'Lukáš null');
+  }).catch(err => {
+    check('oddíl doběhl bez výjimky', err.message, '(nic)');
+  }).then(dalsiF);
+}
+function dalsiF() {
 
 nadpis('7) Bez přihlašovacích údajů');
 {
