@@ -205,7 +205,7 @@ const state = {
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
   lozniceZavrenoRano: null,  // ráno, kdy ložnici žádná automatika neotevře (tlačítko na Asistentovi)
-  detiRano: null,            // které kroky ranního naklopení dětí dnes proběhly
+  rozvrhVerze: 0,            // které úpravy uloženého rozvrhu už proběhly (rozvrhMigrace)
   prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
   zapadDelayMin: 20, // o kolik po západu slunce jede rozvrh žaluzií
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
@@ -4478,7 +4478,15 @@ const VIKEND = [false, false, false, false, false, true, true];
 const VSE = [true, true, true, true, true, true, true];
 const krok = (cil, akce, hodnota = null) => ({ cil, akce, hodnota });
 const ROZVRH_VYCHOZI = [
-  // Ranní naklopení dětí (Miky, Elenka) je vestavěné — viz detiRano
+  // Děti ve všední den: 50 % v 6:40, nebo 15 min před východem, co je později
+  { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' }, kroky: [
+    krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] },
+  { nazev: 'Děti dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
+    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] },
+  // Víkend = prázdniny (prázdninový den se počítá jako neděle). Ložnici nechá být
+  // tlačítko „Zavřené žaluzie v ložnici".
+  { nazev: 'Víkend a prázdniny', dny: VIKEND, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
+    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25), krok('Ložnice', 'tilt', 25)] },
   { nazev: 'Dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '08:00' }, kroky: [
     krok('Hosté', 'tilt', 25), krok('Kuchyň', 'tilt', 25), krok('Obývák Okno', 'tilt', 25),
     krok('Obývák Dveře', 'up')] },
@@ -4498,6 +4506,7 @@ let blindRuleSeq = 1;
 let blindRules = [];
 
 function rozvrhNasadVychozi() {
+  state.rozvrhVerze = 2;
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
   return rozvrhSerad();
 }
@@ -4513,9 +4522,9 @@ function rozvrhVychoziPoStartu() {
 }
 let blindRulesAt = 0;         // kdy se rozvrh naposledy měnil (kvůli obnově ze zálohy)
 
-// Ráno dětí je vestavěné (detiRano). Dřívější výchozí skupiny se s ním tlučou,
-// proto se po startu uklidí — ale jen ty PŘESNĚ výchozí; upravenou si tu někdo
-// nechal schválně:
+// Úprava uloženého rozvrhu po startu. Ráno dětí mají nové skupiny („Děti ráno",
+// „Děti dopoledne", „Víkend a prázdniny"); ty staré by se s nimi tloukly, proto se
+// uklidí — ale jen ty PŘESNĚ výchozí, upravenou si tu někdo nechal schválně:
 //  * „Pokoje" (So–Ne 10:00, děti 50 %) a „Ráno pokoje" (Po–Pá 6:40, děti 50 %) se smažou,
 //  * „Dopoledne" (Po–Pá 8:00) přijde jen o kroky Miky a Elenka.
 const MIGRACE_PRAC = [true, true, true, true, true, false, false];
@@ -4542,10 +4551,22 @@ function rozvrhMigrace(now = Date.now()) {
     }
     zbyle.push(p);
   }
+  // Verze 2: ráno dětí a víkend přešly z vestavěného kódu do rozvrhu, ať je vidět,
+  // co dělají, a jdou pozastavit nebo smazat. Doplní se jednou — kdo je pak smaže,
+  // nedostane je zpátky.
+  if ((state.rozvrhVerze || 0) < 2 && zbyle.length) {
+    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Děti dopoledne', 'Víkend a prázdniny'].includes(v.nazev))) {
+      if (zbyle.some(p => p.nazev === v.nazev)) continue;
+      zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
+      zmeny.push(`přidáno „${v.nazev}"`);
+    }
+  }
+  state.rozvrhVerze = 2;
   if (!zmeny.length) return false;
   blindRules = zbyle;
+  rozvrhSerad(now);
   blindRulesAt = now;
-  addLog(`Rozvrh žaluzií: ${zmeny.join(', ')} — děti řídí vestavěné ráno`);
+  addLog(`Rozvrh žaluzií: ${zmeny.join(', ')}`);
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
   return true;
 }
@@ -4644,12 +4665,14 @@ function rozvrhMinuta(p, at = Date.now()) {
   const w = state.weather || {};
   const zapad = p.kdy.typ === 'zapad';
   const zaklad = zapad ? w.sunsetMs : w.sunriseMs;
-  if (typeof zaklad !== 'number') return null;
+  const nejdrive = p.kdy.nejdrive ? naMinuty(p.kdy.nejdrive) : null;
+  // Bez počasí platí aspoň „nejdřív v" — ráno dětí nesmí propadnout kvůli výpadku
+  if (typeof zaklad !== 'number') return nejdrive;
   // Společné zpoždění se počítá jen u západu — u východu by se s ním čekalo na světlo
   const delay = zapad ? (state.zapadDelayMin || 0) : 0;
   const t = pragueTime(zaklad);
-  const m = t.hour * 60 + t.minute + delay + (Number(p.kdy.posunMin) || 0);
-  return Math.min(1439, Math.max(0, m));
+  const m = Math.min(1439, Math.max(0, t.hour * 60 + t.minute + delay + (Number(p.kdy.posunMin) || 0)));
+  return nejdrive === null ? m : Math.max(m, nejdrive);
 }
 
 app.post('/api/zapad-delay', (req, res) => {
@@ -4789,76 +4812,13 @@ app.post('/api/loznice-zavreno/restore', (req, res) => {
   res.json({ ok: true, datum: state.lozniceZavrenoRano || null });
 });
 
-// ---- Ráno dětí ----
-// Vestavěné, ať se nedá rozbít úpravou rozvrhu. Jen jednorázové povely, nic se
-// nedrží — ovladačem jde hned hýbat. Každý krok jednou za den, s doháněním 20 min.
-//  * školní den (Po–Pá, ne prázdniny): 50 % v 6:40, nebo 15 min před východem
-//    slunce, co je později; pak 25 % v 10:00,
-//  * víkend a prázdniny (víkend = prázdniny): v 10:00 dětem i ložnici 25 % —
-//    ložnici ne, když je zavřená do rána.
-const DETI_RANO_MIN = 6 * 60 + 40;
-const DETI_VYCHOD_PRED_MIN = 15;
-const DETI_DESATA_MIN = 10 * 60;
-const DETI = ['Miky', 'Elenka'];
-
-function detiRanoKroky(at = Date.now()) {
-  const den = pragueDateString(at);
-  const denTydne = new Date(den + 'T12:00:00Z').getUTCDay();
-  const vikend = denTydne === 0 || denTydne === 6;
-  if (vikend || prazdninyDuvod(at)) {
-    return [{ klic: 'desata', minuta: DETI_DESATA_MIN, popis: vikend ? 'Víkend' : 'Prázdniny',
-      cile: [...DETI, 'Ložnice'].map(c => [c, 25]) }];
-  }
-  let ranni = DETI_RANO_MIN;
-  const vychod = state.weather && state.weather.sunriseMs;
-  if (typeof vychod === 'number') {
-    const t = pragueTime(vychod);
-    ranni = Math.max(ranni, t.hour * 60 + t.minute - DETI_VYCHOD_PRED_MIN);
-  }
-  return [
-    { klic: 'ranni', minuta: ranni, popis: 'Děti ráno', cile: DETI.map(c => [c, 50]) },
-    { klic: 'desata', minuta: DETI_DESATA_MIN, popis: 'Děti dopoledne', cile: DETI.map(c => [c, 25]) }
-  ];
-}
-
-// Co už dnes proběhlo — den se při změně data začne znovu
-function detiRanoHotovo(den) {
-  if (!state.detiRano || state.detiRano.d !== den) state.detiRano = { d: den, hotovo: {} };
-  return state.detiRano.hotovo;
-}
-
-async function detiRano(at = Date.now()) {
-  const hotovo = detiRanoHotovo(pragueDateString(at));
-  const t = pragueTime(at);
-  const minuta = t.hour * 60 + t.minute;
-  for (const k of detiRanoKroky(at)) {
-    if (hotovo[k.klic]) continue;
-    const zpozdeni = (minuta - k.minuta) * 60000;
-    if (zpozdeni < 0 || zpozdeni > ROZVRH_DOHNAT_MS) continue;
-    hotovo[k.klic] = true;
-    const ok = [], chyby = [];
-    let lozniceNechana = false;
-    for (const [cil, naklon] of k.cile) {
-      if (jeLoznice(cil) && lozniceZavrenoPlati(at)) { lozniceNechana = true; continue; }
-      try {
-        await assistantControlBlinds({ target: cil, action: 'orientation', orientation: naklon });
-        ok.push(`${cil} ${naklon} %`);
-      } catch (err) {
-        chyby.push(`${cil}: ${String(err.message).slice(0, 60)}`);
-      }
-    }
-    addLog(`${k.popis}: naklopeno ${ok.join(', ') || 'nic'}`
-      + (lozniceNechana ? ', ložnice nechána zavřená' : '')
-      + (chyby.length ? ` — chyby: ${chyby.join('; ')}` : ''), chyby.length ? 'error' : undefined);
-  }
-}
-
 const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit', poloha: 'sjet do' };
 
 function rozvrhKdyPopis(p) {
   if (p.kdy.typ === 'cas') return p.kdy.cas;
   const jm = p.kdy.typ === 'zapad' ? 'západ' : 'východ';
-  return `${jm} slunce${p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : ''}`;
+  return `${jm} slunce${p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : ''}`
+    + (p.kdy.nejdrive ? `, nejdřív ${p.kdy.nejdrive}` : '');
 }
 
 function rozvrhKrokPopis(k) {
@@ -4920,7 +4880,6 @@ async function runBlindSchedule(at = Date.now()) {
     }
   }
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
-  await detiRano(at);
 }
 
 // Návrat z „jsme pryč": žaluzie se nastaví tak, jak by stály, kdyby rozvrh jel celou
@@ -4944,8 +4903,7 @@ async function rozvrhStavTed(at = Date.now()) {
     }
   };
   for (const p of blindRules) if (p.zapnuto && vcera >= 0 && p.dny[vcera]) zapis(p);
-  // Dnešek v pořadí, jak šel čas: pravidla rozvrhu i vestavěné ráno dětí.
-  // Při shodě minuty jde ráno dětí až po pravidlech, stejně jako v tiku.
+  // Dnešek v pořadí, jak šel čas
   const dnesni = [];
   for (const p of blindRules) {
     if (!p.zapnuto || dnes < 0 || !p.dny[dnes]) continue;
@@ -4956,12 +4914,6 @@ async function rozvrhStavTed(at = Date.now()) {
     dnesni.push({ minuta: plan, poradi: 0, p });
   }
   const den = pragueDateString(at);
-  const hotovoDeti = detiRanoHotovo(den);
-  for (const k of detiRanoKroky(at)) {
-    if (k.minuta > minutaTed) continue;
-    dnesni.push({ minuta: k.minuta, poradi: 1, p: { kroky: k.cile.map(([cil, naklon]) => ({ cil, akce: 'tilt', hodnota: naklon })) } });
-    hotovoDeti[k.klic] = true;
-  }
   dnesni.sort((a, b) => a.minuta - b.minuta || a.poradi - b.poradi);
   for (const x of dnesni) {
     zapis(x.p);
@@ -5006,8 +4958,12 @@ function rozvrhOcisti(v) {
     kdy = { typ: 'cas', cas: kdyIn.cas };
   } else {
     const posun = Math.round(Number(kdyIn.posunMin) || 0);
+    // „Nejdřív v": slunce, ale ne dřív než tenhle čas (děti ráno: východ −15, nejdřív 6:40)
+    if (kdyIn.nejdrive !== undefined && kdyIn.nejdrive !== null && kdyIn.nejdrive !== ''
+        && !validTimerTime(kdyIn.nejdrive)) return null;
     if (!Number.isFinite(posun) || Math.abs(posun) > ROZVRH_POSUN_MAX) return null;
     kdy = { typ: kdyIn.typ, posunMin: posun };
+    if (kdyIn.nejdrive) kdy.nejdrive = kdyIn.nejdrive;
   }
   // Záloha z telefonu může být z doby, kdy pravidlo mělo jen jeden cíl a akci —
   // udělá se z ní skupina o jednom kroku. Bez tohohle by se tiše zahodila.
@@ -10134,6 +10090,7 @@ function storeSnapshot() {
     saunaRelace: state.saunaRelace,
     // Od kdy sekačka mlčí — po nasazení by se hodina do připomínky počítala znovu
     sekackaOfflineOd: (state.sekacka && state.sekacka.offlineOd) || 0,
+    rozvrhVerze: state.rozvrhVerze || 0,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -10155,6 +10112,7 @@ function storeApplyPrimo(p) {
       && state.sekacka && !state.sekacka.offlineOd && !state.sekacka.kdy) {
     state.sekacka.offlineOd = p.sekackaOfflineOd;
   }
+  if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {

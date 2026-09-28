@@ -398,6 +398,18 @@ nadpis('5) Přímé hodnoty');
   check('  čerstvé čtení po startu záloha nepřepíše', h2.state.sekacka.offlineOd, 0);
 }
 
+{
+  // Verze úprav rozvrhu přežije nasazení — jinak by se smazané skupiny dětí vracely
+  const st = prazdnyStav();
+  st.saunaNahrev = { bezici: null, zaznamy: [] };
+  st.saunaZapnuto = { od: 0, naposledy: 0 };
+  st.rozvrhVerze = 0;
+  const h = build({ state: st });
+  h.api.storeApplyPrimo({ rozvrhVerze: 2 });
+  check('verze rozvrhu se vrátí ze zálohy', h.state.rozvrhVerze, 2);
+  check('  a jde do zálohy', h.api.storeSnapshot().primo.rozvrhVerze, 2);
+}
+
 nadpis('6) Plánování');
 {
   const h = build({ env: UPSTASH });

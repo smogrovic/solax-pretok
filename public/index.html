@@ -2139,6 +2139,11 @@
     .prip-zalozka::before{inset:-22px;border-radius:52px;}
   }
   /* Panel rozbalený ze zvonečku: oranžový jako zvoneček, nad obsahem stránky */
+  /* Skupiny rozvrhu žaluzií: pracovní dny, víkend + prázdniny, … */
+  .rozvrh-skupina{font-size:12px;font-weight:700;color:var(--grey-text);text-transform:uppercase;
+    letter-spacing:0.04em;margin:14px 0 4px;}
+  .rozvrh-skupina:first-child{margin-top:4px;}
+  .rozvrh-nejdrive-label{font-size:13px;color:var(--grey-text);align-self:center;}
   .prip-panel{
     position:fixed;left:12px;top:120px;z-index:56;
     width:300px;max-width:calc(100vw - 16px);box-sizing:border-box;
@@ -2592,6 +2597,12 @@
             <option value="60">60 min po</option>
             <option value="90">90 min po</option>
           </select>
+        </div>
+        <!-- U slunce: nejdřív v tenhle čas (prázdné = bez omezení). Děti ráno: východ
+             −15 min, ale nejdřív 6:40 — v létě by se jinak naklápělo před pátou. -->
+        <div class="timer-form-row" id="rozvrhNejdriveRadek" hidden>
+          <span class="rozvrh-nejdrive-label">Nejdřív v</span>
+          <input type="time" class="timer-time" id="rozvrhNejdrive" value="">
         </div>
         <input type="text" class="timer-select" id="rozvrhNazev" placeholder="Název (nepovinný), např. Ráno" maxlength="40">
         <!-- Kroky: v 7:00 se obvykle stane víc věcí. Spouštěč je jeden, kroků kolik
@@ -3427,8 +3438,9 @@
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
             <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
-            <li>Děti ve všední den: <b>50 %</b> v 6:40 (nebo 15 min před východem, co je později), <b>25 %</b> v 10:00.</li>
-            <li><b>O víkendu a o prázdninách</b> v <b>10:00</b> dětem i ložnici <b>25 %</b> (ložnici ne při <b>Zavřené žaluzie v ložnici</b>).</li>
+            <li>Děti: <b>Děti ráno</b> (Po–Pá 50 %, východ −15 min, nejdřív 6:40) a <b>Děti dopoledne</b> (Po–Pá 10:00, 25 %).</li>
+            <li><b>Víkend a prázdniny</b>: 10:00 děti i ložnice 25 %. Vše jsou skupiny rozvrhu — jdou pozastavit i smazat.</li>
+            <li><b>Zavřené žaluzie v ložnici</b> (Asistent): ložnici to ráno nic neotevře.</li>
             <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
           <div class="zapad-row">
@@ -6253,6 +6265,8 @@ const rozvrhCilEl = document.getElementById('rozvrhCil');
 const rozvrhKdyEl = document.getElementById('rozvrhKdy');
 const rozvrhCasEl = document.getElementById('rozvrhCas');
 const rozvrhPosunEl = document.getElementById('rozvrhPosun');
+const rozvrhNejdriveEl = document.getElementById('rozvrhNejdrive');
+const rozvrhNejdriveRadekEl = document.getElementById('rozvrhNejdriveRadek');
 const rozvrhAkceEl = document.getElementById('rozvrhAkce');
 const rozvrhNaklonEl = document.getElementById('rozvrhNaklon');
 const rozvrhNaklonValEl = document.getElementById('rozvrhNaklonVal');
@@ -6311,8 +6325,25 @@ function renderRozvrhCile() {
 function rozvrhKdyText(p) {
   if (p.kdy.typ === 'cas') return p.kdy.cas;
   const jm = p.kdy.typ === 'zapad' ? 'západ' : 'východ';
-  if (!p.kdy.posunMin) return jm;
-  return `${jm} ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min`;
+  const posun = p.kdy.posunMin ? ` ${p.kdy.posunMin > 0 ? '+' : ''}${p.kdy.posunMin} min` : '';
+  return jm + posun + (p.kdy.nejdrive ? `, nejdřív ${p.kdy.nejdrive}` : '');
+}
+
+// Skupiny v seznamu: pracovní dny, víkend + prázdniny (prázdninový den je neděle),
+// každý den a zbytek. Pořadí uvnitř skupiny drží server (podle času).
+const ROZVRH_SKUPINY = [
+  { klic: 'prac', nazev: 'Pracovní dny' },
+  { klic: 'vikend', nazev: 'Víkend a prázdniny' },
+  { klic: 'vse', nazev: 'Každý den' },
+  { klic: 'jine', nazev: 'Ostatní' }
+];
+function rozvrhSkupina(p) {
+  const d = p.dny || [];
+  const prac = d.slice(0, 5).some(Boolean), vikend = d.slice(5).some(Boolean);
+  if (d.length === 7 && d.every(Boolean)) return 'vse';
+  if (prac && !vikend) return 'prac';
+  if (vikend && !prac) return 'vikend';
+  return 'jine';
 }
 
 function rozvrhKrokText(k) {
@@ -6379,7 +6410,16 @@ function renderRozvrh(data) {
   if (rozvrhPrazdnoEl) rozvrhPrazdnoEl.hidden = rozvrhData.length > 0;
   if (!rozvrhListEl) return;
   rozvrhListEl.textContent = '';
-  for (const p of rozvrhData) {
+  const serazene = ROZVRH_SKUPINY.flatMap(sk => rozvrhData.filter(p => rozvrhSkupina(p) === sk.klic));
+  let skupina = null;
+  for (const p of serazene) {
+    if (rozvrhSkupina(p) !== skupina) {
+      skupina = rozvrhSkupina(p);
+      const h = document.createElement('div');
+      h.className = 'rozvrh-skupina';
+      h.textContent = ROZVRH_SKUPINY.find(sk => sk.klic === skupina).nazev;
+      rozvrhListEl.appendChild(h);
+    }
     const row = document.createElement('div');
     row.className = 'timer-row rozvrh-radek' + (p.zapnuto ? '' : ' rozvrh-vyp');
     const hlava = document.createElement('div');
@@ -6433,6 +6473,7 @@ function rozvrhDoFormulare(p) {
   if (rozvrhKdyEl) rozvrhKdyEl.value = p.kdy.typ;
   if (p.kdy.typ === 'cas' && rozvrhCasEl) rozvrhCasEl.value = p.kdy.cas;
   if (p.kdy.typ !== 'cas' && rozvrhPosunEl) rozvrhPosunEl.value = String(p.kdy.posunMin || 0);
+  if (rozvrhNejdriveEl) rozvrhNejdriveEl.value = p.kdy.nejdrive || '';
   rozvrhPrepniPole();
   if (rozvrhAddEl) rozvrhAddEl.textContent = 'Uložit změnu';
 }
@@ -6442,6 +6483,7 @@ function rozvrhZrusUpravu() {
   rozvrhKrokyStav = [];
   rozvrhKresliKroky();
   if (rozvrhNazevEl) rozvrhNazevEl.value = '';
+  if (rozvrhNejdriveEl) rozvrhNejdriveEl.value = '';
   if (rozvrhAddEl) rozvrhAddEl.textContent = 'Přidat pravidlo';
 }
 
@@ -6451,13 +6493,15 @@ function rozvrhPrepniPole() {
   const cas = rozvrhKdyEl.value === 'cas';
   if (rozvrhCasEl) rozvrhCasEl.hidden = !cas;
   if (rozvrhPosunEl) rozvrhPosunEl.hidden = cas;
+  if (rozvrhNejdriveRadekEl) rozvrhNejdriveRadekEl.hidden = cas;
 }
 
 function rozvrhZFormulare() {
   const typ = rozvrhKdyEl ? rozvrhKdyEl.value : 'cas';
   const kdy = typ === 'cas'
     ? { typ: 'cas', cas: rozvrhCasEl ? rozvrhCasEl.value : '' }
-    : { typ, posunMin: Number(rozvrhPosunEl ? rozvrhPosunEl.value : 0) || 0 };
+    : { typ, posunMin: Number(rozvrhPosunEl ? rozvrhPosunEl.value : 0) || 0,
+        ...(rozvrhNejdriveEl && rozvrhNejdriveEl.value ? { nejdrive: rozvrhNejdriveEl.value } : {}) };
   // Nenaklikané kroky = jednoduché pravidlo z aktuálního výběru
   const kroky = rozvrhKrokyStav.length ? rozvrhKrokyStav.map(k => ({ ...k })) : [rozvrhKrokZFormulare()];
   // Odklad („počkej na saunu") se v appce nenastavuje, ale při úpravě pravidla

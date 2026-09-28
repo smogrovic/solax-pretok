@@ -62,6 +62,15 @@ setTimeout(async () => {
   kdy.dispatchEvent(new Event('change'));
   check('u západu se přepne na posun', posun.hidden, false);
   check('  a čas zmizí', cas.hidden, true);
+  const nejdrive = document.getElementById('rozvrhNejdrive');
+  check('  u slunce jde nastavit „nejdřív v"', document.getElementById('rozvrhNejdriveRadek').hidden, false);
+  kdy.value = 'vychod'; kdy.dispatchEvent(new Event('change'));
+  posun.value = '-15'; nejdrive.value = '06:40';
+  check('„nejdřív v" se pošle v pravidle', JSON.stringify(rozvrhZFormulare().kdy), '{"typ":"vychod","posunMin":-15,"nejdrive":"06:40"}');
+  nejdrive.value = '';
+  check('  prázdné se neposílá', 'nejdrive' in rozvrhZFormulare().kdy, false);
+  check('popis v seznamu', rozvrhKdyText({ kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' } }), 'východ -15 min, nejdřív 06:40');
+  kdy.value = 'zapad'; kdy.dispatchEvent(new Event('change'));
 
   R.push('\\n4) Přidání a úprava');
   // Cíle jsou jména, ne adresy zařízení — server je páruje stejně jako u asistenta
@@ -316,6 +325,18 @@ setTimeout(async () => {
   naLogice.click();
   await pockej();
   check('na prázdném rozvrhu se neptá', poslano[0].url, '/api/blinds/schedule/default');
+
+  R.push('\\n5e) Skupiny: pracovní dny, víkend a prázdniny');
+  const PRAC = [true, true, true, true, true, false, false], VIK = [false, false, false, false, false, true, true];
+  const pr = (id, nazev, dny, cas) => ({ id, nazev, dny, zapnuto: true, odloz: null, kdy: { typ: 'cas', cas },
+    kroky: [{ cil: 'Miky', akce: 'tilt', hodnota: 25 }] });
+  renderRozvrh({ savedAt: 1, rules: [pr(1, 'Víkend a prázdniny', VIK, '10:00'), pr(2, 'Děti ráno', PRAC, '06:40'),
+    pr(3, 'Garáž', [true, true, true, true, true, true, true], '23:00'), pr(4, 'Děti dopoledne', PRAC, '10:00')] });
+  const list = document.getElementById('rozvrhList');
+  const poradi = [...list.children].map(e => e.classList.contains('rozvrh-skupina') ? '[' + e.textContent + ']'
+    : e.querySelector('.timer-row-text').textContent.split(' · ')[0]);
+  check('seznam je ve skupinách', poradi.join(' '),
+    '[Pracovní dny] Děti ráno Děti dopoledne [Víkend a prázdniny] Víkend a prázdniny [Každý den] Garáž');
 
   R.push('\\n6) Záloha v telefonu');
   // Rozvrh je nastavení od člověka a v paměti serveru nepřežije nasazení
