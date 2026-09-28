@@ -1305,6 +1305,8 @@
     font-family:inherit;
   }
   .prazdniny-btn.on{background:var(--orange);color:#fff;}
+  /* Prázdniny, které přišly samy (léto, bez školy) — světlejší než ruční */
+  .prazdniny-btn.auto{background:rgba(245,147,61,0.18);color:var(--orange-dark);}
   .prazdniny-btn:disabled{opacity:0.5;}
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
@@ -3359,6 +3361,7 @@
           <ul class="logic-list">
             <li id="obehPlan">Rozvrh se načítá…</li>
             <li>Ruční <b>ON</b> jede <b>15 min</b>.</li>
+            <li>Při <b>sauně</b> od nahřátí <b>10 min zapnuto / 10 min vypnuto</b>, dokud se ložnice nezatáhne (15 min po vypnutí kamen i světla).</li>
           </ul>
         </div>
 
@@ -3438,7 +3441,7 @@
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
-            <li>O <b>prázdninách</b> jede víkendová sada.</li>
+            <li>O <b>prázdninách</b> jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
             <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
           <div class="zapad-row">
@@ -9160,12 +9163,18 @@ if (zapadDelayEl) {
 const prazdninyBtnEl = document.getElementById('prazdninyBtn');
 let prazdninyData = { zitra: false, dnes: false };
 
+// Prázdniny přijdou samy v červenci a srpnu a když děti nemají v kalendáři Školu.
+// Tlačítko pak ukazuje proč; ručně jde zapnout dál.
+const PRAZDNINY_PROC = { leto: 'léto', skola: 'bez školy' };
 function renderPrazdniny(d) {
   if (d) prazdninyData = { ...prazdninyData, ...d };
   if (!prazdninyBtnEl) return;
+  const auto = PRAZDNINY_PROC[prazdninyData.zitraDuvod];
   prazdninyBtnEl.classList.toggle('on', !!prazdninyData.zitra);
+  prazdninyBtnEl.classList.toggle('auto', !prazdninyData.zitra && !!auto);
   prazdninyBtnEl.textContent = prazdninyData.zitra
     ? 'Zítra jsou prázdniny ✓'
+    : auto ? `Zítra prázdniny (${auto})`
     : (prazdninyData.dnes ? 'Dnes jsou prázdniny' : 'Zítra jsou prázdniny');
 }
 
@@ -11342,7 +11351,7 @@ const PRIPOMINKY = [
   // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě ji vypne server.
   { id: 'sekacka', nazev: 'Vysvobodit sekačku', ikona: '🆘', sekacka: true, prepinac: true },
   // V zimě ji (i sekačku) vypne server přepínačem — v seznamu zůstanou, jen vypnuté
-  { id: 'trava', nazev: 'Posekat trávu', ikona: '🌿', dni: 10, prepinac: true },
+  { id: 'trava', nazev: 'Posekat trávu', ikona: '🌱', dni: 10, prepinac: true },
   // Krmení psa: každý den, den se láme ve 3:00. Mají vlastní plovoucí záložky.
   { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣', prepinac: true },
   { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣', prepinac: true }

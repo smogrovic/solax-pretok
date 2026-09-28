@@ -41,7 +41,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'autoSet', 'nukiLock', 'nukiOtevri', 'nukiEnabled', 'tahomaEnabled', 'LIGHT_KEYS', 'ZALUZIE_ZAVRENO',
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
     'assistantSetTerasaLight', 'DEVICE_LABELS', 'getBlinds', 'cz',
-    'delay', 'autoRunning', 'rozvrhStavTed', 'runObehSchedule', 'runAutomation',
+    'delay', 'autoRunning', 'rozvrhStavTed', 'runObehSchedule', 'runAutomation', 'HUUM_NAHRATA_C',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload, saunaPripravaTik,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -91,7 +91,8 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     () => state.autoMode !== 'off',
     async () => { akce.push('rozvrh:obnova'); return { ok: 3, celkem: 3, chyby: [] }; },
     async () => { akce.push('obeh:rozvrh'); },
-    async () => { akce.push('automatika'); }
+    async () => { akce.push('automatika'); },
+    5
   );
   return { api, state, akce, logy, routy };
 }
@@ -201,6 +202,18 @@ nadpis('2b) Příprava podle teploty v sauně');
   h.state.away.since -= 16 * MIN;
   await h.api.saunaPripravaTik({ heating: true, temperature: 78, targetTemperature: 80, light: 0 });
   check('když jsme pryč, nic', h.akce.length, 0);
+}
+
+{
+  // Nahřátá sauna (cíl −5 °C, jako notifikace) se zapíše — od ní se protáčí čerpadlo
+  const h = build();
+  await h.api.saunaPripravaTik({ heating: true, temperature: 74, targetTemperature: 80, light: 0 }, 1000);
+  check('74 °C (cíl 80): ještě nenahřátá', h.state.saunaRelace.nahrataAt, undefined);
+  await h.api.saunaPripravaTik({ heating: true, temperature: 75, targetTemperature: 80, light: 0 }, 2000);
+  check('75 °C: nahřátá, zapíše se kdy', h.state.saunaRelace.nahrataAt, 2000);
+  await h.api.saunaPripravaTik({ heating: true, temperature: 79, targetTemperature: 80, light: 0 }, 3000);
+  check('  a čas se už neposouvá', h.state.saunaRelace.nahrataAt, 2000);
+  check('  v Logu', h.logy.some(t => /nahřátá na 75 °C — oběhové čerpadlo se bude protáčet/.test(t)), true);
 }
 
 nadpis('3) Ostatní tlačítka');

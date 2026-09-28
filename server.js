@@ -2817,6 +2817,35 @@ async function obehPripomenON(now) {
   }
 }
 
+// Při saunování se protáčí: od chvíle, kdy je sauna nahřátá, 10 min zapnuto a
+// 10 min vypnuto dokola — dokud platí to, co drží ložnici otevřenou: kamna nebo
+// světlo v sauně zapnuté, a pak ještě SAUNA_LOZNICE_MIN minut. 10 min je pod
+// časovačem relé (15 min), takže se ON nemusí připomínat.
+const OBEH_SAUNA_FAZE_MS = 10 * 60000;
+let obehSaunaFaze = null;       // co naposledy poslalo protáčení: 'on' | 'off' | null
+
+// → 'on' | 'off' (co má čerpadlo teď dělat kvůli sauně), nebo null (sauna nic nechce)
+function obehSaunaChce(now = Date.now()) {
+  const r = state.saunaRelace;
+  if (!r || !r.nahrataAt || r.nahrataAt < (r.od || 0)) return null;
+  const aktivni = saunaAktivni(state.huum);
+  const dobiha = !aktivni && !!r.konec && now < r.konec + SAUNA_LOZNICE_MIN * 60000;
+  if (!aktivni && !dobiha) return null;
+  return Math.floor((now - r.nahrataAt) / OBEH_SAUNA_FAZE_MS) % 2 === 0 ? 'on' : 'off';
+}
+
+// Povel jen na hraně fáze — mezi hranami se relé nechá být
+async function obehSaunaTik(chce) {
+  if (chce === obehSaunaFaze) return;
+  const pred = obehSaunaFaze;
+  obehSaunaFaze = chce;
+  if (chce === 'on') {
+    await autoSet('obeh', 'on', 'sauna — protáčení', { force: true });
+  } else if ((chce === 'off' || pred === 'on') && !manualHeld('obeh')) {
+    await autoSet('obeh', 'off', chce ? 'sauna — pauza' : 'konec saunování', { force: true });
+  }
+}
+
 async function runObehSchedule(now = Date.now()) {
   // Hlavní vypínač automatiky platí i tady. Okno se zapomene, takže po zapnutí
   // automatiky uprostřed okna naskočí náběžná hrana a čerpadlo se rozjede.
@@ -2826,6 +2855,8 @@ async function runObehSchedule(now = Date.now()) {
     return;
   }
   const okno = obehOknoNyni(now);
+  // Okno rozvrhu má přednost; protáčení kvůli sauně jede mimo něj
+  const sauna = okno ? null : obehSaunaChce(now);
   if (okno && okno !== obehOkno) {
     // Náběžná hrana. `force` je schválně: rozvrh je nastavení uživatele, ne
     // konkurenční automatika, a ruční odklad by mu jinak okno sebral.
@@ -2833,11 +2864,13 @@ async function runObehSchedule(now = Date.now()) {
     await autoSet('obeh', 'on', `rozvrh ${okno}`, { force: true });
   } else if (okno) {
     await obehPripomenON(now);
-  } else if (obehOkno) {
+  } else if (obehOkno && !sauna) {
     // Sestupná hrana. Kdo zmáčkl ON na konci okna, má dostat svých 15 minut —
-    // vypnutí o minutu později by bylo horší než nic.
+    // vypnutí o minutu později by bylo horší než nic. Při sauně rozhodne protáčení.
     if (!manualHeld('obeh')) await autoSet('obeh', 'off', `konec rozvrhu ${obehOkno}`, { force: true });
   }
+  if (okno) obehSaunaFaze = null;          // po okně se fáze sauny pošle znovu
+  else await obehSaunaTik(sauna);
   obehOkno = okno;
 }
 
@@ -4490,16 +4523,55 @@ function rozvrhDenIndex(at = Date.now()) {
   return ROZVRH_DNY.indexOf(den);
 }
 
-// „Zítra jsou prázdniny" z Asistenta. Drží se datum, ne příznak — prošlý den tím
-// přestane platit sám a není co uklízet.
+// Prázdniny = den se v rozvrhu žaluzií počítá jako neděle, ať se dětem ráno
+// neroztahují žaluzie. Tři cesty, stačí kterákoli:
+//  * ručně tlačítkem „Zítra jsou prázdniny" (drží se datum — prošlý den přestane
+//    platit sám a není co uklízet),
+//  * letní prázdniny: celý červenec a srpen,
+//  * v kalendáři ani Miki, ani Elenka nemají na ten den „Škola" (musí platit oba).
+// → 'rucne' | 'leto' | 'skola' | null
+function prazdninyDuvod(at = Date.now()) {
+  const den = pragueDateString(at);
+  if (state.prazdniny && state.prazdniny === den) return 'rucne';
+  const mesic = Number(den.slice(5, 7));
+  if (mesic === 7 || mesic === 8) return 'leto';
+  if (prazdninyBezSkoly(den, at)) return 'skola';
+  return null;
+}
 function prazdninyPlati(at = Date.now()) {
-  return !!state.prazdniny && state.prazdniny === pragueDateString(at);
+  return !!prazdninyDuvod(at);
+}
+
+// Kalendáře dětí (Miki/Miky, Elenka) a událost „Škola" v nich. Když kalendář chybí,
+// je v chybě nebo je starý, neví se nic — a pak se jede jako do školy: otevřít
+// dětem žaluzie o prázdninách je menší zlo než zaspat do školy.
+const PRAZDNINY_DETI = ['mik', 'elenk'];
+const PRAZDNINY_KAL_STARI_MS = 24 * 3600000;
+function prazdninyBezSkoly(den, at = Date.now()) {
+  const c = state.calendar;
+  if (!c || c.error || !Array.isArray(c.days) || !Array.isArray(c.kalendare)) return false;
+  if (!c.fetchedAt || at - Date.parse(c.fetchedAt) > PRAZDNINY_KAL_STARI_MS) return false;
+  const d = c.days.find(x => x.d === den);
+  if (!d) return false;
+  const jmena = c.kalendare.map(k => cz(k.nazev || ''));
+  if (!PRAZDNINY_DETI.every(p => jmena.some(j => j.startsWith(p)))) return false;
+  const maSkolu = dite => (d.udalosti || []).some(u =>
+    cz(u.kalendar || '').startsWith(dite) && cz(u.nazev || '').includes('skola'));
+  return PRAZDNINY_DETI.every(dite => !maSkolu(dite));
 }
 function prazdninyZitra(at = Date.now()) {
   return pragueDateString(at + 86400000);
 }
+// `zitra` je ruční tlačítko; `zitraDuvod`/`dnesDuvod` řeknou, proč den platí jako
+// prázdniny i bez něj (léto, bez školy v kalendáři)
 function prazdninyPayload(at = Date.now()) {
-  return { datum: state.prazdniny || null, zitra: state.prazdniny === prazdninyZitra(at), dnes: prazdninyPlati(at) };
+  return {
+    datum: state.prazdniny || null,
+    zitra: state.prazdniny === prazdninyZitra(at),
+    dnes: prazdninyPlati(at),
+    dnesDuvod: prazdninyDuvod(at),
+    zitraDuvod: prazdninyDuvod(at + 86400000)
+  };
 }
 
 app.post('/api/prazdniny', (req, res) => {
@@ -8198,6 +8270,8 @@ async function pollKalendar() {
   }
   if (!state.calendar.error) kalChybaZalogovana = false;
   broadcast('calendar', { calendar: calendarPayload() });
+  // Škola v kalendáři rozhoduje o prázdninách — tlačítko na Asistentovi to má vidět
+  if (typeof prazdninyPayload === 'function') broadcast('prazdniny', prazdninyPayload());
 }
 let kalChybaZalogovana = false;
 let kalKrok = 'hledání kalendářů';   // do hlášky, ať je vidět, kde to uvázlo
@@ -9471,11 +9545,18 @@ let saunaPripravaBezi = false;
 
 async function saunaPripravaTik(h, now = Date.now()) {
   const r = state.saunaRelace;
-  if (!h || !r || h.heating !== true || saunaPripravaBezi) return;
+  if (!h || !r || h.heating !== true) return;
   const t = h.temperature, cil = h.targetTemperature;
   if (typeof t !== 'number' || typeof cil !== 'number') return;
   // Když jsme pryč, drží se všechno zhasnuté a zavřené
   if (awayActive(now)) return;
+  // Nahřátá (stejná mez jako notifikace „Sauna je nahřátá") — od teď se protáčí
+  // oběhové čerpadlo (runObehSchedule)
+  if (!r.nahrataAt && t >= cil - HUUM_NAHRATA_C) {
+    r.nahrataAt = now;
+    addLog(`Sauna: nahřátá na ${Math.round(t)} °C — oběhové čerpadlo se bude protáčet 10 min / 10 min`);
+  }
+  if (saunaPripravaBezi) return;
   saunaPripravaBezi = true;
   try {
     if (!r.loznice && t >= cil - SAUNA_LOZNICE_NAHORU_C) {
@@ -9886,7 +9967,8 @@ function storeApplyPrimo(p) {
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {
     state.saunaRelace = { od: sr.od, konec: Number.isFinite(sr.konec) ? sr.konec : 0,
-      loznice: sr.loznice === true, svetla: sr.svetla === true };
+      loznice: sr.loznice === true, svetla: sr.svetla === true,
+      ...(Number.isFinite(sr.nahrataAt) && sr.nahrataAt > 0 ? { nahrataAt: sr.nahrataAt } : {}) };
   }
   if (p.tempAuto && typeof p.tempAuto === 'object') {
     for (const k of Object.keys(state.tempAuto)) {

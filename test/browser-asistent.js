@@ -199,6 +199,15 @@ setTimeout(async () => {
   check('druhý stisk je zruší', poslano[0].body.zapnout, false);
   renderPrazdniny({ zitra: false, dnes: true });
   check('v den prázdnin to tlačítko řekne', praz.textContent, 'Dnes jsou prázdniny');
+  // Prázdniny, které přišly samy
+  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: 'leto' });
+  check('v létě tlačítko řekne proč', praz.textContent, 'Zítra prázdniny (léto)');
+  check('  světlejší než ruční', praz.classList.contains('auto') && !praz.classList.contains('on'), true);
+  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: 'skola' });
+  check('bez školy v kalendáři taky', praz.textContent, 'Zítra prázdniny (bez školy)');
+  renderPrazdniny({ zitra: true, dnes: false, zitraDuvod: 'rucne' });
+  check('ruční má přednost', praz.textContent + ' ' + praz.classList.contains('auto'), 'Zítra jsou prázdniny ✓ false');
+  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: null, dnesDuvod: null });
 
   R.push('\\n3) Jezdec automatiky má čtyři polohy');
   const jezdec = document.getElementById('autoModeSlider');

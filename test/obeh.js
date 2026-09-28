@@ -14,15 +14,17 @@ const CODE = between('// ---------- Oběhové čerpadlo: rozvrh ----------',
                      '// ---------- Automatika přebytků');
 
 // `den` je zkratka jako z Intl (Mon…Sun), `cas` je 'HH:MM' pražského času.
-function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc = false } = {}) {
+function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc = false, relace = null, huum = {} } = {}) {
   const povely = [];      // co šlo přes autoSet (tedy i do logu)
   const primo = [];       // připomenutí ON nízkou cestou
   let now = 1_700_000_000_000;
   let dnes = den, hodiny = cas;
+  const stav = { saunaRelace: relace, huum };
 
   const api = new Function(
     'pragueTime', 'Intl', 'DEVICES', 'setShellyState', 'noteCmd', 'autoSet',
     'manualHeld', 'autoRunning', 'scheduleEvery', 'RELAY_AUTO_OFF_MS', 'awayActive',
+    'state', 'saunaAktivni', 'SAUNA_LOZNICE_MIN',
     CODE + '\n; return { obehOknoNyni, obehPracovniDen, runObehSchedule, OBEH_ROZVRH,'
          + ' OBEH_TICK_MS, OBEH_KEEPALIVE_MS };'
   )(
@@ -42,11 +44,14 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc =
     () => rezim !== 'off',
     () => {},
     15 * MIN,
-    () => pryc
+    () => pryc,
+    stav,
+    h => !!(h && (h.heating === true || h.light)),
+    15
   );
 
   return {
-    api, povely, primo,
+    api, povely, primo, stav,
     get now() { return now; },
     // Posune čas o `ms` a případně přestaví hodiny/den
     tik: async (ms = 0, novyCas, novyDen) => {
@@ -185,6 +190,73 @@ nadpis('7) Nejsme doma');
   await h.tik(MIN, '06:15');
   await h.tik(MIN, '06:30');
   check('když jsme pryč, rozvrh čerpadlo nezapne', h.povely.length + h.primo.length, 0);
+}
+
+nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
+{
+  // Nahřátá ve 12:00, kamna topí; mimo okno rozvrhu
+  const T0 = 1_700_000_000_000;
+  const h = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
+    huum: { heating: true, light: 1 } });
+  await h.tik();
+  check('nahřátá → čerpadlo zapne', h.povely.join(' | '), 'obeh:on (sauna — protáčení)');
+  await h.tik(5 * MIN, '12:05');
+  check('  5 min nic nového', h.povely.length, 1);
+  await h.tik(5 * MIN, '12:10');
+  check('po 10 min pauza', h.povely[1], 'obeh:off (sauna — pauza)');
+  await h.tik(10 * MIN, '12:20');
+  check('po dalších 10 min zase', h.povely[2], 'obeh:on (sauna — protáčení)');
+  // Kamna vypnutá, světlo taky (konec saunování) — běží se ještě 15 min
+  h.stav.huum = { heating: false, light: 0 };
+  h.stav.saunaRelace.konec = h.now;
+  await h.tik(10 * MIN, '12:30');
+  check('po konci saunování se protáčí dál', h.povely[3], 'obeh:off (sauna — pauza)');
+  await h.tik(4 * MIN, '12:34');
+  check('  14 min po konci ještě', h.povely.length, 4);
+  await h.tik(6 * MIN, '12:40');
+  // 12:40 by byla fáze ON, ale 15 min od konce (12:20) uplynulo → konec
+  check('15 min po konci protáčení skončí (bez dalšího zapnutí)', h.povely.length, 4);
+}
+{
+  // Konec saunování ve fázi ON → čerpadlo se vypne
+  const T0 = 1_700_000_000_000;
+  const h = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
+    huum: { heating: false, light: 1 } });
+  await h.tik();
+  h.stav.huum = { heating: false, light: 0 };
+  h.stav.saunaRelace.konec = h.now - 16 * MIN;
+  await h.tik(MIN, '12:01');
+  check('konec ve fázi ON čerpadlo vypne', h.povely.join(' | '), 'obeh:on (sauna — protáčení) | obeh:off (konec saunování)');
+}
+{
+  // Světlo v sauně svítí, kamna už ne — pořád se saunuje
+  const T0 = 1_700_000_000_000;
+  const h = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
+    huum: { heating: false, light: 1 } });
+  await h.tik();
+  check('svítí jen světlo → protáčí se', h.povely.length, 1);
+}
+{
+  const T0 = 1_700_000_000_000;
+  const n = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0 }, huum: { heating: true } });
+  await n.tik();
+  check('nenahřátá sauna čerpadlo netočí', n.povely.length, 0);
+  const s = build({ den: 'Mon', cas: '12:00', relace: { od: T0, konec: 0, nahrataAt: T0 - 60 * MIN }, huum: { heating: true } });
+  await s.tik();
+  check('nahřátí z minulého saunování neplatí', s.povely.length, 0);
+  const p = build({ den: 'Mon', cas: '12:00', pryc: true, relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 }, huum: { heating: true } });
+  await p.tik();
+  check('když jsme pryč, netočí se', p.povely.length, 0);
+}
+{
+  // V okně rozvrhu jede rozvrh; sauna ho na konci okna nevypne, když má být ON
+  const T0 = 1_700_000_000_000;
+  const h = build({ den: 'Mon', cas: '19:20', relace: { od: T0 - 60 * MIN, konec: 0, nahrataAt: T0 },
+    huum: { heating: true } });
+  await h.tik();
+  check('v okně rozvrhu jede rozvrh', h.povely[0], 'obeh:on (rozvrh 18:45–19:30)');
+  await h.tik(10 * MIN, '19:30');   // fáze: 10 min od nahřátí = OFF
+  check('po okně převezme sauna (pauza)', h.povely.slice(1).join(' | '), 'obeh:off (sauna — pauza)');
 }
 
 nadpis('8) Rozvrh sám');

@@ -31,10 +31,10 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'scheduleEvery',
     'pragueTime', 'pragueDateString', 'naMinuty', 'validTimerTime',
-    'assistantControlBlinds', 'autoRunning', 'awayActive', 'huumEnabled', 'saunaAktivni',
+    'assistantControlBlinds', 'autoRunning', 'awayActive', 'huumEnabled', 'saunaAktivni', 'cz',
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
-         + ' rozvrhOdlozeno, prazdninyPlati, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
+         + ' rozvrhOdlozeno, prazdninyPlati, prazdninyDuvod, prazdninyPayload, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
          + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
@@ -62,7 +62,8 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     () => auto,
     () => pryc,
     huum,
-    h => !!(h && (h.heating === true || h.light))
+    h => !!(h && (h.heating === true || h.light)),
+    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   );
   return Object.assign(h, { api, povely, logy, routy, state });
 }
@@ -452,6 +453,56 @@ nadpis('6e) Zítra jsou prázdniny');
   check('staré datum se ze zálohy nebere', h.state.prazdniny, null);
   await volej(h.routy, 'POST /api/prazdniny/restore', { datum: zitra });
   check('  a zítřejší ano', h.state.prazdniny, zitra);
+}
+
+nadpis('6e2) Prázdniny samy: léto a bez školy v kalendáři');
+{
+  const h = build();
+  const den = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(ms));
+  const stredaRano = PO_6 + 2 * DEN;                 // středa 16. 9. 2026
+  const cervenec = Date.UTC(2026, 6, 15, 4, 0);      // středa 15. 7.
+  const srpen = Date.UTC(2026, 7, 31, 4, 0);
+  const zari = Date.UTC(2026, 8, 1, 4, 0);
+  check('červenec = prázdniny (léto)', h.api.prazdninyDuvod(cervenec), 'leto');
+  check('  srpen až do konce', h.api.prazdninyDuvod(srpen), 'leto');
+  check('  1. září už ne', h.api.prazdninyDuvod(zari), null);
+  check('  a v létě se jede víkendová sada', h.api.rozvrhDenIndex(cervenec), 6);
+
+  // Kalendář: Škola u Mikiho a Elenky
+  const kal = (udalosti, zm = {}) => {
+    h.state.calendar = { error: null, fetchedAt: new Date(stredaRano - 3600000).toISOString(),
+      kalendare: [{ nazev: 'Family' }, { nazev: 'Miki' }, { nazev: 'Elenka' }],
+      days: [{ d: den(stredaRano), udalosti }], ...zm };
+  };
+  const skola = kdo => ({ kalendar: kdo, nazev: 'Škola', celodenni: true });
+  kal([skola('Miki'), skola('Elenka')]);
+  check('oba mají Školu → normální den', h.api.prazdninyDuvod(stredaRano), null);
+  kal([skola('Miki')]);
+  check('jen Miki má Školu → pořád školní den', h.api.prazdninyDuvod(stredaRano), null);
+  kal([skola('Elenka')]);
+  check('jen Elenka → taky školní den', h.api.prazdninyDuvod(stredaRano), null);
+  kal([{ kalendar: 'Family', nazev: 'Škola' }, { kalendar: 'Miki', nazev: 'Kroužek' }]);
+  check('nikdo z nich Školu nemá → prázdniny', h.api.prazdninyDuvod(stredaRano), 'skola');
+  check('  a jede víkendová sada', h.api.rozvrhDenIndex(stredaRano), 6);
+  kal([{ kalendar: 'Miki', nazev: 'škola – výlet' }, skola('Elenka')]);
+  check('„škola" malými a s diakritikou se počítá', h.api.prazdninyDuvod(stredaRano), null);
+  // Nejistota = jede se jako do školy
+  kal([], { error: 'iCloud neodpověděl' });
+  check('kalendář v chybě → žádné prázdniny', h.api.prazdninyDuvod(stredaRano), null);
+  kal([], { fetchedAt: new Date(stredaRano - 2 * DEN).toISOString() });
+  check('starý kalendář → žádné prázdniny', h.api.prazdninyDuvod(stredaRano), null);
+  kal([], { kalendare: [{ nazev: 'Family' }, { nazev: 'Miki' }] });
+  check('chybí kalendář Elenky → žádné prázdniny', h.api.prazdninyDuvod(stredaRano), null);
+  kal([], { days: [] });
+  check('den mimo kalendář → žádné prázdniny', h.api.prazdninyDuvod(stredaRano), null);
+  // Ruční tlačítko má pořád přednost a payload řekne proč
+  h.state.calendar = null;
+  h.state.prazdniny = den(stredaRano);
+  check('ruční tlačítko platí dál', h.api.prazdninyDuvod(stredaRano), 'rucne');
+  const pl = h.api.prazdninyPayload(stredaRano - DEN);
+  check('payload: zítra ručně i s důvodem', pl.zitra + ' ' + pl.zitraDuvod, 'true rucne');
+  h.state.prazdniny = null;
+  check('payload v létě: zítra léto', h.api.prazdninyPayload(cervenec).zitraDuvod, 'leto');
 }
 
 nadpis('6f) Předvyplněný rozvrh');
