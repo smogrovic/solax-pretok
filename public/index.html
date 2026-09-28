@@ -2152,6 +2152,32 @@
     .prip-zalozka.pes-vecer{box-shadow:0 0 0 8px rgba(44,62,112,0.2), 0 0 32px 10px rgba(44,62,112,0.45);}
     .prip-zalozka::before{inset:-22px;border-radius:52px;}
   }
+  /* Panel rozbalený ze zvonečku: oranžový jako zvoneček, nad obsahem stránky */
+  .prip-panel{
+    position:fixed;left:12px;top:120px;z-index:56;
+    width:300px;max-width:calc(100vw - 16px);box-sizing:border-box;
+    background:var(--orange);color:#fff;border-radius:16px;padding:4px 12px;
+    box-shadow:0 0 0 4px rgba(245,147,61,0.18), 0 8px 26px rgba(245,147,61,0.45);
+  }
+  .prip-panel[hidden]{display:none;}
+  .prip-panel-radek{display:flex;align-items:center;gap:10px;padding:9px 0;}
+  .prip-panel-radek + .prip-panel-radek{border-top:1px solid rgba(255,255,255,0.3);}
+  .prip-panel-text{
+    flex:1;min-width:0;border:none;background:none;color:inherit;font:inherit;
+    text-align:left;padding:0;cursor:pointer;
+  }
+  .prip-panel-nazev{font-size:15px;font-weight:700;}
+  .prip-panel-stav{font-size:12px;opacity:0.9;margin-top:1px;}
+  .prip-panel-hotovo{
+    flex:0 0 auto;border:none;border-radius:12px;padding:7px 12px;
+    background:#fff;color:var(--orange-dark);font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;
+  }
+  @media (min-width: 1000px) {
+    .prip-panel{width:460px;border-radius:24px;padding:6px 18px;}
+    .prip-panel-nazev{font-size:22px;}
+    .prip-panel-stav{font-size:16px;}
+    .prip-panel-hotovo{font-size:20px;padding:10px 18px;border-radius:16px;}
+  }
   .prip-aktivovat{
     margin-top:4px;border:none;border-radius:10px;padding:3px 9px;
     background:rgba(44,62,80,0.07);color:var(--grey-text);font-size:11px;font-weight:600;font-family:inherit;
@@ -2206,6 +2232,8 @@
   <button class="prip-zalozka pes-rano" id="pesRanoZalozka" type="button" hidden aria-label="Nakrmeno ráno">☀️🐕🥣</button>
   <button class="prip-zalozka pes-vecer" id="pesVecerZalozka" type="button" hidden aria-label="Nakrmeno večer">🌙🐕🥣</button>
 </div>
+<!-- Panel u zvonečku: svítící připomínky s Hotovo. Mimo skupinu, viz pripPanelRender. -->
+<div class="prip-panel" id="pripPanel" hidden></div>
 <div class="slider-wrap" id="sliderWrap">
 
   <!-- Asistent (první stránka) -->
@@ -11305,16 +11333,17 @@ function updateDots() {
 // neodťukne (svezená je tak jako tak). Server drží jen časy odťuknutí a přepínače;
 // kdy co svítí, se počítá tady podle hodin, v pražském čase.
 const PRIPOMINKY = [
-  { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7 },
-  { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7 },
-  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí; v zimě jde vypnout
-  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4 },    // čtvrtek dopoledne, celý rok
+  // Přepínač má každá — vypnutá připomínka nesvítí (pes na dovolené, BIO v zimě…)
+  { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7, prepinac: true },
+  { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7, prepinac: true },
+  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí
+  { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4, prepinac: true },    // čtvrtek dopoledne
   // Sekačka hodinu není na příjmu — nejspíš někde uvízla. Přepínač se vypíná, když je
   // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě se neukazuje.
   { id: 'sekacka', nazev: 'Vysvobodit sekačku', ikona: '🆘', sekacka: true, prepinac: true },
   // Krmení psa: každý den, den se láme ve 3:00. Mají vlastní plovoucí záložky.
-  { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣' },
-  { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣' }
+  { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣', prepinac: true },
+  { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣', prepinac: true }
 ];
 const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
 const PRIP_SEKACKA_MS = 3600000;   // jak dlouho sekačka mlčí, než se připomínka rozsvítí
@@ -11356,8 +11385,9 @@ function pripominkaStav(def, p, now = Date.now()) {
   // „Aktivovat teď“: svítí, dokud se po aktivaci neodťukne — bez ohledu na čas
   const aktivovano = Number(p.aktivovano) || 0;
   if (aktivovano && aktivovano >= hotovo) return { sviti: true, text: 'Aktivováno ručně', dalsi: null };
+  // Vypnutá přepínačem nesvítí — jen ruční „Aktivovat teď" výš má přednost
+  if (def.prepinac && p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
   if (def.sekacka) {
-    if (p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
     const od = Number(sekackaData && sekackaData.offlineOd) || 0;
     if (!od) return { sviti: false, text: 'Sekačka je na příjmu', dalsi: null };
     const kdy = 'Není na příjmu od ' + fmtSolTime(od);
@@ -11403,7 +11433,6 @@ function pripominkaStav(def, p, now = Date.now()) {
   const naReal = w => w - (W - now);   // zpátky z nástěnných hodin (posun kolem poledne je stálý)
   const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra')
     : PRIP_KDY[def.svoz] + ' ' + pripDatum(S + PRIP_DEN));
-  if (def.prepinac && p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
   // Odťuknout jde i dřív: počítá se k nejbližšímu svozu všechno od poledne dne
   // minulého svozu (tedy od konce předchozího okna)
   if (hotovo && pripNastenne(hotovo) >= S - 6 * PRIP_DEN) {
@@ -11424,6 +11453,20 @@ function pripOdpocet(ms) {
 function pripSviticich(now = Date.now()) {
   return PRIPOMINKY.filter(def => !def.zalozka && pripViditelna(def)
     && pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
+}
+
+// Hotovo, a do pěti vteřin „Zpět" — ze seznamu i z panelu u zvonečku
+function pripOdtukni(def) {
+  if ((pripZpet[def.id] || 0) > Date.now()) {
+    delete pripZpet[def.id];
+    renderPripominky();
+    pripPost('/api/pripominky/' + def.id + '/hotovo', { zpet: true });
+  } else {
+    pripZpet[def.id] = Date.now() + 5000;
+    setTimeout(() => bezpecne(renderPripominky), 5100);
+    renderPripominky();
+    pripPost('/api/pripominky/' + def.id + '/hotovo', {});
+  }
 }
 
 async function pripPost(adresa, telo) {
@@ -11487,18 +11530,7 @@ function renderPripominky(now = Date.now()) {
     btn.textContent = zpet ? 'Zpět' : odpocet ? pripOdpocet(st.dalsi - now) : 'Hotovo';
     // Schová se jen naoko — místo zůstane, ať jsou tlačítka pěkně pod sebou
     btn.classList.toggle('schovane', !zpet && !st.sviti && !odpocet);
-    btn.addEventListener('click', () => {
-      if (zpet) {
-        delete pripZpet[def.id];
-        renderPripominky();
-        pripPost('/api/pripominky/' + def.id + '/hotovo', { zpet: true });
-      } else {
-        pripZpet[def.id] = Date.now() + 5000;
-        setTimeout(() => bezpecne(renderPripominky), 5100);
-        renderPripominky();
-        pripPost('/api/pripominky/' + def.id + '/hotovo', {});
-      }
-    });
+    btn.addEventListener('click', () => pripOdtukni(def));
     if (def.prepinac) {
       const sw = document.createElement('button');
       sw.type = 'button';
@@ -11523,6 +11555,7 @@ function pripZalozkaObnov(now = Date.now()) {
   // Zvoneček je vidět i na stránce Připomínky — jen když nic nesvítí, schová se
   pripZalozkaEl.hidden = !kolik;
   pripZalozkaEl.textContent = '🔔 ' + kolik;
+  bezpecne(() => pripPanelRender(now));
   // Záložky psa: jen na iPadu (široký displej), vidět, když krmení svítí (i na
   // stránce Připomínky), a 5 s po odťuknutí jako „Zpět“. Na telefonu je krmení
   // jen v seznamu Připomínek.
@@ -11589,9 +11622,83 @@ function pripPoziceUmisti() {
   pripPlovouciEl.style.top = Math.round(y) + 'px';
   return true;
 }
+// ---------- Panel u zvonečku ----------
+// Klepnutí na zvoneček nepřepíná stránku: pod ním se rozbalí oranžový panel se
+// svítícími připomínkami a tlačítkem Hotovo. Na stránku Připomínky vede až klepnutí
+// na text připomínky. Panel stojí mimo plovoucí skupinu — ta si kvůli tažení bere
+// ukazatel a tlačítka uvnitř by klepnutí nedostala.
+const pripPanelEl = document.getElementById('pripPanel');
+let pripPanelOtevreny = false;
+
+function pripPanelOtevri(ano) {
+  pripPanelOtevreny = !!ano && !!pripPanelEl;
+  if (!pripPanelEl) return;
+  pripPanelEl.hidden = !pripPanelOtevreny;
+  if (pripPanelOtevreny) pripPanelRender();
+}
+
+// Pod zvoneček, oříznuto do okna. Schovaný zvoneček (po posledním Hotovo běží
+// ještě „Zpět") nemá rozměry — pak panel zůstane, kde je.
+function pripPanelPolohuj() {
+  if (!pripPanelOtevreny || !pripZalozkaEl) return;
+  const z = pripZalozkaEl.getBoundingClientRect();
+  if (!z.width) return;
+  const r = pripPanelEl.getBoundingClientRect();
+  const x = Math.max(8, Math.min(z.left, window.innerWidth - r.width - 8));
+  const y = Math.max(8, Math.min(z.bottom + 10, window.innerHeight - r.height - 8));
+  pripPanelEl.style.left = Math.round(x) + 'px';
+  pripPanelEl.style.top = Math.round(y) + 'px';
+}
+
+function pripPanelRender(now = Date.now()) {
+  if (!pripPanelEl || !pripPanelOtevreny) return;
+  // Stejné připomínky, jaké počítá zvoneček, a k nim ty, co jdou ještě vrátit
+  const polozky = PRIPOMINKY.filter(def => !def.zalozka && pripViditelna(def)
+    && ((pripZpet[def.id] || 0) > now || pripominkaStav(def, pripData && pripData[def.id], now).sviti));
+  if (!polozky.length) { pripPanelOtevri(false); return; }
+  pripPanelEl.textContent = '';
+  for (const def of polozky) {
+    const st = pripominkaStav(def, pripData && pripData[def.id], now);
+    const zpet = (pripZpet[def.id] || 0) > now;
+    const radek = document.createElement('div');
+    radek.className = 'prip-panel-radek';
+    radek.dataset.id = def.id;
+    const text = document.createElement('button');
+    text.type = 'button';
+    text.className = 'prip-panel-text';
+    const nazev = document.createElement('div');
+    nazev.className = 'prip-panel-nazev';
+    nazev.textContent = def.ikona + ' ' + def.nazev;
+    const stav = document.createElement('div');
+    stav.className = 'prip-panel-stav';
+    stav.textContent = zpet ? 'Hotovo ✓' : st.text;
+    text.append(nazev, stav);
+    text.addEventListener('click', () => { pripPanelOtevri(false); pripOtevri(); });
+    const hotovo = document.createElement('button');
+    hotovo.type = 'button';
+    hotovo.className = 'prip-panel-hotovo';
+    hotovo.textContent = zpet ? 'Zpět' : 'Hotovo';
+    hotovo.addEventListener('click', () => pripOdtukni(def));
+    radek.append(text, hotovo);
+    pripPanelEl.appendChild(radek);
+  }
+  pripPanelPolohuj();
+}
+
+if (pripPanelEl) {
+  // Klepnutí mimo panel i zvoneček ho zavře
+  document.addEventListener('pointerdown', ev => {
+    if (!pripPanelOtevreny) return;
+    const t = ev.target;
+    if (pripPanelEl.contains(t) || (pripPlovouciEl && pripPlovouciEl.contains(t))) return;
+    pripPanelOtevri(false);
+  });
+  window.addEventListener('resize', () => bezpecne(pripPanelPolohuj));
+}
+
 // Co dělá které tlačítko skupiny po klepnutí
 function pripPlovouciAkce(el) {
-  if (el === pripZalozkaEl) { pripOtevri(); return; }
+  if (el === pripZalozkaEl) { pripPanelOtevri(!pripPanelOtevreny); return; }
   const def = PRIPOMINKY.find(d => d.zalozka && d.zalozka === el.id);
   if (def) pesKlepnuti(def);
 }
@@ -11625,6 +11732,7 @@ if (pripPlovouciEl) {
     if (t.jede) {
       const r = pripPlovouciEl.getBoundingClientRect();
       pripPoziceUloz({ x: r.left / window.innerWidth, y: r.top / window.innerHeight });
+      pripPanelOtevri(false);
     } else if (t.cil) {
       pripPlovouciAkce(t.cil);
     }

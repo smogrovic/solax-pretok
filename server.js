@@ -1279,22 +1279,23 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 }
 
 // ---------- Připomínky ----------
-// Kytky, vysavač a popelnice. Server drží jen to, kdy se co naposledy odťuklo, a
-// přepínač BIO (běžná popelnice jede celý rok, ta ho nemá). Kdy připomínka svítí, si počítá appka podle hodin — v neděli
+// Kytky, vysavač, popelnice, pes, sekačka. Server drží jen to, kdy se co naposledy
+// odťuklo, a přepínač, kterým jde každou připomínku vypnout. Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
 const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka'];
-const PRIPOMINKY_S_PREPINACEM = ['bio', 'sekacka'];
+// Vypnout jde každá připomínka (třeba pes na dovolené, kytky v zimě)
+const PRIPOMINKY_S_PREPINACEM = PRIPOMINKY_IDS;
 
 function pripominkyVychozi() {
   return {
     // `aktivovano` = ručně rozsvíceno („Aktivovat teď“) — svítí, dokud se neodťukne
-    kytky: { hotovo: 0, predtim: 0, aktivovano: 0 },
-    vysavac: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    kytky: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
+    vysavac: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     bio: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
-    popelnice: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    popelnice: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     // Krmení psa: ráno od 5:00, večer od 16:00, den se láme ve 3:00 (počítá appka)
-    pesRano: { hotovo: 0, predtim: 0, aktivovano: 0 },
-    pesVecer: { hotovo: 0, predtim: 0, aktivovano: 0 },
+    pesRano: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
+    pesVecer: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     // Vysvobodit sekačku: svítí, když sekačka hodinu není na příjmu (počítá appka
     // z `offlineOd` sekačky). Přepínač se vypíná, když je sekačka vypnutá schválně.
     sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 }

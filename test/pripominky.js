@@ -31,8 +31,7 @@ nadpis('1) Výchozí stav');
   check('nic není aktivované ručně', Object.values(h.state.pripominky).every(p => p.aktivovano === 0), true);
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
   check('BIO má přepínač zapnutý', h.state.pripominky.bio.zapnuto, true);
-  check('běžná popelnice přepínač nemá (jede celý rok)', 'zapnuto' in h.state.pripominky.popelnice, false);
-  check('kytky přepínač nemají', 'zapnuto' in h.state.pripominky.kytky, false);
+  check('přepínač mají všechny, výchozí zapnutý', Object.values(h.state.pripominky).every(p => p.zapnuto === true), true);
 }
 
 nadpis('2) Odťuknutí a vrácení');
@@ -71,9 +70,9 @@ nadpis('3) Endpointy');
   check('špatné tělo → 400', r.status, 400);
   check('  a nic se nezmění', h.state.pripominky.bio.zapnuto, false);
   r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'kytky' }, { zapnuto: false });
-  check('kytky přepínač nemají → 404', r.status, 404);
-  r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'popelnice' }, { zapnuto: false });
-  check('běžná popelnice taky ne → 404', r.status, 404);
+  check('kytky jdou vypnout taky', r.status + ' ' + h.state.pripominky.kytky.zapnuto, '200 false');
+  r = h.zavolej('/api/pripominky/:id/zapnuto', { id: 'nesmysl' }, { zapnuto: false });
+  check('neznámá připomínka → 404', r.status, 404);
 }
 
 nadpis('4) Obnova ze zálohy');
@@ -96,7 +95,8 @@ nadpis('4) Obnova ze zálohy');
   check('  i s předchozím', h.state.pripominky.vysavac.predtim, 3000);
   check('nečíslo se zahodí', h.state.pripominky.bio.hotovo, 0);
   check('  ale přepínač se vezme', h.state.pripominky.bio.zapnuto, false);
-  check('běžné popelnici se přepínač nevnutí', 'zapnuto' in h.state.pripominky.popelnice, false);
+  check('přepínač běžné popelnice ze zálohy se vezme', h.state.pripominky.popelnice.zapnuto, false);
+  check('bez přepínače v záloze zůstane zapnuto', h.state.pripominky.kytky.zapnuto, true);
   check('cizí id se nezaloží', 'pes' in h.state.pripominky, false);
   check('prázdné tělo → 400', h.zavolej('/api/pripominky/restore', {}, {}).status, 400);
 }

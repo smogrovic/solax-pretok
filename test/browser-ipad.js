@@ -171,7 +171,12 @@ setTimeout(() => {
   ptr('pointermove', r1.left + 13, r1.top + 12);
   ptr('pointerup', r1.left + 13, r1.top + 12);
   zv.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-  check('klepnutí Připomínky otevře', otevreno, 1);
+  // Klepnutí rozbalí panel u zvonečku; na stránku se jde až z textu v panelu
+  check('klepnutí stránku nepřepne', otevreno, 0);
+  check('  ale rozbalí panel u zvonečku', document.getElementById('pripPanel').hidden, false);
+  document.querySelector('#pripPanel .prip-panel-text').click();
+  check('text v panelu Připomínky otevře', otevreno, 1);
+  check('  a panel se zavře', document.getElementById('pripPanel').hidden, true);
   // Po otevření se zvoneček schová, takže se měří jeho nastavená poloha
   // Poloha patří celé plovoucí skupině se zvonečkem a záložkami psa
   const skupina = document.getElementById('pripPlovouci');

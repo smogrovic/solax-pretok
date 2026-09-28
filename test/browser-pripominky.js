@@ -35,9 +35,9 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('stránka je hned za Úklidem', tituly[tituly.indexOf('Úklid') + 1], 'Připomínky');
   pripData = null; renderPripominky();
   check('šest připomínek (i pes ráno a večer)', document.querySelectorAll('#pripSeznam .prip-radek').length, 6);
-  check('přepínač má jen BIO (běžná popelnice jede celý rok)',
+  check('přepínač má každá připomínka',
     Array.from(document.querySelectorAll('#pripSeznam .prip-prepinac')).map(s => s.closest('.prip-radek').dataset.id).join(','),
-    'bio');
+    'kytky,vysavac,bio,popelnice,pesRano,pesVecer');
   const akceBio = Array.from(radek('bio').querySelector('.prip-akce').children).map(e => e.classList.contains('prip-prepinac') ? 'prepinac' : 'hotovo');
   check('přepínač je vlevo, Hotovo vpravo', akceBio.join(','), 'prepinac,hotovo');
   const praveOkraje = Array.from(document.querySelectorAll('#pripSeznam .prip-hotovo')).map(b => Math.round(b.getBoundingClientRect().right));
@@ -95,8 +95,11 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
     'Příští svoz ve čtvrtek 8. 10.');
   check('mimo okno odpočítává do dalšího okna',
     pripominkaStav(def('popelnice'), pop, praha('2026-10-02', 12)).dalsi, praha('2026-10-07', 12));
-  check('běžná popelnice se vypnout nedá',
-    sviti('popelnice', { zapnuto: false, hotovo: 0 }, praha('2026-09-30', 12)), 'true');
+  check('i běžná popelnice jde vypnout',
+    sviti('popelnice', { zapnuto: false, hotovo: 0 }, praha('2026-09-30', 12)), 'false');
+  check('vypnuté kytky nesvítí', pripominkaStav(def('kytky'), { zapnuto: false, hotovo: 0 }, ted).text, 'Připomínka vypnutá');
+  check('  ruční „Aktivovat teď" má přednost', sviti('kytky', { zapnuto: false, hotovo: 0, aktivovano: ted - MIN }, ted), 'true');
+  check('vypnutý pes nesvítí', sviti('pesRano', { zapnuto: false, hotovo: 0 }, praha('2026-09-30', 7)), 'false');
   check('vypnuté BIO neodpočítává', pripominkaStav(def('bio'), { zapnuto: false }, praha('2026-09-30', 12)).dalsi, null);
 
   OUT.push('\\n4b) Odpočet');
@@ -162,9 +165,35 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   let kam = null;
   const puvodni = sliderWrap.scrollTo;
   sliderWrap.scrollTo = o => { kam = o.left; };
+  const panel = document.getElementById('pripPanel');
   zal.click();
+  check('klepnutí na zvoneček stránku nepřepne', kam, null);
+  check('  ale rozbalí oranžový panel', panel.hidden, 'false');
+  const kolik = Number(zal.textContent.replace(/\\D/g, ''));
+  check('  řádků je tolik, kolik ukazuje zvoneček', panel.querySelectorAll('.prip-panel-radek').length, kolik);
+  const rp = panel.getBoundingClientRect(), rz2 = zal.getBoundingClientRect();
+  check('  panel je pod zvonečkem a v okně', rp.top >= rz2.bottom && rp.right <= innerWidth && rp.left >= 0, 'true');
+  check('  oranžový', getComputedStyle(panel).backgroundColor, getComputedStyle(zal).backgroundColor);
+  // Hotovo z panelu
+  POSLANO.length = 0;
+  const prvni = panel.querySelector('.prip-panel-radek');
+  const idPrvni = prvni.dataset.id;
+  prvni.querySelector('.prip-panel-hotovo').click();
+  check('Hotovo v panelu odťukne', POSLANO.some(x => x.adresa === '/api/pripominky/' + idPrvni + '/hotovo'), 'true');
+  check('  a ukáže Zpět', panel.querySelector('.prip-panel-radek[data-id="' + idPrvni + '"] .prip-panel-hotovo').textContent, 'Zpět');
+  panel.querySelector('.prip-panel-radek[data-id="' + idPrvni + '"] .prip-panel-hotovo').click();
+  check('  Zpět vrátí', POSLANO.some(x => x.adresa === '/api/pripominky/' + idPrvni + '/hotovo' && x.telo && x.telo.zpet), 'true');
+  // Druhé klepnutí na zvoneček panel zavře, třetí zase otevře
+  zal.click();
+  check('druhé klepnutí na zvoneček panel zavře', panel.hidden, 'true');
+  zal.click();
+  document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  check('klepnutí jinam panel zavře', panel.hidden, 'true');
+  zal.click();
+  panel.querySelector('.prip-panel-text').click();
   sliderWrap.scrollTo = puvodni;
-  check('klepnutí přejede na Připomínky', Math.round(kam / sirkaStranky()), cil);
+  check('klepnutí na text v panelu přejede na Připomínky', Math.round(kam / sirkaStranky()), cil);
+  check('  a panel se zavře', panel.hidden, 'true');
   sliderWrap.scrollLeft = cil * sirkaStranky(); updateDots();
   check('i na Připomínkách je zvoneček vidět', zal.hidden, 'false');
   sliderWrap.scrollLeft = 0; updateDots();
