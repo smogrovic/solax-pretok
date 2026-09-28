@@ -4747,7 +4747,7 @@ function renderAutoSlider() {
 function renderAutomation(mode) {
   autoModeData = AUTO_MODES_UI.includes(mode) ? mode : 'on';
   renderAutoSlider();
-  bezpecne(renderPripominky);  // v zimě zmizí připomínka sekačky
+  bezpecne(renderPripominky);
   saveAutoModeLocal();
   renderTempAutoThreshold();   // v zimě se ukazuje jiný jezdec
   renderWbAuto();              // a jiná nápověda u wallboxu
@@ -11339,8 +11339,10 @@ const PRIPOMINKY = [
   { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí
   { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4, prepinac: true },    // čtvrtek dopoledne
   // Sekačka hodinu není na příjmu — nejspíš někde uvízla. Přepínač se vypíná, když je
-  // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě se neukazuje.
+  // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě ji vypne server.
   { id: 'sekacka', nazev: 'Vysvobodit sekačku', ikona: '🆘', sekacka: true, prepinac: true },
+  // V zimě ji (i sekačku) vypne server přepínačem — v seznamu zůstanou, jen vypnuté
+  { id: 'trava', nazev: 'Posekat trávu', ikona: '🌿', dni: 10, prepinac: true },
   // Krmení psa: každý den, den se láme ve 3:00. Mají vlastní plovoucí záložky.
   { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣', prepinac: true },
   { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣', prepinac: true }
@@ -11348,10 +11350,11 @@ const PRIPOMINKY = [
 const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
 const PRIP_SEKACKA_MS = 3600000;   // jak dlouho sekačka mlčí, než se připomínka rozsvítí
 
-// Připomínka sekačky jen tam, kde má smysl: nastavená sekačka a mimo zimu
+// Připomínka sekačky jen tam, kde je sekačka nastavená. Zima ji neschovává —
+// vypne ji přepínačem server a řádek zůstane vidět.
 function pripViditelna(def) {
   if (!def.sekacka) return true;
-  return !!(sekackaData && sekackaData.zapnuto) && !isWinterUi();
+  return !!(sekackaData && sekackaData.zapnuto);
 }
 const PRIP_DEN = 86400000;
 const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];

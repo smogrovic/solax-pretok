@@ -419,6 +419,12 @@ nadpis('9b) Od kdy sekačka není na příjmu (připomínka Vysvobodit sekačku)
   check('návrat na příjem odmlku smaže', h.state.sekacka.offlineOd, 0);
   check('  a vypnutou připomínku zase zapne', h.state.pripominky.sekacka.zapnuto, true);
   check('  a řekne to v Logu', h.logy.some(t => /Připomínka sekačky znovu zapnutá/.test(t)), true);
+  // V zimě ji má vypnutou zima — návrat na příjem ji nezapne
+  h.state.autoMode = 'winter';
+  h.state.pripominky.sekacka.zapnuto = false;
+  online = 0; await h.api.sekackaNacti();
+  online = 1; await h.api.sekackaNacti();
+  check('v zimě se přepínač návratem nezapne', h.state.pripominky.sekacka.zapnuto, false);
 }
 
 nadpis('10) Endpointy');

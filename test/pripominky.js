@@ -1,18 +1,18 @@
 // Ověření: připomínky na serveru — odťuknutí a vrácení, přepínače popelnic,
 // endpointy a obnova ze zálohy.
-const { between, suite } = require('./zdroj');
+const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('připomínky');
 
 const CODE = between('// ---------- Připomínky ----------', '// ---------- Spotřeba po měsících ----------');
 
 function build() {
-  const broadcasts = [], routy = {};
+  const broadcasts = [], routy = {}, logy = [];
   const app = { post: (cesta, fn) => { routy[cesta] = fn; } };
   const state = {};
-  const api = new Function('state', 'broadcast', 'app',
+  const api = new Function('state', 'broadcast', 'app', 'addLog',
     CODE + '\n; state.pripominky = pripominkyVychozi();'
-         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkyObnov, pripominkyVychozi };'
-  )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app);
+         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkyObnov, pripominkyVychozi, pripominkyZima };'
+  )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
     let status = 200, json = null;
@@ -20,13 +20,13 @@ function build() {
     routy[vzor]({ params, body }, res);
     return { status, json };
   };
-  return { api, state, broadcasts, routy, zavolej };
+  return { api, state, broadcasts, routy, zavolej, logy };
 }
 
 nadpis('1) Výchozí stav');
 {
   const h = build();
-  check('sedm připomínek (i pes a sekačka)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer,sekacka');
+  check('osm připomínek (i pes, sekačka a tráva)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer,sekacka,trava');
   check('sekačka má přepínač, výchozí zapnutý', h.state.pripominky.sekacka.zapnuto, true);
   check('nic není aktivované ručně', Object.values(h.state.pripominky).every(p => p.aktivovano === 0), true);
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
@@ -110,6 +110,58 @@ nadpis('5) Záloha a stream');
   check('  i ve snímku zálohy',
     zdroj.includes("'/api/pripominky/restore': { pripominky: state.pripominky }"), true);
   check('stav jde v úvodním snímku streamu', /\n    pripominky: state\.pripominky,\n/.test(zdroj), true);
+}
+
+nadpis('Zima vypne trávu a sekačku');
+{
+  const h = build();
+  const z = id => h.state.pripominky[id];
+  h.api.pripominkyZima(true);
+  check('do zimy se tráva a sekačka vypnou', z('trava').zapnuto + ' ' + z('sekacka').zapnuto, 'false false');
+  check('  s příznakem, že to byla zima', z('trava').zimaVypnulo + ' ' + z('sekacka').zimaVypnulo, 'true true');
+  check('  ostatní zůstanou', Object.entries(h.state.pripominky).filter(([id]) => !['trava', 'sekacka'].includes(id)).every(([, p]) => p.zapnuto), true);
+  check('  v Logu', h.logy.slice(-1)[0], 'Připomínky: posekat trávu, vysvobodit sekačku vypnuty na zimu');
+  check('  a do appky', h.broadcasts.slice(-1)[0].e, 'pripominky');
+  h.api.pripominkyZima(false);
+  check('po zimě se zapnou zpátky', z('trava').zapnuto + ' ' + z('sekacka').zapnuto, 'true true');
+  check('  příznak zmizí', 'zimaVypnulo' in z('trava'), false);
+  check('  v Logu', h.logy.slice(-1)[0], 'Připomínky: posekat trávu, vysvobodit sekačku zapnuty po zimě');
+}
+{
+  // Tráva vypnutá ručně už před zimou — po zimě zůstane vypnutá
+  const h = build();
+  const z = id => h.state.pripominky[id];
+  h.api.pripominkaZapnuto('trava', false);
+  h.api.pripominkyZima(true);
+  check('ručně vypnutou zima neoznačí', 'zimaVypnulo' in z('trava'), false);
+  h.api.pripominkyZima(false);
+  check('  a po zimě zůstane vypnutá', z('trava').zapnuto, false);
+  check('  sekačka se zapnula', z('sekacka').zapnuto, true);
+}
+{
+  // Ruční zapnutí v zimě se respektuje
+  const h = build();
+  h.api.pripominkyZima(true);
+  h.api.pripominkaZapnuto('trava', true);
+  check('ruční zapnutí v zimě smaže příznak', 'zimaVypnulo' in h.state.pripominky.trava, false);
+  const r = h.zavolej('/api/pripominky/restore', {}, { pripominky: { sekacka: { zapnuto: false, zimaVypnulo: true } } });
+  check('obnova nese příznak zimy', r.status + ' ' + h.state.pripominky.sekacka.zimaVypnulo, '200 true');
+}
+
+{
+  // Přepnutí hlavního jezdce do zimy a ze zimy přepínače opravdu přehodí
+  const zima = [];
+  const setAutoMode = new Function('state', 'pripominkyZima', 'addLog', 'broadcast', 'AUTO_MODE_LABELS',
+    'automationPayload', 'thresholdPayload', 'wallboxEnabled', 'runAutomation', 'runEnergyControl',
+    'let autoModeTouched = false;\n' + fn('function setAutoMode(mode, why) {') + '\n; return setAutoMode;')(
+    { autoMode: 'on' }, z => zima.push(z), () => {}, () => {}, { on: 'zapnuta', off: 'vypnuta', winter: 'zima' },
+    () => ({}), () => ({}), false, async () => {}, async () => {});
+  setAutoMode('winter');
+  setAutoMode('off');
+  setAutoMode('on');
+  setAutoMode('winter');
+  setAutoMode('winter');
+  check('jezdec: do zimy, ze zimy (i na vypnuto), mezi zapnuto/vypnuto nic', JSON.stringify(zima), '[true,false,true]');
 }
 
 konec();

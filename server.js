@@ -1282,7 +1282,7 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 // Kytky, vysavač, popelnice, pes, sekačka. Server drží jen to, kdy se co naposledy
 // odťuklo, a přepínač, kterým jde každou připomínku vypnout. Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
-const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka'];
+const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka', 'trava'];
 // Vypnout jde každá připomínka (třeba pes na dovolené, kytky v zimě)
 const PRIPOMINKY_S_PREPINACEM = PRIPOMINKY_IDS;
 
@@ -1298,7 +1298,9 @@ function pripominkyVychozi() {
     pesVecer: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     // Vysvobodit sekačku: svítí, když sekačka hodinu není na příjmu (počítá appka
     // z `offlineOd` sekačky). Přepínač se vypíná, když je sekačka vypnutá schválně.
-    sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 }
+    sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
+    // Posekat trávu: po 10 dnech od posledního odťuknutí (počítá appka)
+    trava: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 }
   };
 }
 
@@ -1324,8 +1326,36 @@ function pripominkaAktivuj(id, now = Date.now()) {
 function pripominkaZapnuto(id, zapnuto) {
   if (!PRIPOMINKY_S_PREPINACEM.includes(id)) return false;
   state.pripominky[id].zapnuto = zapnuto;
+  // Kdo na přepínač sáhl sám, rozhodl — konec zimy ho už nepřepne
+  delete state.pripominky[id].zimaVypnulo;
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
+}
+
+// V zimě tráva ani sekačka nemají co připomínat. Do zimy se jejich přepínač vypne
+// (zůstanou v seznamu, jen vypnuté), po zimě se zapnou zpátky — ale jen ty, které
+// vypnula zima. Co měl člověk vypnuté už předtím, nechá se být.
+const PRIPOMINKY_ZIMNI = ['trava', 'sekacka'];
+const PRIPOMINKY_ZIMNI_NAZVY = { trava: 'posekat trávu', sekacka: 'vysvobodit sekačku' };
+
+function pripominkyZima(zima) {
+  const zmeneno = [];
+  for (const id of PRIPOMINKY_ZIMNI) {
+    const p = state.pripominky[id];
+    if (!p) continue;
+    if (zima && p.zapnuto !== false) {
+      p.zapnuto = false;
+      p.zimaVypnulo = true;
+      zmeneno.push(PRIPOMINKY_ZIMNI_NAZVY[id]);
+    } else if (!zima && p.zimaVypnulo) {
+      p.zapnuto = true;
+      delete p.zimaVypnulo;
+      zmeneno.push(PRIPOMINKY_ZIMNI_NAZVY[id]);
+    }
+  }
+  if (!zmeneno.length) return;
+  addLog(`Připomínky: ${zmeneno.join(', ')} ${zima ? 'vypnuty na zimu' : 'zapnuty po zimě'}`);
+  broadcast('pripominky', { pripominky: state.pripominky });
 }
 
 // Obnova po nasazení. Bere se jen platné a novější odťuknutí serveru se nepřepíše —
@@ -1344,6 +1374,7 @@ function pripominkyObnov(b) {
     const aktivovano = Number(z.aktivovano);
     if (Number.isFinite(aktivovano) && aktivovano > (p.aktivovano || 0)) p.aktivovano = aktivovano;
     if (PRIPOMINKY_S_PREPINACEM.includes(id) && typeof z.zapnuto === 'boolean') p.zapnuto = z.zapnuto;
+    if (z.zimaVypnulo === true) p.zimaVypnulo = true;
   }
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
@@ -2110,7 +2141,9 @@ let autoModeTouched = false;
 function setAutoMode(mode, why) {
   autoModeTouched = true;
   if (state.autoMode === mode) return;
+  const bylaZima = state.autoMode === 'winter';
   state.autoMode = mode;
+  if (bylaZima !== (mode === 'winter')) pripominkyZima(mode === 'winter');
   addLog(`Automatika: ${AUTO_MODE_LABELS[mode]}${why ? ` (${why})` : ''}`);
   broadcast('automation', automationPayload());
   broadcast('tempAutoOn', thresholdPayload());   // appka přepne na zimní jezdec
@@ -9302,7 +9335,8 @@ function sekackaOdmlka(online, now = Date.now()) {
   // Vypnutý přepínač znamenal „sekačka je vypnutá schválně". Teď je zpátky, takže
   // připomínka zase hlídá — na jaře se na to nedá zapomenout.
   const p = state.pripominky && state.pripominky.sekacka;
-  if (p && p.zapnuto === false) {
+  // V zimě ji má vypnutou zima — jarní zapnutí obstará konec zimy
+  if (p && p.zapnuto === false && state.autoMode !== 'winter') {
     pripominkaZapnuto('sekacka', true);
     addLog('Připomínka sekačky znovu zapnutá (sekačka je na příjmu)');
   }
