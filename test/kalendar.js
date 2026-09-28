@@ -28,7 +28,7 @@ function build({ odpovedi = [], duty = '', icloud = false } = {}) {
     CODE + '\n; return { xmlTagy, xmlTag, xmlText, maVevent, absUrl, icsRozbal, icsRadek,'
          + ' icsUdalosti, icsCas, zonaNaMs, kalRozvin, kalUdalosti, kalDoDnu, kalZacatek,'
          + ' calendarPayload, kalStahni, kalDotazTelo, jeKalendarUdalosti, kalObjev,'
-         + ' kalSerad, kalStahniDuty, pollKalendar, KAL_PORADI, DUTY_KALENDAR, KAL_DNU, KAL_POLL_MS, kalBezDuplicit };'
+         + ' kalSerad, pollKalendar, KAL_PORADI, KAL_DNU, KAL_POLL_MS };'
   )(
     state,
     { get: (cesta, fn) => { routy['GET ' + cesta] = fn; },
@@ -358,7 +358,7 @@ nadpis('6) Pojistka kolem „expand"');
 }
 
 function dalsi() {
-nadpis('6b) Pořadí sloupců a pracovní rozpis');
+nadpis('6b) Pořadí sloupců');
 {
   // Sloupce mají pevné pořadí, ať se nepřehazují podle toho, jak je zrovna vrátil
   // iCloud. Co v seznamu není, jde za ně podle abecedy.
@@ -369,38 +369,13 @@ nadpis('6b) Pořadí sloupců a pracovní rozpis');
     'Family, Lukáš, Zuzka, Miki, Elenka');
   check('  a zbytek abecedně za nimi', serazene.slice(5).map(k => k.nazev).join(', '), 'Aarón, Flying');
   check('pořadí se dá přenastavit zvenčí', h.api.KAL_PORADI.join(','), 'Family,Lukáš,Zuzka,Miki,Elenka');
-  check('  a rozpis míří do Lukášova kalendáře', h.api.DUTY_KALENDAR, 'Lukáš');
 }
 {
-  // Pracovní rozpis je obyčejný ICS za odkazem — čte se týmž kódem jako iCloud
-  const FEED = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:duty1\r\nSUMMARY:OK123 PRG-FCO\r\n'
-    + 'DTSTART:20260914T050000Z\r\nDTEND:20260914T133000Z\r\nEND:VEVENT\r\nEND:VCALENDAR';
-  const h = build({ odpovedi: [{ body: FEED }], duty: 'https://dutylog/feed' });
-  const cil = { nazev: 'Lukáš', barva: '#8B8B8B' };
-  return h.api.kalStahniDuty(OD, DO, cil).catch(err => {
-    check('stažení rozpisu nespadlo', err.message, 'nespadnout'); return [];
-  }).then(u => {
-    check('služba se načte', u.length, 1);
-    check('  a spadne do Lukášova sloupce', u[0].kalendar, 'Lukáš');
-    check('  i s jeho barvou', u[0].barva, '#8B8B8B');
-    check('  a se svým názvem', u[0].nazev, 'OK123 PRG-FCO');
-    // V Lukášově sloupci jedou dva zdroje vedle sebe. Bez značky by appka neměla
-    // podle čeho létání odlišit a nakreslila by ho jako jeho vlastní události.
-    check('  a s poznámkou, odkud je', u[0].zdroj, 'duty');
-    // Výpadek DutyLogu nesmí shodit celý kalendář — služby prostě chybí
-    const spadly = build({ odpovedi: [{ ok: false, status: 500 }], duty: 'https://dutylog/feed' });
-    return spadly.api.kalStahniDuty(OD, DO, cil).catch(err => {
-      check('výpadek se má spolknout, ne vyhodit', err.message, 'spolknout'); return ['x'];
-    }).then(prazdno => {
-      check('výpadek DutyLogu nic neshodí', prazdno.length, 0);
-      const bez = build({ duty: '' });
-      return bez.api.kalStahniDuty(OD, DO, cil).then(nic => {
-        check('bez odkazu se nikam nechodí', nic.length, 0);
-        check('  a nic se nezkoušelo stáhnout', bez.dotazy.length, 0);
-        dalsiC();
-      });
-    });
-  });
+  // DutyLog je odpojený: poller na žádný odkaz nechodí, i kdyby DUTY_ICS_URL zůstal
+  const zdroj = LINES.join('\n');
+  check('DutyLog (DUTY_ICS_URL) kód už nečte', /process\.env\.DUTY_ICS_URL/.test(zdroj), false);
+  dalsiC();
+}
 }
 
 function dalsiC() {
@@ -427,73 +402,10 @@ nadpis('6d) Zapojení v polleru');
   const POLLER = zdroj.slice(zdroj.indexOf('async function pollKalendar()'),
                              zdroj.indexOf('function calendarPayload()'));
   check('poller kalendáře seřadí', /kalSerad\(await kalObjev\(\)\)/.test(POLLER), true);
-  check('  a přidá pracovní rozpis', /kalStahniDuty\(od, doKdy/.test(POLLER), true);
   check('  a pošle appce seznam sloupců', /kalendare: kalendare\.map/.test(POLLER), true);
 }
 
-nadpis('6e) Výpadek rozpisu je vidět v appce');
-// Stará adresa feedu vracela chybu, kalendář ji spolkl a Lukášův sloupec vypadal
-// úplně stejně jako volný týden. Tahle část hlídá, že se chyba dostane až do appky.
-{
-  const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
-    + `<current-user-principal xmlns="DAV:"><href xmlns="DAV:">/1/principal/</href></current-user-principal>`
-    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
-  const HOME = `<multistatus xmlns="DAV:"><response><href>/1/principal/</href><propstat><prop>`
-    + `<calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">`
-    + `<href xmlns="DAV:">https://p1-caldav.icloud.com/1/calendars/</href></calendar-home-set>`
-    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
-  const SEZNAM = `<multistatus xmlns="DAV:"><response><href>/1/calendars/lukas/</href><propstat><prop>`
-    + `<displayname>Lukáš</displayname><resourcetype><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>`
-    + `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"><comp name="VEVENT"/></supported-calendar-component-set>`
-    + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
-  const PRAZDNO = `<multistatus xmlns="DAV:"></multistatus>`;
-  // Služba se schválně neodvozuje z dnešního DATA: `toISOString` dává den v UTC,
-  // ale okno kalendáře začíná o pražské půlnoci. Po 22:00 našeho času se ty dva
-  // dny rozejdou, služba spadne před začátek okna a sada selže — což se taky
-  // stalo. Dvě hodiny od teď jsou uvnitř okna vždycky.
-  const utc = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const zacatek = utc(Date.now() + 2 * 3600000);
-  const konecS = utc(Date.now() + 6 * 3600000);
-  const FEED = `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:d1\r\nSUMMARY:OK123 PRG-FCO\r\n`
-    + `DTSTART:${zacatek}\r\nDTEND:${konecS}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
-  const objev = [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM }];
-
-  // Nejdřív výpadek, pak úspěch — a obojí na TÉŽE instanci. Kdyby se zkoušely
-  // dvě zvlášť, „po úspěchu chyba zmizí" by prošlo i bez mazání: nová instance
-  // stejně začíná s prázdnou chybou.
-  const h = build({
-    icloud: true, duty: 'https://dutylog/feed',
-    odpovedi: [...objev, { body: PRAZDNO }, { ok: false, status: 403 },
-               { body: PRAZDNO }, { body: FEED }]
-  });
-  return h.api.pollKalendar().then(() => {
-    const p = h.api.calendarPayload();
-    check('chyba rozpisu se dostane do appky', p.duty && p.duty.error, 'HTTP 403');
-    check('  ale zbytek kalendáře stojí', p.error, null);
-    check('  a dny se poskládaly', p.days.length, 7);
-    check('  a ví se, do kterého sloupce patří', p.duty && p.duty.kalendar, 'Lukáš');
-
-    // Cedule, která nejde pryč, je horší než žádná
-    return h.api.pollKalendar().then(() => {
-      const q = h.api.calendarPayload();
-      check('po úspěchu chyba zmizí', q.duty && q.duty.error, null);
-      check('  a spočítá se, kolik služeb přišlo', q.duty && q.duty.udalosti, 1);
-      check('  a zapamatuje se kdy', !!(q.duty && q.duty.kdy > 0), true);
-      check('  a služba je v Lukášově sloupci',
-        q.days.some(d => d.udalosti.some(u => u.zdroj === 'duty')), true);
-
-      // Bez odkazu není co hlásit — trvalá cedule „nemáš rozpis" by byla šum
-      const bez = build({ icloud: true, duty: '', odpovedi: [...objev, { body: PRAZDNO }] });
-      return bez.api.pollKalendar().then(() => {
-        check('bez odkazu se rozpis vůbec nezmiňuje', bez.api.calendarPayload().duty, null);
-      });
-    });
-  }).catch(err => {
-    // Bez tohohle sada při rozbitém polleru umře bez verdiktu a vypadá to,
-    // jako by se nic nestalo
-    check('oddíl doběhl bez výjimky', err.message, '(nic)');
-  }).then(dalsiE);
-}
+dalsiE();
 function dalsiE() {
   nadpis('6c) Flying se slije do Lukáše, Zuzka Škola do Zuzky (barvou svého kalendáře)');
   const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
@@ -513,16 +425,11 @@ function dalsiE() {
   const udalost = (uid, nazev) => '<multistatus><response><calendar-data>BEGIN:VEVENT\r\nUID:' + uid
     + '\r\nSUMMARY:' + nazev + '\r\nDTSTART:' + utc(Date.now() + 2 * 3600000)
     + '\r\nDTEND:' + utc(Date.now() + 5 * 3600000) + '\r\nEND:VEVENT</calendar-data></response></multistatus>';
-  // DutyLog nese tentýž let (o 3 min posunutý, jinak pojmenovaný) a jeden navíc
-  const feed = (uid, nazev, odH, doH, posun = 0) => `BEGIN:VEVENT\r\nUID:${uid}\r\nSUMMARY:${nazev}\r\n`
-    + `DTSTART:${utc(Date.now() + odH * 3600000 + posun)}\r\nDTEND:${utc(Date.now() + doH * 3600000 + posun)}\r\nEND:VEVENT\r\n`;
-  const FEED = 'BEGIN:VCALENDAR\r\n' + feed('d1', 'FLT OK123', 2, 5, 3 * 60000) + feed('d2', 'SBY', 20, 30)
-    + feed('d3', 'OK789', 2, 5, 30 * 60000) + 'END:VCALENDAR';
   const h = build({ icloud: true, duty: 'https://dutylog/feed',
     odpovedi: [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM },
       // Stahuje se v pořadí sloupců: Lukáš, Zuzka, pak ostatní podle abecedy
       { body: udalost('l1', 'Zubař') }, { body: udalost('z1', 'Kadeřník') },
-      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('s1', 'Třídní schůzka') }, { body: FEED }] });
+      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('s1', 'Třídní schůzka') }] });
   return h.api.pollKalendar().then(() => {
     const p = h.api.calendarPayload();
     const vse = p.days.flatMap(d => d.udalosti);
@@ -536,11 +443,9 @@ function dalsiE() {
     check('vlastní události beze změny', vlastni && vlastni.kalendar + ' ' + vlastni.zdroj + ' ' + vlastni.puvod, 'Lukáš null null');
     const zuz = vse.find(u => u.uid === 'z1');
     check('  i Zuzčiny', zuz && zuz.kalendar + ' ' + zuz.puvod, 'Zuzka null');
-    // Duplicity z DutyLogu (tentýž let ve Flying) pryč
-    check('let z DutyLogu, který je ve Flying, zmizí', vse.some(u => u.uid === 'd1'), false);
-    check('  služba jen v DutyLogu zůstane', vse.some(u => u.uid === 'd2' && u.zdroj === 'duty'), true);
-    check('  posun o 30 min není duplicita', vse.some(u => u.uid === 'd3'), true);
-    check('  a appka ví, kolik se zahodilo', p.duty.duplicit + ' / ' + p.duty.udalosti, '1 / 2');
+    // DutyLog je odpojený — i s nastaveným DUTY_ICS_URL se nic nestahuje
+    check('DutyLog se nestahuje, i když je odkaz nastavený', h.dotazy.some(d => /dutylog/.test(d.url || d)), false);
+    check('  a payload o rozpisu nic neříká', 'duty' in p, false);
   }).catch(err => {
     check('oddíl doběhl bez výjimky', err.message, '(nic)');
   }).then(dalsiF);
@@ -556,7 +461,6 @@ nadpis('7) Bez přihlašovacích údajů');
 }
 
 konec();
-}
 }
 }
 }

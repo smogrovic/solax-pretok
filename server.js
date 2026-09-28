@@ -209,7 +209,7 @@ const state = {
   prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
   zapadDelayMin: 20, // o kolik po západu slunce jede rozvrh žaluzií
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
-  calendar: { days: [], kalendare: [], duty: null, fetchedAt: null, error: null },
+  calendar: { days: [], kalendare: [], fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
   log: [],           // { t, msg } — záznamy zapínání/vypínání za 24 h
   // Hlavní přepínač automatiky (jezdec na stránce Asistent): vypnuto / zapnuto / zima.
@@ -7919,11 +7919,8 @@ const ICLOUD_URL = (process.env.ICLOUD_CALDAV_URL || 'https://caldav.icloud.com'
 // Nepovinné omezení na konkrétní kalendáře (názvy oddělené čárkou). Prázdné = všechny.
 const ICLOUD_ONLY = (process.env.ICLOUD_CALENDARS || '').split(',').map(s => s.trim()).filter(Boolean);
 const calendarEnabled = !!(ICLOUD_ID && ICLOUD_PASS);
-// Pracovní rozpis z DutyLogu — obyčejný odkaz na ICS. Ten odkaz je KLÍČ (kdo ho má,
-// vidí služby), takže patří jen do proměnné na Renderu, ne do kódu.
-const DUTY_ICS_URL = process.env.DUTY_ICS_URL || '';
-// Do kterého kalendáře se pracovní rozpis slije. Sloupec v appce pak zůstane jeden.
-const DUTY_KALENDAR = process.env.DUTY_KALENDAR || 'Lukáš';
+// Odebíraný rozpis z DutyLogu (DUTY_ICS_URL) je odpojený — létání chodí z iOS
+// kalendáře „Flying" (viz KAL_SLOUCIT). Proměnnou na Renderu kód už nečte.
 // Pořadí sloupců v denním přehledu. Co v seznamu není, se přidá za ně podle abecedy.
 const KAL_PORADI = (process.env.ICLOUD_PORADI || 'Family,Lukáš,Zuzka,Miki,Elenka')
   .split(',').map(x => x.trim()).filter(Boolean);
@@ -7931,7 +7928,7 @@ const KAL_DNU = 7;
 const KAL_POLL_MS = 5 * 60 * 1000;
 // Kalendáře, které se slijí do jiného sloupce. Událost si nese, odkud je (`puvod`),
 // a appka ji kreslí barvou svého kalendáře — jako kolečka v Kalendáři na telefonu.
-// „Flying" je Lukášovo létání (dřív odebíraný ICS, viz DUTY_ICS_URL), „Zuzka Škola"
+// „Flying" je Lukášovo létání, „Zuzka Škola"
 // jde k Zuzce. Formát: „Zdroj>Cíl", víc párů oddělených čárkou.
 const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,Zuzka Škola>Zuzka').split(',')
   .map(x => x.split('>').map(y => y.trim())).filter(x => x.length === 2 && x[0] && x[1])
@@ -8285,8 +8282,7 @@ function kalUdalosti(texty, od, doKdy, kal = {}) {
         nazev: icsOdescapuj(ev.SUMMARY ? ev.SUMMARY.hodnota : '') || '(bez názvu)',
         kalendar: kal.nazev || null,
         barva: kal.barva || null,
-        // Odkud událost je. Služby z DutyLogu jedou v Lukášově sloupci, ale appka
-        // je kreslí jinou barvou — bez tohohle by se od jeho vlastních nedaly poznat.
+        // Odkud událost je: 'slouceno' = ze slitého kalendáře (Flying u Lukáše)
         zdroj: kal.zdroj || null,
         // U slitých kalendářů (Flying → Lukáš) jméno toho původního — podle něj barva
         puvod: kal.puvod || null
@@ -8323,45 +8319,6 @@ function kalZacatek(at = Date.now()) {
   return zonaNaMs(d[0], d[1], d[2], 0, 0, 'Europe/Prague');
 }
 
-// Pracovní rozpis. Je to prostý ICS soubor za odkazem — žádné přihlašování, takže
-// stačí stáhnout a přečíst týmž kódem jako iCloud. Výpadek nesmí shodit zbytek:
-// když DutyLog neodpoví, kalendář se ukáže bez služeb.
-let dutyChyba = null;
-// Kolik služeb rozpis naposledy přinesl a kdy se to povedlo. Stará adresa umí
-// vracet i HTTP 200 s prázdným kalendářem — tehdy žádná chyba není a odlišit to
-// jde jen podle počtu. Poplach se z toho ale nedělá: prázdný týden je normální
-// stav (dovolená) a vymyšlená hláška „asi je to rozbité" by byla horší než mlčet.
-let dutyUdalosti = 0;
-let dutyDuplicit = 0;      // kolik letů z DutyLogu se zahodilo, protože už jsou ve Flying
-
-// Stejný let ze dvou zdrojů: DutyLog (odebíraný ICS) a slitý kalendář téhož sloupce
-// (Flying). Shoda = stejný sloupec, začátek i konec do 5 minut. Názvy se neporovnávají
-// — DutyLog a ruční záznam je píšou každý jinak.
-const KAL_DUPLICITA_MS = 5 * 60000;
-function kalBezDuplicit(duty, ostatni) {
-  const slite = ostatni.filter(u => u.zdroj === 'slouceno');
-  return duty.filter(d => !slite.some(u => u.kalendar === d.kalendar
-    && Math.abs(u.od - d.od) <= KAL_DUPLICITA_MS && Math.abs(u.do - d.do) <= KAL_DUPLICITA_MS));
-}
-let dutyKdy = 0;
-async function kalStahniDuty(od, doKdy, kal) {
-  if (!DUTY_ICS_URL) return [];
-  try {
-    const r = await fetch(DUTY_ICS_URL, { signal: AbortSignal.timeout(20000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const text = await r.text();
-    dutyChyba = null;
-    // Značka jde odsud, ne z volajícího: v Lukášově sloupci jedou dva zdroje vedle
-    // sebe a appka potřebuje vědět, který je který, aby létání nakreslila modře.
-    const udalosti = kalUdalosti([text], od, doKdy, { ...kal, zdroj: 'duty' });
-    dutyUdalosti = udalosti.length;
-    dutyKdy = Date.now();
-    return udalosti;
-  } catch (err) {
-    dutyChyba = err.message;
-    return [];
-  }
-}
 
 // Sloupce mají pevné pořadí (Family, Lukáš, …), ať se nepřehazují podle toho,
 // v jakém pořadí je zrovna vrátil iCloud.
@@ -8399,23 +8356,9 @@ async function pollKalendar() {
         vse.push(...kalUdalosti(texty, od, doKdy, kal));
       }
     }
-    // Pracovní rozpis se slije do jednoho z kalendářů, takže sloupec zůstane jeden
-    const cil = kalendare.find(k => k.nazev === DUTY_KALENDAR)
-      || { nazev: DUTY_KALENDAR, barva: null };
-    kalKrok = 'stahování pracovního rozpisu';
-    const duty = await kalStahniDuty(od, doKdy, cil);
-    // Lety, které už jsou ve slitém kalendáři (Flying), se z DutyLogu nepřidají
-    const bezDuplicit = kalBezDuplicit(duty, vse);
-    dutyDuplicit = duty.length - bezDuplicit.length;
-    dutyUdalosti = bezDuplicit.length;
-    vse.push(...bezDuplicit);
-    if (DUTY_ICS_URL && !kalendare.some(k => k.nazev === cil.nazev)) kalendare.push(cil);
     state.calendar = {
       days: kalDoDnu(vse, od),
       kalendare: kalendare.map(k => ({ nazev: k.nazev, barva: k.barva })),
-      duty: DUTY_ICS_URL
-        ? { kalendar: cil.nazev, error: dutyChyba, udalosti: dutyUdalosti, duplicit: dutyDuplicit, kdy: dutyKdy }
-        : null,
       fetchedAt: new Date().toISOString(),
       error: null
     };
