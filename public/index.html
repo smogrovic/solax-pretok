@@ -1259,23 +1259,7 @@
     margin:-8px 0 0 -8px;border:2px solid rgba(255,255,255,0.4);
     border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;
   }
-  /* Přesně 2 řádky návrhů (2×2) — u flex-wrap by počet řádků kolísal podle šířky */
-  .asst-examples{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:6px;
-    margin-top:12px;
-  }
-  .asst-chip{
-    border:none;
-    border-radius:14px;
-    padding:7px 11px;
-    background:rgba(44,62,80,0.06);
-    color:var(--grey-text);
-    font-size:12px;
-  }
-  /* Pevná tlačítka pod nápovědou. Vypadají jinak než šedé návrhy schválně: návrh se
-     jen předepíše do pole, tohle rovnou něco udělá. */
+  /* Pevná tlačítka pod polem asistenta — rovnou něco udělají. */
   .asst-scenes{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -2260,7 +2244,6 @@
           <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
           <button class="asst-send" id="asstSend">▶</button>
         </div>
-        <div class="asst-examples" id="asstExamples"></div>
         <div class="asst-scenes" id="asstScenes"></div>
         <!-- Druhá řada téže mřížky: „Otevři dveře" a prázdniny vedle sebe. Dveře
              sem patří kvůli rozměru řady, prázdniny proto, že rozvrh žaluzií jede
@@ -2268,6 +2251,8 @@
              počítat jako víkend, i když je středa. -->
         <div class="asst-scenes" id="asstDvojice">
           <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
+          <!-- Zatáhne ložnici a to ráno ji žádná automatika neotevře (ani o prázdninách v 10:00) -->
+          <button class="prazdniny-btn" id="lozniceZavrenoBtn" type="button">Zavřené žaluzie v ložnici</button>
         </div>
       </div>
       <div class="card lockable tempauto-card" id="tempAutoCard">
@@ -3441,7 +3426,8 @@
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
-            <li>O <b>prázdninách</b> jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
+            <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
+            <li>O prázdninách v <b>10:00</b> dětem a ložnici naklopení <b>0 %</b> — ložnici ne, když je zmáčknuté <b>Zavřené žaluzie v ložnici</b>.</li>
             <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
           <div class="zapad-row">
@@ -9036,13 +9022,9 @@ async function maybeRestoreMonths(server) {
 const asstInput = document.getElementById('asstInput');
 const asstSend = document.getElementById('asstSend');
 const asstReply = document.getElementById('asstReply');
-const asstExamples = document.getElementById('asstExamples');
 const asstLog = document.getElementById('asstLog');
 const asstLogCard = document.getElementById('asstLogCard');
 
-// Dva návrhy = jeden řádek. „Zhasni všechna světla" a „Zamkni dům" mají vlastní
-// tlačítko hned pod polem, takže jako návrh jen zabíraly místo.
-const ASST_EXAMPLES = ['Zapni bojler', 'Zatáhni žaluzie v ložnici'];
 
 function renderAssistantLog(entries) {
   if (!asstLog || !asstLogCard) return;
@@ -9200,6 +9182,42 @@ if (prazdninyBtnEl) {
   });
 }
 
+// ---------- Zavřené žaluzie v ložnici ----------
+// Zatáhne ložnici hned a to ráno (stisk večer = zítra, po půlnoci = dnes) ji
+// automatika neotevře. Druhý stisk jen zruší, žaluzie nechá být.
+const lozniceZavrenoBtnEl = document.getElementById('lozniceZavrenoBtn');
+let lozniceZavrenoData = { datum: null, aktivni: false };
+
+function renderLozniceZavreno(d) {
+  if (d) lozniceZavrenoData = { ...lozniceZavrenoData, ...d };
+  if (!lozniceZavrenoBtnEl) return;
+  lozniceZavrenoBtnEl.classList.toggle('on', !!lozniceZavrenoData.aktivni);
+  lozniceZavrenoBtnEl.textContent = lozniceZavrenoData.aktivni
+    ? 'Ložnice zavřená do rána ✓' : 'Zavřené žaluzie v ložnici';
+}
+
+if (lozniceZavrenoBtnEl) {
+  lozniceZavrenoBtnEl.addEventListener('click', async () => {
+    const zapnout = !lozniceZavrenoData.aktivni;
+    lozniceZavrenoBtnEl.disabled = true;
+    try {
+      const res = await fetch('/api/loznice-zavreno', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ zapnout })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      renderLozniceZavreno(data);
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Ložnice: ' + err.message;
+      errorEl.classList.add('show');
+    }
+    lozniceZavrenoBtnEl.disabled = false;
+  });
+}
+
 // Tlačítka, která se ptají, a na kolik vteřin. Otevřené dveře jsou horší omyl než
 // cokoli jiného, co se odsud dá spustit.
 const POTVRZ_SCENY = {
@@ -9246,15 +9264,6 @@ async function spustScenu(key, btn) {
   vsechna.forEach(b => { b.disabled = false; });
 }
 
-if (asstExamples) {
-  for (const ex of ASST_EXAMPLES) {
-    const chip = document.createElement('button');
-    chip.className = 'asst-chip';
-    chip.textContent = ex;
-    chip.addEventListener('click', () => { asstInput.value = ex; sendAssistant(); });
-    asstExamples.appendChild(chip);
-  }
-}
 
 async function sendAssistant() {
   const text = asstInput.value.trim();
@@ -10745,6 +10754,7 @@ function applySnapshot(snap) {
   bezpecne(() => renderSekacka(snap.sekacka));
   bezpecne(() => renderVysavac(snap.vysavac || null));
   bezpecne(() => renderPrazdniny(snap.prazdniny));
+  bezpecne(() => renderLozniceZavreno(snap.lozniceZavreno));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
   bezpecne(() => renderRozvrh({ rules: snap.blindRules || [], savedAt: snap.blindRulesAt || 0 }));
@@ -11063,6 +11073,7 @@ function connectStream() {
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
+  es.addEventListener('lozniceZavreno', e => { renderLozniceZavreno(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('siteDny', e => {
     siteDnyData = mergeSiteDny(JSON.parse(e.data).siteDny || [], siteDnyData);

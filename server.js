@@ -204,6 +204,8 @@ const state = {
   // „Nejsme doma": `since` = kdy se to zapnulo. Zamyká se až po AWAY_DELAY_MS,
   // ať se stihne odejít. 0 = jsme doma.
   away: { since: 0 },
+  lozniceZavrenoRano: null,  // ráno, kdy ložnici žádná automatika neotevře (tlačítko na Asistentovi)
+  prazdninyRanoDne: null,    // kdy proběhlo prázdninové ráno (naklopení v 10:00)
   prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
   zapadDelayMin: 20, // o kolik po západu slunce jede rozvrh žaluzií
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
@@ -505,6 +507,7 @@ function snapshot() {
     blindRules,
     blindRulesAt,
     prazdniny: prazdninyPayload(),
+    lozniceZavreno: lozniceZavrenoPayload(),
     zapadDelayMin: state.zapadDelayMin,
     relayTimers,
     aircon: state.aircon,
@@ -4533,6 +4536,10 @@ function rozvrhDenIndex(at = Date.now()) {
 function prazdninyDuvod(at = Date.now()) {
   const den = pragueDateString(at);
   if (state.prazdniny && state.prazdniny === den) return 'rucne';
+  // Samy přicházejí jen v pracovní dny — víkend je víkend a zářijová sobota bez
+  // Školy v kalendáři nemá tlačítko hlásit jako „prázdniny"
+  const denTydne = new Date(den + 'T12:00:00Z').getUTCDay();
+  if (denTydne === 0 || denTydne === 6) return null;
   const mesic = Number(den.slice(5, 7));
   if (mesic === 7 || mesic === 8) return 'leto';
   if (prazdninyBezSkoly(den, at)) return 'skola';
@@ -4699,6 +4706,86 @@ function rozvrhSpustit(p, at = Date.now()) {
   return zpozdeni <= ROZVRH_DOHNAT_MS;
 }
 
+// ---- Zavřená ložnice ----
+// Tlačítko „Zavřené žaluzie v ložnici" na Asistentovi: ložnici hned zatáhne a to
+// ráno ji žádná automatika neotevře (prázdninové ráno, rozvrh, návrat domů).
+// Drží se datum rána — stisk večer platí pro zítřek, stisk mezi půlnocí a 10:00
+// pro dnešek. Prošlé datum přestane platit samo.
+const LOZNICE_ZAVRENO_DO_H = 12;
+function lozniceZavrenoPlati(at = Date.now()) {
+  return !!state.lozniceZavrenoRano && state.lozniceZavrenoRano === pragueDateString(at)
+    && pragueTime(at).hour < LOZNICE_ZAVRENO_DO_H;
+}
+function lozniceZavrenoPayload(at = Date.now()) {
+  const d = state.lozniceZavrenoRano || null;
+  // Aktivní = na dnešní nebo zítřejší ráno a ještě neprošlé
+  const aktivni = !!d && (d > pragueDateString(at) || lozniceZavrenoPlati(at));
+  return { datum: d, aktivni };
+}
+const jeLoznice = cil => cz(cil || '').includes('loznice');
+// Krok, který by ložnici otevřel, se při zavřené ložnici přeskočí; zatažení ne
+const lozniceOtevira = (cil, akce) => jeLoznice(cil) && akce !== 'down';
+
+app.post('/api/loznice-zavreno', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const zapnout = !(req.body && req.body.zapnout === false);
+  const now = Date.now();
+  if (!zapnout) {
+    state.lozniceZavrenoRano = null;
+    addLog('Ložnice: zavřeno do rána zrušeno');
+    broadcast('lozniceZavreno', lozniceZavrenoPayload(now));
+    return res.json(lozniceZavrenoPayload(now));
+  }
+  state.lozniceZavrenoRano = pragueTime(now).hour < 10 ? pragueDateString(now) : pragueDateString(now + 86400000);
+  let chyba = null;
+  try {
+    await assistantControlBlinds({ target: 'ložnice', action: 'down', orientation: ZALUZIE_ZAVRENO });
+  } catch (err) { chyba = String(err.message).slice(0, 80); }
+  addLog(`Ložnice: zavřeno do rána (${state.lozniceZavrenoRano})${chyba ? ` — zatažení selhalo (${chyba})` : ''}`);
+  broadcast('lozniceZavreno', lozniceZavrenoPayload(now));
+  res.json({ ...lozniceZavrenoPayload(now), chyba });
+});
+
+app.post('/api/loznice-zavreno/restore', (req, res) => {
+  const d = req.body && req.body.datum;
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= pragueDateString()) {
+    state.lozniceZavrenoRano = d;
+    broadcast('lozniceZavreno', lozniceZavrenoPayload());
+  }
+  res.json({ ok: true, datum: state.lozniceZavrenoRano || null });
+});
+
+// ---- Prázdninové ráno ----
+// O prázdninách (v pracovní den) v 10:00 dětem naklopit žaluzie na 0 %, a ložnici
+// taky — pokud není zavřená do rána. Běží po pravidlech rozvrhu ve stejném tiku,
+// takže přebije víkendové naklopení na 50 %.
+const PRAZDNINY_RANO_H = 10;
+const PRAZDNINY_RANO_CILE = ['Miky', 'Elenka', 'Ložnice'];
+async function prazdninyRano(at = Date.now()) {
+  const dnes = pragueDateString(at);
+  if (state.prazdninyRanoDne === dnes || !prazdninyDuvod(at)) return;
+  const denTydne = new Date(dnes + 'T12:00:00Z').getUTCDay();
+  if (denTydne === 0 || denTydne === 6) return;
+  const t = pragueTime(at);
+  const zpozdeni = ((t.hour - PRAZDNINY_RANO_H) * 60 + t.minute) * 60000;
+  if (zpozdeni < 0 || zpozdeni > ROZVRH_DOHNAT_MS) return;
+  state.prazdninyRanoDne = dnes;
+  const hotovo = [], chyby = [];
+  let lozniceNechana = false;
+  for (const cil of PRAZDNINY_RANO_CILE) {
+    if (jeLoznice(cil) && lozniceZavrenoPlati(at)) { lozniceNechana = true; continue; }
+    try {
+      await assistantControlBlinds({ target: cil, action: 'orientation', orientation: 0 });
+      hotovo.push(cil);
+    } catch (err) {
+      chyby.push(`${cil}: ${String(err.message).slice(0, 60)}`);
+    }
+  }
+  addLog(`Prázdniny: ${hotovo.join(', ') || 'nic'} naklopeno na 0 %`
+    + (lozniceNechana ? ', ložnice nechána zavřená' : '')
+    + (chyby.length ? ` — chyby: ${chyby.join('; ')}` : ''), chyby.length ? 'error' : undefined);
+}
+
 const ROZVRH_AKCE_SLOVY = { up: 'vytáhnout', down: 'zatáhnout', tilt: 'naklopit', poloha: 'sjet do' };
 
 function rozvrhKdyPopis(p) {
@@ -4721,12 +4808,14 @@ function rozvrhPopis(p) {
 // Kroky jdou po jednom a v pořadí, ve kterém je člověk naklikal — „vytáhni a pak
 // zaklop" dává jiný výsledek než obráceně. Pád jednoho kroku nesmí zastavit zbytek:
 // když neodpoví jedna žaluzie, ostatní se hýbat mají.
-async function rozvrhProved(p) {
+async function rozvrhProved(p, at = Date.now()) {
   let ok = 0;
   const chyby = [];
   for (const k of p.kroky) {
     const akce = ROZVRH_AKCE_CMD[k.akce];
     const hodnota = k.hodnota === null ? undefined : k.hodnota;
+    // Zavřená do rána: ložnici nic neotevře (zatáhnout ji jde dál)
+    if (lozniceZavrenoPlati(at) && lozniceOtevira(k.cil, k.akce)) { ok++; continue; }
     try {
       await assistantControlBlinds({ target: k.cil, action: akce, orientation: hodnota });
       ok++;
@@ -4738,7 +4827,6 @@ async function rozvrhProved(p) {
 }
 
 async function runBlindSchedule(at = Date.now()) {
-  if (!blindRules.length) return;
   // Slunce se za den posune o minuty, za půl roku o hodiny — pořadí se proto
   // srovnává při každém tiku, ne jen když někdo pravidlo uloží
   rozvrhSerad(at);
@@ -4756,7 +4844,7 @@ async function runBlindSchedule(at = Date.now()) {
     if (!poSaune) p.spustenoDne = dnes;
     p.spustenoAt = at;
     neco = true;
-    const v = await rozvrhProved(p);
+    const v = await rozvrhProved(p, at);
     const kdy = poSaune ? ' po sauně' : '';
     if (v.chyby.length) {
       addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}`, 'error');
@@ -4765,6 +4853,7 @@ async function runBlindSchedule(at = Date.now()) {
     }
   }
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  await prazdninyRano(at);
 }
 
 // Návrat z „jsme pryč": žaluzie se nastaví tak, jak by stály, kdyby rozvrh jel celou
@@ -4803,6 +4892,8 @@ async function rozvrhStavTed(at = Date.now()) {
   let ok = 0;
   const chyby = [];
   for (const [cil, { poloha, naklon }] of cile) {
+    const posledni = naklon || poloha;
+    if (lozniceZavrenoPlati(at) && lozniceOtevira(cil, posledni && (naklon ? 'tilt' : poloha.akce))) continue;
     let povel;
     if (poloha && naklon && (poloha.akce === 'up' || poloha.akce === 'down')) {
       povel = { target: cil, action: poloha.akce, orientation: naklon.hodnota };
@@ -9867,6 +9958,7 @@ const STORE_POSTS = [
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
   '/api/prazdniny/restore',
+  '/api/loznice-zavreno/restore',
   '/api/zapad-delay/restore',
   '/api/zavlaha/zony/restore',
   '/api/zavlaha/dny/restore',
@@ -9914,6 +10006,7 @@ function storeSnapshot() {
     // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
     '/api/prazdniny/restore': { datum: state.prazdniny },
+    '/api/loznice-zavreno/restore': { datum: state.lozniceZavrenoRano || null },
     '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
     '/api/zavlaha/zony/restore': { nazvy: zavlahaNazvy, skryte: zavlahaSkryte, minuty: zavlahaVolbaMinut },
     '/api/zavlaha/dny/restore': { dny: state.zavlahaDny },

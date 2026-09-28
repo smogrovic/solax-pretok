@@ -36,7 +36,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
                    'Data, notifikace, časovače', 'Oběhové čerpadlo', 'Rozvrh žaluzií', 'Nejsme doma'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
   // Po zjednodušení jen to, jak se to chová — žádné zdůvodňování na pozadí
-  check('odrážek je nejvýš 50', li.length <= 50, 'true');   // po zjednodušení jich je 49
+  check('odrážek je nejvýš 50', li.length <= 50, 'true');   // po zjednodušení jich je 50
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);
@@ -50,6 +50,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('ložnice po sauně: 15 min po vypnutí kamen i světla', /15 min po vypnutí kamen i světla/.test(txt), 'true');
   check('příprava podle teploty (cíl −10 / −5 °C)', /cíl −10 °C/.test(txt) && /cíl −5 °C/.test(txt), 'true');
   check('prázdniny: léto a škola v kalendáři', /červenec–srpen/.test(txt) && /Školu/.test(txt), 'true');
+  check('prázdninové ráno 10:00 a zavřená ložnice', txt.includes('10:00') && txt.includes('Zavřené žaluzie v ložnici'), 'true');
   check('čerpadlo při sauně 10/10 min', txt.includes('10 min zapnuto') && txt.includes('10 min vypnuto'), 'true');
   // Tlačítko na Asistentovi dělá víc věcí naráz — ať se nemusí hádat které
   check('  i co udělá tlačítko Zapni saunu', /Zapni saunu/.test(txt) && /žaluzie v ložnici/.test(txt), 'true');

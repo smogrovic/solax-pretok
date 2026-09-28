@@ -35,6 +35,7 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, prazdninyDuvod, prazdninyPayload, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
+         + ' prazdninyRano, lozniceZavrenoPlati, lozniceZavrenoPayload,'
          + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
@@ -503,6 +504,88 @@ nadpis('6e2) Prázdniny samy: léto a bez školy v kalendáři');
   check('payload: zítra ručně i s důvodem', pl.zitra + ' ' + pl.zitraDuvod, 'true rucne');
   h.state.prazdniny = null;
   check('payload v létě: zítra léto', h.api.prazdninyPayload(cervenec).zitraDuvod, 'leto');
+}
+
+nadpis('6e3) Prázdninové ráno a zavřená ložnice');
+{
+  const den = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(ms));
+  const STREDA = Date.UTC(2026, 6, 15, 8, 0);     // středa 15. 7. 2026, 10:00 Praha (léto)
+  const h = build();
+  // Víkendové „Pokoje" (děti na 50 %) v 10:00 platí o prázdninách taky — 0 % je musí přebít
+  h.api.pravidla = [pravidlo({ dny: [false, false, false, false, false, true, true], kdy: { typ: 'cas', cas: '10:00' },
+    kroky: [krok('Elenka', 'tilt', 50), krok('Miky', 'tilt', 50)] })];
+  await h.api.runBlindSchedule(STREDA - MIN);
+  check('9:59 o prázdninách nic', h.povely.length, 0);
+  await h.api.runBlindSchedule(STREDA);
+  check('10:00: víkendových 50 % a pak dětem i ložnici 0 %', h.povely.join(' | '),
+    'Elenka:orientation:50 | Miky:orientation:50 | Miky:orientation:0 | Elenka:orientation:0 | Ložnice:orientation:0');
+  check('  v Logu', h.logy.some(t => t === 'Prázdniny: Miky, Elenka, Ložnice naklopeno na 0 %'), true);
+  const pred = h.povely.length;
+  await h.api.runBlindSchedule(STREDA + 5 * MIN);
+  check('  jen jednou za den', h.povely.length, pred);
+}
+{
+  const STREDA = Date.UTC(2026, 6, 15, 8, 0);
+  const h = build();
+  await h.api.runBlindSchedule(STREDA + 21 * MIN);
+  check('v 10:21 už se nedohání', h.povely.length, 0);
+  const c = build();
+  await c.api.runBlindSchedule(Date.UTC(2026, 8, 17, 8, 0));   // čtvrtek 17. 9., bez prázdnin
+  check('obyčejný čtvrtek nic', c.povely.length, 0);
+  const so = build();
+  await so.api.runBlindSchedule(Date.UTC(2026, 6, 18, 8, 0));  // sobota v létě
+  check('sobota v létě není prázdninové ráno', so.povely.length, 0);
+  check('  a auto prázdniny o víkendu neplatí', so.api.prazdninyDuvod(Date.UTC(2026, 6, 18, 8, 0)), null);
+  so.state.prazdniny = '2026-07-18';
+  check('  ruční tlačítko o víkendu ano', so.api.prazdninyDuvod(Date.UTC(2026, 6, 18, 8, 0)), 'rucne');
+}
+{
+  // Zavřená ložnice: ráno ji nic neotevře
+  const STREDA = Date.UTC(2026, 6, 15, 8, 0);
+  const h = build();
+  h.state.lozniceZavrenoRano = '2026-07-15';
+  check('zavřená ložnice platí to ráno', h.api.lozniceZavrenoPlati(STREDA), true);
+  check('  v poledne už ne', h.api.lozniceZavrenoPlati(STREDA + 2 * H), false);
+  h.api.pravidla = [pravidlo({ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '08:00' },
+    kroky: [krok('Ložnice', 'up'), krok('Kuchyň', 'up')] }),
+    pravidlo({ id: 2, dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '08:05' },
+    kroky: [krok('Ložnice', 'down', 100)] })];
+  await h.api.runBlindSchedule(STREDA - 2 * H);        // 8:00
+  await h.api.runBlindSchedule(STREDA - 2 * H + 5 * MIN);
+  check('krok „Ložnice nahoru" se přeskočí, ostatní jedou, zatažení taky', h.povely.join(' | '),
+    'Kuchyň:up | Ložnice:down:100');
+  await h.api.runBlindSchedule(STREDA);
+  check('prázdninové ráno ložnici vynechá', h.povely.slice(2).join(' | '), 'Miky:orientation:0 | Elenka:orientation:0');
+  check('  a řekne to', h.logy.some(t => /ložnice nechána zavřená/.test(t)), true);
+}
+{
+  // Tlačítko: stisk večer platí pro zítřek, po půlnoci pro dnešek
+  const h = build();
+  const puvodni = Date.now;
+  Date.now = () => Date.UTC(2026, 8, 15, 20, 0);        // 22:00 Praha, úterý 15. 9.
+  let r = await volej(h.routy, 'POST /api/loznice-zavreno', { zapnout: true });
+  check('stisk ve 22:00 → zítřejší ráno', h.state.lozniceZavrenoRano, '2026-09-16');
+  check('  a ložnice se hned zatáhne', h.povely.slice(-1)[0], 'ložnice:down:100');
+  check('  appka ví, že je zapnuto', r.out.aktivni, true);
+  Date.now = () => Date.UTC(2026, 8, 16, 4, 0);         // 6:00 Praha
+  await volej(h.routy, 'POST /api/loznice-zavreno', { zapnout: true });
+  check('stisk v 6:00 → dnešní ráno', h.state.lozniceZavrenoRano, '2026-09-16');
+  const pred = h.povely.length;
+  r = await volej(h.routy, 'POST /api/loznice-zavreno', { zapnout: false });
+  check('vypnutí jen zruší, žaluzií se nedotkne', h.povely.length + ' ' + h.state.lozniceZavrenoRano + ' ' + r.out.aktivni, pred + ' null false');
+  await volej(h.routy, 'POST /api/loznice-zavreno/restore', { datum: '2020-01-01' });
+  check('prošlé datum ze zálohy se nevezme', h.state.lozniceZavrenoRano, null);
+  Date.now = puvodni;
+}
+
+{
+  // Návrat z „jsme pryč" ráno: zavřenou ložnici neotevře
+  const h = build();
+  h.api.pravidla = [pravidlo({ dny: [true, true, true, true, true, true, true], kdy: { typ: 'cas', cas: '07:00' },
+    kroky: [krok('Ložnice', 'tilt', 30), krok('Kuchyň', 'up')] })];
+  h.state.lozniceZavrenoRano = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(PO_6));
+  await h.api.rozvrhStavTed(PO_6 + 2 * H);   // 8:00
+  check('návrat domů zavřenou ložnici neotevře', h.povely.join(' | '), 'Kuchyň:up');
 }
 
 nadpis('6f) Předvyplněný rozvrh');

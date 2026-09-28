@@ -80,8 +80,9 @@ setTimeout(async () => {
   check('v hlavní mřížce zůstanou čtyři', document.querySelectorAll('#asstScenes .asst-scene').length, 4);
   check('  a dveře jsou v dvojici', !!document.querySelector('#asstDvojice [data-scene="otevri"]'), true);
   const dvojice = [...document.querySelectorAll('#asstDvojice button')];
-  check('dvojice má dvě tlačítka', dvojice.length, 2);
+  check('dvojice má tři tlačítka (dveře, prázdniny, ložnice)', dvojice.length, 3);
   check('  a prázdniny jsou druhé', dvojice[1].id, 'prazdninyBtn');
+  check('  zavřená ložnice třetí', dvojice[2].id, 'lozniceZavrenoBtn');
   const r0 = dvojice[0].getBoundingClientRect(), r1 = dvojice[1].getBoundingClientRect();
   check('stojí vedle sebe', Math.round(r0.top) === Math.round(r1.top) && r1.left > r0.left, true);
   check('  a jsou stejně široká', Math.round(r0.width), Math.round(r1.width));
@@ -90,18 +91,27 @@ setTimeout(async () => {
   check('  a široká jako ta nad nimi', Math.round(r0.width), Math.round(nahore.width));
   // Když server dveře nenabídne, dvojici tvoří samotné prázdniny
   renderSceny([{ key: 'zamkni', label: 'Zamkni dům' }]);
-  check('bez dveří ze serveru zbydou v dvojici jen prázdniny',
-    document.querySelectorAll('#asstDvojice button').length, 1);
+  check('bez dveří ze serveru zbydou v dvojici prázdniny a ložnice',
+    document.querySelectorAll('#asstDvojice button').length, 2);
 
-  R.push('\\n1d) Návrhy pod polem');
-  // „Zhasni všechna světla" a „Zamkni dům" mají vlastní tlačítko hned pod polem,
-  // takže jako návrh jen zabíraly řádek
-  const navrhy = [...document.querySelectorAll('#asstExamples .asst-chip')];
-  check('návrhy jsou dva', navrhy.length, 2);
-  check('  a neopakují tlačítka', navrhy.map(b => b.textContent).join(' | '),
-    'Zapni bojler | Zatáhni žaluzie v ložnici');
-  check('  na jednom řádku',
-    Math.round(navrhy[0].getBoundingClientRect().top), Math.round(navrhy[1].getBoundingClientRect().top));
+  R.push('\\n1d) Šedé návrhy pod polem jsou pryč');
+  check('žádné šedé návrhy', document.querySelectorAll('#asstExamples, .asst-chip').length, 0);
+
+  R.push('\\n1e) Zavřené žaluzie v ložnici');
+  const loz = document.getElementById('lozniceZavrenoBtn');
+  renderLozniceZavreno({ datum: null, aktivni: false });
+  check('tlačítko je šedé s výzvou', loz.textContent + ' ' + loz.classList.contains('on'), 'Zavřené žaluzie v ložnici false');
+  poslano.length = 0;
+  loz.click();
+  await pockej();
+  check('stisk zapne', poslano[0] && poslano[0].url + ' ' + poslano[0].body.zapnout, '/api/loznice-zavreno true');
+  renderLozniceZavreno({ datum: '2026-09-29', aktivni: true });
+  check('  zapnuté je oranžové a řekne do kdy', loz.textContent + ' ' + loz.classList.contains('on'), 'Ložnice zavřená do rána ✓ true');
+  poslano.length = 0;
+  loz.click();
+  await pockej();
+  check('druhý stisk zruší', poslano[0] && poslano[0].body.zapnout, false);
+  renderLozniceZavreno({ datum: null, aktivni: false });
 
   R.push('\\n2) Pořadí karet');
   // Jen karty, které je doopravdy vidět — schované (zámek, dětský režim) do
