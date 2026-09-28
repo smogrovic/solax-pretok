@@ -7973,10 +7973,11 @@ const KAL_PORADI = (process.env.ICLOUD_PORADI || 'Family,Lukáš,Zuzka,Miki,Elen
   .split(',').map(x => x.trim()).filter(Boolean);
 const KAL_DNU = 7;
 const KAL_POLL_MS = 5 * 60 * 1000;
-// Kalendáře, které se slijí do jiného sloupce a kreslí se modře jako pracovní
-// rozpis. „Flying" je Lukášův kalendář létání v iOS (dřív odebíraný ICS, viz
-// DUTY_ICS_URL). Formát: „Zdroj>Cíl", víc párů oddělených čárkou.
-const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš').split(',')
+// Kalendáře, které se slijí do jiného sloupce. Událost si nese, odkud je (`puvod`),
+// a appka ji kreslí barvou svého kalendáře — jako kolečka v Kalendáři na telefonu.
+// „Flying" je Lukášovo létání (dřív odebíraný ICS, viz DUTY_ICS_URL), „Zuzka Škola"
+// jde k Zuzce. Formát: „Zdroj>Cíl", víc párů oddělených čárkou.
+const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,Zuzka Škola>Zuzka').split(',')
   .map(x => x.split('>').map(y => y.trim())).filter(x => x.length === 2 && x[0] && x[1])
   .map(([z, c]) => [z.toLowerCase(), c]));
 
@@ -8330,7 +8331,9 @@ function kalUdalosti(texty, od, doKdy, kal = {}) {
         barva: kal.barva || null,
         // Odkud událost je. Služby z DutyLogu jedou v Lukášově sloupci, ale appka
         // je kreslí jinou barvou — bez tohohle by se od jeho vlastních nedaly poznat.
-        zdroj: kal.zdroj || null
+        zdroj: kal.zdroj || null,
+        // U slitých kalendářů (Flying → Lukáš) jméno toho původního — podle něj barva
+        puvod: kal.puvod || null
       });
     }
   }
@@ -8422,7 +8425,8 @@ async function pollKalendar() {
       const doSloupce = KAL_SLOUCIT.get(String(kal.nazev || '').toLowerCase());
       if (doSloupce) {
         const cilKal = kalendare.find(k => k.nazev === doSloupce) || { nazev: doSloupce, barva: null };
-        vse.push(...kalUdalosti(texty, od, doKdy, { ...cilKal, zdroj: 'duty' }));
+        vse.push(...kalUdalosti(texty, od, doKdy,
+          { nazev: cilKal.nazev, barva: kal.barva, zdroj: 'slouceno', puvod: kal.nazev }));
         if (!kalendare.some(k => k.nazev === cilKal.nazev)) kalendare.push(cilKal);
       } else {
         vse.push(...kalUdalosti(texty, od, doKdy, kal));

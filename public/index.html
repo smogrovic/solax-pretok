@@ -11812,22 +11812,25 @@ const KAL_BARVY = {
   'family': '#ffd60a',
   'miki': '#34a853',
   'elenka': '#ef5fb8',
-  'zuzka': '#e5453a',
+  // Zuzka, Zuzka Škola a Flying podle koleček v Kalendáři na telefonu
+  'zuzka': '#8e2a4c',
+  'zuzka škola': '#a68ae8',
   'lukáš': '#8e8e93',
   'lukas': '#8e8e93',
-  'flying': '#2f7dd8'
+  'flying': '#1c3f9e'
 };
-// Létání chodí z odebíraného kalendáře za odkazem a slévá se do Lukášova sloupce.
-// Modrá je jediné, co ho tam od jeho vlastních událostí odliší.
-const KAL_BARVA_DUTY = '#2f7dd8';
+// Létání z odebíraného kalendáře za odkazem (DutyLog) — stejná modrá jako Flying
+const KAL_BARVA_DUTY = '#1c3f9e';
 const KAL_NAHRADNI = ['#3b82c4', '#e5534b', '#7a9e2f', '#7d5fd6', '#e8a13a', '#18a999'];
 function kalBarva(kal, i) {
   const jmeno = String((kal && kal.nazev) || '').trim().toLowerCase();
   return KAL_BARVY[jmeno] || (kal && kal.barva) || KAL_NAHRADNI[i % KAL_NAHRADNI.length];
 }
-// Barva jedné události. Většinou je to barva sloupce, jen služby mají svoji.
+// Barva jedné události. Většinou je to barva sloupce; služby a události ze slitých
+// kalendářů (Flying u Lukáše, Škola u Zuzky) mají barvu svého původního kalendáře.
 function kalBarvaU(u, kal, i) {
   if (u && u.zdroj === 'duty') return KAL_BARVA_DUTY;
+  if (u && u.puvod) return kalBarva({ nazev: u.puvod, barva: u.barva }, i || 0);
   return kalBarva(kal || { nazev: u && u.kalendar, barva: u && u.barva }, i || 0);
 }
 

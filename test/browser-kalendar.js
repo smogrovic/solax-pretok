@@ -222,7 +222,9 @@ setTimeout(async () => {
     ud('Family', 10, 11, 'Oběd', { misto: 'S-centrum' }),
     ud('Zuzka', 12, 13, 'Kadeřník'),
     ud('Lukáš', 8, 9, 'Porada'),
-    ud('Lukáš', 15, 18, 'OK123 PRG-FCO', { zdroj: 'duty' })
+    ud('Lukáš', 15, 18, 'OK123 PRG-FCO', { zdroj: 'duty' }),
+    ud('Lukáš', 19, 20, 'OK456 FCO-PRG', { zdroj: 'slouceno', puvod: 'Flying', barva: '#FF0000' }),
+    ud('Zuzka', 14, 15, 'Třídní schůzka', { zdroj: 'slouceno', puvod: 'Zuzka Škola' })
   ];
   renderKalendar({ enabled: true, dnu: 7, days: dc, kalendare: KAL,
                    fetchedAt: new Date().toISOString(), error: null });
@@ -230,11 +232,13 @@ setTimeout(async () => {
   const blok = (i, jm) => [...sl2[i].querySelectorAll('.kal-blok')].find(b => b.textContent.includes(jm));
   check('Family je žlutá', blok(0, 'Oběd').style.borderLeftColor, 'rgb(255, 214, 10)');
   check('  i když iCloud hlásí modrou', KAL[0].barva, '#34AADC');
-  check('Zuzka červená', blok(2, 'Kadeřník').style.borderLeftColor, 'rgb(229, 69, 58)');
+  check('Zuzka vínová (jako kolečko v telefonu)', blok(2, 'Kadeřník').style.borderLeftColor, 'rgb(142, 42, 76)');
+  check('Zuzka Škola ve Zuzčině sloupci, fialová', blok(2, 'Třídní') && blok(2, 'Třídní').style.borderLeftColor, 'rgb(166, 138, 232)');
+  check('Flying u Lukáše tmavě modrý (barva z telefonu, ne z iCloudu)', blok(1, 'OK456') && blok(1, 'OK456').style.borderLeftColor, 'rgb(28, 63, 158)');
   check('Lukáš šedý', blok(1, 'Porada').style.borderLeftColor, 'rgb(142, 142, 147)');
   // Létání chodí z odebíraného kalendáře a slévá se k Lukášovi — jen modře
   check('létání je v Lukášově sloupci', !!blok(1, 'OK123'), true);
-  check('  ale modré, ne šedé', blok(1, 'OK123').style.borderLeftColor, 'rgb(47, 125, 216)');
+  check('  ale modré, ne šedé', blok(1, 'OK123').style.borderLeftColor, 'rgb(28, 63, 158)');
 
   // Karta je bílá: žlutá ani světle šedá se na ní nepřečtou. Text se proto ztmavuje,
   // dokud nemá kontrast 4,5:1 — proužek a výplň zůstávají v barvě z telefonu.
@@ -255,7 +259,7 @@ setTimeout(async () => {
     return pomer(fg, bg);
   };
   const vsechny = [...document.querySelectorAll('#kalMrizka .kal-blok')];
-  check('bloků je na co koukat', vsechny.length, 4);
+  check('bloků je na co koukat', vsechny.length, 6);
   check('název v bloku je čitelný',
     vsechny.every(b => citelnost(b.querySelector('b')) >= 4.5), true);
   check('  a čas pod ním taky', vsechny.every(b => citelnost(b.querySelector('.kal-blok-cas')) >= 4.5), true);
