@@ -13,6 +13,7 @@ const CODE = KONST + '\n'
   + fn('function saunaTopi() {') + '\n'
   + fn('function saunaBlokuje() {') + '\n'
   + fn('function saunaPayload() {') + '\n'
+  + fn('function saunaOmyl(now) {') + '\n'
   + fn('function updateSauna(powerW) {') + '\n'
   + fn('function checkSaunaForgotten() {') + '\n'
   + fn('function recordSaunaDay(w, dtH) {') + '\n'
@@ -136,6 +137,74 @@ nadpis('2) Po dotopení se drží ještě půl hodiny');
   h.posun(25); h.api.updateSauna(0);
   check('  a počítá se od posledního nátopu', h.api.saunaBlokuje(), 'true');
   check('  topení pořád běží (jedno sezení)', h.state.sauna.since > 0, 'true');
+}
+
+nadpis('2b) Omylem zapnutá sauna (do 2 min) bazén nedrží');
+{
+  const h = build();
+  h.api.updateSauna(6000);
+  check('krátké zapnutí bazén shodí', h.api.saunaBlokuje(), 'true');
+  h.posun(2); h.api.updateSauna(0);
+  check('vypnutí hned dalším čtením blokaci pustí', h.api.saunaBlokuje(), 'false');
+  check('  topení se uzavřelo', h.state.sauna.since, 0);
+  check('  a v logu je proč', /jen krátce zapnutá \(120 s\)/.test(h.log.join('|')), 'true');
+  check('  nahřívání se zapsalo jako bliknutí', h.state.saunaNahrev.zaznamy.length === 1 && h.state.saunaNahrev.zaznamy[0].kratke, 'true');
+}
+{
+  const h = build();
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.updateSauna(6000);   // dvě čtení nad prahem = topila aspoň 2 min
+  h.posun(2); h.api.updateSauna(0);
+  check('topila přes 2 min → drží jako dřív', h.api.saunaBlokuje(), 'true');
+  h.posun(27); h.api.updateSauna(0);
+  check('  29 min po posledním nátopu pořád drží', h.api.saunaBlokuje(), 'true');
+  h.posun(2); h.api.updateSauna(0);
+  check('  pak konec', h.api.saunaBlokuje(), 'false');
+}
+{
+  const h = build();
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.updateSauna(null);
+  check('měřák mlčí → nic se nepouští', h.api.saunaBlokuje(), 'true');
+  h.posun(2); h.api.updateSauna(0);
+  check('  a vypadlé čtení = nevíme, jak dlouho topila → drží', h.api.saunaBlokuje(), 'true');
+}
+{
+  const h = build();
+  h.api.updateSauna(6000);
+  h.posun(3); h.api.updateSauna(0);
+  check('vypnutí se zpožděním do 3 min (fronta dotazů) ještě pustí', h.api.saunaBlokuje(), 'false');
+}
+{
+  // Horká sauna znovu zapnutá: termostat cvakne do minuty, ale kamna jsou pořád zapnutá
+  const h = build();
+  h.state.huum.heating = true;
+  h.api.updateSauna(6000);
+  h.posun(2); h.api.updateSauna(0);
+  check('kamna pořád zapnutá (jen termostat) → drží', h.api.saunaBlokuje(), 'true');
+  h.state.huum.heating = false;
+  h.posun(2); h.api.updateSauna(0);
+  check('  a vypnutí kamen po delší době už omyl není', h.api.saunaBlokuje(), 'true');
+}
+{
+  // Rychlá cesta ze Shelly zapíše začátek dřív, než ho vidí poller
+  const h = build();
+  h.state.sauna.since = h.now;
+  h.state.saunaBlockUntil = h.now + 30 * MIN;
+  h.posun(1.5); h.api.updateSauna(0);
+  check('rychlá cesta a hned vypnuto → pustí', h.api.saunaBlokuje(), 'false');
+  const h2 = build();
+  h2.state.sauna.since = h2.now;
+  h2.state.saunaBlockUntil = h2.now + 30 * MIN;
+  h2.posun(1.5); h2.api.updateSauna(6000);
+  h2.posun(2); h2.api.updateSauna(0);
+  check('rychlá cesta a topení ještě po 1,5 min → pustí (pod 2 min)', h2.api.saunaBlokuje(), 'false');
+  const h3 = build();
+  h3.state.sauna.since = h3.now;
+  h3.state.saunaBlockUntil = h3.now + 30 * MIN;
+  h3.posun(2); h3.api.updateSauna(6000);
+  h3.posun(2); h3.api.updateSauna(0);
+  check('rychlá cesta a topení ještě po 2 min → drží', h3.api.saunaBlokuje(), 'true');
 }
 
 nadpis('3) Hlídání zapomenuté sauny');
@@ -314,6 +383,7 @@ nadpis('Měření nahřívání');
   // Termostat u cílové teploty cykluje. Kdyby se měření zakládalo na každý
   // náběh odběru, byla by z jednoho použití sauny desítka falešných měření.
   const h = build({ drzeni: 30 });
+  h.state.huum.heating = true;           // kamna zapnutá, cvaká jen termostat
   h.api.updateSauna(6000);
   h.posun(2); h.api.updateSauna(50);     // termostat vypnul
   h.posun(2); h.api.updateSauna(6000);   // a zase zapnul
@@ -438,7 +508,8 @@ nadpis('Model náběhu');
 }
 {
   // Data pro přefitování: odC doplněné z prvního vzorku a u bodů, jestli topí
-  const h = build({ huum: {} });
+  // (kamna zapnutá — pokles odběru je termostat, ne omylem zapnutá sauna)
+  const h = build({ huum: { heating: true } });
   h.api.updateSauna(6000);
   h.posun(2); h.api.nahrevVzorek(24, h.now);
   const b = h.state.saunaNahrev.bezici;

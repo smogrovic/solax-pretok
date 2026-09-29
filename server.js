@@ -72,6 +72,12 @@ const tuyaEnabled = !!(TUYA_ACCESS_ID && TUYA_ACCESS_SECRET && TUYA_HEATPUMP_ID)
 // Výchozí meze; obojí se dá přenastavit z appky (stránka Logika automatiky)
 const SAUNA_ON_W = 500;       // nad tímhle sauna „topí" (natvrdo, v appce se nenastavuje)
 const SAUNA_HOLD_MIN = 30;    // držet vypnuté po posledním nátopu
+// Omylem zapnutá sauna: topila kratší dobu, než je jeden dotaz na měřák (2 min),
+// a vypnutí potvrdilo hned další čtení → bazén se nedrží 30 min, pustí se hned.
+// Mezera je dotaz + rezerva na frontu dotazů; když čtení vypadla, neví se, jak
+// dlouho topila, a platí plné držení.
+const SAUNA_OMYL_MS = 2 * 60000;
+const SAUNA_OMYL_MEZERA_MS = 3 * 60000;
 const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení notifikace
 const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
 const SAUNA_DAYS_MAX = 7;
@@ -998,6 +1004,17 @@ function saunaPayload() {
   };
 }
 
+// Omyl = skutečné čtení pod prahem (výpadek měřáku nic nepouští), kamna nejsou
+// zapnutá, topení vidělo nanejvýš jedno čtení a vypnutí přišlo hned tím dalším
+function saunaOmyl(now) {
+  if (typeof state.sauna.powerW !== 'number' || !saunaBlokuje()) return false;
+  // Kamna pořád zapnutá = jen termostat u horké sauny cvakl, žádný omyl
+  if (state.huum && state.huum.heating === true) return false;
+  const since = state.sauna.since;
+  const posledni = Math.max(state.sauna.lastHeatAt || 0, since);
+  return posledni - since < SAUNA_OMYL_MS && now - posledni <= SAUNA_OMYL_MEZERA_MS;
+}
+
 // Volá se po každém načtení odběru sauny
 function updateSauna(powerW) {
   const now = Date.now();
@@ -1016,6 +1033,13 @@ function updateSauna(powerW) {
       nahrevStart('odber', now);
     }
     state.saunaBlockUntil = now + saunaHoldMs();
+  } else if (state.sauna.since && saunaOmyl(now)) {
+    const s = Math.round((now - state.sauna.since) / 1000);
+    state.saunaBlockUntil = now;
+    state.sauna.since = 0;
+    state.sauna.alertAt = 0;
+    addLog(`Sauna: jen krátce zapnutá (${s} s) — bazén a solinátor se nemusí držet vypnuté`);
+    nahrevKonec(now);
   } else if (state.sauna.since && !saunaBlokuje()) {
     // Doběhlo okno po posledním nátopu → topení skončilo
     state.sauna.since = 0;
