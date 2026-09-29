@@ -4479,11 +4479,12 @@ const VIKEND = [false, false, false, false, false, true, true];
 const VSE = [true, true, true, true, true, true, true];
 const krok = (cil, akce, hodnota = null) => ({ cil, akce, hodnota });
 const ROZVRH_VYCHOZI = [
-  // Děti ve všední den: 50 % v 6:40, nebo 15 min před východem, co je později
+  // Děti ve všední den: 25 % v 6:40, nebo 15 min před východem, co je později.
+  // Pak už na ně nic nesahá — v 10:00 se naklápí jen ložnice.
   { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' }, kroky: [
-    krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] },
-  { nazev: 'Děti dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
     krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] },
+  { nazev: 'Ložnice dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
+    krok('Ložnice', 'tilt', 25)] },
   // Víkend = prázdniny (prázdninový den se počítá jako neděle). Ložnici nechá být
   // tlačítko „Zavřené žaluzie v ložnici".
   { nazev: 'Víkend a prázdniny', dny: VIKEND, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
@@ -4507,7 +4508,7 @@ let blindRuleSeq = 1;
 let blindRules = [];
 
 function rozvrhNasadVychozi() {
-  state.rozvrhVerze = 2;
+  state.rozvrhVerze = 3;
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
   return rozvrhSerad();
 }
@@ -4556,13 +4557,30 @@ function rozvrhMigrace(now = Date.now()) {
   // co dělají, a jdou pozastavit nebo smazat. Doplní se jednou — kdo je pak smaže,
   // nedostane je zpátky.
   if ((state.rozvrhVerze || 0) < 2 && zbyle.length) {
-    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Děti dopoledne', 'Víkend a prázdniny'].includes(v.nazev))) {
+    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Ložnice dopoledne', 'Víkend a prázdniny'].includes(v.nazev))) {
       if (zbyle.some(p => p.nazev === v.nazev)) continue;
       zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
       zmeny.push(`přidáno „${v.nazev}"`);
     }
   }
-  state.rozvrhVerze = 2;
+  // Verze 3: ve všední den děti jen jednou (ráno na 25 %); v 10:00 už jen ložnice.
+  // Upraví se jen skupiny, které mají tvar z verze 2 — ručně předělané zůstanou.
+  if ((state.rozvrhVerze || 0) < 3) {
+    const jenDeti = p => Array.isArray(p.kroky) && p.kroky.length
+      && p.kroky.every(k => (k.cil === 'Miky' || k.cil === 'Elenka') && k.akce === 'tilt');
+    const vsedni = p => JSON.stringify(p.dny) === JSON.stringify(MIGRACE_PRAC);
+    for (const p of zbyle) {
+      if (p.nazev === 'Děti ráno' && vsedni(p) && jenDeti(p) && p.kroky.some(k => k.hodnota !== 25)) {
+        p.kroky = p.kroky.map(k => ({ ...k, hodnota: 25 }));
+        zmeny.push('„Děti ráno" na 25 %');
+      } else if (p.nazev === 'Děti dopoledne' && vsedni(p) && p.kdy && p.kdy.typ === 'cas' && p.kdy.cas === '10:00' && jenDeti(p)) {
+        p.nazev = 'Ložnice dopoledne';
+        p.kroky = [{ cil: 'Ložnice', akce: 'tilt', hodnota: 25 }];
+        zmeny.push('„Děti dopoledne" → „Ložnice dopoledne" (jen ložnice 25 %)');
+      }
+    }
+  }
+  state.rozvrhVerze = 3;
   if (!zmeny.length) return false;
   blindRules = zbyle;
   rozvrhSerad(now);

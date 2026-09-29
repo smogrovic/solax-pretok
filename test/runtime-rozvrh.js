@@ -90,7 +90,7 @@ function snapshot() {
   // (server tu jede bez klíče k předpovědi) se u slunce sáhne po odhadu.
   check('  a v pořadí, jak se odehrají',
     snap2.blindRules.map(p => p.nazev).join(' → '),
-    'Děti ráno → Dopoledne → Ráno → Děti dopoledne → Víkend a prázdniny → Po západu → Ložnice po západu → Garáž');
+    'Děti ráno → Dopoledne → Ráno → Ložnice dopoledne → Víkend a prázdniny → Po západu → Ložnice po západu → Garáž');
 
   srv.kill();
   await pauza(200);
