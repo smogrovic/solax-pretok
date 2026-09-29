@@ -4535,7 +4535,7 @@ let blindRuleSeq = 1;
 let blindRules = [];
 
 function rozvrhNasadVychozi() {
-  state.rozvrhVerze = 5;
+  state.rozvrhVerze = 6;
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
   return rozvrhSerad();
 }
@@ -4643,12 +4643,26 @@ function rozvrhMigrace(now = Date.now()) {
       zmeny.push('přidáno „Ložnice a hosté" (10:00)');
     }
   }
-  state.rozvrhVerze = 5;
+  state.rozvrhVerze = Math.max(state.rozvrhVerze || 0, 5);
   if (!zmeny.length) return false;
   blindRules = zbyle;
   rozvrhSerad(now);
   blindRulesAt = now;
   addLog(`Rozvrh žaluzií: ${zmeny.join(', ')}`);
+  broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  return true;
+}
+
+// Verze 6: jednou znovu nahrát celý doporučený rozvrh (uživatel si o to řekl —
+// dílčí úpravy v1–v5 upravené skupiny schválně nechávaly, tady se přepíše vše).
+// Verze se zálohuje, takže další nasazení už rozvrh nepřepíše; smazaný (prázdný)
+// rozvrh zůstane prázdný.
+function rozvrhMigraceV6(now = Date.now()) {
+  if ((state.rozvrhVerze || 0) >= 6) return false;
+  if (!blindRules.length) { state.rozvrhVerze = 6; return false; }
+  rozvrhNasadVychozi();
+  blindRulesAt = now;
+  addLog(`Rozvrh žaluzií: znovu nahrán doporučený rozvrh (${blindRules.length} skupin)`);
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
   return true;
 }
@@ -10609,6 +10623,7 @@ const server = app.listen(PORT, async () => {
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
   rozvrhMigrace();
+  rozvrhMigraceV6();
   scheduleEvery(zavlahaPlanHlidej, ZAVLAHA_PLAN_TIK_MS, ZAVLAHA_PLAN_TIK_MS);
   if (anthbotEnabled) scheduleEvery(() => sekackaNacti().catch(() => {}), ANTHBOT_TIK_MS, 5000);
   else console.log('Sekačka Anthbot vypnutá (chybí ANTHBOT_EMAIL / ANTHBOT_HESLO).');

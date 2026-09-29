@@ -147,7 +147,9 @@ setTimeout(async () => {
   const radky = () => [...document.querySelectorAll('#rozvrhList .timer-row')];
   check('skupina je v seznamu jako jeden blok', radky().length, 1);
   check('  s časem', radky()[0].querySelector('.timer-row-time').textContent, '06:15');
-  check('  názvem a dny', radky()[0].querySelector('.timer-row-text').textContent, 'Ráno · Po Út St Čt Pá');
+  check('  a názvem bez dnů (ty určuje box skupiny)', radky()[0].querySelector('.timer-row-text').textContent, 'Ráno');
+  check('  v boxu „Pracovní den / škola"', radky()[0].closest('.rozvrh-box').querySelector('.rozvrh-skupina').textContent,
+    'Pracovní den / škola');
   check('  a kroky pod tím', radky()[0].querySelector('.rozvrh-podkroky').textContent,
     'Ložnice — vytáhnout · Obývák — zatáhnout na 100 %');
 
@@ -285,22 +287,26 @@ setTimeout(async () => {
   renderRozvrh({ rules: SERVER, savedAt: Date.now() });
   const r1 = radky()[0].getBoundingClientRect();
   const r2 = radky()[1].getBoundingClientRect();
-  const seznam = document.getElementById('rozvrhList').getBoundingClientRect();
-  check('řádky jsou široké jako seznam', Math.round(r1.width), Math.round(seznam.width));
+  // Řádky žijí v boxu skupiny (každý v jiném: Po–Pá a So–Ne); měří se k němu
+  const seznam = radky()[0].closest('.rozvrh-box').querySelector('.rozvrh-skupina').getBoundingClientRect();
+  check('řádky jsou široké jako box', Math.abs(Math.round(r1.width) - Math.round(seznam.width)) <= 6, true);
+  check('  oba stejně', Math.round(r1.width), Math.round(r2.width));
   const casy = radky().map(r => Math.round(r.querySelector('.timer-row-time').getBoundingClientRect().left));
   check('časy začínají na stejném místě', casy[0] === casy[1], true);
-  check('  a u levého okraje', casy[0] - Math.round(seznam.left) <= 4, true);
-  // Popis stojí hned za časem (mezera je jen rozestup mřížky). Kdyby se obsah řádku
-  // centroval, byl by od času odsazený mnohem víc.
-  const mezery = radky().map(r => Math.round(
-    r.querySelector('.timer-row-text').getBoundingClientRect().left
-    - r.querySelector('.timer-row-time').getBoundingClientRect().right));
-  check('popis navazuje na čas', mezery.every(d => d >= 0 && d <= 12), true);
+  check('  a u levého okraje', Math.abs(casy[0] - Math.round(seznam.left)) <= 6, true);
+  // Název je POD tučným časem a lícuje s ním vlevo — vedle času se na telefonu
+  // lámal do úzkého sloupečku
+  const cas1 = radky()[0].querySelector('.timer-row-time').getBoundingClientRect();
+  const nazev1 = radky()[0].querySelector('.timer-row-text').getBoundingClientRect();
+  check('název je pod časem', nazev1.top >= cas1.bottom - 2, true);
+  check('  a lícuje s ním vlevo', Math.round(nazev1.left) === Math.round(cas1.left), true);
+  check('čas je tučně', Number(getComputedStyle(radky()[0].querySelector('.timer-row-time')).fontWeight) >= 700, true);
+  check('bez názvu žádný prázdný řádek', radky()[1].querySelector('.timer-row-text'), 'null');
   // Křížek u pravého okraje, ať je popis jakkoli krátký
-  const krizky = radky().map(r => Math.round(seznam.right - r.querySelector('.timer-del').getBoundingClientRect().right));
+  const krizky = radky().map(r => Math.round(r.getBoundingClientRect().right - r.querySelector('.timer-del').getBoundingClientRect().right));
   check('křížek drží pravý okraj', krizky[0] === krizky[1] && krizky[0] <= 4, true);
   check('kroky pod hlavičkou začínají vlevo',
-    Math.round(radky()[0].querySelector('.rozvrh-podkroky').getBoundingClientRect().left) - Math.round(seznam.left) <= 4, true);
+    Math.abs(Math.round(radky()[0].querySelector('.rozvrh-podkroky').getBoundingClientRect().left) - casy[0]) <= 4, true);
 
   R.push('\\n5d) Nahrání rozvrhu z Logiky automatiky');
   // Natrvalo, ne jen v prázdné kartě — po nahrání by zmizelo zrovna ve chvíli,
@@ -333,10 +339,15 @@ setTimeout(async () => {
   renderRozvrh({ savedAt: 1, rules: [pr(1, 'Víkend a prázdniny', VIK, '10:00'), pr(2, 'Děti ráno', PRAC, '06:40'),
     pr(3, 'Garáž', [true, true, true, true, true, true, true], '23:00'), pr(4, 'Děti dopoledne', PRAC, '10:00')] });
   const list = document.getElementById('rozvrhList');
-  const poradi = [...list.children].map(e => e.classList.contains('rozvrh-skupina') ? '[' + e.textContent + ']'
-    : e.querySelector('.timer-row-text').textContent.split(' · ')[0]);
-  check('seznam je ve skupinách', poradi.join(' '),
-    '[Pracovní dny] Děti ráno Děti dopoledne [Víkend a prázdniny] Víkend a prázdniny [Každý den] Garáž');
+  const poradi = [...list.children].map(box => '[' + box.querySelector('.rozvrh-skupina').textContent + '] '
+    + [...box.querySelectorAll('.timer-row-text')].map(e => e.textContent).join(' '));
+  check('seznam je v boxech po skupinách', poradi.join(' '),
+    '[Pracovní den / škola] Děti ráno Děti dopoledne [Víkend / prázdniny] Víkend a prázdniny [Každý den] Garáž');
+  check('  každý box je zvlášť', [...list.children].every(e => e.classList.contains('rozvrh-box')), true);
+  check('  a dny se nikde nevypisují', /Po Út|So Ne/.test(list.textContent), false);
+  renderRozvrh({ savedAt: 1, rules: [pr(5, 'Divné', [true, false, false, false, false, true, false], '09:00')] });
+  check('smíšené dny: box Ostatní a dny u názvu', [...list.children].map(box => box.querySelector('.rozvrh-skupina').textContent
+    + ': ' + box.querySelector('.timer-row-text').textContent).join(), 'Ostatní: Divné · Po So');
 
   R.push('\\n6) Záloha v telefonu');
   // Rozvrh je nastavení od člověka a v paměti serveru nepřežije nasazení

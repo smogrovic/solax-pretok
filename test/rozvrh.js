@@ -35,7 +35,7 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, prazdninyDuvod, prazdninyPayload, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
-         + ' lozniceZavrenoPlati, lozniceZavrenoPayload, rozvrhMigrace,'
+         + ' lozniceZavrenoPlati, lozniceZavrenoPayload, rozvrhMigrace, rozvrhMigraceV6,'
          + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
@@ -617,6 +617,31 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   h.state.lozniceZavrenoRano = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(PO_6));
   await h.api.rozvrhStavTed(PO_6 + 2 * H);   // 8:00
   check('návrat domů zavřenou ložnici neotevře', h.povely.join(' | '), 'Kuchyň:up');
+}
+{
+  // Migrace v6: jednou znovu celý doporučený rozvrh, i přes vlastní úpravy
+  const h = build();
+  h.state.rozvrhVerze = 5;
+  h.api.pravidla = [pravidlo({ id: 1, nazev: 'Moje vlastní' }), pravidlo({ id: 2, nazev: 'Garáž' })];
+  check('v6 nahraje doporučený rozvrh', h.api.rozvrhMigraceV6(12000), true);
+  check('  celý a jen ten', h.api.pravidla.map(p => p.nazev).sort().join(','),
+    h.api.ROZVRH_VYCHOZI.map(p => p.nazev).sort().join(','));
+  check('  razítko se posune (záloha z telefonu ho nepřepíše)', h.api.savedAt, 12000);
+  check('  verze 6', h.state.rozvrhVerze, 6);
+  check('  a je to v logu', h.logy.some(t => /znovu nahrán doporučený rozvrh/.test(t)), true);
+  h.api.pravidla = h.api.pravidla.slice(1);
+  check('druhý start už nic nepřepíše', h.api.rozvrhMigraceV6(13000), false);
+  check('  úpravy po v6 zůstanou', h.api.pravidla.length, h.api.ROZVRH_VYCHOZI.length - 1);
+  h.api.rozvrhMigrace(14000);
+  check('starší migrace verzi 6 nesníží', h.state.rozvrhVerze, 6);
+  const e = build();
+  e.state.rozvrhVerze = 5;
+  e.api.pravidla = [];
+  check('smazaný (prázdný) rozvrh zůstane prázdný', e.api.rozvrhMigraceV6(12000) + ' ' + e.api.pravidla.length, 'false 0');
+  check('  ale verze se zapíše', e.state.rozvrhVerze, 6);
+  const n = build();
+  n.api.rozvrhNasadVychozi();
+  check('nahrání doporučeného dá rovnou verzi 6', n.state.rozvrhVerze, 6);
 }
 {
   // Migrace v1: jen přesně výchozí staré skupiny

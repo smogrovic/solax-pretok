@@ -2137,6 +2137,14 @@
   .rozvrh-skupina{font-size:12px;font-weight:700;color:var(--grey-text);text-transform:uppercase;
     letter-spacing:0.04em;margin:14px 0 4px;}
   .rozvrh-skupina:first-child{margin-top:4px;}
+  /* Box na skupinu: dny určuje skupina, v řádcích se pak nevypisují */
+  .rozvrh-box{background:rgba(44,62,80,0.05);border-radius:14px;padding:4px 10px 6px;margin:10px 0;}
+  .rozvrh-box .rozvrh-skupina{margin:6px 2px 2px;}
+  .rozvrh-box .timer-row.rozvrh-radek{background:transparent;}
+  .rozvrh-box .timer-row.rozvrh-radek:last-child{border-bottom:none;}
+  .rozvrh-kdy{display:flex;flex-direction:column;align-items:flex-start;gap:1px;flex:1;min-width:0;}
+  .rozvrh-kdy .timer-row-time{font-weight:700;}
+  .rozvrh-kdy .timer-row-text{flex:none;font-size:13px;color:var(--grey-text);}
   .rozvrh-nejdrive-label{font-size:13px;color:var(--grey-text);align-self:center;}
   .prip-panel{
     position:fixed;left:12px;top:120px;z-index:56;
@@ -6330,8 +6338,8 @@ function rozvrhKdyText(p) {
 // Skupiny v seznamu: pracovní dny, víkend + prázdniny (prázdninový den je neděle),
 // každý den a zbytek. Pořadí uvnitř skupiny drží server (podle času).
 const ROZVRH_SKUPINY = [
-  { klic: 'prac', nazev: 'Pracovní dny' },
-  { klic: 'vikend', nazev: 'Víkend a prázdniny' },
+  { klic: 'prac', nazev: 'Pracovní den / škola' },
+  { klic: 'vikend', nazev: 'Víkend / prázdniny' },
   { klic: 'vse', nazev: 'Každý den' },
   { klic: 'jine', nazev: 'Ostatní' }
 ];
@@ -6351,7 +6359,10 @@ function rozvrhKrokText(k) {
   return `${k.cil} — ${akce}${h === null || h === undefined ? '' : ` na ${h} %`}`;
 }
 
+// Dny určuje box skupiny, takže se píšou jen u smíšených („Ostatní"), kde je
+// skupina neřekne
 function rozvrhText(p) {
+  if (rozvrhSkupina(p) !== 'jine') return p.nazev || '';
   const dny = ROZVRH_DNY_CZ.filter((_, i) => p.dny[i]).join(' ');
   return p.nazev ? `${p.nazev} · ${dny}` : dny;
 }
@@ -6408,16 +6419,23 @@ function renderRozvrh(data) {
   if (rozvrhPrazdnoEl) rozvrhPrazdnoEl.hidden = rozvrhData.length > 0;
   if (!rozvrhListEl) return;
   rozvrhListEl.textContent = '';
-  const serazene = ROZVRH_SKUPINY.flatMap(sk => rozvrhData.filter(p => rozvrhSkupina(p) === sk.klic));
-  let skupina = null;
-  for (const p of serazene) {
-    if (rozvrhSkupina(p) !== skupina) {
-      skupina = rozvrhSkupina(p);
-      const h = document.createElement('div');
-      h.className = 'rozvrh-skupina';
-      h.textContent = ROZVRH_SKUPINY.find(sk => sk.klic === skupina).nazev;
-      rozvrhListEl.appendChild(h);
-    }
+  // Každá skupina ve vlastním boxu; pořadí uvnitř drží server (podle času)
+  for (const sk of ROZVRH_SKUPINY) {
+    const pravidla = rozvrhData.filter(p => rozvrhSkupina(p) === sk.klic);
+    if (!pravidla.length) continue;
+    const box = document.createElement('div');
+    box.className = 'rozvrh-box';
+    box.dataset.skupina = sk.klic;
+    const h = document.createElement('div');
+    h.className = 'rozvrh-skupina';
+    h.textContent = sk.nazev;
+    box.appendChild(h);
+    for (const p of pravidla) box.appendChild(rozvrhRadek(p));
+    rozvrhListEl.appendChild(box);
+  }
+}
+
+function rozvrhRadek(p) {
     const row = document.createElement('div');
     row.className = 'timer-row rozvrh-radek' + (p.zapnuto ? '' : ' rozvrh-vyp');
     const hlava = document.createElement('div');
@@ -6446,8 +6464,12 @@ function renderRozvrh(data) {
         `${rozvrhKdyText(p)} · ${(p.kroky || []).map(rozvrhKrokText).join(' · ')}`,
         () => rozvrhSmaz(p.id, del), 10);
     });
-    hlava.appendChild(time);
-    hlava.appendChild(text);
+    // Čas tučně a název pod ním — vedle sebe se na telefonu název lámal do sloupečku
+    const kdy = document.createElement('div');
+    kdy.className = 'rozvrh-kdy';
+    kdy.appendChild(time);
+    if (text.textContent) kdy.appendChild(text);
+    hlava.appendChild(kdy);
     hlava.appendChild(prep);
     hlava.appendChild(del);
     row.appendChild(hlava);
@@ -6457,8 +6479,7 @@ function renderRozvrh(data) {
     const odlozText = p.odloz ? ` · čeká ${p.odloz.minut} min po sauně` : '';
     kroky.textContent = (p.kroky || []).map(rozvrhKrokText).join(' · ') + odlozText;
     row.appendChild(kroky);
-    rozvrhListEl.appendChild(row);
-  }
+    return row;
 }
 
 function rozvrhDoFormulare(p) {
@@ -6627,7 +6648,7 @@ for (const btn of rozvrhVychoziEls) {
     // Na prázdném rozvrhu není co ztratit; jinak to přepíše všechno, včetně úprav
     if (!rozvrhData.length) return rozvrhNahrajVychozi(btn);
     potvrzZeptej('Nahrát doporučený rozvrh?',
-      `Přepíše to všech ${rozvrhData.length} pravidel, která teď máš, za sedm doporučených.`,
+      `Přepíše to všech ${rozvrhData.length} pravidel, která teď máš, doporučeným rozvrhem.`,
       () => rozvrhNahrajVychozi(btn));
   });
 }
