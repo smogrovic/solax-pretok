@@ -2991,9 +2991,7 @@
                číselník hned pod tím a psát ho dvakrát nemá smysl. -->
           <div class="hp-temp" id="huumTemp">– °C</div>
           <!-- Kdy se dnešní saunování poprvé zaplo; drží se do 3 h po posledním topení -->
-          <div class="hp-meta" id="huumZapnuto" hidden></div>
           <div class="manual-hold" id="huumHint"></div>
-          <div class="hp-meta" id="huumKdy"></div>
         </div>
       </div>
       <!-- Topení. Jediné místo v appce, které umí rozpálit něco na devadesát
@@ -8049,7 +8047,7 @@ const WB_MODE_LEGEND = [
 const huumEls = {};
 for (const id of ['huumLight', 'huumState', 'huumTemp', 'huumHint',
   'huumStatusCard', 'huumDoor', 'huumEnd', 'huumLeft', 'huumHumidity',
-  'huumLightState', 'huumKdy', 'huumZapnuto']) {
+  'huumLightState']) {
   huumEls[id] = document.getElementById(id);
 }
 let huumData = null;
@@ -8102,19 +8100,6 @@ function renderHuum() {
     // Co má jednotka osazené se nemění a na kartě to nikomu nic neříká —
     // zůstává jen to, co je špatně
     : (d.error || (zname ? '' : 'Z HUUM nechodí data.'));
-
-  // Kdy naposledy DORAZILA data — při chybě se razítko na serveru neobnovuje, takže
-  // zmrzlá teplota je poznat i na kartě, která jinak vypadá úplně normálně.
-  // Pojistka i v appce: kdyby se zpráva o vynulování ztratila, po 3 h od
-  // posledního topení řádek zmizí sám
-  const z = saunaZapnutoData || {};
-  const zapnuto = z.od > 0 && z.naposledy > 0 && Date.now() - z.naposledy <= SAUNA_ZAPNUTO_RESET_MS;
-  huumEls.huumZapnuto.textContent = zapnuto ? 'Zapnuto v ' + fmtSolTime(z.od) : '';
-  huumEls.huumZapnuto.hidden = !zapnuto;
-
-  huumEls.huumKdy.textContent = d.enabled && d.fetchedAt
-    ? 'Naposledy ' + fmtSolTime(new Date(d.fetchedAt).getTime())
-    : '';
 
   renderHuumSvetlo(d, zname);
   renderHuumTopeni(d, zname);

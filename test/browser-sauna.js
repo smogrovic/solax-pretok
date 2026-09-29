@@ -188,16 +188,11 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('chyba se ukáže', /neplatné jméno/.test(huumHint.textContent), 'true');
 
-  OUT.push('\\n8b) Kdy naposledy dorazila data');
-  // Ražítko se na serveru při chybě neobnovuje, takže tenhle řádek je jediné místo,
-  // kde je zmrzlá teplota poznat — karta jinak vypadá úplně normálně
-  huumData = { enabled: true, statusCode: 232, fetchedAt: new Date(T - 90 * MIN).toISOString() };
-  renderHuum();
-  check('u zmrzl\u00fdch dat je vid\u011bt, odkdy jsou',
-    huumKdy.textContent, 'Naposledy ' + fmtSolTime(T - 90 * MIN));
+  OUT.push('\\n8b) Pod teplotou nic navíc');
+  // „Zapnuto v" ani „Naposledy" se neukazují — zastaralá data řekne stav „nedostupná"
+  check('řádky Zapnuto v / Naposledy nejsou', !!document.getElementById('huumZapnuto') || !!document.getElementById('huumKdy'), false);
   huumData = { enabled: false, error: null };
   renderHuum();
-  check('bez p\u0159ipojen\u00ed se \u0159\u00e1dek neukazuje', huumKdy.textContent, '');
 
   OUT.push('\\n8c) Po\u0159ad\u00ed karet a zalomen\u00ed teploty');
   // Kamna patří nahoru — teplota v sauně je to, kvůli čemu se na stránku chodí.
@@ -442,24 +437,6 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     top('huumDial').compareDocumentPosition(top('huumSvetloCard')) & Node.DOCUMENT_POSITION_FOLLOWING ? 'true' : 'false', 'true');
   check('  a vlastn\u00ed kartu u\u017e nem\u00e1',
     document.querySelectorAll('#saunaSlide .card > .lights-grid').length, 0);
-
-  OUT.push('\\n8e1d) Zapnuto v');
-  const zapEl = top('huumZapnuto');
-  saunaZapnutoData = { od: 0, naposledy: 0 };
-  renderHuum();
-  check('bez saunov\u00e1n\u00ed \u0159\u00e1dek nen\u00ed vid\u011bt', zapEl.hidden, 'true');
-  const odKdy = Date.now() - 40 * MIN;
-  saunaZapnutoData = { od: odKdy, naposledy: Date.now() - 5 * MIN };
-  renderHuum();
-  check('p\u0159i saunov\u00e1n\u00ed se uk\u00e1\u017ee', zapEl.hidden, 'false');
-  check('  s \u010dasem prvn\u00edho zapnut\u00ed', zapEl.textContent, 'Zapnuto v ' + fmtSolTime(odKdy));
-  // Pod teplotou, nad hl\u00e1\u0161kou a \u201eNaposledy\u201c
-  check('  a je hned pod teplotou', huumTemp.nextElementSibling.id, 'huumZapnuto');
-  // Pojistka v appce: po 3 h od posledn\u00edho topen\u00ed zmiz\u00ed, i kdyby se zpr\u00e1va ztratila
-  saunaZapnutoData = { od: Date.now() - 5 * H, naposledy: Date.now() - 3 * H - MIN };
-  renderHuum();
-  check('po 3 h od posledn\u00edho topen\u00ed zmiz\u00ed', zapEl.hidden, 'true');
-  saunaZapnutoData = null;
 
   OUT.push('\\n8e2) Vyp\u00edna\u010d se mus\u00ed podr\u017eet');
   const btn = top('huumTopeniBtn');
