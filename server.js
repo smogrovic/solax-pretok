@@ -9587,6 +9587,7 @@ function sekackaPayload() {
     // `chyba` je chybový kód od sekačky, `potiz` problém se spojením — dvě různé věci
     potiz: state.sekacka.potiz,
     offlineOd: state.sekacka.offlineOd || 0,
+    posekanoKdy: (state.sekacka.posekano && state.sekacka.posekano.kdy) || 0,
     ...anthbotPrectiStin(state.sekacka.stin)
   };
 }
@@ -9616,6 +9617,7 @@ async function sekackaNacti(znovu = false) {
     }
     state.sekacka.__drive = { online: stin.online };
     sekackaOdmlka(jeOnline);
+    sekackaPosekano(stin);
     sekackaPosli();
   } catch (err) {
     // 401 i 403 znamenají „přihlaš se znovu"; jednou to zkusíme, pak to přiznáme
@@ -9623,6 +9625,22 @@ async function sekackaNacti(znovu = false) {
     state.sekacka.potiz = err.message;
     sekackaPosli();
   }
+}
+
+// Kdy sekačka naposledy posekala. Stín žádný čas sečení nenese, jen součty
+// „celkem posekáno" (plocha, čas) — každé posečení je zvedne, takže změna
+// součtu je okamžik, kdy sekačka dosekala a nahlásila výsledek. První čtení
+// bez předchozí hodnoty nic nenastaví: jinak by každé nasazení vypadalo jako
+// posečení (proto se poslední součty zálohují).
+function sekackaPosekano(stin, now = Date.now()) {
+  const plocha = anthbotCislo(stin.mowing_area);
+  const sekundy = anthbotCislo(stin.mowing_time);
+  if (plocha === null && sekundy === null) return;
+  const p = state.sekacka.posekano || (state.sekacka.posekano = { kdy: 0, plocha: null, sekundy: null });
+  const zmena = (drive, ted) => drive !== null && drive !== undefined && ted !== null && ted !== drive;
+  if (zmena(p.plocha, plocha) || zmena(p.sekundy, sekundy)) p.kdy = now;
+  if (plocha !== null) p.plocha = plocha;
+  if (sekundy !== null) p.sekundy = sekundy;
 }
 
 // Od kdy sekačka není na příjmu — z toho appka rozsvítí připomínku „Vysvobodit
@@ -10182,6 +10200,9 @@ function storeSnapshot() {
     saunaRelace: state.saunaRelace,
     // Od kdy sekačka mlčí — po nasazení by se hodina do připomínky počítala znovu
     sekackaOfflineOd: (state.sekacka && state.sekacka.offlineOd) || 0,
+    // Kdy naposledy posekala a poslední součty — bez nich by první čtení po
+    // nasazení datum ztratilo, nebo nepoznalo posečení během nasazování
+    sekackaPosekano: (state.sekacka && state.sekacka.posekano) || null,
     rozvrhVerze: state.rozvrhVerze || 0,
     push: Array.from(pushSubscriptions.values())
   };
@@ -10203,6 +10224,20 @@ function storeApplyPrimo(p) {
   if (Number.isFinite(p.sekackaOfflineOd) && p.sekackaOfflineOd > 0 && p.sekackaOfflineOd <= now
       && state.sekacka && !state.sekacka.offlineOd && !state.sekacka.kdy) {
     state.sekacka.offlineOd = p.sekackaOfflineOd;
+  }
+  const sp = p.sekackaPosekano;
+  if (sp && typeof sp === 'object' && state.sekacka) {
+    const cislo = v => (Number.isFinite(v) && v >= 0 ? v : null);
+    const kdy = Number.isFinite(sp.kdy) && sp.kdy > 0 && sp.kdy <= now ? sp.kdy : 0;
+    const ted = state.sekacka.posekano;
+    if (!ted || (ted.plocha === null && ted.sekundy === null)) {
+      state.sekacka.posekano = { kdy, plocha: cislo(sp.plocha), sekundy: cislo(sp.sekundy) };
+    } else if (!ted.kdy && kdy) {
+      // Čtení po startu už bylo — datum ze zálohy platí, jen když se od té doby
+      // součty nepohnuly; jinak sekala během nasazování a kdy přesně, nevíme
+      const beze = (a, b) => a === null || b === null || a === b;
+      if (beze(ted.plocha, cislo(sp.plocha)) && beze(ted.sekundy, cislo(sp.sekundy))) ted.kdy = kdy;
+    }
   }
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
   const sr = p.saunaRelace;

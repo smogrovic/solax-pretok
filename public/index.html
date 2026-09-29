@@ -10415,6 +10415,11 @@ function sekackaNaPrijmu() {
   return sekackaZive() && sekackaData.online !== false;
 }
 
+// „dnes 14:30" / „28. 9. 14:30" — samotný čas by vedle součtů vypadal jako údaj o sečení
+function sekackaKdyPosekano(ts) {
+  return (new Date(ts).toDateString() === new Date().toDateString() ? 'dnes ' : '') + fmtSolTime(ts);
+}
+
 function sekackaMetaRadky() {
   const d = sekackaData;
   if (!d.zapnuto) return ['Sekačka není nastavená — chybí přihlášení k Anthbotu v Renderu.'];
@@ -10429,7 +10434,8 @@ function sekackaMetaRadky() {
   if (d.chyba) r.push(`Chyba č. ${d.chyba} (kód přímo od sekačky)`);
   if (d.vyska !== null && d.vyska !== undefined) r.push(`Výška sečení: ${d.vyska} mm`);
   if (d.travnik) r.push(`Trávník: ${d.travnik} m²`);
-  if (d.plochaCelkem) r.push(`Celkem: ${d.plochaCelkem} m²${d.minutyCelkem ? `, ${d.minutyCelkem} min` : ''}`);
+  if (d.plochaCelkem) r.push(`Celkem: ${d.plochaCelkem} m²${d.minutyCelkem ? `, ${d.minutyCelkem} min` : ''}`
+    + (d.posekanoKdy ? ` · posekáno ${sekackaKdyPosekano(d.posekanoKdy)}` : ''));
   r.push('Naposledy ' + logCas(d.kdy));
   return r;
 }

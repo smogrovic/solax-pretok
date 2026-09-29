@@ -72,6 +72,17 @@ setTimeout(async () => {
   check('nic navíc tam není',
     VYHOZENE.filter(t => metaEl.textContent.includes(t)).join(', ') || 'nic', 'nic');
   check('řádky jsou právě čtyři', metaEl.querySelectorAll('div').length, 4);
+  // Kdy naposledy posekala — vedle součtů, dokud to server neví, nic
+  check('bez data posečení řádek beze změny', metaEl.textContent.includes('posekáno'), false);
+  const vcera = new Date(); vcera.setDate(vcera.getDate() - 1); vcera.setHours(14, 30, 0, 0);
+  zive({ posekanoKdy: vcera.getTime() });
+  check('datum posečení je u celkem',
+    [...metaEl.querySelectorAll('div')].some(r => r.textContent.startsWith('Celkem: 900 m², 120 min · posekáno '
+      + vcera.getDate() + '. ' + (vcera.getMonth() + 1) + '. 14:30')), true);
+  const dnes = new Date(); dnes.setHours(0, 5, 0, 0);
+  zive({ posekanoKdy: dnes.getTime() });
+  check('  dnešní posečení řekne „dnes"', metaEl.textContent.includes('posekáno dnes 00:05'), true);
+  check('  a řádků je pořád čtyři', metaEl.querySelectorAll('div').length, 4);
   // Prázdná pole se nemají ukazovat jako pomlčky — radši ať řádek není
   zive({ travnik: null, plochaCelkem: null });
   check('bez dat žádný prázdný řádek', metaEl.textContent.includes('Trávník'), false);

@@ -427,6 +427,42 @@ nadpis('9b) Od kdy sekačka není na příjmu (připomínka Vysvobodit sekačku)
   check('v zimě se přepínač návratem nezapne', h.state.pripominky.sekacka.zapnuto, false);
 }
 
+nadpis('9c) Kdy naposledy posekala (datum u „Celkem")');
+{
+  const h = build();
+  let plocha = 900, cas = 7200, selze = false, bez = false;
+  const stin = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ state: { reported: {
+    elec: { value: 40 }, robot_sta: { value: 'idle' }, online: { value: 1 },
+    ...(bez ? {} : { mowing_area: { value: plocha }, mowing_time: { value: cas } }) } } }) });
+  podstrc({ ...CESTA_CELA, aws: () => (selze ? { ok: false, status: 500, text: async () => 'x' } : stin()) });
+  await h.api.sekackaNacti();
+  check('první čtení datum nenastaví (nasazení není posečení)', h.api.sekackaPayload().posekanoKdy, 0);
+  check('  ale součty si zapamatuje', [h.state.sekacka.posekano.plocha, h.state.sekacka.posekano.sekundy].join(), '900,7200');
+  await h.api.sekackaNacti();
+  check('stejné součty nic nenastaví', h.api.sekackaPayload().posekanoKdy, 0);
+  plocha = 1150;
+  const pred = Date.now();
+  await h.api.sekackaNacti();
+  const kdy = h.api.sekackaPayload().posekanoKdy;
+  check('změna plochy = posekáno teď', kdy >= pred && kdy <= Date.now(), true);
+  await new Promise(r => setTimeout(r, 5));
+  await h.api.sekackaNacti();
+  check('další čtení se stejnými součty datum neposune', h.api.sekackaPayload().posekanoKdy, kdy);
+  selze = true;
+  await h.api.sekackaNacti();
+  check('výpadek cloudu datum nemění', h.api.sekackaPayload().posekanoKdy, kdy);
+  selze = false;
+  bez = true;
+  await h.api.sekackaNacti();
+  check('stín bez součtů datum nemění', h.api.sekackaPayload().posekanoKdy, kdy);
+  check('  ani nezapomene součty', h.state.sekacka.posekano.plocha, 1150);
+  bez = false;
+  await new Promise(r => setTimeout(r, 5));
+  cas = 9000;
+  await h.api.sekackaNacti();
+  check('změna minut taky = posekáno', h.api.sekackaPayload().posekanoKdy > kdy, true);
+}
+
 nadpis('10) Endpointy');
 {
   const h = build();

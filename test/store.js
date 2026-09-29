@@ -399,6 +399,55 @@ nadpis('5) Přímé hodnoty');
 }
 
 {
+  // Kdy sekačka posekala + poslední součty — po nasazení se datum neztratí
+  // a první čtení nevydává nasazení za posečení
+  const zaloha = { kdy: Date.now() - 3 * 3600000, plocha: 900, sekundy: 7200 };
+  const st = prazdnyStav();
+  st.saunaNahrev = { bezici: null, zaznamy: [] };
+  st.saunaZapnuto = { od: 0, naposledy: 0 };
+  st.sekacka = { stin: null, kdy: 0, potiz: null };
+  const h = build({ state: st });
+  h.api.storeApplyPrimo({ sekackaPosekano: zaloha });
+  check('posečení se vrátí ze zálohy', JSON.stringify(h.state.sekacka.posekano), JSON.stringify(zaloha));
+  check('  a jde do zálohy', JSON.stringify(h.api.storeSnapshot().primo.sekackaPosekano), JSON.stringify(zaloha));
+  h.api.storeApplyPrimo({ sekackaPosekano: { kdy: Date.now() + 3600000, plocha: 'x', sekundy: -1 } });
+  check('  nesmysly ze zálohy přes platná data nejdou', h.state.sekacka.posekano.plocha, 900);
+  // Čtení po startu už proběhlo a součty sedí → datum ze zálohy platí
+  const st2 = prazdnyStav();
+  st2.saunaNahrev = { bezici: null, zaznamy: [] };
+  st2.saunaZapnuto = { od: 0, naposledy: 0 };
+  st2.sekacka = { stin: {}, kdy: Date.now(), potiz: null, posekano: { kdy: 0, plocha: 900, sekundy: 7200 } };
+  const h2 = build({ state: st2 });
+  h2.api.storeApplyPrimo({ sekackaPosekano: zaloha });
+  check('  po čtení se stejnými součty se datum doplní', h2.state.sekacka.posekano.kdy, zaloha.kdy);
+  // Součty se mezitím pohnuly → sekala během nasazení, staré datum neplatí
+  const st3 = prazdnyStav();
+  st3.saunaNahrev = { bezici: null, zaznamy: [] };
+  st3.saunaZapnuto = { od: 0, naposledy: 0 };
+  st3.sekacka = { stin: {}, kdy: Date.now(), potiz: null, posekano: { kdy: 0, plocha: 1150, sekundy: 7200 } };
+  const h3 = build({ state: st3 });
+  h3.api.storeApplyPrimo({ sekackaPosekano: zaloha });
+  check('  jiné součty staré datum nevezmou', h3.state.sekacka.posekano.kdy, 0);
+  check('  a čerstvé součty zůstanou', h3.state.sekacka.posekano.plocha, 1150);
+  const st5 = prazdnyStav();
+  st5.saunaNahrev = { bezici: null, zaznamy: [] };
+  st5.saunaZapnuto = { od: 0, naposledy: 0 };
+  st5.sekacka = { stin: {}, kdy: Date.now(), potiz: null, posekano: { kdy: 0, plocha: 900, sekundy: 9000 } };
+  const h5 = build({ state: st5 });
+  h5.api.storeApplyPrimo({ sekackaPosekano: zaloha });
+  check('  jiné minuty taky ne', h5.state.sekacka.posekano.kdy, 0);
+  // Čerstvé datum po startu záloha nepřepíše
+  const st4 = prazdnyStav();
+  st4.saunaNahrev = { bezici: null, zaznamy: [] };
+  st4.saunaZapnuto = { od: 0, naposledy: 0 };
+  const cerstve = { kdy: Date.now(), plocha: 900, sekundy: 7200 };
+  st4.sekacka = { stin: {}, kdy: Date.now(), potiz: null, posekano: { ...cerstve } };
+  const h4 = build({ state: st4 });
+  h4.api.storeApplyPrimo({ sekackaPosekano: zaloha });
+  check('  čerstvé posečení záloha nepřepíše', JSON.stringify(h4.state.sekacka.posekano), JSON.stringify(cerstve));
+}
+
+{
   // Verze úprav rozvrhu přežije nasazení — jinak by se smazané skupiny dětí vracely
   const st = prazdnyStav();
   st.saunaNahrev = { bezici: null, zaznamy: [] };
