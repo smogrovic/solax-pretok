@@ -8287,6 +8287,12 @@ function huumOdpocetText(zbyvaMs) {
   return min < 60 ? `za ${min} min` : `za ${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
 }
 
+function huumSaunaNahrata() {
+  const d = huumData || {};
+  const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
+  return huumTopiTed === true && huumTeplotaTed !== null && huumTeplotaTed >= cilC;
+}
+
 function renderHuumOdpocet(now = Date.now()) {
   const el = document.getElementById('huumOdpocet');
   if (!el) return;
@@ -8294,7 +8300,11 @@ function renderHuumOdpocet(now = Date.now()) {
   const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
   let text = '';
   if (huumTopiTed === true) {
-    if (huumTeplotaTed !== null && huumTeplotaTed >= cilC) text = 'Nahřáto';
+    // Nahřátá: pod tlačítkem kolik ještě kamna potopí, „Nahřáto" jde pod číselník
+    if (huumSaunaNahrata()) {
+      const konec = d.endDate ? d.endDate * 1000 : 0;
+      text = konec > now ? `Zbývá ${fmtSolDur(konec - now)}` : 'Nahřáto';
+    }
     else {
       const cile = (d.odhad && d.odhad.cile) || [];
       const c = cile.find(x => x.c === cilC) || cile[0];
@@ -8330,8 +8340,11 @@ function renderHuumOdhad() {
     // ještě potopí (konec topení hlásí HUUM). Nedosažitelný cíl se řekne pořád.
     const nad = (o.cile || []).find(c => c.dosazitelne === false);
     const konec = huumData && huumData.endDate ? huumData.endDate * 1000 : 0;
+    // Při nahřívání tady zbývající doba topení, po nahřátí „Nahřáto" (a doba
+    // topení se přestěhuje pod tlačítko místo odpočtu)
     el.textContent = nad ? `${nad.c} °C je nad možnostmi kamen`
-      : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : '');
+      : (huumSaunaNahrata() ? 'Nahřáto'
+      : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : ''));
     return;
   }
   // Netopí (nebo stav kamen neznámý): jak dlouho by nahřátí na teplotu
