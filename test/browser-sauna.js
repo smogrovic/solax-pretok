@@ -592,7 +592,16 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumCilDotcen = true;
   jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
   renderHuum();
-  check('před zapnutím: za jak dlouho na cíl z číselníku', odhadEl.textContent, 'Na 80 °C za ~77 min');
+  check('před zapnutím: za jak dlouho na cíl z číselníku', odhadEl.textContent, 'Nahřátí na 80 °C ~1 h 17 min');
+  jezdec.value = '60'; jezdec.dispatchEvent(new Event('input'));
+  check('  točení číselníkem ho hned přepočítá', odhadEl.textContent, 'Nahřátí na 60 °C ~46 min');
+  // Stav kamen neznámý (stará data), model je → odhad pořád vidět
+  huumData = { ...huumData, fetchedAt: new Date(Date.now() - 60 * MIN).toISOString() };
+  renderHuum();
+  jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
+  check('  i když stav kamen zrovna neznáme', odhadEl.textContent, 'Nahřátí na 80 °C ~1 h 17 min');
+  huumData = { ...huumData, fetchedAt: new Date().toISOString() };
+  renderHuum();
   check('  i s rozjezdem kamen (cíl 60 → ~46 min)', Math.round(odhadNabehuJs(model, 14.94, 27, 60).minut), 46);
   jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
   check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, '90 \u00b0C je nad mo\u017enostmi kamen');

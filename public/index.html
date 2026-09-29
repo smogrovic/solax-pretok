@@ -3050,7 +3050,7 @@
           <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
           <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
-        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. Na cíl −10 °C se vytáhnou žaluzie v ložnici, na cíl −5 °C se rozsvítí světlo v sauně a po západu slunce zahrada dole.</div>
+        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. Na cíl −10 °C se vytáhnou žaluzie v ložnici, na cíl −5 °C se rozsvítí světlo v sauně a po západu slunce zahrada dole — i když slunce zapadne až během saunování.</div>
         <div class="timer-list" id="huumTimerList"></div>
       </div>
 
@@ -3355,7 +3355,7 @@
           <ul class="logic-list">
             <li>Když topí (nad <b>500 W</b>), <b>bazén a solinátor jdou dolů</b> na <b>30 min</b> po posledním nátopu. Omyl <b>do 2 min</b> je pustí hned.</li>
             <li>Platí i přes ruční zapnutí a „+24 h".</li>
-            <li>Při nahřívání: <b>cíl −10 °C</b> → žaluzie v ložnici nahoru, <b>cíl −5 °C</b> → světlo v sauně a po západu zahrada dole.</li>
+            <li>Při nahřívání: <b>cíl −10 °C</b> → žaluzie v ložnici nahoru, <b>cíl −5 °C</b> → světlo v sauně a po západu zahrada dole (i když slunce zapadne až během saunování).</li>
             <li><b>Ložnice</b> se po západu zatáhne <b>15 min</b> po vypnutí kamen i světla v sauně (co zhasne později) — i podruhé, když ji sauna vytáhla.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
             <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, zbytek podle teploty výš.</li>
@@ -8324,8 +8324,8 @@ function renderHuumOdhad() {
   const el = document.getElementById('huumOdhad');
   if (!el) return;
   const o = huumData && huumData.odhad;
-  if (!o || huumTopiTed === null) { el.textContent = ''; return; }
-  if (huumTopiTed) {
+  if (!o) { el.textContent = ''; return; }
+  if (huumTopiTed === true) {
     // Topí: kdy bude cíl ukazuje odpočet pod tlačítkem; tady jak dlouho kamna
     // ještě potopí (konec topení hlásí HUUM). Nedosažitelný cíl se řekne pořád.
     const nad = (o.cile || []).find(c => c.dosazitelne === false);
@@ -8334,12 +8334,14 @@ function renderHuumOdhad() {
       : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : '');
     return;
   }
-  // Netopí: za jak dlouho by se nahřála na cíl z číselníku
+  // Netopí (nebo stav kamen neznámý): jak dlouho by nahřátí na teplotu
+  // z číselníku trvalo — přepočítá se při každém pootočení
   const cil = huumCil();
   const r = odhadNabehuJs(o.model, o.venkuC, o.tStartC, cil);
+  const delka = min => min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
   el.textContent = !r ? ''
     : (!r.dosazitelne ? `${cil} °C je nad možnostmi kamen`
-    : (r.minut === 0 ? `Na ${cil} °C už je` : `Na ${cil} °C za ~${Math.round(r.minut)} min`));
+    : (r.minut === 0 ? `Na ${cil} °C už je` : `Nahřátí na ${cil} °C ~${delka(Math.round(r.minut))}`));
 }
 
 function renderHuumTopeni(d, cerstve) {

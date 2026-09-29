@@ -7351,7 +7351,7 @@ function saunaAktivni(h) {
 function saunaRelaceSleduj(pred, po, now = Date.now()) {
   const byla = saunaAktivni(pred);
   const je = saunaAktivni(po);
-  if (je && !byla) state.saunaRelace = { od: now, konec: 0, loznice: false, svetla: false };
+  if (je && !byla) state.saunaRelace = { od: now, konec: 0, loznice: false, svetla: false, zahrada: false };
   else if (!je && byla) state.saunaRelace = { ...(state.saunaRelace || { od: 0 }), konec: now };
 }
 
@@ -9855,22 +9855,30 @@ async function saunaPripravaTik(h, now = Date.now()) {
         addLog(`Sauna: ložnici se nepodařilo vytáhnout (${String(err.message).slice(0, 80)})`);
       }
     }
-    if (!r.svetla && t >= cil - SAUNA_SVETLA_C) {
+    const kusy = [];
+    const nahrivaSe = t >= cil - SAUNA_SVETLA_C;
+    const svetloTed = !r.svetla && nahrivaSe;
+    if (svetloTed) {
       r.svetla = true;
-      const kusy = [];
       if (!h.light) {
         try { await huumSvetlo(true); kusy.push('světlo v sauně'); } catch (err) {
           kusy.push(`světlo v sauně selhalo (${String(err.message).slice(0, 60)})`);
         }
       }
-      // Ve dne by se svítilo zbytečně — venku je světlo a stejně se to zapomene zhasnout
-      if (poZapaduSlunce()) {
-        try { await actuateRelay('lightDole', true, 'sauna se nahřívá'); kusy.push('zahrada dole'); } catch (err) {
-          kusy.push(`zahrada dole selhala (${String(err.message).slice(0, 60)})`);
-        }
-      }
-      if (kusy.length) addLog(`Sauna: ${Math.round(t)} °C (cíl ${Math.round(cil)}) — ${kusy.join(', ')}`);
     }
+    // Zahrada má vlastní příznak: ve dne by se svítilo zbytečně, ale když slunce
+    // zapadne až během saunování, rozsvítí se v tu chvíli. Jednou za saunování —
+    // zhasnutou (Zahrada OFF) už znovu nerozsvěcuje.
+    if (!r.zahrada && nahrivaSe && poZapaduSlunce()) {
+      r.zahrada = true;
+      try {
+        await actuateRelay('lightDole', true, 'sauna se nahřívá');
+        kusy.push(svetloTed ? 'zahrada dole' : 'zahrada dole (po západu)');
+      } catch (err) {
+        kusy.push(`zahrada dole selhala (${String(err.message).slice(0, 60)})`);
+      }
+    }
+    if (kusy.length) addLog(`Sauna: ${Math.round(t)} °C (cíl ${Math.round(cil)}) — ${kusy.join(', ')}`);
   } finally {
     saunaPripravaBezi = false;
   }
@@ -10283,6 +10291,8 @@ function storeApplyPrimo(p) {
       && (!state.saunaRelace || !state.saunaRelace.od)) {
     state.saunaRelace = { od: sr.od, konec: Number.isFinite(sr.konec) ? sr.konec : 0,
       loznice: sr.loznice === true, svetla: sr.svetla === true,
+      // Záloha ze starší verze zahradu neznala — svítila spolu se světlem v sauně
+      zahrada: sr.zahrada === true || (sr.zahrada === undefined && sr.svetla === true),
       ...(Number.isFinite(sr.nahrataAt) && sr.nahrataAt > 0 ? { nahrataAt: sr.nahrataAt } : {}) };
   }
   if (p.tempAuto && typeof p.tempAuto === 'object') {

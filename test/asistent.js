@@ -183,6 +183,18 @@ nadpis('2b) Příprava podle teploty v sauně');
   const h = build({ poZapadu: false });
   await h.api.saunaPripravaTik({ heating: true, temperature: 76, targetTemperature: 80, light: 0 });
   check('ve dne zahrada zůstane zhasnutá', h.akce.join(' | '), 'zaluzie:ložnice:up | huumsvetlo:on');
+  // Slunce zapadne až během saunování → zahrada se rozsvítí v tu chvíli
+  h.state.weather.sunsetMs = 1000;
+  await h.api.saunaPripravaTik({ heating: true, temperature: 80, targetTemperature: 80, light: 1 });
+  check('západ během saunování: zahrada se rozsvítí', h.akce.slice(2).join(' | '), 'lightDole:on (sauna se nahřívá)');
+  check('  jen ona (světlo v sauně podruhé ne)', h.akce.length, 3);
+  check('  a v Logu je proč', h.logy.some(t => t === 'Sauna: 80 °C (cíl 80) — zahrada dole (po západu)'), true);
+  await h.api.saunaPripravaTik({ heating: true, temperature: 80, targetTemperature: 80, light: 1 });
+  check('  zhasnutá (Zahrada OFF) se znovu nerozsvítí', h.akce.length, 3);
+  const k = build({ poZapadu: true });
+  k.state.saunaRelace = { od: 1, konec: 0, loznice: true, svetla: false, zahrada: false };
+  await k.api.saunaPripravaTik({ heating: false, temperature: 80, targetTemperature: 80, light: 1 });
+  check('po vypnutí kamen se zahrada nerozsvěcuje', k.akce.length, 0);
 }
 {
   const h = build({ poZapadu: true });
