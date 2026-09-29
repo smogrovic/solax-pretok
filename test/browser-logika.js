@@ -47,7 +47,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('nastavení sauny už na stránce není', !!document.getElementById('saunaLimitInput'), 'false');
   check('nejsme doma drží vypnutou saunu i čerpadlo', /drží vypnutá světla/.test(txt) && /čerpadlo/.test(txt), 'true');
   check('  a po návratu nastaví žaluzie podle rozvrhu', /žaluzie nastaví podle rozvrhu/.test(txt), 'true');
-  check('ložnice po sauně: 15 min po vypnutí kamen i světla', /15 min po vypnutí kamen i světla/.test(txt), 'true');
+  check('ložnice po sauně: 15 min po jejím konci', /15 min po jejím konci/.test(txt), 'true');
+  check('sauna běží i se světlem při ≥ 60 °C', /svítí světlo při ≥ 60 °C/.test(txt), 'true');
   check('příprava podle teploty (cíl −10 / −5 °C)', /cíl −10 °C/.test(txt) && /cíl −5 °C/.test(txt), 'true');
   check('prázdniny: léto a škola v kalendáři', /červenec–srpen/.test(txt) && /Školu/.test(txt), 'true');
   check('děti a ložnice jsou v rozvrhu jako skupiny',

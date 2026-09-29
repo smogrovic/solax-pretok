@@ -7,6 +7,10 @@
 // Druhá past je opačná: do KEEPALIVE_KEYS čerpadlo nepatří (hlídá test/rele.js),
 // tam by se držel nažhavený i ruční ON, který má naopak doběhnout za 15 minut.
 const { between, suite } = require('./zdroj');
+
+// Skutečné „sauna běží" ze serveru (kamna, nebo světlo a ≥ 60 °C), ne náhražka
+const SAUNA_AKTIVNI = between('const SAUNA_BEZI_C', 'function saunaRelaceSleduj');
+const saunaAktivniPro = state => new Function('state', SAUNA_AKTIVNI + '\nreturn saunaAktivni;')(state);
 const { check, nadpis, konec } = suite('rozvrh čerpadla');
 
 const MIN = 60000;
@@ -46,7 +50,7 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc =
     15 * MIN,
     () => pryc,
     stav,
-    h => !!(h && (h.heating === true || h.light)),
+    saunaAktivniPro(stav),
     15
   );
 
@@ -221,7 +225,7 @@ nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
   // Konec saunování ve fázi ON → čerpadlo se vypne
   const T0 = 1_700_000_000_000;
   const h = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
-    huum: { heating: false, light: 1 } });
+    huum: { heating: false, light: 1, temperature: 75 } });
   await h.tik();
   h.stav.huum = { heating: false, light: 0 };
   h.stav.saunaRelace.konec = h.now - 16 * MIN;
@@ -229,12 +233,16 @@ nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
   check('konec ve fázi ON čerpadlo vypne', h.povely.join(' | '), 'obeh:on (sauna — protáčení) | obeh:off (konec saunování)');
 }
 {
-  // Světlo v sauně svítí, kamna už ne — pořád se saunuje
+  // Světlo v sauně svítí a je horko, kamna už ne — pořád se saunuje
   const T0 = 1_700_000_000_000;
   const h = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
-    huum: { heating: false, light: 1 } });
+    huum: { heating: false, light: 1, temperature: 75 } });
   await h.tik();
-  check('svítí jen světlo → protáčí se', h.povely.length, 1);
+  check('svítí světlo a 75 °C → protáčí se', h.povely.length, 1);
+  const c = build({ den: 'Mon', cas: '12:00', relace: { od: T0 - 30 * MIN, konec: 0, nahrataAt: T0 },
+    huum: { heating: false, light: 1, temperature: 40 } });
+  await c.tik();
+  check('  světlo ve vychladlé sauně (40 °C) ne', c.povely.length, 0);
 }
 {
   const T0 = 1_700_000_000_000;

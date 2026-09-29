@@ -7345,12 +7345,22 @@ async function fetchHuum() {
 // Saunování podle kamen HUUM: začne zapnutím kamen NEBO světla a skončí, až je
 // vypnuté obojí. Termostat mezitím kamna nechává i dvě hodiny odpočívat (sauna drží
 // teplo setrvačností) — proto se konec nebere z odběru, ale z vypnutí kamen/světla.
-function saunaAktivni(h) {
-  return !!(h && (h.heating === true || h.light));
+//
+// Sauna BĚŽÍ, když topí kamna, nebo když svítí světlo a je v ní aspoň 60 °C —
+// kamna po dotopení odpočívají, ale v sauně se pořád sedí. Samotné světlo ve
+// studené sauně (úklid) saunování není. Kdo už běží, drží se do 58 °C, ať se
+// saunování kolem šedesátky nezačíná a nekončí dokola.
+const SAUNA_BEZI_C = 60;
+const SAUNA_BEZI_DRZI_C = 58;
+function saunaAktivni(h, byla = !!(state.saunaRelace && state.saunaRelace.od && !state.saunaRelace.konec)) {
+  if (!h) return false;
+  if (h.heating === true) return true;
+  return !!h.light && typeof h.temperature === 'number'
+    && h.temperature >= (byla ? SAUNA_BEZI_DRZI_C : SAUNA_BEZI_C);
 }
 function saunaRelaceSleduj(pred, po, now = Date.now()) {
   const byla = saunaAktivni(pred);
-  const je = saunaAktivni(po);
+  const je = saunaAktivni(po, byla);
   if (je && !byla) state.saunaRelace = { od: now, konec: 0, loznice: false, svetla: false, zahrada: false };
   else if (!je && byla) state.saunaRelace = { ...(state.saunaRelace || { od: 0 }), konec: now };
 }
@@ -9832,17 +9842,24 @@ let saunaPripravaBezi = false;
 
 async function saunaPripravaTik(h, now = Date.now()) {
   const r = state.saunaRelace;
-  if (!h || !r || h.heating !== true) return;
-  const t = h.temperature, cil = h.targetTemperature;
-  if (typeof t !== 'number' || typeof cil !== 'number') return;
+  if (!h || !r) return;
+  const t = h.temperature;
+  if (typeof t !== 'number') return;
+  // Kamna netopí, ale svítí světlo a je horko → v sauně se sedí: ložnice nahoru
+  // a po západu zahrada hned, bez ohledu na cíl (ten u vypnutých kamen nemusí být)
+  const sedi = h.heating !== true && saunaAktivni(h);
+  if (h.heating !== true && !sedi) return;
+  const cil = sedi ? t : h.targetTemperature;
+  if (typeof cil !== 'number') return;
   // Když jsme pryč, drží se všechno zhasnuté a zavřené
   if (awayActive(now)) return;
   // Nahřátá (stejná mez jako notifikace „Sauna je nahřátá") — od teď se protáčí
   // oběhové čerpadlo (runObehSchedule)
-  if (!r.nahrataAt && t >= cil - HUUM_NAHRATA_C) {
+  if (!sedi && !r.nahrataAt && t >= cil - HUUM_NAHRATA_C) {
     r.nahrataAt = now;
     addLog(`Sauna: nahřátá na ${Math.round(t)} °C — oběhové čerpadlo se bude protáčet 10 min / 10 min`);
   }
+  const proc = sedi ? `${Math.round(t)} °C, svítí světlo` : `${Math.round(t)} °C (cíl ${Math.round(cil)})`;
   if (saunaPripravaBezi) return;
   saunaPripravaBezi = true;
   try {
@@ -9850,7 +9867,7 @@ async function saunaPripravaTik(h, now = Date.now()) {
       r.loznice = true;
       try {
         await assistantControlBlinds({ target: 'ložnice', action: 'up' });
-        addLog(`Sauna: ${Math.round(t)} °C (cíl ${Math.round(cil)}) — ložnice nahoru`);
+        addLog(`Sauna: ${proc} — ložnice nahoru`);
       } catch (err) {
         addLog(`Sauna: ložnici se nepodařilo vytáhnout (${String(err.message).slice(0, 80)})`);
       }
@@ -9878,7 +9895,7 @@ async function saunaPripravaTik(h, now = Date.now()) {
         kusy.push(`zahrada dole selhala (${String(err.message).slice(0, 60)})`);
       }
     }
-    if (kusy.length) addLog(`Sauna: ${Math.round(t)} °C (cíl ${Math.round(cil)}) — ${kusy.join(', ')}`);
+    if (kusy.length) addLog(`Sauna: ${proc} — ${kusy.join(', ')}`);
   } finally {
     saunaPripravaBezi = false;
   }

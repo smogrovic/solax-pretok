@@ -8,6 +8,10 @@
 //    pomalu, takže značka „dnes už běželo" musí padnout PŘED povelem.
 //  * Když jsme pryč, dům je zavřený a takový má zůstat.
 const { LINES, between, suite } = require('./zdroj');
+
+// Skutečné „sauna běží" ze serveru (kamna, nebo světlo a ≥ 60 °C), ne náhražka
+const SAUNA_AKTIVNI = between('const SAUNA_BEZI_C', 'function saunaRelaceSleduj');
+const saunaAktivniPro = state => new Function('state', SAUNA_AKTIVNI + '\nreturn saunaAktivni;')(state);
 const { check, nadpis, konec } = suite('rozvrh žaluzií');
 
 const CODE = between('// ---------- Rozvrh žaluzií (opakovaná pravidla místo scénářů v TaHomě) ----------',
@@ -63,7 +67,7 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     () => auto,
     () => pryc,
     huum,
-    h => !!(h && (h.heating === true || h.light)),
+    saunaAktivniPro(state),
     t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   );
   return Object.assign(h, { api, povely, logy, routy, state });
@@ -339,15 +343,26 @@ nadpis('6d2) Odklad podle kamen a světla HUUM, po sauně znovu');
   s.state.saunaRelace = { od: zapad - H, konec: 0 };
   await s.api.runBlindSchedule(zapad + 90 * MIN);
   check('kamna zapnutá → ložnice čeká, i když dávno netopila', s.povely.length, 0);
-  s.state.huum = { heating: false, light: 1, fetchedAt: 'x' };
+  s.state.huum = { heating: false, light: 1, temperature: 70, fetchedAt: 'x' };
   await s.api.runBlindSchedule(zapad + 100 * MIN);
-  check('kamna vypnutá, světlo svítí → pořád čeká', s.povely.length, 0);
+  check('kamna vypnutá, světlo svítí a 70 °C → pořád čeká', s.povely.length, 0);
+  s.state.huum = { heating: false, light: 1, temperature: 59, fetchedAt: 'x' };
+  await s.api.runBlindSchedule(zapad + 101 * MIN);
+  check('  59 °C se světlem pořád běží (drží se do 58)', s.povely.length, 0);
   s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
   s.state.saunaRelace = { od: zapad - H, konec: zapad + 110 * MIN };
   await s.api.runBlindSchedule(zapad + 139 * MIN);
   check('29 min po zhasnutí ještě ne', s.povely.length, 0);
   await s.api.runBlindSchedule(zapad + 140 * MIN);
   check('30 min po tom, co zhaslo později, se zatáhne', s.povely.join(','), 'Ložnice:down:100');
+  // Světlo ve studené sauně (úklid) saunování není — ložnice nečeká
+  const c = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  c.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 30 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  c.state.huum = { heating: false, light: 1, temperature: 30, fetchedAt: 'x' };
+  c.state.saunaRelace = { od: 0, konec: 0 };
+  await c.api.runBlindSchedule(zapad + 5 * MIN);
+  check('světlo ve studené sauně ložnici neodloží', c.povely.join(','), 'Ložnice:down:100');
 }
 {
   // Po restartu, dokud HUUM neodpověděl, se nezatahuje naslepo
