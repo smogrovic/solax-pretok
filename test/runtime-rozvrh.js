@@ -64,13 +64,13 @@ function snapshot() {
 
   nadpis('1) Rozvrh je vidět hned po startu');
   const cesta = JSON.parse((await spat('/api/blinds/schedule')).body);
-  check('cesta vrátí osm skupin', cesta.rules.length, 8);
+  check('cesta vrátí devět skupin', cesta.rules.length, 9);
   // Razítko nula je schválně: první záloha z telefonu (savedAt > 0) rozvrh přebije,
   // takže se vlastní úpravy nasazením neztratí
   check('  s razítkem nula', cesta.savedAt, 0);
 
   const snap = await snapshot();
-  check('a jsou i ve snapshotu', (snap.blindRules || []).length, 8);
+  check('a jsou i ve snapshotu', (snap.blindRules || []).length, 9);
   check('  i s kroky', snap.blindRules[0].kroky.length, 2);
   check('  a s časem (nejdřív)', snap.blindRules[0].kdy.nejdrive, '06:40');
   check('zpoždění po západu je ve snapshotu taky', snap.zapadDelayMin, 20);
@@ -81,16 +81,16 @@ function snapshot() {
   // Ať se rozvrh dá vrátit bez ohledu na to, co ho vymazalo
   await spat('/api/blinds/schedule/default', 'POST');
   const po = JSON.parse((await spat('/api/blinds/schedule')).body);
-  check('nahraje osm skupin', po.rules.length, 8);
+  check('nahraje devět skupin', po.rules.length, 9);
   // Bez razítka by je stará záloha z telefonu hned zase přepsala
   check('  a dá jim razítko', po.savedAt > 0, true);
   const snap2 = await snapshot();
-  check('a v appce jsou taky', (snap2.blindRules || []).length, 8);
+  check('a v appce jsou taky', (snap2.blindRules || []).length, 9);
   // Pořadí je chronologické, ne podle toho, jak pravidla vznikla. Bez počasí
   // (server tu jede bez klíče k předpovědi) se u slunce sáhne po odhadu.
   check('  a v pořadí, jak se odehrají',
     snap2.blindRules.map(p => p.nazev).join(' → '),
-    'Děti ráno → Dopoledne → Ráno → Ložnice dopoledne → Víkend a prázdniny → Po západu → Ložnice po západu → Garáž');
+    'Děti ráno → Děti po ránu → Dopoledne → Ráno → Ložnice dopoledne → Víkend a prázdniny → Po západu → Ložnice po západu → Garáž');
 
   srv.kill();
   await pauza(200);

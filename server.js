@@ -4479,9 +4479,12 @@ const VIKEND = [false, false, false, false, false, true, true];
 const VSE = [true, true, true, true, true, true, true];
 const krok = (cil, akce, hodnota = null) => ({ cil, akce, hodnota });
 const ROZVRH_VYCHOZI = [
-  // Děti ve všední den: 25 % v 6:40, nebo 15 min před východem, co je později.
-  // Pak už na ně nic nesahá — v 10:00 se naklápí jen ložnice.
+  // Děti ve všední den: 50 % v 6:40, nebo 15 min před východem, co je později;
+  // pak 25 % v 7:00, ale nejdřív při východu — v zimě (východ po sedmé) by jinak
+  // 25 % přišlo dřív než 50 % a zůstalo by 50 %. V 10:00 se naklápí jen ložnice.
   { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' }, kroky: [
+    krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] },
+  { nazev: 'Děti po ránu', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '07:00' }, kroky: [
     krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] },
   { nazev: 'Ložnice dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
     krok('Ložnice', 'tilt', 25)] },
@@ -4508,7 +4511,7 @@ let blindRuleSeq = 1;
 let blindRules = [];
 
 function rozvrhNasadVychozi() {
-  state.rozvrhVerze = 3;
+  state.rozvrhVerze = 4;
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
   return rozvrhSerad();
 }
@@ -4557,30 +4560,41 @@ function rozvrhMigrace(now = Date.now()) {
   // co dělají, a jdou pozastavit nebo smazat. Doplní se jednou — kdo je pak smaže,
   // nedostane je zpátky.
   if ((state.rozvrhVerze || 0) < 2 && zbyle.length) {
-    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Ložnice dopoledne', 'Víkend a prázdniny'].includes(v.nazev))) {
+    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Děti po ránu', 'Ložnice dopoledne', 'Víkend a prázdniny'].includes(v.nazev))) {
       if (zbyle.some(p => p.nazev === v.nazev)) continue;
       zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
       zmeny.push(`přidáno „${v.nazev}"`);
     }
   }
-  // Verze 3: ve všední den děti jen jednou (ráno na 25 %); v 10:00 už jen ložnice.
-  // Upraví se jen skupiny, které mají tvar z verze 2 — ručně předělané zůstanou.
+  // Verze 3: v 10:00 ve všední den už jen ložnice. Upraví se jen skupiny, které mají
+  // tvar z verze 2 — ručně předělané zůstanou.
+  const jenDeti = p => Array.isArray(p.kroky) && p.kroky.length
+    && p.kroky.every(k => (k.cil === 'Miky' || k.cil === 'Elenka') && k.akce === 'tilt');
+  const vsedni = p => JSON.stringify(p.dny) === JSON.stringify(MIGRACE_PRAC);
   if ((state.rozvrhVerze || 0) < 3) {
-    const jenDeti = p => Array.isArray(p.kroky) && p.kroky.length
-      && p.kroky.every(k => (k.cil === 'Miky' || k.cil === 'Elenka') && k.akce === 'tilt');
-    const vsedni = p => JSON.stringify(p.dny) === JSON.stringify(MIGRACE_PRAC);
     for (const p of zbyle) {
-      if (p.nazev === 'Děti ráno' && vsedni(p) && jenDeti(p) && p.kroky.some(k => k.hodnota !== 25)) {
-        p.kroky = p.kroky.map(k => ({ ...k, hodnota: 25 }));
-        zmeny.push('„Děti ráno" na 25 %');
-      } else if (p.nazev === 'Děti dopoledne' && vsedni(p) && p.kdy && p.kdy.typ === 'cas' && p.kdy.cas === '10:00' && jenDeti(p)) {
+      if (p.nazev === 'Děti dopoledne' && vsedni(p) && p.kdy && p.kdy.typ === 'cas' && p.kdy.cas === '10:00' && jenDeti(p)) {
         p.nazev = 'Ložnice dopoledne';
         p.kroky = [{ cil: 'Ložnice', akce: 'tilt', hodnota: 25 }];
         zmeny.push('„Děti dopoledne" → „Ložnice dopoledne" (jen ložnice 25 %)');
       }
     }
   }
-  state.rozvrhVerze = 3;
+  // Verze 4: děti ráno 50 % a v 7:00 (nejdřív při východu) 25 %
+  if ((state.rozvrhVerze || 0) < 4 && zbyle.length) {
+    const rano = zbyle.find(p => p.nazev === 'Děti ráno' && vsedni(p) && jenDeti(p)
+      && p.kdy && p.kdy.typ === 'vychod' && p.kdy.nejdrive === '06:40');
+    if (rano && rano.kroky.some(k => k.hodnota !== 50)) {
+      rano.kroky = rano.kroky.map(k => ({ ...k, hodnota: 50 }));
+      zmeny.push('„Děti ráno" na 50 %');
+    }
+    if (!zbyle.some(p => p.nazev === 'Děti po ránu')) {
+      const v = ROZVRH_VYCHOZI.find(x => x.nazev === 'Děti po ránu');
+      zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
+      zmeny.push('přidáno „Děti po ránu" (25 % v 7:00)');
+    }
+  }
+  state.rozvrhVerze = 4;
   if (!zmeny.length) return false;
   blindRules = zbyle;
   rozvrhSerad(now);

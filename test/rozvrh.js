@@ -521,9 +521,13 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
     await d.api.runBlindSchedule(CT(6, 39));
     check('východ 6:10 → v 6:39 děti ještě ne', deti(d.povely).length, 0);
     await d.api.runBlindSchedule(CT(6, 40));
-    check('  v 6:40 na 25 %', deti(d.povely).join(' | '), 'Miky:orientation:25 | Elenka:orientation:25');
+    check('  v 6:40 na 50 %', deti(d.povely).join(' | '), 'Miky:orientation:50 | Elenka:orientation:50');
+    await d.api.runBlindSchedule(CT(6, 59));
+    check('  v 6:59 nic dalšího', deti(d.povely).length, 2);
+    await d.api.runBlindSchedule(CT(7, 0));
+    check('  v 7:00 na 25 % („Děti po ránu")', deti(d.povely).slice(2).join(' | '), 'Miky:orientation:25 | Elenka:orientation:25');
     await d.api.runBlindSchedule(CT(10, 0));
-    check('  v 10:00 už jen ložnice na 25 % (děti už jsou)', deti(d.povely).slice(2).join(' | '), 'Ložnice:orientation:25');
+    check('  v 10:00 už jen ložnice na 25 %', deti(d.povely).slice(4).join(' | '), 'Ložnice:orientation:25');
     const pred = d.povely.length;
     await d.api.runBlindSchedule(CT(12, 0));
     check('  a pak nic — nic se nedrží', d.povely.length, pred);
@@ -534,7 +538,11 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
     await d.api.runBlindSchedule(CT(7, 4));
     check('východ 7:20 → v 7:04 ještě ne', deti(d.povely).length, 0);
     await d.api.runBlindSchedule(CT(7, 5));
-    check('  v 7:05 ano', deti(d.povely).join(' | '), 'Miky:orientation:25 | Elenka:orientation:25');
+    check('  v 7:05 ano (50 %)', deti(d.povely).join(' | '), 'Miky:orientation:50 | Elenka:orientation:50');
+    await d.api.runBlindSchedule(CT(7, 19));
+    check('  25 % ne v 7:00, ale až při východu (7:20) — vždycky po 50 %', deti(d.povely).length, 2);
+    await d.api.runBlindSchedule(CT(7, 20));
+    check('  v 7:20 na 25 %', deti(d.povely).slice(2).join(' | '), 'Miky:orientation:25 | Elenka:orientation:25');
     const bez = build();
     check('bez počasí platí 6:40', bez.api.rozvrhMinuta({ kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' } }, CT(6)), 400);
   }
@@ -617,17 +625,17 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   const pokoje = (zm = {}) => pravidlo({ id: 9, nazev: 'Pokoje', dny: VIKEND, kdy: { typ: 'cas', cas: '10:00' },
     kroky: [krok('Elenka', 'tilt', 50), krok('Miky', 'tilt', 50)], ...zm });
   const h = build();
-  h.state.rozvrhVerze = 2;
+  h.state.rozvrhVerze = 4;
   h.api.pravidla = [pravidlo({ id: 1 }), pokoje()];
   check('výchozí „Pokoje" se smaže', h.api.rozvrhMigrace(5000) + ' ' + h.api.pravidla.map(p => p.id).join(','), 'true 1');
   check('  a razítko se posune (záloha ji nevrátí)', h.api.savedAt, 5000);
   check('druhý start už nic', h.api.rozvrhMigrace(6000), false);
   const u = build();
-  u.state.rozvrhVerze = 2;
+  u.state.rozvrhVerze = 4;
   u.api.pravidla = [pokoje({ kroky: [krok('Elenka', 'tilt', 30), krok('Miky', 'tilt', 30)] })];
   check('upravená „Pokoje" zůstane', u.api.rozvrhMigrace() + ' ' + u.api.pravidla.length, 'false 1');
   const m = build();
-  m.state.rozvrhVerze = 2;
+  m.state.rozvrhVerze = 4;
   m.api.pravidla = [
     pravidlo({ id: 1, nazev: 'Ráno pokoje', dny: PRAC, kdy: { typ: 'cas', cas: '06:40' },
       kroky: [krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] }),
@@ -646,9 +654,9 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   const h = build();
   h.api.pravidla = [pravidlo({ id: 1, nazev: 'Garáž' })];
   check('doplní se', h.api.rozvrhMigrace(9000), true);
-  check('  „Děti ráno", „Ložnice dopoledne", „Víkend a prázdniny"',
-    h.api.pravidla.map(p => p.nazev).filter(n => n !== 'Garáž').sort().join(','), 'Děti ráno,Ložnice dopoledne,Víkend a prázdniny');
-  check('  a verze se zapíše', h.state.rozvrhVerze, 3);
+  check('  děti ráno a po ránu, ložnice dopoledne, víkend',
+    h.api.pravidla.map(p => p.nazev).filter(n => n !== 'Garáž').sort().join(','), 'Děti po ránu,Děti ráno,Ložnice dopoledne,Víkend a prázdniny');
+  check('  a verze se zapíše', h.state.rozvrhVerze, 4);
   h.api.pravidla = h.api.pravidla.filter(p => p.nazev !== 'Děti ráno');   // smazal si je
   check('smazané se znovu nedoplní', h.api.rozvrhMigrace(9500), false);
   const e = build();
@@ -672,7 +680,8 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
       kroky: [krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] })
   ];
   check('migrace v3 proběhne', h.api.rozvrhMigrace(11000), true);
-  check('  děti ráno na 25 %', h.api.pravidla.find(p => p.id === 1).kroky.map(k => k.hodnota).join(','), '25,25');
+  check('  děti ráno 50 % (v4) a přibude „Děti po ránu"', h.api.pravidla.find(p => p.id === 1).kroky.map(k => k.hodnota).join(',')
+    + ' ' + h.api.pravidla.some(p => p.nazev === 'Děti po ránu'), '50,50 true');
   const lz = h.api.pravidla.find(p => p.id === 2);
   check('  z „Děti dopoledne" je „Ložnice dopoledne" jen s ložnicí', lz.nazev + ': ' + lz.kroky.map(k => k.cil + ' ' + k.hodnota).join(','), 'Ložnice dopoledne: Ložnice 25');
   check('  podruhé nic', h.api.rozvrhMigrace(12000), false);
@@ -681,16 +690,17 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   u.api.pravidla = [pravidlo({ id: 3, nazev: 'Děti dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' },
     kroky: [krok('Miky', 'tilt', 25), krok('Hosté', 'tilt', 25)] })];
   u.api.rozvrhMigrace(11000);
-  check('ručně předělané „Děti dopoledne" zůstane', u.api.pravidla[0].nazev + ' ' + u.api.pravidla[0].kroky.length, 'Děti dopoledne 2');
+  const up = u.api.pravidla.find(p => p.id === 3);
+  check('ručně předělané „Děti dopoledne" zůstane', up.nazev + ' ' + up.kroky.length, 'Děti dopoledne 2');
 }
 
 nadpis('6f) Předvyplněný rozvrh');
 {
   const h = build();
-  check('je tam osm skupin', h.api.ROZVRH_VYCHOZI.length, 8);
+  check('je tam devět skupin', h.api.ROZVRH_VYCHOZI.length, 9);
   // Nasazuje se až po obnově z úložiště, ne při startu — jinak by zálohu jen přepsalo
   check('na prázdném serveru se nasadí', h.api.rozvrhVychoziPoStartu(), true);
-  check('  a je jich osm', h.api.pravidla.length, 8);
+  check('  a je jich devět', h.api.pravidla.length, 9);
   check('podruhé už ne', h.api.rozvrhVychoziPoStartu(), false);
   // Kdyby výchozí pravidlo neprošlo vlastní validací, tiše by se do rozvrhu nedostalo
   check('všechna projdou validací',
@@ -705,7 +715,7 @@ nadpis('6f) Předvyplněný rozvrh');
   const podle = jm => h.api.pravidla.find(p => p.nazev === jm);
   check('děti mají ve výchozím rozvrhu vlastní skupiny',
     h.api.ROZVRH_VYCHOZI.filter(p => p.kroky.some(k => k.cil === 'Miky') && p.kroky.every(k => k.akce === 'tilt')).map(p => p.nazev).join(','),
-    'Děti ráno,Víkend a prázdniny');
+    'Děti ráno,Děti po ránu,Víkend a prázdniny');
   check('dopoledne bez dětí', podle('Dopoledne').kroky.map(k => k.cil).join(','), 'Hosté,Kuchyň,Obývák Okno,Obývák Dveře');
   check('garáž se zavírá ve 23:00 každý den',
     podle('Garáž').kdy.cas + ' ' + podle('Garáž').dny.filter(Boolean).length, '23:00 7');
@@ -760,7 +770,7 @@ nadpis('6g) Prázdná záloha rozvrh nesmaže');
   const h = build();
   h.api.rozvrhVychoziPoStartu();
   const { out } = await volej(h.routy, 'POST /api/blinds/schedule/restore', { savedAt: Date.now(), rules: [] });
-  check('prázdná záloha hotový rozvrh nesmaže', h.api.pravidla.length, 8);
+  check('prázdná záloha hotový rozvrh nesmaže', h.api.pravidla.length, 9);
   check('  a řekne to', out.odmitnuto, true);
   check('  nahlas do logu', h.logy.some(l => /^CHYBA .*záloha bez pravidel/.test(l)), true);
   // Ani záloha, ze které nic neprojde kontrolou
@@ -768,7 +778,7 @@ nadpis('6g) Prázdná záloha rozvrh nesmaže');
   rozbita.api.rozvrhVychoziPoStartu();
   await volej(rozbita.routy, 'POST /api/blinds/schedule/restore',
     { savedAt: Date.now(), rules: [{ dny: [], kdy: {}, kroky: [] }] });
-  check('rozbitá záloha taky ne', rozbita.api.pravidla.length, 8);
+  check('rozbitá záloha taky ne', rozbita.api.pravidla.length, 9);
 }
 {
   // Na prázdném rozvrhu projít musí — jinak by se všechna pravidla dala smazat
@@ -782,7 +792,7 @@ nadpis('6g) Prázdná záloha rozvrh nesmaže');
   // Tlačítko v appce: ať se rozvrh dá vrátit bez ohledu na to, co ho vymazalo
   const h = build();
   const { out } = await volej(h.routy, 'POST /api/blinds/schedule/default', {});
-  check('tlačítko nahraje doporučený rozvrh', out.rules.length, 8);
+  check('tlačítko nahraje doporučený rozvrh', out.rules.length, 9);
   // Bez razítka by ho stará záloha z telefonu hned zase přepsala
   check('  s razítkem teď', out.savedAt > 0, true);
 }
@@ -885,7 +895,7 @@ nadpis('Návrat z „jsme pryč": žaluzie jak by stály podle rozvrhu');
       'Kuchyň:down:25 | Obývák Okno:down:25 | Obývák Dveře:up | Miky:down:25 | Elenka:down:25 | Ložnice:down:25 | Hosté:down:25 | Garáž:down');
     check('  a spočítá to', v.ok + '/' + v.celkem, '8/8');
     const dnes = h.api.pravidla.filter(p => p.spustenoDne).map(p => p.nazev).join(',');
-    check('dnešní proběhlá pravidla jsou odškrtnutá', dnes, 'Děti ráno,Dopoledne,Ložnice dopoledne');
+    check('dnešní proběhlá pravidla jsou odškrtnutá', dnes, 'Děti ráno,Děti po ránu,Dopoledne,Ložnice dopoledne');
     const pred = h.povely.length;
     await h.api.runBlindSchedule(PO_6 + 7 * H);
     check('  a tik je znovu nepustí', h.povely.length, pred);
