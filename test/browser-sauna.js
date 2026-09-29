@@ -605,6 +605,42 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     odhad: { venkuC: 10, tStartC: 50, model, cile: [{ c: 80, minut: 40, hotovoV: kdy.getTime(), dosazitelne: true }] } };
   renderHuum();
   check('p\u0159i topen\u00ed \u201e80 \u00b0C v 18:42\u201c', odhadEl.textContent, '80 \u00b0C v 18:42');
+  OUT.push('\\n8e6) Odpo\u010det pod tla\u010d\u00edtkem');
+  const odp = top('huumOdpocet');
+  const tlac = top('huumTopeniBtn');
+  const cil23 = Date.now() + 23 * MIN - 5000;
+  const topi = (t, cile) => {
+    huumData = { ...huumData, statusCode: 231, heating: true, targetTemperature: 80, temperature: t,
+      fetchedAt: new Date().toISOString(), odhad: { venkuC: 10, tStartC: t, model, cile } };
+    renderHuum();
+  };
+  topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
+  check('topí: odpočet do cíle', odp.textContent, 'za 23 min');
+  check('  je vidět', odp.hidden, false);
+  check('  tučně', Number(getComputedStyle(odp).fontWeight) >= 700, true);
+  check('  pod tlačítkem', odp.getBoundingClientRect().top >= tlac.getBoundingClientRect().bottom - 1, true);
+  const min = Number(jezdec.min), max = Number(jezdec.max);
+  const barvaTed = (() => { const x = document.createElement('div'); x.style.color = dialBarva((50 - min) / (max - min)); return x.style.color; })();
+  check('  v barvě stupnice podle teploty v sauně', odp.style.color, barvaTed);
+  topi(70, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
+  check('  a barva nabíhá s teplotou', odp.style.color !== barvaTed, true);
+  topi(40, [{ c: 80, minut: 65, hotovoV: Date.now() + 65 * MIN - 5000, dosazitelne: true }]);
+  check('přes hodinu v hodinách', odp.textContent, 'za 1 h 05 min');
+  topi(78, [{ c: 80, minut: 0, hotovoV: Date.now() - 2 * MIN, dosazitelne: true }]);
+  check('odhad prošel, teplota ještě ne → „za chvíli"', odp.textContent, 'za chvíli');
+  topi(81, []);
+  check('cíl dosažený → „Nahřáto"', odp.textContent, 'Nahřáto');
+  topi(50, [{ c: 80, minut: null, hotovoV: null, dosazitelne: false }]);
+  check('nedosažitelný cíl → nic', odp.hidden, true);
+  topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
+  huumData = { ...huumData, heating: false, statusCode: 232 };
+  renderHuum();
+  check('netopí → nic (i se starým odhadem)', odp.hidden, true);
+  // Střed číselníku se musí vejít do kruhu i s odpočtem
+  topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
+  check('obsah středu se vejde do číselníku',
+    top('huumTopeniPopis').getBoundingClientRect().bottom <= top('huumDial').getBoundingClientRect().bottom - 20, true);
+
   huumData = { ...huumData, statusCode: 232, heating: false, odhad: null };
   huumCilDotcen = false;
   renderHuum();

@@ -1616,6 +1616,7 @@
   /* Když topí, je tlačítko samo oranžové — oranžový obvod by na něm při vypínání zmizel */
   .huum-power.topi #huumPowerRing{stroke:#fff;}
   .huum-power-ico{width:34px;height:34px;}
+  .huum-odpocet{font-size:17px;font-weight:800;line-height:1.1;letter-spacing:-0.01em;}
   .huum-odhad{text-align:center;font-size:13px;font-weight:600;color:var(--grey-text);margin-top:4px;min-height:18px;}
   .huum-odhad:empty{display:none;}
   .huum-dial-val{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
@@ -3017,6 +3018,8 @@
                 <path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path>
               </svg>
             </button>
+            <!-- Odpočet do cílové teploty (model náběhu), barva podle teploty v sauně -->
+            <div class="huum-odpocet" id="huumOdpocet" hidden></div>
             <div class="huum-dial-val" id="huumCilVal">– °C</div>
             <div class="huum-dial-popis" id="huumTopeniPopis"></div>
           </div>
@@ -8272,6 +8275,37 @@ function dialKresli() {
       : (huumTopiTed === false ? `Podrž pro zapnutí na ${huumCil()} °C` : '');
   }
   bezpecne(renderHuumOdhad);
+  bezpecne(renderHuumOdpocet);
+}
+
+// Odpočet pod tlačítkem: kolik zbývá do cílové teploty podle modelu náběhu.
+// Server posílá čas dosažení (hotovoV); mezi dotazy na kamna se odtikává tady.
+// Barva je tatáž jako konec oblouku — podle toho, kam sauna už došla.
+function huumOdpocetText(zbyvaMs) {
+  if (zbyvaMs <= 0) return 'za chvíli';
+  const min = Math.ceil(zbyvaMs / 60000);
+  return min < 60 ? `za ${min} min` : `za ${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+}
+
+function renderHuumOdpocet(now = Date.now()) {
+  const el = document.getElementById('huumOdpocet');
+  if (!el) return;
+  const d = huumData || {};
+  const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
+  let text = '';
+  if (huumTopiTed === true) {
+    if (huumTeplotaTed !== null && huumTeplotaTed >= cilC) text = 'Nahřáto';
+    else {
+      const cile = (d.odhad && d.odhad.cile) || [];
+      const c = cile.find(x => x.c === cilC) || cile[0];
+      if (c && c.dosazitelne !== false && typeof c.hotovoV === 'number') text = huumOdpocetText(c.hotovoV - now);
+    }
+  }
+  el.hidden = !text;
+  el.textContent = text;
+  const min = huumCilMin(), max = huumCilMax();
+  el.style.color = huumTeplotaTed === null || max <= min ? 'var(--navy)'
+    : dialBarva((huumTeplotaTed - min) / (max - min));
 }
 
 // ---- Odhad náběhu ----
