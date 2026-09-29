@@ -10,3 +10,4 @@ public/nas/vysavac.relace.json
 # Heslo a přihlášení k účtu VW (auto) — zůstává na NASu
 public/nas/auto.config.json
 public/nas/auto.tokeny.json
+__pycache__/
