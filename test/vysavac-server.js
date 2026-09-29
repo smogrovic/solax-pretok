@@ -11,7 +11,7 @@ const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('vysavač (appka)');
 
 const CODE = between('// ---------- Vysavač Xiaomi (most na NASu) ----------',
-                     '// ---------- Sekačka Anthbot (cloud) ----------');
+                     '// ---------- Auto VW (most na NASu) ----------');
 
 function build() {
   const logy = [], zpravy = [], routy = {};

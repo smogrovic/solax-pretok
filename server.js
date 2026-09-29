@@ -535,6 +535,7 @@ function snapshot() {
     nukiEnabled,
     zavlaha: zavlahaPayload(),
     vysavac: vysavacPayload(),
+    auto: autoPayload(),
     sekacka: sekackaPayload(),
     pushEnabled,
     lockEnabled,
@@ -9033,6 +9034,73 @@ app.post('/api/vysavac/povel', (req, res) => {
   const mistnosti = ukol.ids ? ` (${ukol.ids.map(id => (vysavacStav.mistnosti.find(m => m.id === id) || {}).jmeno || id).join(', ')})` : '';
   addLog(`Vysavač: ${VYSAVAC_POPIS_TYPU[ukol.typ]}${mistnosti} — odesláno`);
   res.json({ success: true, message: 'Odesláno — vysavač povel dostane do půl minuty.' });
+});
+
+// ---------- Auto VW (most na NASu) ----------
+// Procenta baterie, dojezd a nabíjení umí jen cloud Volkswagenu. Přihlášení drží
+// most na NASu (public/nas/auto-most.py, knihovna CarConnectivity) a posílá sem
+// jen stav — heslo k VW ID z domu nikam nejde. Most se ozývá po 10 minutách.
+const AUTO_TICHO_MS = 35 * 60 * 1000;   // tři propadlá kola = most mlčí
+
+let autoStav = null;
+let autoKdy = 0;
+
+function autoZive(at = Date.now()) {
+  return autoKdy > 0 && at - autoKdy < AUTO_TICHO_MS;
+}
+function autoPayload() {
+  return { stav: autoStav, kdy: autoKdy || null, zive: autoZive() };
+}
+
+// Z mostu se bere jen to, co má tvar
+function autoOcisti(t) {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return null;
+  const cislo = (v, min, max) => (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : null);
+  const text = (v, max = 80) => (typeof v === 'string' && v ? v.slice(0, max) : null);
+  const cas = v => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+  return {
+    soc: cislo(t.soc, 0, 100),
+    dojezdKm: cislo(t.dojezdKm, 0, 2000),
+    nabijeni: text(t.nabijeni, 40),
+    nabiji: typeof t.nabiji === 'boolean' ? t.nabiji : null,
+    cilSoc: cislo(t.cilSoc, 0, 100),
+    vykonKw: cislo(t.vykonKw, 0, 400),
+    hotovoV: cas(t.hotovoV),
+    zmerenoV: cas(t.zmerenoV),
+    model: text(t.model, 60),
+    chyba: text(t.chyba, 200)
+  };
+}
+
+const AUTO_NABIJENI_CZ = {
+  off: 'nenabíjí', ready_for_charging: 'připraveno k nabíjení', charging: 'nabíjí se',
+  conservation: 'udržuje baterii', error: 'chyba nabíjení', discharging: 'vybíjí se'
+};
+
+// Do Logu jen to podstatné: začátek a konec nabíjení, potíž s přihlášením
+function autoZmena(stary, novy) {
+  const zapisy = [];
+  if (!novy) return zapisy;
+  if (novy.chyba && novy.chyba !== (stary && stary.chyba)) zapisy.push(`Auto: ${novy.chyba}`);
+  if (novy.nabiji !== null && stary && stary.nabiji !== null && novy.nabiji !== stary.nabiji) {
+    zapisy.push(novy.nabiji
+      ? `Auto: nabíjí se${novy.soc !== null ? ` (${Math.round(novy.soc)} %)` : ''}`
+      : `Auto: nabíjení skončilo${novy.soc !== null ? ` (${Math.round(novy.soc)} %)` : ''}`);
+  }
+  return zapisy;
+}
+
+app.post('/api/auto/stav', (req, res) => {
+  const stav = autoOcisti(req.body);
+  if (!stav) return res.status(400).json({ error: 'Chybí stav.' });
+  const bylTicho = !autoZive();
+  for (const z of autoZmena(autoStav, stav)) addLog(z);
+  if (bylTicho && autoKdy) addLog('Auto: most na NASu se zase ozývá');
+  // Chyba bez čísel nepřepíše poslední známá procenta — jen se k nim přidá
+  autoStav = stav.chyba && stav.soc === null && autoStav ? { ...autoStav, chyba: stav.chyba } : stav;
+  autoKdy = Date.now();
+  broadcast('auto', { auto: autoPayload() });
+  res.json({ ok: true });
 });
 
 // ---------- Sekačka Anthbot (cloud) ----------

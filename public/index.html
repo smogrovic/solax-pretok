@@ -1773,6 +1773,12 @@
     font-size:11px;
     color:var(--grey-text);
   }
+  .wb-auto{width:100%;margin-top:12px;padding:10px 12px;border-radius:14px;background:rgba(44,62,80,0.05);box-sizing:border-box;}
+  .wb-auto[hidden]{display:none;}
+  .wb-auto-hlavni{display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--grey-text);}
+  .wb-auto-soc{font-size:22px;font-weight:700;color:var(--navy);}
+  .wb-auto-meta{font-size:11px;color:var(--grey-text);margin-top:2px;}
+  .wb-auto.stare .wb-auto-soc{color:var(--grey-text);}
   .wb-stats{
     display:flex;
     width:100%;
@@ -2811,6 +2817,11 @@
             <div class="wb-stat-label">Stav</div>
             <div class="wb-stat-val" id="wbStatusVal">–</div>
           </div>
+        </div>
+        <!-- Baterie auta z cloudu VW (most na NASu). Bez mostu se neukazuje. -->
+        <div class="wb-auto" id="wbAuto" hidden>
+          <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
+          <div class="wb-auto-meta" id="wbAutoMeta"></div>
         </div>
         <div class="wb-mode-toggle">
           <span class="wb-mode-opt" id="wbModeFast">FAST</span>
@@ -9171,6 +9182,42 @@ if (zapadDelayEl) {
   });
 }
 
+// ---------- Baterie auta (VW přes most na NASu) ----------
+// Procenta a dojezd z cloudu VW. VW hlásí i staré hodnoty, když auto spí — proto
+// se pod čísly píše, kdy auto naposledy měřilo, a u mlčícího mostu zešedne.
+const wbAutoEl = document.getElementById('wbAuto');
+let autoData = null;
+const AUTO_NABIJENI_CZ = {
+  off: 'nenabíjí', ready_for_charging: 'připraveno k nabíjení', charging: 'nabíjí se',
+  conservation: 'udržuje baterii', error: 'chyba nabíjení', discharging: 'vybíjí se'
+};
+
+function renderAuto(d) {
+  if (d !== undefined) autoData = d;
+  if (!wbAutoEl) return;
+  const a = autoData;
+  wbAutoEl.hidden = !(a && a.kdy && a.stav);
+  if (wbAutoEl.hidden) return;
+  const s = a.stav;
+  wbAutoEl.classList.toggle('stare', !a.zive);
+  document.getElementById('wbAutoSoc').textContent = typeof s.soc === 'number' ? `🚗 ${Math.round(s.soc)} %` : '🚗 –';
+  const kusy = [];
+  if (typeof s.dojezdKm === 'number') kusy.push(`dojezd ${Math.round(s.dojezdKm)} km`);
+  if (s.nabijeni) {
+    let n = AUTO_NABIJENI_CZ[s.nabijeni] || s.nabijeni;
+    if (s.nabiji && typeof s.cilSoc === 'number') n += ` do ${Math.round(s.cilSoc)} %`;
+    if (s.nabiji && typeof s.vykonKw === 'number') n += ` (${s.vykonKw.toFixed(1).replace('.', ',')} kW)`;
+    kusy.push(n);
+  }
+  document.getElementById('wbAutoText').textContent = kusy.join(' · ');
+  const meta = [];
+  if (!a.zive) meta.push('most na NASu mlčí');
+  if (s.chyba) meta.push(s.chyba);
+  if (s.nabiji && s.hotovoV) meta.push(`nabito v ${fmtSolTime(Date.parse(s.hotovoV))}`);
+  if (s.zmerenoV) meta.push(`změřeno ${fmtSolTime(Date.parse(s.zmerenoV))}`);
+  document.getElementById('wbAutoMeta').textContent = meta.join(' · ');
+}
+
 // ---------- Zítra jsou prázdniny ----------
 // Rozvrh žaluzií počítá takový den jako neděli, takže pojede víkendová sada.
 const prazdninyBtnEl = document.getElementById('prazdninyBtn');
@@ -10784,6 +10831,7 @@ function applySnapshot(snap) {
   bezpecne(() => renderZavlaha(snap.zavlaha));
   bezpecne(() => renderSekacka(snap.sekacka));
   bezpecne(() => renderVysavac(snap.vysavac || null));
+  bezpecne(() => renderAuto(snap.auto || null));
   bezpecne(() => renderPrazdniny(snap.prazdniny));
   bezpecne(() => renderLozniceZavreno(snap.lozniceZavreno));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
@@ -11103,6 +11151,7 @@ function connectStream() {
   es.addEventListener('zavlaha', e => { renderZavlaha(JSON.parse(e.data).zavlaha); });
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
+  es.addEventListener('auto', e => { bezpecne(() => renderAuto(JSON.parse(e.data).auto)); });
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('lozniceZavreno', e => { renderLozniceZavreno(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });

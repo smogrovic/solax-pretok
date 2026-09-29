@@ -7,3 +7,6 @@ public/nas/uklid.config.json
 # Heslo k účtu Xiaomi (vysavač) — zůstává u člověka doma
 public/nas/vysavac.config.json
 public/nas/vysavac.relace.json
+# Heslo a přihlášení k účtu VW (auto) — zůstává na NASu
+public/nas/auto.config.json
+public/nas/auto.tokeny.json
