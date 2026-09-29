@@ -473,7 +473,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   await wait(60);
   check('kr\u00e1tk\u00e9 klepnut\u00ed saunu NEZAPNE', POSLANO.length, 0);
   check('  a popisek \u0159ekne, \u017ee se m\u00e1 dr\u017eet',
-    /Podr\u017e pro zapnut\u00ed na 65 \u00b0C/.test(top('huumTopeniPopis').textContent), 'true');
+    top('huumTopeniPopis').textContent, 'Podr\u017e pro zapnut\u00ed');
 
   dotyk('pointerdown');
   await wait(300);
@@ -592,19 +592,20 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumCilDotcen = true;
   jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
   renderHuum();
-  check('před zapnutím: za jak dlouho na cíl z číselníku', odhadEl.textContent, 'Nahřátí na 80 °C ~1 h 17 min');
+  check('před zapnutím: za jak dlouho na cíl z číselníku', odhadEl.textContent, 'Nahřátí ~1 h 17 min');
+  check('  popisek bez teploty', top('huumTopeniPopis').textContent, 'Podrž pro zapnutí');
   jezdec.value = '60'; jezdec.dispatchEvent(new Event('input'));
-  check('  točení číselníkem ho hned přepočítá', odhadEl.textContent, 'Nahřátí na 60 °C ~46 min');
+  check('  točení číselníkem ho hned přepočítá', odhadEl.textContent, 'Nahřátí ~46 min');
   // Stav kamen neznámý (stará data), model je → odhad pořád vidět
   huumData = { ...huumData, fetchedAt: new Date(Date.now() - 60 * MIN).toISOString() };
   renderHuum();
   jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
-  check('  i když stav kamen zrovna neznáme', odhadEl.textContent, 'Nahřátí na 80 °C ~1 h 17 min');
+  check('  i když stav kamen zrovna neznáme', odhadEl.textContent, 'Nahřátí ~1 h 17 min');
   huumData = { ...huumData, fetchedAt: new Date().toISOString() };
   renderHuum();
   check('  i s rozjezdem kamen (cíl 60 → ~46 min)', Math.round(odhadNabehuJs(model, 14.94, 27, 60).minut), 46);
   jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
-  check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, '90 \u00b0C je nad mo\u017enostmi kamen');
+  check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, 'Nad mo\u017enosti kamen');
   check('  vzorec sedí i pro mráz (−20 → 85 °C ~133 min)',
     Math.round(odhadNabehuJs(model, -20, -20, 85).minut), 133);
   check('  a z 10 °C při −20 venku ~108 min', Math.round(odhadNabehuJs(model, -20, 10, 85).minut), 108);
@@ -617,7 +618,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('při topení místo „80 °C v …" kolik kamna ještě topí', odhadEl.textContent, 'Zbývá 1:20');
   huumData = { ...huumData, odhad: { ...huumData.odhad, cile: [{ c: 95, minut: null, hotovoV: null, dosazitelne: false }] } };
   renderHuum();
-  check('  nedosažitelný cíl se řekne pořád', odhadEl.textContent, '95 °C je nad možnostmi kamen');
+  check('  nedosažitelný cíl se řekne pořád', odhadEl.textContent, 'Nad možnosti kamen');
   huumData = { ...huumData, endDate: 0, odhad: { ...huumData.odhad, cile: [] } };
   renderHuum();
   check('  bez konce topení nic', odhadEl.textContent, '');

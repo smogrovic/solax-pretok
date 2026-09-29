@@ -8272,7 +8272,7 @@ function dialKresli() {
   e.slider.setAttribute('aria-valuetext', huumCil() + ' °C');
   if (e.popis) {
     e.popis.textContent = huumTopiTed === true ? 'Podrž pro vypnutí'
-      : (huumTopiTed === false ? `Podrž pro zapnutí na ${huumCil()} °C` : '');
+      : (huumTopiTed === false ? 'Podrž pro zapnutí' : '');
   }
   bezpecne(renderHuumOdhad);
   bezpecne(renderHuumOdpocet);
@@ -8342,7 +8342,7 @@ function renderHuumOdhad() {
     const konec = huumData && huumData.endDate ? huumData.endDate * 1000 : 0;
     // Při nahřívání tady zbývající doba topení, po nahřátí „Nahřáto" (a doba
     // topení se přestěhuje pod tlačítko místo odpočtu)
-    el.textContent = nad ? `${nad.c} °C je nad možnostmi kamen`
+    el.textContent = nad ? 'Nad možnosti kamen'
       : (huumSaunaNahrata() ? 'Nahřáto'
       : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : ''));
     return;
@@ -8353,8 +8353,9 @@ function renderHuumOdhad() {
   const r = odhadNabehuJs(o.model, o.venkuC, o.tStartC, cil);
   const delka = min => min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
   el.textContent = !r ? ''
-    : (!r.dosazitelne ? `${cil} °C je nad možnostmi kamen`
-    : (r.minut === 0 ? `Na ${cil} °C už je` : `Nahřátí na ${cil} °C ~${delka(Math.round(r.minut))}`));
+    // Teplota je jen jednou, velká pod tlačítkem — tady už jen čas
+    : (!r.dosazitelne ? 'Nad možnosti kamen'
+    : (r.minut === 0 ? 'Už je nahřáto' : `Nahřátí ~${delka(Math.round(r.minut))}`));
 }
 
 function renderHuumTopeni(d, cerstve) {
