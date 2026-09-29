@@ -8326,10 +8326,12 @@ function renderHuumOdhad() {
   const o = huumData && huumData.odhad;
   if (!o || huumTopiTed === null) { el.textContent = ''; return; }
   if (huumTopiTed) {
-    // Topí: kdy bude cíl (nebo nedosažené prahy), podle serveru
-    el.textContent = (o.cile || []).map(c => c.dosazitelne === false
-      ? `${c.c} °C je nad možnostmi kamen`
-      : (typeof c.hotovoV === 'number' ? `${c.c} °C v ${fmtSolTime(c.hotovoV)}` : '')).filter(Boolean).join(' · ');
+    // Topí: kdy bude cíl ukazuje odpočet pod tlačítkem; tady jak dlouho kamna
+    // ještě potopí (konec topení hlásí HUUM). Nedosažitelný cíl se řekne pořád.
+    const nad = (o.cile || []).find(c => c.dosazitelne === false);
+    const konec = huumData && huumData.endDate ? huumData.endDate * 1000 : 0;
+    el.textContent = nad ? `${nad.c} °C je nad možnostmi kamen`
+      : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : '');
     return;
   }
   // Netopí: za jak dlouho by se nahřála na cíl z číselníku

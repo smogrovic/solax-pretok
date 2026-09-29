@@ -602,9 +602,16 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Top\u00ed: kdy bude c\u00edl, podle serveru
   const kdy = new Date(); kdy.setHours(18, 42, 0, 0);
   huumData = { ...huumData, statusCode: 231, heating: true, targetTemperature: 80,
+    endDate: Math.round((Date.now() + 80 * MIN) / 1000),
     odhad: { venkuC: 10, tStartC: 50, model, cile: [{ c: 80, minut: 40, hotovoV: kdy.getTime(), dosazitelne: true }] } };
   renderHuum();
-  check('p\u0159i topen\u00ed \u201e80 \u00b0C v 18:42\u201c', odhadEl.textContent, '80 \u00b0C v 18:42');
+  check('při topení místo „80 °C v …" kolik kamna ještě topí', odhadEl.textContent, 'Zbývá 1:20');
+  huumData = { ...huumData, odhad: { ...huumData.odhad, cile: [{ c: 95, minut: null, hotovoV: null, dosazitelne: false }] } };
+  renderHuum();
+  check('  nedosažitelný cíl se řekne pořád', odhadEl.textContent, '95 °C je nad možnostmi kamen');
+  huumData = { ...huumData, endDate: 0, odhad: { ...huumData.odhad, cile: [] } };
+  renderHuum();
+  check('  bez konce topení nic', odhadEl.textContent, '');
   OUT.push('\\n8e6) Odpo\u010det pod tla\u010d\u00edtkem');
   const odp = top('huumOdpocet');
   const tlac = top('huumTopeniBtn');
