@@ -474,6 +474,61 @@ setTimeout(async () => {
   check('  tlačítko je zase Přehled', prBtn.textContent, 'Přehled');
   prBtn.click(); prBtn.click();
   check('„Den" vrátí denní pohled', getComputedStyle(document.getElementById('kalDenPohled')).display !== 'none' || window.innerWidth < 1000, true);
+
+  R.push('\\n11) Klepnutí na událost: detail');
+  d14[0].udalosti = [casU(0, 9, 'Zubař', 'Lukáš', { misto: 'Benešov, Masarykovo nám. 1' }),
+    casU(0, 14, 'Let OK123 PRG–FCO–PRG a pak ještě hodně dlouhý popis, který se do bloku nevejde', 'Lukáš', { puvod: 'Flying' }),
+    { uid: 'sv', od: denMs(0), do: denMs(1), celodenni: true, nazev: 'Státní svátek', misto: null, kalendar: 'Family' }];
+  renderKalendar({ enabled: true, dnu: 14, days: d14, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+  document.getElementById('kalDenNazev').click();
+  const detail = document.getElementById('kalDetail');
+  check('detail je zavřený', detail.hidden, true);
+  const blokyD = [...document.querySelectorAll('#kalMrizka .kal-blok')];
+  const blokLet = blokyD.find(b => /OK123/.test(b.textContent));
+  blokLet.click();
+  const karta = document.getElementById('kalDetailKarta');
+  check('klepnutí na událost otevře detail', detail.hidden, false);
+  check('  s celým názvem', karta.querySelector('.kal-detail-nazev').textContent,
+    'Let OK123 PRG–FCO–PRG a pak ještě hodně dlouhý popis, který se do bloku nevejde');
+  check('  čas od–do', /· 14:00–15:00$/.test(karta.querySelectorAll('.kal-detail-radek')[0].textContent), true);
+  check('  a kalendář i s původem', karta.querySelector('.kal-detail-kal').textContent, 'Flying · Lukáš');
+  const nzR = karta.querySelector('.kal-detail-nazev').getBoundingClientRect();
+  check('  název se celý vejde (zalamuje se)', nzR.right <= karta.getBoundingClientRect().right + 1 && nzR.height > 30, true);
+  karta.click();
+  check('klepnutí na kartu ji nezavře', detail.hidden, false);
+  detail.click();
+  check('klepnutí vedle ji zavře', detail.hidden, true);
+  blokyD.find(b => /Zubař/.test(b.textContent)).click();
+  check('místo je v detailu vidět', karta.textContent.includes('Benešov, Masarykovo nám. 1'), true);
+  detail.click();
+  document.querySelector('#kalMrizka .kal-cely-chip').click();
+  check('celodenní: „celý den"', /· celý den$/.test(karta.querySelectorAll('.kal-detail-radek')[0].textContent), true);
+  detail.click();
+  // Samo se zavře (v appce po 15 s; tady zkrácené)
+  kalDetailMs = 60;
+  blokLet.click();
+  await new Promise(r => setTimeout(r, 120));
+  check('samo se zavře po čase', detail.hidden, true);
+  kalDetailMs = 15000;
+  check('  výchozí je 15 s', kalDetailMs, 15000);
+  // V Přehledu událost otevře detail a den nepřepne
+  prBtn.click();
+  const radekP = [...document.querySelectorAll('#kalPrehled .kal-p-u')].find(r => /Zubař/.test(r.textContent));
+  radekP.click();
+  check('v Přehledu klepnutí na událost otevře detail', detail.hidden, false);
+  check('  a Přehled zůstane', document.getElementById('kalPrehled').hidden, false);
+  detail.click();
+  prBtn.click();
+  // Zavření kalendáře zavře i detail
+  blokLet.isConnected && blokLet.click();
+  document.querySelector('#kalMrizka .kal-blok').click();
+  kalOtevri(false);
+  check('zavření kalendáře zavře i detail', detail.hidden, true);
+  kalOtevri(true);
+  // Telefonní seznam dnů: řádek události otevře detail taky
+  document.querySelector('#kalDny .kal-udalost').click();
+  check('řádek v telefonním seznamu otevře detail', detail.hidden, false);
+  detail.click();
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

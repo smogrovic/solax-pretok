@@ -209,6 +209,19 @@
   .kal-p-celodenni .kal-p-nazev{font-weight:600;}
   .kal-p-vic{font-size:10px;color:var(--muted);font-weight:600;}
 
+  /* Detail události: karta uprostřed, pozadí jen lehce ztlumené */
+  .kal-detail{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    padding:16px;background:rgba(44,62,80,0.18);}
+  .kal-detail[hidden]{display:none;}
+  .kal-detail-karta{background:var(--card);border-radius:20px;border-left:8px solid var(--orange);
+    box-shadow:0 12px 40px rgba(44,62,80,0.22);width:100%;max-width:520px;padding:18px 20px 18px 22px;
+    animation:kal-detail-in .18s ease-out;}
+  @keyframes kal-detail-in{from{transform:scale(.92);opacity:0;}to{transform:none;opacity:1;}}
+  .kal-detail-nazev{font-size:24px;font-weight:800;color:var(--navy);line-height:1.2;overflow-wrap:anywhere;}
+  .kal-detail-radek{font-size:15px;color:var(--grey-text);margin-top:8px;overflow-wrap:anywhere;}
+  .kal-detail-kal{font-size:13px;font-weight:700;margin-top:12px;}
+  .kal-blok,.kal-cely-chip,.kal-udalost,.kal-p-u{cursor:pointer;}
+
   /* Denní pohled se sloupci po kalendářích — jen na širokém displeji */
   .kal-den-pohled{flex:1;display:none;flex-direction:column;min-height:0;}
   @media (min-width: 1000px) {
@@ -1657,8 +1670,7 @@
   /* Když topí, je tlačítko samo oranžové — oranžový obvod by na něm při vypínání zmizel */
   .huum-power.topi #huumPowerRing{stroke:#fff;}
   .huum-power-ico{width:34px;height:34px;}
-  .huum-odpocet{font-size:17px;font-weight:800;line-height:1.1;letter-spacing:-0.01em;}
-  .huum-odhad{text-align:center;font-size:13px;font-weight:600;color:var(--grey-text);margin-top:4px;min-height:18px;}
+  .huum-odhad{text-align:center;font-size:17px;font-weight:800;letter-spacing:-0.01em;color:var(--grey-text);margin-top:4px;min-height:22px;}
   .huum-odhad:empty{display:none;}
   .huum-dial-val{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
   .huum-dial-popis{
@@ -3057,8 +3069,6 @@
                 <path d="M6.4 6.4a8 8 0 1 0 11.2 0"></path>
               </svg>
             </button>
-            <!-- Odpočet do cílové teploty (model náběhu), barva podle teploty v sauně -->
-            <div class="huum-odpocet" id="huumOdpocet" hidden></div>
             <div class="huum-dial-val" id="huumCilVal">– °C</div>
             <div class="huum-dial-popis" id="huumTopeniPopis"></div>
           </div>
@@ -3544,6 +3554,10 @@
     <div class="kal-meta" id="kalMeta"></div>
   </div>
 </div>
+
+<!-- Detail události z kalendáře: klepnutím na událost se zvětší, klepnutím vedle
+     (nebo samo po 15 s) zase zmizí -->
+<div class="kal-detail" id="kalDetail" hidden><div class="kal-detail-karta" id="kalDetailKarta"></div></div>
 
 <!-- Potvrzení u poloh jezdce, které dům utlumí. Stojí mimo pás stránek, aby ho
      nemohl uříznout sloupec na iPadu. -->
@@ -8304,12 +8318,10 @@ function dialKresli() {
       : (huumTopiTed === false ? 'Podrž pro zapnutí' : '');
   }
   bezpecne(renderHuumOdhad);
-  bezpecne(renderHuumOdpocet);
 }
 
-// Odpočet pod tlačítkem: kolik zbývá do cílové teploty podle modelu náběhu.
-// Server posílá čas dosažení (hotovoV); mezi dotazy na kamna se odtikává tady.
-// Barva je tatáž jako konec oblouku — podle toho, kam sauna už došla.
+// Odpočet do cílové teploty podle modelu náběhu. Server posílá čas dosažení
+// (hotovoV); mezi dotazy na kamna se odtikává po 30 s (renderHuum).
 function huumOdpocetText(zbyvaMs) {
   if (zbyvaMs <= 0) return 'za chvíli';
   const min = Math.ceil(zbyvaMs / 60000);
@@ -8322,29 +8334,10 @@ function huumSaunaNahrata() {
   return huumTopiTed === true && huumTeplotaTed !== null && huumTeplotaTed >= cilC;
 }
 
-function renderHuumOdpocet(now = Date.now()) {
-  const el = document.getElementById('huumOdpocet');
-  if (!el) return;
-  const d = huumData || {};
-  const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
-  let text = '';
-  if (huumTopiTed === true) {
-    // Nahřátá: pod tlačítkem kolik ještě kamna potopí, „Nahřáto" jde pod číselník
-    if (huumSaunaNahrata()) {
-      const konec = d.endDate ? d.endDate * 1000 : 0;
-      text = konec > now ? `Zbývá ${fmtSolDur(konec - now)}` : 'Nahřáto';
-    }
-    else {
-      const cile = (d.odhad && d.odhad.cile) || [];
-      const c = cile.find(x => x.c === cilC) || cile[0];
-      if (c && c.dosazitelne !== false && typeof c.hotovoV === 'number') text = huumOdpocetText(c.hotovoV - now);
-    }
-  }
-  el.hidden = !text;
-  el.textContent = text;
+// Barva stupnice pro teplotu (stejná jako oblouk a puntík na číselníku)
+function huumBarvaTeploty(t) {
   const min = huumCilMin(), max = huumCilMax();
-  el.style.color = huumTeplotaTed === null || max <= min ? 'var(--navy)'
-    : dialBarva((huumTeplotaTed - min) / (max - min));
+  return t === null || t === undefined || max <= min ? 'var(--navy)' : dialBarva((t - min) / (max - min));
 }
 
 // ---- Odhad náběhu ----
@@ -8359,21 +8352,22 @@ function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
   return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
 }
 
-function renderHuumOdhad() {
+// Jediný stavový řádek pod číselníkem: jak dlouho potrvá nahřátí. Před zapnutím
+// v barvě nastavované cílové teploty, po zapnutí v barvě teploty, kam už sauna došla.
+function renderHuumOdhad(now = Date.now()) {
   const el = document.getElementById('huumOdhad');
   if (!el) return;
   const o = huumData && huumData.odhad;
   if (!o) { el.textContent = ''; return; }
   if (huumTopiTed === true) {
-    // Topí: kdy bude cíl ukazuje odpočet pod tlačítkem; tady jak dlouho kamna
-    // ještě potopí (konec topení hlásí HUUM). Nedosažitelný cíl se řekne pořád.
-    const nad = (o.cile || []).find(c => c.dosazitelne === false);
-    const konec = huumData && huumData.endDate ? huumData.endDate * 1000 : 0;
-    // Při nahřívání tady zbývající doba topení, po nahřátí „Nahřáto" (a doba
-    // topení se přestěhuje pod tlačítko místo odpočtu)
-    el.textContent = nad ? 'Nad možnosti kamen'
-      : (huumSaunaNahrata() ? 'Nahřáto'
-      : (konec > Date.now() ? `Zbývá ${fmtSolDur(konec - Date.now())}` : ''));
+    const d = huumData || {};
+    const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
+    const cile = o.cile || [];
+    const c = cile.find(x => x.c === cilC) || cile[0];
+    el.textContent = huumSaunaNahrata() ? 'Nahřáto'
+      : (c && c.dosazitelne === false ? 'Nad možnosti kamen'
+      : (c && typeof c.hotovoV === 'number' ? huumOdpocetText(c.hotovoV - now) : ''));
+    el.style.color = huumBarvaTeploty(huumTeplotaTed);
     return;
   }
   // Netopí (nebo stav kamen neznámý): jak dlouho by nahřátí na teplotu
@@ -8385,6 +8379,7 @@ function renderHuumOdhad() {
     // Teplota je jen jednou, velká pod tlačítkem — tady už jen čas
     : (!r.dosazitelne ? 'Nad možnosti kamen'
     : (r.minut === 0 ? 'Už je nahřáto' : `Nahřátí ~${delka(Math.round(r.minut))}`));
+  el.style.color = huumBarvaTeploty(cil);
 }
 
 function renderHuumTopeni(d, cerstve) {
@@ -12138,6 +12133,7 @@ function renderKalDen() {
       if (!u.celodenni || u.kalendar !== k.nazev) continue;
       const chip = div('kal-cely-chip', box);
       chip.textContent = u.nazev;
+      chip.addEventListener('click', e => { e.stopPropagation(); kalDetailOtevri(u); });
       const cb = kalBarvaU(u, k, i);
       chip.style.background = kalSvetle(cb, 0.18);
       chip.style.color = kalCitelna(cb, 0.18);
@@ -12175,6 +12171,7 @@ function renderKalDen() {
         b.style.color = kalCitelna(barva, 0.14);
         b.style.borderLeftColor = barva;
         b.style.background = kalSvetle(barva, 0.14);
+        b.addEventListener('click', e => { e.stopPropagation(); kalDetailOtevri(u); });
         const jm = document.createElement('b');
         jm.textContent = u.nazev;
         b.appendChild(jm);
@@ -12289,6 +12286,8 @@ function renderKalPrehled() {
     for (const u of (den.udalosti || [])) {
       const r = document.createElement('div');
       r.className = 'kal-p-u' + (u.celodenni ? ' kal-p-celodenni' : '');
+      // Událost otevře detail; den (klepnutí jinam do buňky) se tím nepřepne
+      r.addEventListener('click', e => { e.stopPropagation(); kalDetailOtevri(u); });
       const tecka = document.createElement('span');
       tecka.className = 'kal-p-tecka';
       tecka.style.background = kalBarvaU(u);
@@ -12335,6 +12334,49 @@ function renderKalPrehled() {
 
 if (kalPrehledBtn) kalPrehledBtn.addEventListener('click', () => kalPrehledPrepni(!kalPrehledZap));
 
+// ---------- Detail události ----------
+const kalDetailEl = document.getElementById('kalDetail');
+const kalDetailKartaEl = document.getElementById('kalDetailKarta');
+let kalDetailMs = 15000;         // samo se zavře po 15 s
+let kalDetailTimer = null;
+
+function kalDetailZavri() {
+  if (kalDetailTimer) { clearTimeout(kalDetailTimer); kalDetailTimer = null; }
+  if (kalDetailEl) kalDetailEl.hidden = true;
+}
+
+function kalDetailCas(u) {
+  if (u.celodenni) return 'celý den';
+  const hm = ms => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  return `${hm(u.od)}–${hm(u.do)}`;
+}
+
+function kalDetailOtevri(u) {
+  if (!kalDetailEl || !kalDetailKartaEl || !u) return;
+  const d = new Date(u.od);
+  const radek = (trida, text) => {
+    const el = document.createElement('div');
+    el.className = trida;
+    el.textContent = text;
+    kalDetailKartaEl.appendChild(el);
+    return el;
+  };
+  kalDetailKartaEl.textContent = '';
+  const barva = kalBarvaU(u);
+  kalDetailKartaEl.style.borderLeftColor = barva;
+  radek('kal-detail-nazev', u.nazev || '(bez názvu)');
+  radek('kal-detail-radek', `${KAL_DNY_KRATCE[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}. · ${kalDetailCas(u)}`);
+  if (u.misto) radek('kal-detail-radek', u.misto);
+  const kal = u.puvod ? `${u.puvod} · ${u.kalendar}` : (u.kalendar || '');
+  if (kal) radek('kal-detail-kal', kal).style.color = kalCitelna(barva);
+  kalDetailEl.hidden = false;
+  if (kalDetailTimer) clearTimeout(kalDetailTimer);
+  kalDetailTimer = setTimeout(kalDetailZavri, kalDetailMs);
+}
+
+// Klepnutí vedle karty zavře; na kartu samotnou ne
+if (kalDetailEl) kalDetailEl.addEventListener('click', e => { if (e.target === kalDetailEl) kalDetailZavri(); });
+
 function renderKalendar(data) {
   if (data) kalData = data;
   if (!kalDnyEl) return;
@@ -12375,6 +12417,7 @@ function renderKalendar(data) {
       nazev.textContent = u.nazev;
       row.appendChild(cas);
       row.appendChild(nazev);
+      row.addEventListener('click', () => kalDetailOtevri(u));
       box.appendChild(row);
     }
     kalDnyEl.appendChild(box);
@@ -12404,6 +12447,7 @@ if (kalDiagBtn) {
 
 function kalOtevri(otevrit) {
   if (!kalPanelEl) return;
+  if (!otevrit) kalDetailZavri();
   const zmena = kalPanelEl.hidden === otevrit;
   kalPanelEl.hidden = !otevrit;
   if (otevrit && zmena) {

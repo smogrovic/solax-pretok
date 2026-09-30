@@ -586,59 +586,37 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  vzorec sedí i pro mráz (−20 → 85 °C ~133 min)',
     Math.round(odhadNabehuJs(model, -20, -20, 85).minut), 133);
   check('  a z 10 °C při −20 venku ~108 min', Math.round(odhadNabehuJs(model, -20, 10, 85).minut), 108);
-  // Top\u00ed: kdy bude c\u00edl, podle serveru
-  const kdy = new Date(); kdy.setHours(18, 42, 0, 0);
-  huumData = { ...huumData, statusCode: 231, heating: true, targetTemperature: 80,
-    endDate: Math.round((Date.now() + 80 * MIN) / 1000),
-    odhad: { venkuC: 10, tStartC: 50, model, cile: [{ c: 80, minut: 40, hotovoV: kdy.getTime(), dosazitelne: true }] } };
-  renderHuum();
-  check('při topení místo „80 °C v …" kolik kamna ještě topí', odhadEl.textContent, 'Zbývá 1:20');
-  huumData = { ...huumData, odhad: { ...huumData.odhad, cile: [{ c: 95, minut: null, hotovoV: null, dosazitelne: false }] } };
-  renderHuum();
-  check('  nedosažitelný cíl se řekne pořád', odhadEl.textContent, 'Nad možnosti kamen');
-  huumData = { ...huumData, endDate: 0, odhad: { ...huumData.odhad, cile: [] } };
-  renderHuum();
-  check('  bez konce topení nic', odhadEl.textContent, '');
-  OUT.push('\\n8e6) Odpo\u010det pod tla\u010d\u00edtkem');
-  const odp = top('huumOdpocet');
-  const tlac = top('huumTopeniBtn');
+  const barvaPro = t => { const x = document.createElement('div');
+    x.style.color = dialBarva((t - Number(jezdec.min)) / (Number(jezdec.max) - Number(jezdec.min))); return x.style.color; };
+  jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
+  check('vypnutá: barva podle nastavované cílové teploty', odhadEl.style.color, barvaPro(80));
+  jezdec.value = '60'; jezdec.dispatchEvent(new Event('input'));
+  check('  a mění se s točením', odhadEl.style.color, barvaPro(60));
+  check('  tučně', Number(getComputedStyle(odhadEl).fontWeight) >= 700, true);
+
+  OUT.push('\\n8e6) Po zapnutí: odpočet na spodním řádku');
+  check('pod tlačítkem žádný odpočet', document.getElementById('huumOdpocet'), null);
   const cil23 = Date.now() + 23 * MIN - 5000;
-  const topi = (t, cile) => {
+  const topi = (t, cile, extra) => {
     huumData = { ...huumData, statusCode: 231, heating: true, targetTemperature: 80, temperature: t,
-      fetchedAt: new Date().toISOString(), odhad: { venkuC: 10, tStartC: t, model, cile } };
+      endDate: Math.round((Date.now() + 180 * MIN) / 1000),
+      fetchedAt: new Date().toISOString(), odhad: { venkuC: 10, tStartC: t, model, cile }, ...(extra || {}) };
     renderHuum();
   };
   topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
-  check('topí: odpočet do cíle', odp.textContent, 'za 23 min');
-  check('  je vidět', odp.hidden, false);
-  check('  tučně', Number(getComputedStyle(odp).fontWeight) >= 700, true);
-  check('  pod tlačítkem', odp.getBoundingClientRect().top >= tlac.getBoundingClientRect().bottom - 1, true);
-  const min = Number(jezdec.min), max = Number(jezdec.max);
-  const barvaTed = (() => { const x = document.createElement('div'); x.style.color = dialBarva((50 - min) / (max - min)); return x.style.color; })();
-  check('  v barvě stupnice podle teploty v sauně', odp.style.color, barvaTed);
+  check('topí: místo „Zbývá" odpočet do nahřátí', odhadEl.textContent, 'za 23 min');
+  check('  v barvě aktuální teploty (50 °C)', odhadEl.style.color, barvaPro(50));
   topi(70, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
-  check('  a barva nabíhá s teplotou', odp.style.color !== barvaTed, true);
+  check('  a barva nabíhá s teplotou', odhadEl.style.color, barvaPro(70));
+  check('„Zbývá" na číselníku není', /Zbývá/.test(top('huumDial').textContent + odhadEl.textContent), false);
   topi(40, [{ c: 80, minut: 65, hotovoV: Date.now() + 65 * MIN - 5000, dosazitelne: true }]);
-  check('přes hodinu v hodinách', odp.textContent, 'za 1 h 05 min');
+  check('přes hodinu v hodinách', odhadEl.textContent, 'za 1 h 05 min');
   topi(78, [{ c: 80, minut: 0, hotovoV: Date.now() - 2 * MIN, dosazitelne: true }]);
-  check('odhad prošel, teplota ještě ne → „za chvíli"', odp.textContent, 'za chvíli');
+  check('odhad prošel, teplota ještě ne → „za chvíli"', odhadEl.textContent, 'za chvíli');
   topi(81, []);
-  check('cíl dosažený bez konce topení → „Nahřáto"', odp.textContent, 'Nahřáto');
-  huumData = { ...huumData, endDate: Math.round((Date.now() + 180 * MIN) / 1000) };
-  renderHuum();
-  check('nahřátá: pod tlačítkem kolik kamna ještě topí', odp.textContent, 'Zbývá 3:00');
-  check('  a „Nahřáto" jde pod číselník', top('huumOdhad').textContent, 'Nahřáto');
-  topi(60, [{ c: 80, minut: 20, hotovoV: Date.now() + 20 * MIN - 5000, dosazitelne: true }]);
-  check('nahřívá se: pod tlačítkem odpočet', odp.textContent, 'za 20 min');
-  check('  pod číselníkem doba topení', top('huumOdhad').textContent, 'Zbývá 3:00');
-  huumData = { ...huumData, endDate: 0 };
+  check('cíl dosažený → „Nahřáto"', odhadEl.textContent, 'Nahřáto');
   topi(50, [{ c: 80, minut: null, hotovoV: null, dosazitelne: false }]);
-  check('nedosažitelný cíl → nic', odp.hidden, true);
-  topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
-  huumData = { ...huumData, heating: false, statusCode: 232 };
-  renderHuum();
-  check('netopí → nic (i se starým odhadem)', odp.hidden, true);
-  // Střed číselníku se musí vejít do kruhu i s odpočtem
+  check('nedosažitelný cíl → řekne to', odhadEl.textContent, 'Nad možnosti kamen');
   topi(50, [{ c: 80, minut: 23, hotovoV: cil23, dosazitelne: true }]);
   check('obsah středu se vejde do číselníku',
     top('huumTopeniPopis').getBoundingClientRect().bottom <= top('huumDial').getBoundingClientRect().bottom - 20, true);
