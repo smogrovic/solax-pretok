@@ -407,7 +407,7 @@ nadpis('6d) Zapojení v polleru');
 
 dalsiE();
 function dalsiE() {
-  nadpis('6c) Flying se slije do Lukáše, Zuzka Škola do Zuzky (barvou svého kalendáře)');
+  nadpis('6c) Flying a Lov/opc se slijí do Lukáše, Zuzka Škola do Zuzky (barvou svého kalendáře)');
   const PRINCIPAL = `<multistatus xmlns="DAV:"><response><href>/</href><propstat><prop>`
     + `<current-user-principal><href>/1/principal/</href></current-user-principal>`
     + `</prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`;
@@ -419,7 +419,7 @@ function dalsiE() {
     + `<displayname>${jmeno}</displayname><resourcetype><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>`
     + `<supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav"><comp name="VEVENT"/></supported-calendar-component-set>`
     + `</prop><status>HTTP/1.1 200 OK</status></propstat></response>`;
-  const SEZNAM = `<multistatus xmlns="DAV:">${kal('lukas', 'Lukáš')}${kal('flying', 'Flying')}`
+  const SEZNAM = `<multistatus xmlns="DAV:">${kal('lukas', 'Lukáš')}${kal('flying', 'Flying')}${kal('lov', 'LOV / OPC')}`
     + `${kal('zuzka', 'Zuzka')}${kal('skola', 'Zuzka Škola')}</multistatus>`;
   const utc = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const udalost = (uid, nazev) => '<multistatus><response><calendar-data>BEGIN:VEVENT\r\nUID:' + uid
@@ -429,12 +429,16 @@ function dalsiE() {
     odpovedi: [{ body: PRINCIPAL }, { body: HOME }, { body: SEZNAM },
       // Stahuje se v pořadí sloupců: Lukáš, Zuzka, pak ostatní podle abecedy
       { body: udalost('l1', 'Zubař') }, { body: udalost('z1', 'Kadeřník') },
-      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('s1', 'Třídní schůzka') }] });
+      { body: udalost('f1', 'OK123 PRG-FCO') }, { body: udalost('o1', 'Hon Lány') },
+      { body: udalost('s1', 'Třídní schůzka') }] });
   return h.api.pollKalendar().then(() => {
     const p = h.api.calendarPayload();
     const vse = p.days.flatMap(d => d.udalosti);
     const let_ = vse.find(u => u.uid === 'f1');
-    check('Flying ani Škola nemají vlastní sloupec', p.kalendare.map(k => k.nazev).sort().join(','), 'Lukáš,Zuzka');
+    check('Flying, Lov/opc ani Škola nemají vlastní sloupec', p.kalendare.map(k => k.nazev).sort().join(','), 'Lukáš,Zuzka');
+    // Na Renderu je „Lov/opc", v iCloudu „LOV / OPC" — velikost písmen a mezery nevadí
+    const lov = vse.find(u => u.uid === 'o1');
+    check('  lov je v Lukášově sloupci (i jinak napsaný)', lov && lov.kalendar + ' ' + lov.puvod + ' ' + lov.zdroj, 'Lukáš LOV / OPC slouceno');
     check('  let je v Lukášově sloupci', let_ && let_.kalendar, 'Lukáš');
     check('  a ví se, že je z Flying (barva)', let_ && let_.puvod + ' ' + let_.zdroj, 'Flying slouceno');
     const skola = vse.find(u => u.uid === 's1');

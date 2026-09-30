@@ -8034,11 +8034,15 @@ const KAL_DNU = 7;
 const KAL_POLL_MS = 5 * 60 * 1000;
 // Kalendáře, které se slijí do jiného sloupce. Událost si nese, odkud je (`puvod`),
 // a appka ji kreslí barvou svého kalendáře — jako kolečka v Kalendáři na telefonu.
-// „Flying" je Lukášovo létání, „Zuzka Škola"
+// „Flying" a „Lov/opc" jsou Lukášovy, „Zuzka Škola"
 // jde k Zuzce. Formát: „Zdroj>Cíl", víc párů oddělených čárkou.
-const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,Zuzka Škola>Zuzka').split(',')
+// Názvy se porovnávají volně (velikost písmen, diakritika, mezery, lomítka) —
+// „LOV/OPC", „Lov / opc" i „lov-opc" je pro to totéž.
+const kalKlic = nazev => String(nazev || '').toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,Lov/opc>Lukáš,Zuzka Škola>Zuzka').split(',')
   .map(x => x.split('>').map(y => y.trim())).filter(x => x.length === 2 && x[0] && x[1])
-  .map(([z, c]) => [z.toLowerCase(), c]));
+  .map(([z, c]) => [kalKlic(z), c]));
 
 // ---- XML bez parseru ----
 // Odpovědi CalDAVu jsou předvídatelné, ale prefix jmenného prostoru ne. Proto se
@@ -8447,12 +8451,12 @@ async function pollKalendar() {
     kalKrok = 'hledání kalendářů';
     const vsechny = kalSerad(await kalObjev());
     // Slité kalendáře (Flying → Lukáš) vlastní sloupec nemají
-    const kalendare = vsechny.filter(k => !KAL_SLOUCIT.has(String(k.nazev || '').toLowerCase()));
+    const kalendare = vsechny.filter(k => !KAL_SLOUCIT.has(kalKlic(k.nazev)));
     const vse = [];
     for (const kal of vsechny) {
       kalKrok = `stahování kalendáře „${kal.nazev}"`;
       const texty = await kalStahni(kal, od, doKdy);
-      const doSloupce = KAL_SLOUCIT.get(String(kal.nazev || '').toLowerCase());
+      const doSloupce = KAL_SLOUCIT.get(kalKlic(kal.nazev));
       if (doSloupce) {
         const cilKal = kalendare.find(k => k.nazev === doSloupce) || { nazev: doSloupce, barva: null };
         vse.push(...kalUdalosti(texty, od, doKdy,
