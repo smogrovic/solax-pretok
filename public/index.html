@@ -1356,7 +1356,8 @@
     box-shadow:0 8px 30px rgba(20,30,40,0.25);
   }
   .potvrz-nadpis{font-size:16px;font-weight:800;color:var(--navy);text-align:center;}
-  .potvrz-text{font-size:12px;color:var(--grey-text);line-height:1.5;text-align:center;margin-top:8px;}
+  .potvrz-text{font-size:12px;color:var(--grey-text);line-height:1.5;text-align:center;margin-top:8px;white-space:pre-line;}
+  .potvrz-text:empty{display:none;}
   .potvrz-pin{margin-top:12px;}
   .potvrz-pin[hidden]{display:none;}
   .potvrz-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
@@ -3099,7 +3100,6 @@
           <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
           <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
-        <div class="tempauto-thr-hint">Kamna se zapnou o odhad náběhu dřív (podle teploty v sauně a venku) na teplotu z číselníku. Na cíl −10 °C se vytáhnou žaluzie v ložnici, na cíl −5 °C se rozsvítí světlo v sauně a po západu slunce zahrada dole — i když slunce zapadne až během saunování.</div>
         <div class="timer-list" id="huumTimerList"></div>
       </div>
 
@@ -3407,7 +3407,7 @@
             <li>Při nahřívání: <b>cíl −10 °C</b> → žaluzie v ložnici nahoru, <b>cíl −5 °C</b> → světlo v sauně a po západu zahrada dole (i když slunce zapadne až během saunování).</li>
             <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b>Ložnice</b> se po západu zatáhne <b>15 min</b> po jejím konci.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
-            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>, zbytek podle teploty výš.</li>
+            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
           </ul>
         </div>
 
@@ -4889,6 +4889,11 @@ function potvrzKonec(potvrzeno) {
 }
 
 if (potvrzAnoEl) potvrzAnoEl.addEventListener('click', () => potvrzKonec(true));
+// Stejné okno jako všude jinde (oranžové „Potvrdit" s odpočtem) místo systémového
+// dialogu prohlížeče. → Promise<boolean>; neodpovězené okno po odpočtu = ne.
+function zeptejSe(nadpis, text, sekundy) {
+  return new Promise(hotovo => potvrzZeptej(nadpis, text || '', () => hotovo(true), sekundy, () => hotovo(false)));
+}
 if (potvrzZpetEl) potvrzZpetEl.addEventListener('click', () => potvrzKonec(false));
 
 async function setAutomation(mode) {
@@ -5641,6 +5646,22 @@ function blindCilPouzij(list, now = Date.now()) {
   }
 }
 
+// Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
+// konečný stav. Nový povel ruší všechny dřív naplánované obnovy.
+function blindsObnovPoPovelu() {
+  for (const t of blindsReloadTimers) clearTimeout(t);
+  blindsReloadTimers = BLIND_OBNOVA_MS.map(ms => setTimeout(loadBlinds, ms));
+}
+
+// Povel poslal server (rozvrh, časovač, sauna, scéna nebo jiný telefon): ukazatel
+// polohy a naklopení se posune hned, skutečnost se pak načte po dojetí
+function blindPovelZeServeru(d) {
+  if (!d || !d.deviceURL || !blinds.some(b => b.deviceURL === d.deviceURL)) return;
+  blindCilNastav(d.deviceURL, d.action, d.value, d.tilt);
+  bezpecne(renderBlinds);
+  blindsObnovPoPovelu();
+}
+
 async function blindCommand(deviceURL, action, value, btn, tilt) {
   if (btn) btn.disabled = true;
   let ok = false;
@@ -5666,10 +5687,7 @@ async function blindCommand(deviceURL, action, value, btn, tilt) {
     if (!res.ok) throw new Error(data.error || 'Příkaz se nepodařilo odeslat.');
     errorEl.classList.remove('show');
     ok = data || true;
-    // Žaluzie potřebuje čas dojet — polohu obnovíme několikrát, ať chytíme
-    // konečný stav. Nový povel ruší všechny dřív naplánované obnovy.
-    for (const t of blindsReloadTimers) clearTimeout(t);
-    blindsReloadTimers = BLIND_OBNOVA_MS.map(ms => setTimeout(loadBlinds, ms));
+    blindsObnovPoPovelu();
   } catch (err) {
     // Povel neodešel — cíl se vrátí, jak byl
     if (mame) {
@@ -5919,9 +5937,11 @@ function renderBlindRow(b) {
     const isPergola = normalizeName(b.label).includes('pergola');
     const upCmd = isPergola ? 'down' : 'up';
     const downCmd = isPergola ? 'up' : 'down';
-    // Garáž vyžaduje potvrzení, ať se neotevře/nezavře omylem ukliknutím
-    const guard = (open, fn) => (btn) => {
-      if (isGarage && !confirm(open ? 'Opravdu OTEVŘÍT garáž?' : 'Opravdu ZAVŘÍT garáž?')) return;
+    // Garáž vyžaduje potvrzení, ať se neotevře/nezavře omylem ukliknutím.
+    // Okno samo zmizí po 15 s — nepotvrzené vrata nehnou.
+    const guard = (open, fn) => async (btn) => {
+      if (isGarage && !(await zeptejSe(open ? 'Otevřít garáž?' : 'Zavřít garáž?',
+        open ? 'Vrata se začnou otevírat.' : 'Vrata se začnou zavírat. Zkontroluj, že pod nimi nic není.', 15))) return;
       return fn(btn);
     };
     btns.appendChild(makeBlindBtn('blind-btn', '▲', guard(true, btn => blindCommand(b.deviceURL, upCmd, tiltValue(), btn))));
@@ -9397,7 +9417,7 @@ if (lozniceZavrenoBtnEl) {
 // Tlačítka, která se ptají, a na kolik vteřin. Otevřené dveře jsou horší omyl než
 // cokoli jiného, co se odsud dá spustit.
 const POTVRZ_SCENY = {
-  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 10 },
+  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 15 },
   // Těch 80 °C musí sedět se `SCENA_SAUNA_C` na serveru — hlídá to test/staticka.js.
   // Okno vypisuje i to, co přijde samo: z názvu „Zapni saunu" by nikdo nečekal,
   // že se pak otevřou žaluzie v ložnici.
@@ -10447,7 +10467,7 @@ async function zavlahaSpust(zona, btn) {
     errorEl.classList.add('show');
     return;
   }
-  if (!confirm(`Pustit ${zavlahaJmeno(zona)} na ${minut} min?`)) return;
+  if (!(await zeptejSe('Pustit zónu?', `${zavlahaJmeno(zona)} na ${minut} min.`))) return;
   await zavlahaPosli('/api/zavlaha/spust', { zona, minut }, btn, 'Zónu se nepodařilo pustit.');
 }
 
@@ -10456,17 +10476,17 @@ async function zavlahaSerie() {
   if (!kroky.length) return;
   const celkem = kroky.reduce((s, k) => s + k.minut, 0);
   const seznam = kroky.map(k => `${zavlahaJmeno(k.zona)} ${k.minut} min`).join('\n');
-  if (!confirm(`Zalévat postupně (celkem ${celkem} min)?\n\n${seznam}`)) return;
+  if (!(await zeptejSe(`Zalévat postupně (${celkem} min)?`, seznam))) return;
   await zavlahaPosli('/api/zavlaha/serie', { kroky }, zavlahaSerieBtnEl, 'Řadu se nepodařilo spustit.');
 }
 
 async function zavlahaStop() {
-  if (!confirm('Zastavit celou závlahu?')) return;
+  if (!(await zeptejSe('Zastavit celou závlahu?', 'Zastaví se zóna, která zrovna běží, i zbytek řady.'))) return;
   await zavlahaPosli('/api/zavlaha/stop', {}, zavlahaStopBtnEl, 'Závlahu se nepodařilo zastavit.');
 }
 
 async function zavlahaSchovej(zona, skryt, btn) {
-  if (skryt && !confirm(`Schovat ${zavlahaJmeno(zona)} ze seznamu?`)) return;
+  if (skryt && !(await zeptejSe(`Schovat ${zavlahaJmeno(zona)}?`, 'Zóna zmizí ze seznamu, vrátit ji jde dole u „Schované".'))) return;
   await zavlahaPosli('/api/zavlaha/skryt', { zona, skryt }, btn,
     skryt ? 'Zónu se nepodařilo schovat.' : 'Zónu se nepodařilo vrátit.');
 }
@@ -10581,7 +10601,7 @@ function renderSekacka(d) {
 }
 
 async function sekackaPovel(co, popis, btn) {
-  if (!confirm(`Sekačka: ${popis}?`)) return;
+  if (!(await zeptejSe(`Sekačka: ${popis}?`, ''))) return;
   if (btn) btn.disabled = true;
   try {
     const res = await fetch('/api/sekacka/povel', {
@@ -10685,7 +10705,7 @@ function renderVysavac(d) {
 }
 
 async function vysavacPovel(typ, btn) {
-  if (typ === 'uklid' && !confirm('Vysavač: vysát celý byt?')) return;
+  if (typ === 'uklid' && !(await zeptejSe('Vysát celý byt?', 'Vysavač vyjede z doku a projede všechny místnosti.'))) return;
   if (btn) btn.disabled = true;
   try {
     const res = await fetch('/api/vysavac/povel', {
@@ -11247,6 +11267,9 @@ function connectStream() {
     renderWallboxChart();
     saveWbModeHistoryLocal();
   });
+  es.addEventListener('blindPovel', e => {
+    try { blindPovelZeServeru(JSON.parse(e.data)); } catch {}
+  });
   es.addEventListener('blindTimers', e => {
     blindTimersData = JSON.parse(e.data).timers || [];
     renderBlindTimers();
@@ -11365,7 +11388,7 @@ async function doPinUnlock(pinInput, errEl) {
     setLocked(false);
     // Nabídneme odemykání přes Face ID pro příště
     if (faceIdSupported && !localStorage.getItem('faceIdCredId')
-        && confirm('Chceš příště odemykat přes Face ID?')) {
+        && await zeptejSe('Odemykat příště přes Face ID?', 'Kód pak nebude potřeba zadávat.')) {
       try { await enrollFaceId(); } catch {}
     }
   } catch (err) {

@@ -39,7 +39,7 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
          + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, prazdninyDuvod, prazdninyPayload, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
-         + ' lozniceZavrenoPlati, lozniceZavrenoPayload, rozvrhMigrace, rozvrhMigraceV6,'
+         + ' lozniceZavrenoPlati, lozniceZavrenoPayload, rozvrhMigrace, rozvrhMigraceV6, rozvrhMigraceV7,'
          + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
          + ' get pravidla() { return blindRules; }, set pravidla(v) { blindRules = v; },'
          + ' get savedAt() { return blindRulesAt; } };'
@@ -634,6 +634,23 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   check('návrat domů zavřenou ložnici neotevře', h.povely.join(' | '), 'Kuchyň:up');
 }
 {
+  // Migrace v7: Obývák Dveře po západu 20 → 15 %, jen výchozí hodnota
+  const poZapadu = hodnota => pravidlo({ id: 1, nazev: 'Po západu', kdy: { typ: 'zapad', posunMin: 0 },
+    kroky: [krok('Kuchyň', 'down', 100), krok('Obývák Dveře', 'poloha', hodnota)] });
+  const h = build();
+  h.state.rozvrhVerze = 6;
+  h.api.pravidla = [poZapadu(20)];
+  check('v7: dveře po západu 20 → 15 %', h.api.rozvrhMigraceV7(20000) + ' ' + h.api.pravidla[0].kroky[1].hodnota, 'true 15');
+  check('  razítko se posune', h.api.savedAt, 20000);
+  check('  verze 7', h.state.rozvrhVerze, 7);
+  check('  druhé volání nic', h.api.rozvrhMigraceV7(21000), false);
+  const u = build();
+  u.state.rozvrhVerze = 6;
+  u.api.pravidla = [poZapadu(30)];
+  check('vlastní hodnota (30 %) zůstane', u.api.rozvrhMigraceV7(20000) + ' ' + u.api.pravidla[0].kroky[1].hodnota, 'false 30');
+  check('  ale verze se zapíše', u.state.rozvrhVerze, 7);
+}
+{
   // Migrace v6: jednou znovu celý doporučený rozvrh, i přes vlastní úpravy
   const h = build();
   h.state.rozvrhVerze = 5;
@@ -642,13 +659,13 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   check('  celý a jen ten', h.api.pravidla.map(p => p.nazev).sort().join(','),
     h.api.ROZVRH_VYCHOZI.map(p => p.nazev).sort().join(','));
   check('  razítko se posune (záloha z telefonu ho nepřepíše)', h.api.savedAt, 12000);
-  check('  verze 6', h.state.rozvrhVerze, 6);
+  check('  verze 7 (výchozí rozvrh je už po v7)', h.state.rozvrhVerze, 7);
   check('  a je to v logu', h.logy.some(t => /znovu nahrán doporučený rozvrh/.test(t)), true);
   h.api.pravidla = h.api.pravidla.slice(1);
   check('druhý start už nic nepřepíše', h.api.rozvrhMigraceV6(13000), false);
   check('  úpravy po v6 zůstanou', h.api.pravidla.length, h.api.ROZVRH_VYCHOZI.length - 1);
   h.api.rozvrhMigrace(14000);
-  check('starší migrace verzi 6 nesníží', h.state.rozvrhVerze, 6);
+  check('starší migrace verzi nesníží', h.state.rozvrhVerze, 7);
   const e = build();
   e.state.rozvrhVerze = 5;
   e.api.pravidla = [];
@@ -656,7 +673,7 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   check('  ale verze se zapíše', e.state.rozvrhVerze, 6);
   const n = build();
   n.api.rozvrhNasadVychozi();
-  check('nahrání doporučeného dá rovnou verzi 6', n.state.rozvrhVerze, 6);
+  check('nahrání doporučeného dá rovnou verzi 7', n.state.rozvrhVerze, 7);
 }
 {
   // Migrace v1: jen přesně výchozí staré skupiny
@@ -819,9 +836,9 @@ nadpis('6f) Předvyplněný rozvrh');
     podle('Garáž').kdy.cas + ' ' + podle('Garáž').dny.filter(Boolean).length, '23:00 7');
   // Zpoždění je v nastavení, ne v pravidle — jinak by se měnilo v každém zvlášť
   check('po západu nemá vlastní posun', podle('Po západu').kdy.posunMin, 0);
-  check('  a dveře sjedou do 20 %',
+  check('  a dveře sjedou do 15 %',
     podle('Po západu').kroky.filter(k => k.akce === 'poloha').map(k => k.cil + ':' + k.hodnota).join(''),
-    'Obývák Dveře:20');
+    'Obývák Dveře:15');
   check('ložnice má odklad na saunu 15 min', podle('Ložnice po západu').odloz.minut, 15);
 }
 
@@ -1002,14 +1019,14 @@ nadpis('Návrat z „jsme pryč": žaluzie jak by stály podle rozvrhu');
     const h = stav();
     await h.api.rozvrhStavTed(PO_6 + 15 * H);   // 21:00
     check('po západu už jen zataženo', h.povely.join(' | '),
-      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:20 | Miky:down:100 | Elenka:down:100 | Ložnice:down:100 | Hosté:down:100 | Garáž:down');
+      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:15 | Miky:down:100 | Elenka:down:100 | Ložnice:down:100 | Hosté:down:100 | Garáž:down');
   }
   {
     // V noci dnes ještě nic neproběhlo — stav je ze včerejšího večera
     const h = stav();
     await h.api.rozvrhStavTed(PO_6 - 5 * H);    // 1:00
     check('v 1:00 stav ze včerejška', h.povely.join(' | '),
-      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:20 | Miky:down:100 | Elenka:down:100 | Ložnice:down:100 | Hosté:down:100 | Garáž:down');
+      'Kuchyň:down:100 | Obývák Okno:down:100 | Obývák Dveře:closure:15 | Miky:down:100 | Elenka:down:100 | Ložnice:down:100 | Hosté:down:100 | Garáž:down');
     check('  a dnešní pravidla zůstávají na později', h.api.pravidla.some(p => p.spustenoDne), false);
   }
   {

@@ -4241,6 +4241,18 @@ async function tahomaNaklopPoDojeti(deviceURL) {
 // action: up / down / stop / on / off / orientation / closure
 // value:  u 'orientation' a 'closure' cílová hodnota, u pohybů cílové naklopení
 // tilt:   naklopení k akci 'closure' (u ostatních akcí ho nese už `value`)
+// Appka se o povelu dozví hned — i když ho poslal rozvrh, časovač nebo sauna, ne
+// ona sama. Posune si podle něj ukazatel polohy a naklopení a pak si načte
+// skutečnost, až žaluzie dojede. Bez toho by ukazatel stál do ruční obnovy.
+function blindPovelOznam(deviceURL, action, value, tilt) {
+  if (typeof broadcast !== 'function') return;
+  broadcast('blindPovel', {
+    deviceURL, action,
+    value: Number.isFinite(value) ? value : null,
+    tilt: Number.isFinite(tilt) ? tilt : null
+  });
+}
+
 async function blindCommand(deviceURL, action, value, tilt) {
   const blinds = await getBlinds();
   const blind = blinds.find(b => b.deviceURL === deviceURL);
@@ -4255,6 +4267,7 @@ async function blindCommand(deviceURL, action, value, tilt) {
     const uzCeka = !!tahomaNaklopeniCeka[deviceURL];
     tahomaNaklopeniCeka[deviceURL] = { label, cmd, hodnota: num(value) };
     if (!uzCeka) tahomaNaklopPoDojeti(deviceURL);   // v pozadí, odpověď se nezdržuje
+    blindPovelOznam(deviceURL, action, value, tilt);
     return { ...blind, ceka: true };
   }
   // Povel, který nese vlastní naklopení (nebo zastavení), čekající naklopení ruší
@@ -4282,6 +4295,7 @@ async function blindCommand(deviceURL, action, value, tilt) {
       }
     }
     blindsCache = { ts: 0, list: [] };
+    blindPovelOznam(deviceURL, action, value, tilt);
     return blind;
   }
 
@@ -4303,6 +4317,7 @@ async function blindCommand(deviceURL, action, value, tilt) {
   // Zneplatníme cache, ať se po dojetí načte čerstvá poloha (jinak by /api/blinds
   // vracelo starý closure z 60s cache a ukazatel by se neaktualizoval)
   blindsCache = { ts: 0, list: [] };
+  blindPovelOznam(deviceURL, action, value, tilt);
   return blind;
 }
 
@@ -4525,7 +4540,7 @@ const ROZVRH_VYCHOZI = [
     krok('Garáž', 'down')] },
   { nazev: 'Po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 0 }, kroky: [
     krok('Kuchyň', 'down', 100), krok('Obývák Okno', 'down', 100), krok('Miky', 'down', 100),
-    krok('Elenka', 'down', 100), krok('Hosté', 'down', 100), krok('Obývák Dveře', 'poloha', 20)] },
+    krok('Elenka', 'down', 100), krok('Hosté', 'down', 100), krok('Obývák Dveře', 'poloha', 15)] },
   // Ložnice má vlastní skupinu kvůli odkladu: při sauně se čeká, až dotopí
   { nazev: 'Ložnice po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 0 },
     odloz: { typ: 'sauna', minut: SAUNA_LOZNICE_MIN }, kroky: [krok('Ložnice', 'down', 100)] }
@@ -4535,7 +4550,7 @@ let blindRuleSeq = 1;
 let blindRules = [];
 
 function rozvrhNasadVychozi() {
-  state.rozvrhVerze = 6;
+  state.rozvrhVerze = 7;
   blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
   return rozvrhSerad();
 }
@@ -4663,6 +4678,25 @@ function rozvrhMigraceV6(now = Date.now()) {
   rozvrhNasadVychozi();
   blindRulesAt = now;
   addLog(`Rozvrh žaluzií: znovu nahrán doporučený rozvrh (${blindRules.length} skupin)`);
+  broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  return true;
+}
+
+// Verze 7: dveře v obýváku po západu jen do 15 % (dřív 20). Mění se jen přesně
+// výchozích 20 — vlastní hodnotu si tam někdo dal schválně.
+function rozvrhMigraceV7(now = Date.now()) {
+  if ((state.rozvrhVerze || 0) >= 7) return false;
+  state.rozvrhVerze = 7;
+  let zmena = false;
+  for (const p of blindRules) {
+    if (p.nazev !== 'Po západu') continue;
+    for (const k of p.kroky || []) {
+      if (k.cil === 'Obývák Dveře' && k.akce === 'poloha' && k.hodnota === 20) { k.hodnota = 15; zmena = true; }
+    }
+  }
+  if (!zmena) return false;
+  blindRulesAt = now;
+  addLog('Rozvrh žaluzií: Obývák Dveře po západu jen do 15 %');
   broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
   return true;
 }
@@ -10660,6 +10694,7 @@ const server = app.listen(PORT, async () => {
   rozvrhVychoziPoStartu();
   rozvrhMigrace();
   rozvrhMigraceV6();
+  rozvrhMigraceV7();
   scheduleEvery(zavlahaPlanHlidej, ZAVLAHA_PLAN_TIK_MS, ZAVLAHA_PLAN_TIK_MS);
   if (anthbotEnabled) scheduleEvery(() => sekackaNacti().catch(() => {}), ANTHBOT_TIK_MS, 5000);
   else console.log('Sekačka Anthbot vypnutá (chybí ANTHBOT_EMAIL / ANTHBOT_HESLO).');

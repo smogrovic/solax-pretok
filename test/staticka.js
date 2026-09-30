@@ -261,4 +261,13 @@ nadpis('9) Prohlížečové sady: zpětné apostrofy v DRIVERu');
 nadpis('10) Kontrola téhle kontroly');
 check('rozdílná čísla se chytí', new RegExp('85' + '\\s*°C').test('na 80 °C'), false);
 
+nadpis('Potvrzovací okna');
+// Všechna potvrzení jdou přes okno appky (oranžové „Potvrdit" s odpočtem), ne přes
+// systémový dialog prohlížeče
+check('v appce není systémové confirm()', /[^A-Za-z_.]confirm\(/.test(HTML), false);
+check('garáž a otevření dveří mají 15 s',
+  /zavřít garáž\?'[\s\S]{0,200}?, 15\)\)\) return;/i.test(HTML) && /otevri: \{[^}]*sekundy: 15/.test(HTML), true);
+// Vysvětlení logiky sauny je jen na stránce Logika automatiky
+check('u časovače sauny není dlouhé vysvětlení', HTML.includes('Kamna se zapnou o odhad náběhu dřív'), false);
+
 konec();

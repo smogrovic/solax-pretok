@@ -178,6 +178,52 @@ setTimeout(async () => {
   const svetlo = radky.find(r => /Sv\u011btla terasa/.test(r.textContent));
   check('sv\u011btlu popisek z\u016fst\u00e1v\u00e1', !!svetlo.querySelector('.blind-pos'), 'true');
   check('  a \u0159\u00edk\u00e1 stav', svetlo.querySelector('.blind-pos').textContent, 'zapnuto');
+
+  R.push('');
+  R.push('6) Povel od rozvrhu posune ukazatel');
+  // Server (rozvrh, časovač, sauna) pošle přes SSE „blindPovel" — appka nečeká
+  // na ruční obnovu seznamu
+  blinds = [{ deviceURL: 'io://ObyvakDvere', label: 'Obývák Dveře', room: 'Obývák', type: 'cover',
+    hasOrientation: true, orientation: 0, hasClosure: true, closure: 0 }];
+  renderBlinds();
+  const radekD = () => [...document.querySelectorAll('.blind-row')].find(r => /Obývák Dveře/.test(r.textContent));
+  const obnovy = blindsReloadTimers.length;
+  blindPovelZeServeru({ deviceURL: 'io://ObyvakDvere', action: 'closure', value: 15, tilt: 40 });
+  check('ukazatel polohy hned ukáže 15 %', radekD().querySelector('.blind-meter-pct').textContent, '15 %');
+  const jezdecN = radekD().parentElement.querySelector('input[type=range]') || document.querySelector('.blind-tilt input');
+  check('  naklopení se posune na 40', jezdecN && jezdecN.value, '40');
+  check('  a naplánuje se načtení skutečnosti', blindsReloadTimers.length, 6);
+  blindPovelZeServeru({ deviceURL: 'io://ObyvakDvere', action: 'down', value: null, tilt: null });
+  check('„zatáhnout" = 100 %', radekD().querySelector('.blind-meter-pct').textContent, '100 %');
+  blindPovelZeServeru({ deviceURL: 'io://Neznama', action: 'down', value: null, tilt: null });
+  check('cizí žaluzie nic nerozbije', radekD().querySelector('.blind-meter-pct').textContent, '100 %');
+  for (const t of blindsReloadTimers) clearTimeout(t);
+
+  R.push('');
+  R.push('7) Garáž se ptá oknem appky, 15 s');
+  blinds = [{ deviceURL: 'io://Garaz', label: 'Garáž', room: 'Garáž', uiClass: 'GarageDoor', type: 'cover',
+    hasClosure: true, closure: 100 }];
+  renderBlinds();
+  const garaz = [...document.querySelectorAll('.blind-row')].find(r => /Garáž/.test(r.textContent));
+  const poslanoG = [];
+  window.fetch = async (url, opts) => { poslanoG.push(String(url) + ' ' + (opts && opts.body || ''));
+    return { ok: true, status: 200, json: async () => ({ ok: true, blinds: [] }) }; };
+  garaz.querySelectorAll('.blind-btn')[0].click();
+  await new Promise(r => setTimeout(r, 20));
+  const okno = document.getElementById('potvrzOkno');
+  check('▲ otevře okno appky (ne systémové)', okno.hidden, false);
+  check('  s otázkou', document.getElementById('potvrzNadpis').textContent, 'Otevřít garáž?');
+  check('  a 15s odpočtem', document.getElementById('potvrzAno').textContent, 'Potvrdit (15 s)');
+  check('  zatím se nic neposlalo', poslanoG.filter(x => /command/.test(x)).length, 0);
+  document.getElementById('potvrzZpet').click();
+  await new Promise(r => setTimeout(r, 20));
+  check('„Zpět" vrata nepohne', poslanoG.filter(x => /command/.test(x)).length, 0);
+  garaz.querySelectorAll('.blind-btn')[0].click();
+  await new Promise(r => setTimeout(r, 20));
+  document.getElementById('potvrzAno').click();
+  await new Promise(r => setTimeout(r, 30));
+  check('„Potvrdit" pošle povel', poslanoG.filter(x => /command/.test(x)).length, 1);
+  for (const t of blindsReloadTimers) clearTimeout(t);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

@@ -163,9 +163,9 @@ setTimeout(async () => {
   tlac('otevri').click();
   check('otevři dveře se ptá', okno0.hidden, false);
   check('  a zatím nic neposílá', poslano.length, 0);
-  // Deset vteřin, ne třicet jako u jezdce automatiky
-  check('  odpočet je desetivteřinový',
-    /^Potvrdit \\(10 s\\)$/.test(document.getElementById('potvrzAno').textContent), true);
+  // Patnáct vteřin, ne třicet jako u jezdce automatiky
+  check('  odpočet je patnáctivteřinový',
+    /^Potvrdit \\(15 s\\)$/.test(document.getElementById('potvrzAno').textContent), true);
   document.getElementById('potvrzZpet').click();
   check('„zpět" dveře neotevře', poslano.length, 0);
   tlac('otevri').click();

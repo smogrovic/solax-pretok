@@ -26,7 +26,10 @@ window.fetch = async (url, opts) => {
   return { ok: true, status: 200, json: async () => ({ success: true, nazvy: { 1: 'Trávník dole' } }) };
 };
 let POTVRZENO = true;
-window.confirm = () => POTVRZENO;
+// Potvrzení jde přes okno appky (zeptejSe), ne přes confirm(). Tady se na něj
+// rovnou odpoví; samotné okno má vlastní test v browser-potvrz.js.
+const ZEPTANO = [];
+window.zeptejSe = async (nadpis, text) => { ZEPTANO.push(nadpis + ' | ' + text); return POTVRZENO; };
 let ZADANO = 'Nové jméno';
 window.prompt = () => ZADANO;
 

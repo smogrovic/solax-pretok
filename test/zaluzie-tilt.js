@@ -7,6 +7,7 @@ const CODE = between('let blindsCache = { ts: 0, list: [] };', 'async function g
   + fn('async function getBlinds() {') + '\n'
   + fn('async function tahomaExec(label, deviceURL, commands) {') + '\n'
   + between('const EXEC_WAIT_MAX_MS', '// action: up / down / stop / on / off / orientation / closure') + '\n'
+  + fn('function blindPovelOznam(deviceURL, action, value, tilt) {') + '\n'
   + fn('async function blindCommand(deviceURL, action, value, tilt) {');
 
 const URL = 'io://obyvak';
@@ -37,14 +38,15 @@ function build() {
   // v getBlinds) proběhne hned
   const delay = ms => ms === 2000 ? new Promise(r => cekani.push(r)) : Promise.resolve();
   const FakeDate = class extends Date { static now() { return ted; } };
-  const api = new Function('tahomaFetch', 'delay', 'console', 'Date',
+  const oznameni = [];           // co šlo appce přes SSE (blindPovel)
+  const api = new Function('tahomaFetch', 'delay', 'console', 'Date', 'broadcast',
     CODE + '\n; return { blindCommand, getBlinds, ceka: () => tahomaNaklopeniCeka };'
-  )(tahomaFetch, delay, { error() {}, log() {} }, FakeDate);
+  )(tahomaFetch, delay, { error() {}, log() {} }, FakeDate, (ev, d) => oznameni.push({ ev, ...d }));
   // Pustí všechna čekání a nechá doběhnout, co na ně navazuje
   const tik = async () => {
     for (let i = 0; i < 5; i++) { while (cekani.length) cekani.shift()(); await new Promise(r => setImmediate(r)); }
   };
-  return { api, poslano, bezi, tik, posledniId: () => 'e' + (dalsiId - 1),
+  return { api, poslano, bezi, tik, oznameni, posledniId: () => 'e' + (dalsiId - 1),
     posun: ms => { ted += ms; }, cteni: () => cteni };
 }
 
@@ -98,6 +100,21 @@ function build() {
     // Jízda doběhla (v /exec/current už není) — naklopení jde rovnou
     await h.api.blindCommand(URL, 'orientation', 80);
     check('po dojeté jízdě taky hned', h.poslano.slice(-1)[0], 'setOrientation:80');
+  }
+
+  nadpis('4b) Appka se o povelu dozví (i od rozvrhu)');
+  {
+    const h = build();
+    await h.api.blindCommand(URL, 'closure', 15);
+    check('poloha jde appce', JSON.stringify(h.oznameni[0]),
+      JSON.stringify({ ev: 'blindPovel', deviceURL: URL, action: 'closure', value: 15, tilt: null }));
+    await h.api.blindCommand(URL, 'orientation', 25);
+    check('  i samotné naklopení', h.oznameni[1].action + ' ' + h.oznameni[1].value + ' ' + h.oznameni[1].tilt, 'orientation 25 null');
+    await h.api.blindCommand(URL, 'down');
+    check('  i krajní poloha', h.oznameni[2].action, 'down');
+    let chyba = '';
+    await h.api.blindCommand('io://neznama', 'down').catch(e => { chyba = e.message; });
+    check('neodeslaný povel se nehlásí', h.oznameni.length + ' ' + !!chyba, '3 true');
   }
 
   nadpis('5) Během jízdy se seznam nedrží minutu v cache');
