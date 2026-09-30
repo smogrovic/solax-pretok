@@ -4983,6 +4983,26 @@ async function rozvrhProved(p, at = Date.now()) {
   return { ok, celkem: p.kroky.length, chyby };
 }
 
+// Po sauně zhasne zahradu dole — za stejných podmínek, za jakých se zatahuje
+// ložnice (15 min po konci saunování), a jen když ji rozsvítila sauna. Jednou za
+// saunování; ručně zhasnutou jen označí.
+async function saunaZahradaPoSaune(at = Date.now()) {
+  const r = state.saunaRelace;
+  if (!r || r.zahrada !== true || r.zahradaZhasnuta || !r.konec) return false;
+  if (saunaAktivni(state.huum)) return false;
+  if (at < r.konec + SAUNA_LOZNICE_MIN * 60000) return false;
+  r.zahradaZhasnuta = true;
+  const d = (state.devices || {}).lightDole;
+  if (d && d.isOn === false) return false;
+  try {
+    await actuateRelay('lightDole', false, 'po sauně');
+    addLog(`Sauna: ${SAUNA_LOZNICE_MIN} min po konci — zahrada dole zhasnuta`);
+  } catch (err) {
+    addLog(`Sauna: zahradu dole se po sauně nepodařilo zhasnout (${String(err.message).slice(0, 80)})`, 'error');
+  }
+  return true;
+}
+
 async function runBlindSchedule(at = Date.now()) {
   // Slunce se za den posune o minuty, za půl roku o hodiny — pořadí se proto
   // srovnává při každém tiku, ne jen když někdo pravidlo uloží
@@ -4991,6 +5011,7 @@ async function runBlindSchedule(at = Date.now()) {
   if (!autoRunning()) return;
   // Když jsme pryč, dům je zavřený a takový má zůstat — ranní „vytáhni" by ho otevřel
   if (awayActive()) return;
+  await saunaZahradaPoSaune(at);
   const dnes = pragueDateString(at);
   let neco = false;
   for (const p of blindRules) {
@@ -7395,7 +7416,7 @@ function saunaAktivni(h, byla = !!(state.saunaRelace && state.saunaRelace.od && 
 function saunaRelaceSleduj(pred, po, now = Date.now()) {
   const byla = saunaAktivni(pred);
   const je = saunaAktivni(po, byla);
-  if (je && !byla) state.saunaRelace = { od: now, konec: 0, loznice: false, svetla: false, zahrada: false };
+  if (je && !byla) state.saunaRelace = { od: now, konec: 0, loznice: false, svetla: false, zahrada: false, zahradaZhasnuta: false };
   else if (!je && byla) state.saunaRelace = { ...(state.saunaRelace || { od: 0 }), konec: now };
 }
 
@@ -10353,6 +10374,7 @@ function storeApplyPrimo(p) {
       loznice: sr.loznice === true, svetla: sr.svetla === true,
       // Záloha ze starší verze zahradu neznala — svítila spolu se světlem v sauně
       zahrada: sr.zahrada === true || (sr.zahrada === undefined && sr.svetla === true),
+      zahradaZhasnuta: sr.zahradaZhasnuta === true,
       ...(Number.isFinite(sr.nahrataAt) && sr.nahrataAt > 0 ? { nahrataAt: sr.nahrataAt } : {}) };
   }
   if (p.tempAuto && typeof p.tempAuto === 'object') {

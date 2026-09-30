@@ -35,9 +35,9 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
   const api = new Function(
     'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'scheduleEvery',
     'pragueTime', 'pragueDateString', 'naMinuty', 'validTimerTime',
-    'assistantControlBlinds', 'autoRunning', 'awayActive', 'huumEnabled', 'saunaAktivni', 'cz',
+    'assistantControlBlinds', 'autoRunning', 'awayActive', 'huumEnabled', 'saunaAktivni', 'cz', 'actuateRelay',
     CODE + '\n; return { rozvrhDenIndex, rozvrhMinuta, rozvrhSpustit, rozvrhPopis,'
-         + ' rozvrhOcisti, runBlindSchedule, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
+         + ' rozvrhOcisti, runBlindSchedule, saunaZahradaPoSaune, ZALUZIE_ZAVRENO, ROZVRH_DOHNAT_MS, ROZVRH_MAX,'
          + ' rozvrhOdlozeno, prazdninyPlati, prazdninyDuvod, prazdninyPayload, ROZVRH_VYCHOZI, ZAPAD_DELAY_MAX,'
          + ' lozniceZavrenoPlati, lozniceZavrenoPayload, rozvrhMigrace, rozvrhMigraceV6, rozvrhMigraceV7,'
          + ' rozvrhVychoziPoStartu, rozvrhNasadVychozi, rozvrhSerad, rozvrhPoradi, rozvrhStavTed,'
@@ -68,7 +68,13 @@ function build({ auto = true, pryc = false, pocasi = {}, huum = false } = {}) {
     () => pryc,
     huum,
     saunaAktivniPro(state),
-    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    t => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+    async (key, zapnout, duvod) => {
+      if (h.zlobi === key) throw new Error('Shelly neodpovídá');
+      povely.push(`${key}:${zapnout ? 'on' : 'off'} (${duvod})`);
+      state.devices = state.devices || {};
+      state.devices[key] = { ...(state.devices[key] || {}), isOn: zapnout };
+    }
   );
   return Object.assign(h, { api, povely, logy, routy, state });
 }
@@ -632,6 +638,47 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   h.state.lozniceZavrenoRano = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(PO_6));
   await h.api.rozvrhStavTed(PO_6 + 2 * H);   // 8:00
   check('návrat domů zavřenou ložnici neotevře', h.povely.join(' | '), 'Kuchyň:up');
+}
+{
+  // Po sauně zhasne zahradu dole — 15 min po konci, stejně jako se zatahuje ložnice
+  const KONEC = PO_6;
+  const saunovani = (zm = {}) => ({ od: KONEC - H, konec: KONEC, loznice: true, svetla: true,
+    zahrada: true, zahradaZhasnuta: false, ...zm });
+  const h = build({ huum: true });
+  h.state.huum = { heating: false, light: 0, temperature: 55, fetchedAt: 'x' };
+  h.state.devices = { lightDole: { isOn: true } };
+  h.state.saunaRelace = saunovani();
+  await h.api.runBlindSchedule(KONEC + 14 * MIN);
+  check('14 min po konci sauny zahrada ještě svítí', h.povely.join(), '');
+  await h.api.runBlindSchedule(KONEC + 15 * MIN);
+  check('15 min po konci zhasne', h.povely.join(), 'lightDole:off (po sauně)');
+  check('  a v Logu je proč', h.logy.some(t => /zahrada dole zhasnuta/.test(t)), true);
+  await h.api.runBlindSchedule(KONEC + 20 * MIN);
+  check('  jen jednou', h.povely.length, 1);
+  const n = build({ huum: true });
+  n.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  n.state.devices = { lightDole: { isOn: true } };
+  n.state.saunaRelace = saunovani({ zahrada: false });
+  await n.api.runBlindSchedule(KONEC + 30 * MIN);
+  check('zahradu nerozsvítila sauna → nechá ji být', n.povely.join(), '');
+  const b = build({ huum: true });
+  b.state.huum = { heating: false, light: 1, temperature: 70, fetchedAt: 'x' };
+  b.state.devices = { lightDole: { isOn: true } };
+  b.state.saunaRelace = saunovani();
+  await b.api.runBlindSchedule(KONEC + 30 * MIN);
+  check('sauna zase běží (světlo, 70 °C) → nezhasne', b.povely.join(), '');
+  const v = build({ huum: true, auto: false });
+  v.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  v.state.devices = { lightDole: { isOn: true } };
+  v.state.saunaRelace = saunovani();
+  await v.api.runBlindSchedule(KONEC + 30 * MIN);
+  check('vypnutá automatika → nezhasne (jako ložnice)', v.povely.join(), '');
+  const r = build({ huum: true });
+  r.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  r.state.devices = { lightDole: { isOn: false } };
+  r.state.saunaRelace = saunovani();
+  await r.api.runBlindSchedule(KONEC + 30 * MIN);
+  check('ručně zhasnutá → žádný povel, jen se označí', r.povely.join() + ' ' + r.state.saunaRelace.zahradaZhasnuta, ' true');
 }
 {
   // Migrace v7: Obývák Dveře po západu 20 → 15 %, jen výchozí hodnota

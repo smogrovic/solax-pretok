@@ -374,7 +374,7 @@ nadpis('5) Přímé hodnoty');
   const od = Date.now() - 3600000;
   h.api.storeApplyPrimo({ saunaRelace: { od, konec: 0, loznice: true, svetla: false } });
   check('saunování se vrátí i s tím, co už příprava udělala',
-    JSON.stringify(h.state.saunaRelace), JSON.stringify({ od, konec: 0, loznice: true, svetla: false, zahrada: false }));
+    JSON.stringify(h.state.saunaRelace), JSON.stringify({ od, konec: 0, loznice: true, svetla: false, zahrada: false, zahradaZhasnuta: false }));
   check('  a jde do zálohy', h.api.storeSnapshot().primo.saunaRelace.od, od);
   h.api.storeApplyPrimo({ saunaRelace: { od: od - 5000, konec: 0, loznice: false } });
   check('  novější stav po startu záloha nepřepíše', h.state.saunaRelace.od, od);
@@ -385,6 +385,9 @@ nadpis('5) Přímé hodnoty');
   const h2 = build({ state: s2 });
   h2.api.storeApplyPrimo({ saunaRelace: { od, konec: 0, loznice: true, svetla: true, zahrada: true } });
   check('  rozsvícená zahrada se ze zálohy vrátí (nerozsvítí se znovu)', h2.state.saunaRelace.zahrada, true);
+  s2.saunaRelace = { od: 0, konec: 0 };
+  h2.api.storeApplyPrimo({ saunaRelace: { od, konec: 0, loznice: true, svetla: true, zahrada: true, zahradaZhasnuta: true } });
+  check('  zhasnutá po sauně se ze zálohy vrátí (nezhasíná se znovu)', h2.state.saunaRelace.zahradaZhasnuta, true);
   s2.saunaRelace = { od: 0, konec: 0 };
   h2.api.storeApplyPrimo({ saunaRelace: { od, konec: 0, loznice: true, svetla: true } });
   check('  stará záloha bez zahrady: svítila se světlem v sauně', h2.state.saunaRelace.zahrada, true);
