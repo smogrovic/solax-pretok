@@ -8034,13 +8034,13 @@ const KAL_DNU = 7;
 const KAL_POLL_MS = 5 * 60 * 1000;
 // Kalendáře, které se slijí do jiného sloupce. Událost si nese, odkud je (`puvod`),
 // a appka ji kreslí barvou svého kalendáře — jako kolečka v Kalendáři na telefonu.
-// „Flying" a „Lov/opc" jsou Lukášovy, „Zuzka Škola"
+// „Flying" a „LPC/OPC" (přezkoušení) jsou Lukášovy, „Zuzka Škola"
 // jde k Zuzce. Formát: „Zdroj>Cíl", víc párů oddělených čárkou.
 // Názvy se porovnávají volně (velikost písmen, diakritika, mezery, lomítka) —
-// „LOV/OPC", „Lov / opc" i „lov-opc" je pro to totéž.
+// „LPC/OPC", „Lpc / opc" i „lpc-opc" je pro to totéž.
 const kalKlic = nazev => String(nazev || '').toLowerCase().normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
-const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,Lov/opc>Lukáš,Zuzka Škola>Zuzka').split(',')
+const KAL_SLOUCIT = new Map((process.env.ICLOUD_SLOUCIT || 'Flying>Lukáš,LPC/OPC>Lukáš,Zuzka Škola>Zuzka').split(',')
   .map(x => x.split('>').map(y => y.trim())).filter(x => x.length === 2 && x[0] && x[1])
   .map(([z, c]) => [kalKlic(z), c]));
 
