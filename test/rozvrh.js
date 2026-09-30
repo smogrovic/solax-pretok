@@ -302,10 +302,11 @@ nadpis('6d) Odklad kvůli sauně');
   check('při sauně se ložnice po západu nezavře', s.povely.length, 0);
   // Kdyby se to zapsalo jako splněné, ložnice by zůstala otevřená celou noc
   check('  a pravidlo zůstane na řadě', s.api.pravidla[0].spustenoDne, null);
-  await s.api.runBlindSchedule(PO_2015 + 20 * MIN);
-  check('ani po dvaceti minutách', s.povely.length, 0);
-  await s.api.runBlindSchedule(PO_2015 + 26 * MIN);
-  check('třicet minut po nátopu se zavře', s.povely.join(','), 'Ložnice:down:100');
+  // Čeká se podle nastavení v Logice automatiky (výchozí 15 min), ne podle pravidla
+  await s.api.runBlindSchedule(PO_2015 + 9 * MIN);
+  check('14 min po nátopu ještě ne', s.povely.length, 0);
+  await s.api.runBlindSchedule(PO_2015 + 11 * MIN);
+  check('15 min po nátopu se zavře', s.povely.join(','), 'Ložnice:down:100');
 }
 {
   // Bez sauny se ložnice zavře po západu jako ostatní
@@ -357,10 +358,10 @@ nadpis('6d2) Odklad podle kamen a světla HUUM, po sauně znovu');
   check('  59 °C se světlem pořád běží (drží se do 58)', s.povely.length, 0);
   s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
   s.state.saunaRelace = { od: zapad - H, konec: zapad + 110 * MIN };
-  await s.api.runBlindSchedule(zapad + 139 * MIN);
-  check('29 min po zhasnutí ještě ne', s.povely.length, 0);
-  await s.api.runBlindSchedule(zapad + 140 * MIN);
-  check('30 min po tom, co zhaslo později, se zatáhne', s.povely.join(','), 'Ložnice:down:100');
+  await s.api.runBlindSchedule(zapad + 124 * MIN);
+  check('14 min po zhasnutí ještě ne', s.povely.length, 0);
+  await s.api.runBlindSchedule(zapad + 125 * MIN);
+  check('15 min po tom, co zhaslo později, se zatáhne', s.povely.join(','), 'Ložnice:down:100');
   // Světlo ve studené sauně (úklid) saunování není — ložnice nečeká
   const c = build({ pocasi: { sunsetMs: zapad }, huum: true });
   c.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
@@ -400,10 +401,10 @@ nadpis('6d2) Odklad podle kamen a světla HUUM, po sauně znovu');
   // Sauna skončila po půlnoci (vypnuto v 0:10)
   s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
   s.state.saunaRelace = { od: zapad + 30 * MIN, konec: zapad + 235 * MIN };
+  await s.api.runBlindSchedule(zapad + 245 * MIN);
+  check('10 min po sauně ještě ne', s.povely.length, 1);
   await s.api.runBlindSchedule(zapad + 250 * MIN);
-  check('15 min po sauně ještě ne', s.povely.length, 1);
-  await s.api.runBlindSchedule(zapad + 265 * MIN);
-  check('30 min po sauně znovu zatáhne (i po půlnoci)', s.povely.join(','), 'Ložnice:down:100,Ložnice:down:100');
+  check('15 min po sauně znovu zatáhne (i po půlnoci)', s.povely.join(','), 'Ložnice:down:100,Ložnice:down:100');
   check('  a v Logu je, že po sauně', s.logy.some(t => /^Rozvrh žaluzií po sauně/.test(t)), true);
   await s.api.runBlindSchedule(zapad + 280 * MIN);
   check('  jen jednou', s.povely.length, 2);
@@ -638,6 +639,26 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
   h.state.lozniceZavrenoRano = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(PO_6));
   await h.api.rozvrhStavTed(PO_6 + 2 * H);   // 8:00
   check('návrat domů zavřenou ložnici neotevře', h.povely.join(' | '), 'Kuchyň:up');
+}
+{
+  // Volič v Logice automatiky: 5–15 min po konci sauny (ložnice i zahrada)
+  const zapad = Date.UTC(2026, 8, 14, 18, 15);
+  const s = build({ pocasi: { sunsetMs: zapad }, huum: true });
+  s.api.pravidla = [pravidlo({ kdy: { typ: 'zapad', posunMin: 0 },
+    odloz: { typ: 'sauna', minut: 15 }, kroky: [krok('Ložnice', 'down', 100)] })];
+  const ok = await volej(s.routy, 'POST /api/sauna-po', { minut: 5 });
+  check('nastavení 5 min se uloží', ok.out.minut + ' ' + s.state.saunaPoMin, '5 5');
+  check('  a pravidlo s odkladem to ukáže', s.api.pravidla[0].odloz.minut, 5);
+  check('  i s logem', s.logy.some(t => /5 min po konci saunování/.test(t)), true);
+  check('mimo 5–15 neprojde', (await volej(s.routy, 'POST /api/sauna-po', { minut: 20 })).kod
+    + ' ' + (await volej(s.routy, 'POST /api/sauna-po', { minut: 4 })).kod + ' ' + s.state.saunaPoMin, '400 400 5');
+  s.state.huum = { heating: false, light: 0, fetchedAt: 'x' };
+  s.state.saunaRelace = { od: zapad - H, konec: zapad + 30 * MIN, zahrada: true, zahradaZhasnuta: false };
+  s.state.devices = { lightDole: { isOn: true } };
+  await s.api.runBlindSchedule(zapad + 34 * MIN);
+  check('s 5 min: za 4 min nic', s.povely.join(), '');
+  await s.api.runBlindSchedule(zapad + 35 * MIN);
+  check('  za 5 min ložnice i zahrada', s.povely.slice().sort().join(' | '), 'Ložnice:down:100 | lightDole:off (po sauně)');
 }
 {
   // Po sauně zhasne zahradu dole — 15 min po konci, stejně jako se zatahuje ložnice

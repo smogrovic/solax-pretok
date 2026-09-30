@@ -3405,10 +3405,14 @@
             <li>Když topí (nad <b>500 W</b>), <b>bazén a solinátor jdou dolů</b> na <b>30 min</b> po posledním nátopu. Omyl <b>do 2 min</b> je pustí hned.</li>
             <li>Platí i přes ruční zapnutí a „+24 h".</li>
             <li>Při nahřívání: <b>cíl −10 °C</b> → žaluzie v ložnici nahoru, <b>cíl −5 °C</b> → světlo v sauně a po západu zahrada dole (i když slunce zapadne až během saunování).</li>
-            <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b>15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, pokud ji rozsvítila sauna.</li>
+            <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b class="sauna-po-min">15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, pokud ji rozsvítila sauna.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
             <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
           </ul>
+          <div class="zapad-row">
+            <span class="zapad-label">Ložnice a zahrada po sauně</span>
+            <select class="timer-select" id="saunaPo"></select>
+          </div>
         </div>
 
         <div class="logic-sec" data-rezim="full">
@@ -3416,7 +3420,7 @@
           <ul class="logic-list">
             <li id="obehPlan">Rozvrh se načítá…</li>
             <li>Ruční <b>ON</b> jede <b>15 min</b>.</li>
-            <li>Při <b>sauně</b> od nahřátí <b>10 min zapnuto / 10 min vypnuto</b>, dokud se ložnice nezatáhne (15 min po konci sauny).</li>
+            <li>Při <b>sauně</b> od nahřátí <b>10 min zapnuto / 10 min vypnuto</b>, dokud se ložnice nezatáhne (<span class="sauna-po-min">15 min</span> po konci sauny).</li>
           </ul>
         </div>
 
@@ -9300,6 +9304,51 @@ if (zapadDelayEl) {
   });
 }
 
+// ---------- Po sauně: za kolik minut ložnice a zahrada ----------
+const SAUNA_PO_MIN = 5, SAUNA_PO_MAX = 15;
+const saunaPoEl = document.getElementById('saunaPo');
+let saunaPoMin = 15;
+if (saunaPoEl) {
+  for (let m = SAUNA_PO_MIN; m <= SAUNA_PO_MAX; m++) {
+    const o = document.createElement('option');
+    o.value = String(m);
+    o.textContent = `${m} min po konci`;
+    saunaPoEl.appendChild(o);
+  }
+}
+
+function renderSaunaPo(minut) {
+  if (Number.isInteger(minut)) saunaPoMin = minut;
+  if (saunaPoEl && document.activeElement !== saunaPoEl) saunaPoEl.value = String(saunaPoMin);
+  // Odrážky v Logice říkají skutečné číslo, ne výchozích 15
+  document.querySelectorAll('.sauna-po-min').forEach(el => { el.textContent = `${saunaPoMin} min`; });
+}
+
+if (saunaPoEl) {
+  saunaPoEl.addEventListener('change', async () => {
+    const minut = Number(saunaPoEl.value);
+    saunaPoEl.disabled = true;
+    try {
+      const res = await fetch('/api/sauna-po', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ minut })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
+      renderSaunaPo(data.minut);
+      errorEl.classList.remove('show');
+    } catch (err) {
+      errorEl.textContent = 'Po sauně: ' + err.message;
+      errorEl.classList.add('show');
+      renderSaunaPo();             // server to nevzal, ať výběr nelže
+    }
+    saunaPoEl.disabled = false;
+  });
+}
+renderSaunaPo();
+
 // ---------- Baterie auta (VW přes most na NASu) ----------
 // Procenta a dojezd z cloudu VW. VW hlásí i staré hodnoty, když auto spí — proto
 // se pod čísly píše, kdy auto naposledy měřilo, a u mlčícího mostu zešedne.
@@ -10959,6 +11008,7 @@ function applySnapshot(snap) {
   bezpecne(() => renderPrazdniny(snap.prazdniny));
   bezpecne(() => renderLozniceZavreno(snap.lozniceZavreno));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
+  bezpecne(() => renderSaunaPo(snap.saunaPoMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
   bezpecne(() => renderRozvrh({ rules: snap.blindRules || [], savedAt: snap.blindRulesAt || 0 }));
   bezpecne(maybeRestoreRozvrh);
@@ -11282,6 +11332,7 @@ function connectStream() {
   es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
   es.addEventListener('lozniceZavreno', e => { renderLozniceZavreno(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
+  es.addEventListener('saunaPo', e => { renderSaunaPo(JSON.parse(e.data).minut); });
   es.addEventListener('siteDny', e => {
     siteDnyData = mergeSiteDny(JSON.parse(e.data).siteDny || [], siteDnyData);
     saveSiteDnyLocal();

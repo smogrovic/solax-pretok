@@ -21,6 +21,7 @@ const CODE = between('// ---------- Oběhové čerpadlo: rozvrh ----------',
 function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc = false, relace = null, huum = {} } = {}) {
   const povely = [];      // co šlo přes autoSet (tedy i do logu)
   const primo = [];       // připomenutí ON nízkou cestou
+  const doLogu = [];      // povely, které se zapíšou do Logu (tiché ne)
   let now = 1_700_000_000_000;
   let dnes = den, hodiny = cas;
   const stav = { saunaRelace: relace, huum };
@@ -42,6 +43,7 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc =
     async (key, turn, reason, opts = {}) => {
       if (!opts.force && rucni) return false;
       povely.push(`${key}:${turn} (${reason})`);
+      if (!opts.tichy) doLogu.push(`${key}:${turn} (${reason})`);   // co by šlo do Logu
       return true;
     },
     () => rucni,
@@ -55,7 +57,7 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc =
   );
 
   return {
-    api, povely, primo, stav,
+    api, povely, primo, stav, doLogu,
     get now() { return now; },
     // Posune čas o `ms` a případně přestaví hodiny/den
     tik: async (ms = 0, novyCas, novyDen) => {
@@ -210,6 +212,7 @@ nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
   check('po 10 min pauza', h.povely[1], 'obeh:off (sauna — pauza)');
   await h.tik(10 * MIN, '12:20');
   check('po dalších 10 min zase', h.povely[2], 'obeh:on (sauna — protáčení)');
+  check('  a Log zůstal čistý', h.doLogu.length, 0);
   // Kamna vypnutá, světlo taky (konec saunování) — běží se ještě 15 min
   h.stav.huum = { heating: false, light: 0 };
   h.stav.saunaRelace.konec = h.now;
@@ -231,6 +234,8 @@ nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
   h.stav.saunaRelace.konec = h.now - 16 * MIN;
   await h.tik(MIN, '12:01');
   check('konec ve fázi ON čerpadlo vypne', h.povely.join(' | '), 'obeh:on (sauna — protáčení) | obeh:off (konec saunování)');
+  // Cykly 10/10 by Log zaplevelily — do Logu jde jen konec protáčení
+  check('  cykly se do Logu nepíšou, konec ano', h.doLogu.join(' | '), 'obeh:off (konec saunování)');
 }
 {
   // Světlo v sauně svítí a je horko, kamna už ne — pořád se saunuje

@@ -79,6 +79,21 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('změna se pošle serveru', poslano.url, '/api/zapad-delay');
   check('  s minutami', poslano.body.minut, 35);
 
+  OUT.push('\\n1c) Ložnice a zahrada po sauně');
+  const po = document.getElementById('saunaPo');
+  check('volič je na téhle stránce', page.contains(po), 'true');
+  check('  5–15 min po minutě', [...po.options].map(o => o.value).join(','), '5,6,7,8,9,10,11,12,13,14,15');
+  renderSaunaPo(15);
+  check('  výchozí 15', po.value, '15');
+  renderSaunaPo(8);
+  check('odrážky říkají nastavené číslo', [...document.querySelectorAll('.sauna-po-min')].map(e => e.textContent).join(','), '8 min,8 min');
+  poslano = null;
+  po.value = '10';
+  po.dispatchEvent(new Event('change'));
+  await wait(30);
+  check('změna se pošle serveru', poslano.url, '/api/sauna-po');
+  check('  s minutami', poslano.body.minut, 10);
+
   OUT.push('\\n2) Nová pravidla');
   check('bazén má denní minimum', /Aspoň 2 h denně/.test(txt), 'true');
   check('  s oknem 13–15', /13:00 a 15:00/.test(txt), 'true');

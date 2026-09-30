@@ -469,6 +469,11 @@ nadpis('5) Přímé hodnoty');
   const h = build({ state: st });
   h.api.storeApplyPrimo({ rozvrhVerze: 2 });
   check('verze rozvrhu se vrátí ze zálohy', h.state.rozvrhVerze, 2);
+  h.api.storeApplyPrimo({ saunaPoMin: 7 });
+  check('minuty po sauně se vrátí ze zálohy', h.state.saunaPoMin, 7);
+  check('  a jdou do zálohy', h.api.storeSnapshot().primo.saunaPoMin, 7);
+  h.api.storeApplyPrimo({ saunaPoMin: 40 });
+  check('  nesmysl ze zálohy neprojde', h.state.saunaPoMin, 7);
   check('  a jde do zálohy', h.api.storeSnapshot().primo.rozvrhVerze, 2);
 }
 

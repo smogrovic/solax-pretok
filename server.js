@@ -214,6 +214,7 @@ const state = {
   rozvrhVerze: 0,            // které úpravy uloženého rozvrhu už proběhly (rozvrhMigrace)
   prazdniny: null,   // datum, které se má počítat jako víkend (z tlačítka na Asistentovi)
   zapadDelayMin: 20, // o kolik po západu slunce jede rozvrh žaluzií
+  saunaPoMin: 15,    // za kolik minut po konci sauny se zatáhne ložnice a zhasne zahrada (5–15)
   // Kalendář z iCloudu: sedm dní dopředu. Nezálohuje se — pravda je venku.
   calendar: { days: [], kalendare: [], fetchedAt: null, error: null },
   history: [],       // { t, kw, soc, pv } — přetok, nabití baterie a výroba FVE (4 dny)
@@ -515,6 +516,7 @@ function snapshot() {
     prazdniny: prazdninyPayload(),
     lozniceZavreno: lozniceZavrenoPayload(),
     zapadDelayMin: state.zapadDelayMin,
+    saunaPoMin: saunaPoMin(),
     relayTimers,
     aircon: state.aircon,
     airconEnabled: panasonicEnabled,
@@ -2857,7 +2859,7 @@ function obehSaunaChce(now = Date.now()) {
   const r = state.saunaRelace;
   if (!r || !r.nahrataAt || r.nahrataAt < (r.od || 0)) return null;
   const aktivni = saunaAktivni(state.huum);
-  const dobiha = !aktivni && !!r.konec && now < r.konec + SAUNA_LOZNICE_MIN * 60000;
+  const dobiha = !aktivni && !!r.konec && now < r.konec + (state.saunaPoMin || SAUNA_LOZNICE_MIN) * 60000;
   if (!aktivni && !dobiha) return null;
   return Math.floor((now - r.nahrataAt) / OBEH_SAUNA_FAZE_MS) % 2 === 0 ? 'on' : 'off';
 }
@@ -2868,9 +2870,10 @@ async function obehSaunaTik(chce) {
   const pred = obehSaunaFaze;
   obehSaunaFaze = chce;
   if (chce === 'on') {
-    await autoSet('obeh', 'on', 'sauna — protáčení', { force: true });
+    await autoSet('obeh', 'on', 'sauna — protáčení', { force: true, tichy: true });
   } else if ((chce === 'off' || pred === 'on') && !manualHeld('obeh')) {
-    await autoSet('obeh', 'off', chce ? 'sauna — pauza' : 'konec saunování', { force: true });
+    // Jednotlivé cykly se do Logu nepíšou; konec protáčení ano (jeden řádek)
+    await autoSet('obeh', 'off', chce ? 'sauna — pauza' : 'konec saunování', { force: true, tichy: !!chce });
   }
 }
 
@@ -3331,7 +3334,8 @@ async function enforceSaunaOff() {
 }
 
 // force = tvrdá pojistka (přehřátá nádrž), kterou ruční zásah přebít nesmí
-async function autoSet(key, turn, reason, { force = false } = {}) {
+// tichy = nezapisovat do Logu (protáčení čerpadla při sauně cvaká po 10 min a Log by zaplevelilo)
+async function autoSet(key, turn, reason, { force = false, tichy = false } = {}) {
   const dev = DEVICES[key];
   if (!force && manualHeld(key)) return false;   // ruční zásah drží, automatika počká
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -3340,7 +3344,7 @@ async function autoSet(key, turn, reason, { force = false } = {}) {
       state.devices[key] = { ...(state.devices[key] || {}), online: true, isOn: turn === 'on', fetchedAt: new Date().toISOString() };
       noteCmd(key, turn);
       broadcast('device', { key, status: devicePayload(key) });
-      logAutoSet(key, turn, reason);
+      if (!tichy) logAutoSet(key, turn, reason);
       return true;
     } catch (err) {
       if (attempt === 0) {
@@ -4488,7 +4492,14 @@ setInterval(async () => {
 const ZALUZIE_ZAVRENO = 100;
 // Ložnice po sauně: kolik minut po vypnutí kamen i světla (co zhasne později).
 // Jedna hodnota pro všechna pravidla — starší záloha s jiným číslem se převede.
-const SAUNA_LOZNICE_MIN = 15;
+const SAUNA_LOZNICE_MIN = 15;   // výchozí; nastavuje se v Logice automatiky (5–15)
+const SAUNA_PO_MIN = 5, SAUNA_PO_MAX = 15;
+// Za kolik minut po konci sauny se zatáhne ložnice, zhasne zahrada (když ji
+// rozsvítila sauna) a doběhne protáčení čerpadla
+function saunaPoMin() {
+  const m = Math.round(Number(state.saunaPoMin));
+  return Number.isFinite(m) && m >= SAUNA_PO_MIN && m <= SAUNA_PO_MAX ? m : SAUNA_LOZNICE_MIN;
+}
 const ROZVRH_MAX = 20;
 // Po nasazení se pravidlo dožene, ale jen chvíli zpátky. Render appku restartuje při
 // každém nasazení a čekání na přesnou minutu (jako u časovačů) by ranní pravidlo tiše
@@ -4551,7 +4562,9 @@ let blindRules = [];
 
 function rozvrhNasadVychozi() {
   state.rozvrhVerze = 7;
-  blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...p, spustenoDne: null }));
+  blindRules = ROZVRH_VYCHOZI.map(p => ({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(p)), spustenoDne: null }));
+  // Odklad po sauně podle nastavení v Logice automatiky
+  for (const p of blindRules) if (p.odloz && p.odloz.typ === 'sauna') p.odloz.minut = saunaPoMin();
   return rozvrhSerad();
 }
 
@@ -4826,6 +4839,28 @@ app.post('/api/zapad-delay/restore', (req, res) => {
   res.json({ ok: true, minut: state.zapadDelayMin });
 });
 
+// Za kolik minut po konci sauny se zatáhne ložnice a zhasne zahrada (Logika automatiky)
+app.post('/api/sauna-po', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const minut = Number(req.body && req.body.minut);
+  if (!Number.isInteger(minut) || minut < SAUNA_PO_MIN || minut > SAUNA_PO_MAX) {
+    return res.status(400).json({ error: `Musí to být ${SAUNA_PO_MIN}–${SAUNA_PO_MAX} min.` });
+  }
+  state.saunaPoMin = minut;
+  // Pravidla s odkladem po sauně nesou číslo i pro výpis v appce („čeká X min po sauně")
+  let zmena = false;
+  for (const p of blindRules) {
+    if (p.odloz && p.odloz.typ === 'sauna' && p.odloz.minut !== minut) { p.odloz.minut = minut; zmena = true; }
+  }
+  if (zmena) {
+    blindRulesAt = Date.now();
+    broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
+  }
+  addLog(`Po sauně: ložnice a zahrada ${minut} min po konci saunování`);
+  broadcast('saunaPo', { minut });
+  res.json({ minut });
+});
+
 // Odklad: pravidlo je sice na řadě, ale ještě se nemá provést. Dokud od posledního
 // nátopu sauny neuplynulo zadaných pár minut, tik pravidlo přeskočí a NEZAPÍŠE ho
 // jako splněné — zkusí to zas za minutu. Ložnice se tím po západu zavře jen tehdy,
@@ -4835,7 +4870,8 @@ app.post('/api/zapad-delay/restore', (req, res) => {
 // zadané minuty od toho, co z nich zhaslo později. Bez HUUM zbývá jen odběr z měřáku.
 function rozvrhOdlozeno(p, at = Date.now()) {
   if (!p.odloz || p.odloz.typ !== 'sauna') return false;
-  const cekej = p.odloz.minut * 60000;
+  // Délka je jedna společná z Logiky automatiky (5–15 min), ne z pravidla
+  const cekej = saunaPoMin() * 60000;
   if (huumEnabled) {
     const h = state.huum || {};
     // Po restartu, dokud kamna neodpověděla, se čeká — radši o chvíli později než do sauny
@@ -4990,13 +5026,13 @@ async function saunaZahradaPoSaune(at = Date.now()) {
   const r = state.saunaRelace;
   if (!r || r.zahrada !== true || r.zahradaZhasnuta || !r.konec) return false;
   if (saunaAktivni(state.huum)) return false;
-  if (at < r.konec + SAUNA_LOZNICE_MIN * 60000) return false;
+  if (at < r.konec + saunaPoMin() * 60000) return false;
   r.zahradaZhasnuta = true;
   const d = (state.devices || {}).lightDole;
   if (d && d.isOn === false) return false;
   try {
     await actuateRelay('lightDole', false, 'po sauně');
-    addLog(`Sauna: ${SAUNA_LOZNICE_MIN} min po konci — zahrada dole zhasnuta`);
+    addLog(`Sauna: ${saunaPoMin()} min po konci — zahrada dole zhasnuta`);
   } catch (err) {
     addLog(`Sauna: zahradu dole se po sauně nepodařilo zhasnout (${String(err.message).slice(0, 80)})`, 'error');
   }
@@ -5130,7 +5166,7 @@ function rozvrhOcisti(v) {
   let odloz = null;
   if (v.odloz && v.odloz.typ === 'sauna') {
     // Délka se v appce nenastavuje, platí jedna společná (záloha mohla nést starých 30)
-    const minut = SAUNA_LOZNICE_MIN;
+    const minut = saunaPoMin();
     if (!Number.isFinite(minut) || minut < 0 || minut > 240) return null;
     odloz = { typ: 'sauna', minut };
   }
@@ -10331,6 +10367,7 @@ function storeSnapshot() {
     // nasazení datum ztratilo, nebo nepoznalo posečení během nasazování
     sekackaPosekano: (state.sekacka && state.sekacka.posekano) || null,
     rozvrhVerze: state.rozvrhVerze || 0,
+    saunaPoMin: state.saunaPoMin || 15,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -10367,6 +10404,7 @@ function storeApplyPrimo(p) {
     }
   }
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
+  if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {
