@@ -8030,7 +8030,7 @@ const calendarEnabled = !!(ICLOUD_ID && ICLOUD_PASS);
 // Pořadí sloupců v denním přehledu. Co v seznamu není, se přidá za ně podle abecedy.
 const KAL_PORADI = (process.env.ICLOUD_PORADI || 'Family,Lukáš,Zuzka,Miki,Elenka')
   .split(',').map(x => x.trim()).filter(Boolean);
-const KAL_DNU = 7;
+const KAL_DNU = 14;          // listuje se dva týdny dopředu (a stejně tolik ukáže Přehled)
 const KAL_POLL_MS = 5 * 60 * 1000;
 // Kalendáře, které se slijí do jiného sloupce. Událost si nese, odkud je (`puvod`),
 // a appka ji kreslí barvou svého kalendáře — jako kolečka v Kalendáři na telefonu.
@@ -8404,16 +8404,21 @@ function kalUdalosti(texty, od, doKdy, kal = {}) {
 
 // Poskládá výskyty do sedmi dnů. Vícedenní událost se objeví v každém dni, kterého
 // se dotkne — jinak by týdenní dovolená byla vidět jen v den odjezdu.
+// Hranice dnů jsou pražské půlnoci, ne násobky 24 h: přes změnu času (konec října)
+// by jinak každý další den začínal ve 23:00 předchozího a ranní události by
+// padaly o den vedle.
+function kalDenOd(od, i) {
+  return kalZacatek(od + i * 86400000 + 12 * 3600000);
+}
 function kalDoDnu(udalosti, od) {
   const dny = [];
   for (let i = 0; i < KAL_DNU; i++) {
-    const zac = od + i * 86400000;
-    dny.push({ d: pragueDateString(zac), od: zac, udalosti: [] });
+    const zac = kalDenOd(od, i);
+    dny.push({ d: pragueDateString(zac), od: zac, do: kalDenOd(od, i + 1), udalosti: [] });
   }
   for (const u of udalosti) {
     for (const den of dny) {
-      const konecDne = den.od + 86400000;
-      if (u.od < konecDne && u.do > den.od) den.udalosti.push(u);
+      if (u.od < den.do && u.do > den.od) den.udalosti.push(u);
     }
   }
   for (const den of dny) {
@@ -8447,7 +8452,7 @@ async function pollKalendar() {
   kalPollRunning = true;
   try {
     const od = kalZacatek();
-    const doKdy = od + KAL_DNU * 86400000;
+    const doKdy = kalDenOd(od, KAL_DNU);
     kalKrok = 'hledání kalendářů';
     const vsechny = kalSerad(await kalObjev());
     // Slité kalendáře (Flying → Lukáš) vlastní sloupec nemají
@@ -8506,7 +8511,7 @@ app.get('/api/calendar/raw', async (req, res) => {
     kalKalendare = null;
     out.kalendare = await kalObjev();
     const od = kalZacatek();
-    out.prvniKalendar = (await kalStahni(out.kalendare[0], od, od + KAL_DNU * 86400000)).slice(0, 3);
+    out.prvniKalendar = (await kalStahni(out.kalendare[0], od, kalDenOd(od, KAL_DNU))).slice(0, 3);
   } catch (err) {
     out.chyba = err.message;
   }

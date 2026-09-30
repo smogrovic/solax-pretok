@@ -427,6 +427,53 @@ setTimeout(async () => {
   check('  a překreslí tím, co přišlo zpátky',
     document.querySelectorAll('#kalMrizka .kal-hlava').length, 10);
   check('  a zase se dá zmáčknout', obnov.disabled, false);
+
+  R.push('\\n10) Čtrnáct dní a Přehled');
+  const d14 = dny(14);
+  const casU = (o, h, nazev, kalendar, extra) => Object.assign({ uid: nazev + o, od: denMs(o) + h * 3600000,
+    do: denMs(o) + (h + 1) * 3600000, celodenni: false, nazev, misto: null, kalendar }, extra || {});
+  d14[0].udalosti = [casU(0, 9, 'Zubař', 'Lukáš'), casU(0, 14, 'Let OK123 PRG–FCO–PRG a pak ještě dlouhý popis', 'Lukáš', { puvod: 'Flying' })];
+  d14[3].udalosti = Array.from({ length: 30 }, (_, i) => casU(3, 6 + i * 0.5, 'Schůzka ' + i, 'Family'));
+  d14[9].udalosti = [casU(9, 10, 'Trénink', 'Miki')];
+  renderKalendar({ enabled: true, dnu: 14, days: d14, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+  document.getElementById('kalDenNazev').click();
+  for (let i = 0; i < 20; i++) document.getElementById('kalNext').click();
+  check('listuje se až k 14. dni (vpravo 13. a 14.)',
+    [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].length === 2 && document.getElementById('kalNext').disabled, true);
+  document.getElementById('kalDenNazev').click();
+  const prBtn = document.getElementById('kalPrehledBtn');
+  const prehled = document.getElementById('kalPrehled');
+  check('tlačítko Přehled je dole v patičce', prBtn.closest('.kal-pata') !== null && prBtn.textContent, 'Přehled');
+  check('  zatím je přehled schovaný', prehled.hidden, true);
+  prBtn.click();
+  const bunky = [...prehled.querySelectorAll('.kal-p-den')];
+  check('Přehled ukáže 14 dní', bunky.length, 14);
+  check('  denní pohled je schovaný', getComputedStyle(document.getElementById('kalDenPohled')).display, 'none');
+  check('  tlačítko teď vede zpátky', prBtn.textContent, 'Den');
+  check('první je „Dnes" a orámovaný', /^Dnes /.test(bunky[0].querySelector('.kal-p-h').textContent) && bunky[0].classList.contains('dnes'), true);
+  check('další dny krátce (Po 5. 10.)', /^(Po|Út|St|Čt|Pá|So|Ne) \\d+\\. \\d+\\.$/.test(bunky[2].querySelector('.kal-p-h').textContent), true);
+  const zub = bunky[0].querySelector('.kal-p-u');
+  check('událost má čas a název', zub.querySelector('.kal-p-cas').textContent + ' ' + zub.querySelector('.kal-p-nazev').textContent, '09:00 Zubař');
+  const letRadek = bunky[0].querySelectorAll('.kal-p-u')[1];
+  const bFlying = (() => { const x = document.createElement('i'); x.style.color = kalBarva({ nazev: 'Flying' }, 0); return x.style.color; })();
+  check('  sloučený kalendář má svou barvu (Flying)', letRadek.querySelector('.kal-p-tecka').style.background, bFlying);
+  const nz = letRadek.querySelector('.kal-p-nazev');
+  check('  dlouhý název je na jeden řádek', nz.getBoundingClientRect().height < 20 && nz.scrollWidth > nz.clientWidth, true);
+  const vic = bunky[3].querySelector('.kal-p-vic');
+  check('přeplněný den ukáže „+N další"', !!vic && /^\\+\\d+ další$/.test(vic.textContent), true);
+  check('  a obsah z buňky nevytéká', bunky[3].querySelector('.kal-p-seznam').scrollHeight <= bunky[3].querySelector('.kal-p-seznam').clientHeight + 1, true);
+  const prR = prehled.getBoundingClientRect();
+  check('celý přehled je na jedné obrazovce', prR.bottom <= window.innerHeight + 40 && prR.height > 200, true);
+  if (window.innerWidth >= 700) {
+    check('  na iPadu dva týdny po sedmi', Math.round(bunky[7].getBoundingClientRect().left) === Math.round(bunky[0].getBoundingClientRect().left)
+      && bunky[7].getBoundingClientRect().top > bunky[6].getBoundingClientRect().top, true);
+  }
+  bunky[9].click();
+  check('klepnutí na den ukáže ten den', /Trénink/.test(document.getElementById('kalMrizka').textContent), true);
+  check('  a přehled se zavře', prehled.hidden, true);
+  check('  tlačítko je zase Přehled', prBtn.textContent, 'Přehled');
+  prBtn.click(); prBtn.click();
+  check('„Den" vrátí denní pohled', getComputedStyle(document.getElementById('kalDenPohled')).display !== 'none' || window.innerWidth < 1000, true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

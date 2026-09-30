@@ -315,7 +315,7 @@ nadpis('5) Skládání do dnů');
     ics('UID:y', 'SUMMARY:Oběd', 'DTSTART:20260915T100000Z', 'DTEND:20260915T110000Z')
   ], OD, DO);
   const dny = api.kalDoDnu(u, api.kalZacatek(Date.UTC(2026, 8, 14, 12)));
-  check('dnů je sedm', dny.length, 7);
+  check('dnů je čtrnáct', dny.length, 14);
   check('první den má datum', dny[0].d, '2026-09-14');
   check('první den je prázdný', dny[0].udalosti.length, 0);
   // Vícedenní událost musí být vidět v každém dotčeném dni, ne jen v den odjezdu
@@ -327,7 +327,22 @@ nadpis('5) Skládání do dnů');
 {
   const dny = api.kalDoDnu([], api.kalZacatek(Date.UTC(2026, 8, 14, 12)));
   check('bez událostí jsou dny prázdné', dny.every(d => d.udalosti.length === 0), true);
-  check('  ale pořád jich je sedm', dny.length, 7);
+  check('  ale pořád jich je čtrnáct', dny.length, 14);
+}
+{
+  // Přes konec letního času (25. 10. 2026): dny začínají v pražskou půlnoc, ne po 24 h
+  const od = api.kalZacatek(Date.UTC(2026, 9, 20, 10));
+  const u = api.kalUdalosti([
+    ics('UID:r', 'SUMMARY:Ranní let', 'DTSTART:20261026T070000Z', 'DTEND:20261026T090000Z'),
+    ics('UID:p', 'SUMMARY:Pozdní večer', 'DTSTART:20261025T223000Z', 'DTEND:20261025T225500Z')
+  ], od, od + 20 * 86400000);
+  const dny = api.kalDoDnu(u, od);
+  const d26 = dny.find(d => d.d === '2026-10-26');
+  check('po změně času začíná den v půlnoc (23:00 UTC)', new Date(d26.od).toISOString(), '2026-10-25T23:00:00.000Z');
+  check('  ranní událost 26. 10. je v 26. 10.', d26.udalosti.map(x => x.nazev).join(), 'Ranní let');
+  check('  večer 25. 10. (23:30) zůstane v 25. 10.',
+    dny.find(d => d.d === '2026-10-25').udalosti.map(x => x.nazev).join(), 'Pozdní večer');
+  check('  všech 14 dní má svoje datum', new Set(dny.map(d => d.d)).size, 14);
 }
 {
   // Uříznutá nebo prázdná odpověď nesmí shodit poller
@@ -460,7 +475,7 @@ nadpis('7) Bez přihlašovacích údajů');
 {
   const h = build();
   check('kalendář je vypnutý', h.api.calendarPayload().enabled, false);
-  check('  a dnů je sedm', h.api.calendarPayload().dnu, 7);
+  check('  a dnů je čtrnáct', h.api.calendarPayload().dnu, 14);
   check('  bez dat', h.api.calendarPayload().days.length, 0);
 }
 

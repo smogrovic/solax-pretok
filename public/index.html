@@ -168,6 +168,47 @@
   }
   @media (min-width: 700px)  { .kal-dny{grid-template-columns:repeat(4, 1fr);} }
 
+  /* Přehled 14 dní: telefon 2 sloupce × 7 řádků, širší displej 7 × 2 (dva týdny).
+     Buňky mají pevný podíl výšky, takže se vejde na jednu obrazovku; co se do
+     buňky nevejde, schová se a dole je „+N". */
+  .kal-prehled{
+    flex:1 1 auto;
+    min-height:60vh;
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    grid-template-rows:repeat(7, minmax(0, 1fr));
+    gap:6px;
+  }
+  .kal-prehled[hidden]{display:none;}
+  @media (min-width: 700px) {
+    .kal-prehled{grid-template-columns:repeat(7, minmax(0, 1fr));grid-template-rows:repeat(2, minmax(0, 1fr));}
+  }
+  .kal-panel.kal-v-prehledu .kal-den-pohled,
+  .kal-panel.kal-v-prehledu .kal-dny{display:none !important;}
+  .kal-p-den{
+    background:var(--card);
+    border-radius:12px;
+    padding:6px 7px;
+    box-shadow:0 1px 3px rgba(44,62,80,0.06);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+    cursor:pointer;
+  }
+  .kal-p-den.dnes{box-shadow:0 0 0 2px var(--orange);}
+  .kal-p-den.vikend{background:rgba(255,255,255,0.72);}
+  .kal-p-h{font-size:11px;font-weight:700;color:var(--grey-text);margin-bottom:3px;white-space:nowrap;}
+  .kal-p-den.dnes .kal-p-h{color:var(--orange);}
+  .kal-p-den.vikend .kal-p-h{color:var(--muted);}
+  .kal-p-seznam{flex:1;min-height:0;overflow:hidden;}
+  .kal-p-u{display:flex;align-items:center;gap:4px;font-size:11px;line-height:1.35;white-space:nowrap;}
+  .kal-p-tecka{flex:0 0 6px;height:6px;border-radius:50%;}
+  .kal-p-cas{color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto;}
+  .kal-p-nazev{color:var(--grey-text);overflow:hidden;text-overflow:ellipsis;min-width:0;}
+  .kal-p-celodenni .kal-p-nazev{font-weight:600;}
+  .kal-p-vic{font-size:10px;color:var(--muted);font-weight:600;}
+
   /* Denní pohled se sloupci po kalendářích — jen na širokém displeji */
   .kal-den-pohled{flex:1;display:none;flex-direction:column;min-height:0;}
   @media (min-width: 1000px) {
@@ -3495,7 +3536,10 @@
     <div class="kal-mrizka" id="kalMrizka"></div>
   </div>
   <div class="kal-dny" id="kalDny"></div>
+  <!-- Přehled: 14 dní naráz, kompaktně (na iPadu dva týdny po sedmi) -->
+  <div class="kal-prehled" id="kalPrehled" hidden></div>
   <div class="kal-pata">
+    <button class="kal-obnov" id="kalPrehledBtn" type="button">Přehled</button>
     <button class="kal-obnov" id="kalObnov" type="button">Aktualizovat</button>
     <div class="kal-meta" id="kalMeta"></div>
   </div>
@@ -11946,6 +11990,7 @@ const kalDenNazevEl = document.getElementById('kalDenNazev');
 // se nic dopočítávat ani překreslovat při otočení iPadu.
 const kalPct = ms => (ms / 86400000) * 100;
 let kalDenIndex = 0;            // který z došlých dnů se ukazuje (0 = dnes)
+let kalPrehledZap = false;       // místo denního pohledu přehled 14 dní
 
 // Barvy sloupců podle toho, jak kalendáře vypadají v Kalendáři na telefonu — ať se
 // při pohledu na zeď pozná Elenčina událost stejně rychle jako tam. Barva z iCloudu
@@ -12198,8 +12243,97 @@ if (kalObnovBtn) kalObnovBtn.addEventListener('click', async () => {
   kalObnovBtn.textContent = popis;
   kalObnovBtn.disabled = false;
 });
-// Čára „teď" se musí posouvat i bez nových dat ze serveru
-setInterval(() => { if (kalPanelEl && !kalPanelEl.hidden) renderKalDen(); }, 60000);
+// Čára „teď" se musí posouvat i bez nových dat ze serveru (a „Dnes" v přehledu)
+setInterval(() => {
+  if (kalPanelEl && !kalPanelEl.hidden) { renderKalDen(); if (kalPrehledZap) renderKalPrehled(); }
+}, 60000);
+
+// ---------- Přehled: 14 dní na jedné obrazovce ----------
+const kalPrehledEl = document.getElementById('kalPrehled');
+const kalPrehledBtn = document.getElementById('kalPrehledBtn');
+const KAL_DNY_KRATCE = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+
+function kalPrehledNadpis(den, i) {
+  const [y, m, d] = String(den.d || '').split('-').map(Number);
+  if (!y) return '?';
+  const datum = `${d}. ${m}.`;
+  if (i === 0) return `Dnes ${datum}`;
+  if (i === 1) return `Zítra ${datum}`;
+  return `${KAL_DNY_KRATCE[new Date(y, m - 1, d).getDay()]} ${datum}`;
+}
+
+function kalPrehledPrepni(zap) {
+  kalPrehledZap = zap;
+  if (kalPanelEl) kalPanelEl.classList.toggle('kal-v-prehledu', zap);
+  if (kalPrehledEl) kalPrehledEl.hidden = !zap;
+  if (kalPrehledBtn) kalPrehledBtn.textContent = zap ? 'Den' : 'Přehled';
+  if (zap) renderKalPrehled();
+}
+
+function renderKalPrehled() {
+  if (!kalPrehledEl || !kalPrehledZap) return;
+  const dny = ((kalData || {}).days || []).slice(0, 14);
+  kalPrehledEl.textContent = '';
+  dny.forEach((den, i) => {
+    const [y, m, d] = String(den.d || '').split('-').map(Number);
+    const tyden = y ? new Date(y, m - 1, d).getDay() : 1;
+    const bunka = document.createElement('div');
+    bunka.className = 'kal-p-den' + (i === 0 ? ' dnes' : '') + (tyden === 0 || tyden === 6 ? ' vikend' : '');
+    bunka.dataset.i = String(i);
+    const h = document.createElement('div');
+    h.className = 'kal-p-h';
+    h.textContent = kalPrehledNadpis(den, i);
+    bunka.appendChild(h);
+    const seznam = document.createElement('div');
+    seznam.className = 'kal-p-seznam';
+    for (const u of (den.udalosti || [])) {
+      const r = document.createElement('div');
+      r.className = 'kal-p-u' + (u.celodenni ? ' kal-p-celodenni' : '');
+      const tecka = document.createElement('span');
+      tecka.className = 'kal-p-tecka';
+      tecka.style.background = kalBarvaU(u);
+      r.appendChild(tecka);
+      if (!u.celodenni) {
+        const cas = document.createElement('span');
+        cas.className = 'kal-p-cas';
+        cas.textContent = kalCas(u);
+        r.appendChild(cas);
+      }
+      const n = document.createElement('span');
+      n.className = 'kal-p-nazev';
+      n.textContent = u.nazev;
+      r.appendChild(n);
+      seznam.appendChild(r);
+    }
+    bunka.appendChild(seznam);
+    // Klepnutí na den: zpátky na denní pohled právě na tom dni
+    bunka.addEventListener('click', () => {
+      kalPrehledPrepni(false);
+      kalDenIndex = i;
+      renderKalDen();
+      const box = kalDnyEl && kalDnyEl.children[i];
+      if (box && getComputedStyle(kalDnyEl).display !== 'none') box.scrollIntoView({ block: 'start' });
+    });
+    kalPrehledEl.appendChild(bunka);
+  });
+  // Co se do buňky nevejde, schová se a místo toho „+N" — až po rozvržení,
+  // protože kolik se vejde, záleží na výšce obrazovky
+  for (const seznam of kalPrehledEl.querySelectorAll('.kal-p-seznam')) {
+    const radky = [...seznam.children];
+    if (seznam.scrollHeight <= seznam.clientHeight + 1) continue;
+    const vic = document.createElement('div');
+    vic.className = 'kal-p-vic';
+    seznam.appendChild(vic);
+    let skryto = 0;
+    while (radky.length && seznam.scrollHeight > seznam.clientHeight + 1) {
+      radky.pop().style.display = 'none';
+      skryto++;
+      vic.textContent = `+${skryto} další`;
+    }
+  }
+}
+
+if (kalPrehledBtn) kalPrehledBtn.addEventListener('click', () => kalPrehledPrepni(!kalPrehledZap));
 
 function renderKalendar(data) {
   if (data) kalData = data;
@@ -12215,6 +12349,7 @@ function renderKalendar(data) {
   }
   if (kalDiagBtn) kalDiagBtn.hidden = !d.enabled || (!d.error && (d.days || []).length > 0);
   renderKalDen();
+  if (kalPrehledZap) renderKalPrehled();
   for (const [i, den] of (d.days || []).entries()) {
     const box = document.createElement('div');
     box.className = 'kal-den' + (i === 0 ? ' dnes' : '');
