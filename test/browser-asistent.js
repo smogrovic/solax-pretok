@@ -306,6 +306,25 @@ setTimeout(async () => {
   await pockej();
   check('potvrzené „jsme pryč" se pošle', poslano[0].url, '/api/away');
   check('  s hodnotou', poslano[0].body.away, true);
+
+  R.push('\\nAlarm přes Zkratky');
+  const otevreno = [];
+  alarmOtevri = url => otevreno.push(url);
+  const zap = document.getElementById('alarmZapBtn'), vyp = document.getElementById('alarmVypBtn');
+  check('tlačítka Zakóduj / Odkóduj alarm jsou na Asistentovi', zap.textContent + ' | ' + vyp.textContent, 'Zakóduj alarm | Odkóduj alarm');
+  check('  vedle sebe v jedné řadě', Math.round(zap.getBoundingClientRect().top) === Math.round(vyp.getBoundingClientRect().top), true);
+  zap.click();
+  check('zakódování se ptá', document.getElementById('potvrzNadpis').textContent, 'Zakódovat alarm?');
+  check('  s 15s odpočtem', document.getElementById('potvrzAno').textContent, 'Potvrdit (15 s)');
+  document.getElementById('potvrzZpet').click();
+  check('„Zpět" nic nespustí', otevreno.length, 0);
+  zap.click();
+  document.getElementById('potvrzAno').click();
+  check('potvrzení spustí zkratku Alarm zapnout', otevreno[0], 'shortcuts://run-shortcut?name=Alarm%20zapnout');
+  vyp.click();
+  check('odkódování se ptá', document.getElementById('potvrzNadpis').textContent, 'Odkódovat alarm?');
+  document.getElementById('potvrzAno').click();
+  check('  a spustí zkratku Alarm vypnout', otevreno[1], 'shortcuts://run-shortcut?name=Alarm%20vypnout');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

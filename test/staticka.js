@@ -270,4 +270,10 @@ check('garáž a otevření dveří mají 15 s',
 // Vysvětlení logiky sauny je jen na stránce Logika automatiky
 check('u časovače sauny není dlouhé vysvětlení', HTML.includes('Kamna se zapnou o odhad náběhu dřív'), false);
 
+nadpis('Alarm');
+// Číslo alarmu a kód patří jen do zkratky v telefonu — v appce smí být jen jména zkratek
+check('appka spouští zkratky Alarm zapnout / vypnout', HTML.includes("zapnout: 'Alarm zapnout'") && HTML.includes("vypnout: 'Alarm vypnout'"), true);
+check('v appce není telefonní číslo', /(?<![\d.])(\+420\s?)?[67]\d{2}\s?\d{3}\s?\d{3}(?!\d)/.test(HTML), false);
+check('  ani SMS příkaz alarmu', /\.(ARM|OFF)\.A\d/.test(HTML), false);
+
 konec();

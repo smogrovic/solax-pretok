@@ -1308,6 +1308,10 @@
   }
   /* Spodní mřížka navazuje na horní se stejnou mezerou jako mezi tlačítky */
   #asstDvojice{margin-top:8px;}
+  #asstAlarm{margin-top:8px;}
+  .asst-scene.alarm-btn{background:var(--navy);}
+  /* iPad na zdi nemá SIM — zkratky se SMS se pouštějí z telefonu */
+  @media (min-width: 1000px) { #asstAlarm{display:none;} }
   .asst-scene{
     border:none;
     border-radius:16px;
@@ -2315,6 +2319,12 @@
           <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
           <!-- Zatáhne ložnici a to ráno ji žádná automatika neotevře (ani o prázdninách v 10:00) -->
           <button class="prazdniny-btn" id="lozniceZavrenoBtn" type="button">Zavřené žaluzie v ložnici</button>
+        </div>
+        <!-- Alarm se ovládá SMS. Tlačítko spustí zkratku v iPhonu, která SMS pošle;
+             číslo alarmu i kód jsou JEN ve zkratce, appka zná jen její jméno. -->
+        <div class="asst-scenes" id="asstAlarm">
+          <button class="asst-scene alarm-btn" id="alarmZapBtn" type="button">Zakóduj alarm</button>
+          <button class="asst-scene alarm-btn" id="alarmVypBtn" type="button">Odkóduj alarm</button>
         </div>
       </div>
       <div class="card lockable tempauto-card" id="tempAutoCard">
@@ -3490,9 +3500,9 @@
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Nejsme doma</div>
           <ul class="logic-list">
-            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie a vypne světla, klimu, saunu i oběhové čerpadlo.</li>
-            <li>Dokud jsme pryč, drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
+            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
             <li>Po přepnutí zpátky se <b>žaluzie nastaví podle rozvrhu</b>, klima a relé se vrátí do automatiky.</li>
+            <li><b>Alarm</b> (Asistent): Zakóduj / Odkóduj spustí v iPhonu zkratku, která pošle SMS. Číslo a kód jsou jen ve zkratce.</li>
           </ul>
         </div>
 
@@ -9477,6 +9487,26 @@ const POTVRZ_SCENY = {
     sekundy: 15
   }
 };
+
+// ---------- Alarm přes Zkratky v iPhonu ----------
+const ALARM_ZKRATKY = { zapnout: 'Alarm zapnout', vypnout: 'Alarm vypnout' };
+// Samostatně, ať jde v testu podvrhnout (skutečná navigace by stránku opustila)
+function alarmOtevri(url) { location.href = url; }
+function alarmZkratka(co) {
+  const jmeno = ALARM_ZKRATKY[co];
+  if (!jmeno) return;
+  alarmOtevri('shortcuts://run-shortcut?name=' + encodeURIComponent(jmeno));
+}
+function alarmKlik(co) {
+  const zap = co === 'zapnout';
+  potvrzZeptej(zap ? 'Zakódovat alarm?' : 'Odkódovat alarm?',
+    'Z tohoto telefonu odejde SMS přes zkratku „' + ALARM_ZKRATKY[co] + '".',
+    () => alarmZkratka(co), 15, () => {});
+}
+const alarmZapBtnEl = document.getElementById('alarmZapBtn');
+const alarmVypBtnEl = document.getElementById('alarmVypBtn');
+if (alarmZapBtnEl) alarmZapBtnEl.addEventListener('click', () => alarmKlik('zapnout'));
+if (alarmVypBtnEl) alarmVypBtnEl.addEventListener('click', () => alarmKlik('vypnout'));
 
 function scenaKlik(key, btn) {
   const p = POTVRZ_SCENY[key];
