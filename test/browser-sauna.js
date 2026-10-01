@@ -562,7 +562,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
 
   OUT.push('\\n8e5) Odhad n\u00e1b\u011bhu');
   const odhadEl = top('huumOdhad');
-  const model = { rozjezd: 7.5, tau: 123.8, a: 147.8, b: 0.15, termostat: 90 };
+  const model = { rozjezd: 5.9, tau: 118.7, a: 137, b: 0.55, termostat: 90 };
   // Netopí: sauna 27 °C, venku 14,94 °C, cíl 80 → ~77 min (zadání modelu)
   huumData = { enabled: true, statusCode: 232, heating: false, temperature: 27, fetchedAt: new Date().toISOString(),
     odhad: { venkuC: 14.94, tStartC: 27, model, cile: [] } };
@@ -572,7 +572,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('před zapnutím: za jak dlouho na cíl z číselníku', odhadEl.textContent, 'Nahřátí ~1 h 17 min');
   check('  popisek bez teploty', top('huumTopeniPopis').textContent, 'Podrž pro zapnutí');
   jezdec.value = '60'; jezdec.dispatchEvent(new Event('input'));
-  check('  točení číselníkem ho hned přepočítá', odhadEl.textContent, 'Nahřátí ~46 min');
+  check('  točení číselníkem ho hned přepočítá', odhadEl.textContent, 'Nahřátí ~45 min');
   // Stav kamen neznámý (stará data), model je → odhad pořád vidět
   huumData = { ...huumData, fetchedAt: new Date(Date.now() - 60 * MIN).toISOString() };
   renderHuum();
@@ -580,12 +580,12 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  i když stav kamen zrovna neznáme', odhadEl.textContent, 'Nahřátí ~1 h 17 min');
   huumData = { ...huumData, fetchedAt: new Date().toISOString() };
   renderHuum();
-  check('  i s rozjezdem kamen (cíl 60 → ~46 min)', Math.round(odhadNabehuJs(model, 14.94, 27, 60).minut), 46);
+  check('  i s rozjezdem kamen (cíl 60 → ~45 min)', Math.round(odhadNabehuJs(model, 14.94, 27, 60).minut), 45);
   jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
   check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, 'Nad mo\u017enosti kamen');
-  check('  vzorec sedí i pro mráz (−20 → 85 °C ~133 min)',
-    Math.round(odhadNabehuJs(model, -20, -20, 85).minut), 133);
-  check('  a z 10 °C při −20 venku ~108 min', Math.round(odhadNabehuJs(model, -20, 10, 85).minut), 108);
+  check('  vzorec sedí i pro mráz (−20 → 85 °C ~157 min)',
+    Math.round(odhadNabehuJs(model, -20, -20, 85).minut), 157);
+  check('  a z 10 °C při −20 venku ~129 min', Math.round(odhadNabehuJs(model, -20, 10, 85).minut), 129);
   const barvaPro = t => { const x = document.createElement('div');
     x.style.color = dialBarva((t - Number(jezdec.min)) / (Number(jezdec.max) - Number(jezdec.min))); return x.style.color; };
   jezdec.value = '80'; jezdec.dispatchEvent(new Event('input'));
@@ -670,7 +670,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Celá křivka je to, proč to tlačítko existuje — z milestones samotných
   // se rychlost nahřívání nespočítá
   check('  v\u010detn\u011b k\u0159ivky', parsed.zaznamy[0].body.length, 2);
-  check('  i s modelem, se kterým se počítalo', parsed.model && parsed.model.tau, 123.8);
+  check('  i s modelem, se kterým se počítalo', parsed.model && parsed.model.tau, 118.7);
   // Nic se nemaže — i nesmyslná měření zůstávají, jen s poznámkou
   saunaNahrevData = { bezici: null, zaznamy: [
     { start: T - 5 * H, konec: T - 4 * H, venkuC: 8, odC: 72, cilC: 80, teplyStart: true,

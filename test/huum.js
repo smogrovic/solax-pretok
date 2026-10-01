@@ -725,7 +725,7 @@ const volejD = async (h, cesta, params) => {
 
 nadpis('18) Tik: zapnutí o odhad dřív, přípravu v pevný čas už nedělá');
 const MINUTA = 60000;
-// Sauna 20 °C, venku 10 °C: model dá na 80 °C 7,5 + 123,8·ln((149,3−20)/(149,3−80)) ≈ 84,7 → 85 min
+// Sauna 20 °C, venku 10 °C: model dá na 80 °C 5,9 + 118,7·ln((142,5−20)/(142,5−80)) ≈ 85,8 → 86 min
 const stavKamen = (h, o = {}) => {
   h.state.weather = { tempC: 10 };
   h.state.huum = { temperature: 20, heating: false, fetchedAt: new Date().toISOString(), error: null, ...o };
@@ -738,7 +738,7 @@ const stavKamen = (h, o = {}) => {
   h.api.saunaTimerPridej('19:00', 80, od);
   const t = h.api.casovace()[0];
   const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
-  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 85);
+  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 86);
   check('zapnutí = příchod − odhad', t.zapneV, jdu - cekane * MINUTA);
   h.odpovez = async n => (h.volani[h.volani.length - 1].adresa.endsWith('/start')
     ? { stav: 200, text: '{"ok":true}' }

@@ -529,6 +529,27 @@ setTimeout(async () => {
   document.querySelector('#kalDny .kal-udalost').click();
   check('řádek v telefonním seznamu otevře detail', detail.hidden, false);
   detail.click();
+
+  R.push('\\n12) Bez doteku zpátky na dnes a zítra');
+  kalOtevri(true);
+  document.getElementById('kalDenNazev').click();
+  for (let i = 0; i < 4; i++) document.getElementById('kalNext').click();
+  check('prolistováno dopředu', kalDenIndex, 4);
+  prBtn.click();
+  document.querySelector('#kalPrehled .kal-p-u').click();
+  check('  s Přehledem a detailem', !document.getElementById('kalPrehled').hidden && !detail.hidden, true);
+  // Čerstvý dotek: pod rukama se nic nemění
+  ipadDotekAt = Date.now();
+  ipadKontrola(Date.now());
+  check('dokud se na displej sahá, nic se nepřepne', kalDenIndex + ' ' + kalPrehledZap, '4 true');
+  // Pět minut klidu: zpátky na dnes a zítra
+  ipadDotekAt = 0;
+  ipadKontrola(Date.now() + KAL_VYCHOZI_MS + 1000);
+  check('po klidu je kalendář na dnešku', kalDenIndex, 0);
+  check('  nadpis Dnes', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
+  check('  Přehled vypnutý', document.getElementById('kalPrehled').hidden, true);
+  check('  detail zavřený', detail.hidden, true);
+  check('  a kalendář otevřený', kalPanelEl.hidden, false);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

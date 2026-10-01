@@ -1106,10 +1106,10 @@ const saunaEnvNum = (klic, vychozi) => {
   const v = process.env[klic];
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
 };
-const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 7.5);
-const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 123.8);
-const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 147.8);
-const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.15);
+const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.9);
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 118.7);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 137);
+const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.55);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
 

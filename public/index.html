@@ -12686,10 +12686,20 @@ function ipadSaunaIndex() {
   return slides.indexOf(document.getElementById('saunaSlide'));
 }
 
+// Výchozí kalendář = dnes a zítra: bez Přehledu, bez otevřeného detailu
+function kalNaDnesek() {
+  if (kalPrehledZap) kalPrehledPrepni(false);
+  kalDetailZavri();
+  if (kalDenIndex !== 0) { kalDenIndex = 0; renderKalDen(); }
+}
+function kalJeNaDnesku() {
+  return kalDenIndex === 0 && !kalPrehledZap && !(kalDetailEl && !kalDetailEl.hidden);
+}
+
 function ipadVychozi(now = Date.now()) {
   if (!sirokyDisplej()) return;
   const i = ipadSaunaIndex();
-  if (!saunaBezi(now) || i < 0) { kalOtevri(true); return; }
+  if (!saunaBezi(now) || i < 0) { kalNaDnesek(); kalOtevri(true); return; }
   kalOtevri(false);
   // Sauna uprostřed: první viditelná je ta před ní
   sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
@@ -12699,7 +12709,8 @@ function ipadVychozi(now = Date.now()) {
 function ipadJeVychozi(now = Date.now()) {
   const kal = !!(kalPanelEl && !kalPanelEl.hidden);
   const i = ipadSaunaIndex();
-  if (!saunaBezi(now) || i < 0) return kal;
+  // Prolistovaný den, Přehled nebo otevřený detail výchozí nejsou
+  if (!saunaBezi(now) || i < 0) return kal && kalJeNaDnesku();
   return !kal && Math.round(sliderWrap.scrollLeft / sirkaStranky()) === Math.round(stranaNaStred(i) / sirkaStranky());
 }
 
