@@ -311,8 +311,9 @@ setTimeout(async () => {
   const otevreno = [];
   alarmOtevri = url => otevreno.push(url);
   const zap = document.getElementById('alarmZapBtn'), vyp = document.getElementById('alarmVypBtn');
-  check('tlačítka Zakóduj / Odkóduj alarm jsou na Asistentovi', zap.textContent + ' | ' + vyp.textContent, 'Zakóduj alarm | Odkóduj alarm');
-  check('  vedle sebe v jedné řadě', Math.round(zap.getBoundingClientRect().top) === Math.round(vyp.getBoundingClientRect().top), true);
+  check('tlačítka Zakóduj / Odkóduj alarm jsou v appce', zap.textContent + ' | ' + vyp.textContent, 'Zakóduj alarm | Odkóduj alarm');
+  // Zatím schované (rozpracováno, viz ROZPRACOVANE.md) — kód ale funguje
+  check('  zatím schovaná', document.getElementById('asstAlarm').hidden && getComputedStyle(document.getElementById('asstAlarm')).display, 'none');
   zap.click();
   check('zakódování se ptá', document.getElementById('potvrzNadpis').textContent, 'Zakódovat alarm?');
   check('  s 15s odpočtem', document.getElementById('potvrzAno').textContent, 'Potvrdit (15 s)');

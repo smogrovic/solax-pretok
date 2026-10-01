@@ -1309,6 +1309,7 @@
   /* Spodní mřížka navazuje na horní se stejnou mezerou jako mezi tlačítky */
   #asstDvojice{margin-top:8px;}
   #asstAlarm{margin-top:8px;}
+  #asstAlarm[hidden]{display:none;}
   .asst-scene.alarm-btn{background:var(--navy);}
   /* iPad na zdi nemá SIM — zkratky se SMS se pouštějí z telefonu */
   @media (min-width: 1000px) { #asstAlarm{display:none;} }
@@ -2322,7 +2323,9 @@
         </div>
         <!-- Alarm se ovládá SMS. Tlačítko spustí zkratku v iPhonu, která SMS pošle;
              číslo alarmu i kód jsou JEN ve zkratce, appka zná jen její jméno. -->
-        <div class="asst-scenes" id="asstAlarm">
+        <!-- Zatím schované: přeskakování do Zkratek se nelíbí, rozpracováno
+             v ROZPRACOVANE.md (SMS ze serveru). -->
+        <div class="asst-scenes" id="asstAlarm" hidden>
           <button class="asst-scene alarm-btn" id="alarmZapBtn" type="button">Zakóduj alarm</button>
           <button class="asst-scene alarm-btn" id="alarmVypBtn" type="button">Odkóduj alarm</button>
         </div>
@@ -3502,7 +3505,6 @@
           <ul class="logic-list">
             <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
             <li>Po přepnutí zpátky se <b>žaluzie nastaví podle rozvrhu</b>, klima a relé se vrátí do automatiky.</li>
-            <li><b>Alarm</b> (Asistent): Zakóduj / Odkóduj spustí v iPhonu zkratku, která pošle SMS. Číslo a kód jsou jen ve zkratce.</li>
           </ul>
         </div>
 
