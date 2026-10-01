@@ -12067,7 +12067,8 @@ let kalPrehledZap = false;       // místo denního pohledu přehled 14 dní
 // s tím, co je vidět na telefonu, často míjí.
 const KAL_BARVY = {
   'family': '#ffd60a',
-  'miki': '#34a853',
+  // Miki podle výřezu z Kalendáře v iPhonu (proužek, výplň i písmo)
+  'miki': '#3b8b25',
   'elenka': '#ef5fb8',
   // Zuzka, Zuzka Škola a Flying podle koleček v Kalendáři na telefonu
   'zuzka': '#8e2a4c',
@@ -12075,6 +12076,11 @@ const KAL_BARVY = {
   'lukáš': '#8e8e93',
   'lukas': '#8e8e93',
   'flying': '#1c3f9e'
+};
+// Ručně doladěné písmo k barvě kalendáře (podle vzoru z telefonu). Ostatní
+// kalendáře si ho dopočítají přes kalCitelna.
+const KAL_TEXT = {
+  '#3b8b25': { nazev: '#1f4215', cas: '#2d651d', alfa: 0.15 }
 };
 const KAL_NAHRADNI = ['#3b82c4', '#e5534b', '#7a9e2f', '#7d5fd6', '#e8a13a', '#18a999'];
 function kalBarva(kal, i) {
@@ -12210,7 +12216,8 @@ function renderKalDen() {
       chip.addEventListener('click', e => { e.stopPropagation(); kalDetailOtevri(u); });
       const cb = kalBarvaU(u, k, i);
       chip.style.background = kalSvetle(cb, 0.18);
-      chip.style.color = kalCitelna(cb, 0.18);
+      const vzorC = KAL_TEXT[String(cb).toLowerCase()];
+      chip.style.color = vzorC ? vzorC.nazev : kalCitelna(cb, 0.18);
     }
   }));
 
@@ -12242,9 +12249,10 @@ function renderKalDen() {
         b.style.left = `calc(${(u._pruh / u._pruhu) * 100}% + 2px)`;
         b.style.width = `calc(${100 / u._pruhu}% - 4px)`;
         const barva = kalBarvaU(u, k, i);
-        b.style.color = kalCitelna(barva, 0.14);
+        const vzor = KAL_TEXT[String(barva).toLowerCase()];
+        b.style.color = vzor ? vzor.nazev : kalCitelna(barva, 0.14);
         b.style.borderLeftColor = barva;
-        b.style.background = kalSvetle(barva, 0.14);
+        b.style.background = kalSvetle(barva, vzor ? vzor.alfa : 0.14);
         b.addEventListener('click', e => { e.stopPropagation(); kalDetailOtevri(u); });
         const jm = document.createElement('b');
         jm.textContent = u.nazev;
@@ -12252,6 +12260,7 @@ function renderKalDen() {
         const cas = document.createElement('span');
         cas.className = 'kal-blok-cas';
         cas.textContent = kalCas(u);
+        if (vzor) cas.style.color = vzor.cas;
         b.appendChild(cas);
         // Krátká událost nemá výšku na dvě řádky — čas jde vedle názvu, ne pod něj
         if (doKdy - od < 90 * 60000) b.classList.add('kal-blok-uzky');

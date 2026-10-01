@@ -550,6 +550,21 @@ setTimeout(async () => {
   check('  Přehled vypnutý', document.getElementById('kalPrehled').hidden, true);
   check('  detail zavřený', detail.hidden, true);
   check('  a kalendář otevřený', kalPanelEl.hidden, false);
+
+  R.push('\\n13) Mikiho barvy podle vzoru z telefonu');
+  d14[0].udalosti = [casU(0, 17, 'Třídní schůzka', 'Miki'), casU(0, 9, 'Kadeřník', 'Zuzka')];
+  renderKalendar({ enabled: true, dnu: 14, days: d14, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+  const bMiki = [...document.querySelectorAll('#kalMrizka .kal-blok')].find(b => /Třídní/.test(b.textContent));
+  const csM = getComputedStyle(bMiki);
+  check('proužek #3b8b25', csM.borderLeftColor, 'rgb(59, 139, 37)');
+  const fill = csM.backgroundColor.match(/[0-9.]+/g).map(Number);
+  // Výplň je proužek s průhledností 0,15 → na bílé #e1eedd
+  const naBile = fill.slice(0, 3).map(c => Math.round(c * fill[3] + 255 * (1 - fill[3])));
+  check('výplň jako ve vzoru (#e1eedd)', naBile.every((c, j) => Math.abs(c - [225, 238, 221][j]) <= 2), true);
+  check('název tmavě zelený (#1f4215)', getComputedStyle(bMiki.querySelector('b')).color, 'rgb(31, 66, 21)');
+  check('čas zelený (#2d651d)', getComputedStyle(bMiki.querySelector('.kal-blok-cas')).color, 'rgb(45, 101, 29)');
+  const bZuz = [...document.querySelectorAll('#kalMrizka .kal-blok')].find(b => /Kadeřník/.test(b.textContent));
+  check('ostatní kalendáře beze změny (Zuzka)', bZuz.style.color, (() => { const x = document.createElement('i'); x.style.color = kalCitelna(kalBarva({ nazev: 'Zuzka' }, 0), 0.14); return x.style.color; })());
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
