@@ -11,7 +11,7 @@ function build() {
   const state = {};
   const api = new Function('state', 'broadcast', 'app', 'addLog',
     CODE + '\n; state.pripominky = pripominkyVychozi();'
-         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkyObnov, pripominkyVychozi, pripominkyZima };'
+         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima };'
   )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
@@ -26,7 +26,9 @@ function build() {
 nadpis('1) Výchozí stav');
 {
   const h = build();
-  check('osm připomínek (i pes, sekačka a tráva)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer,sekacka,trava');
+  check('devět připomínek (i pes, sekačka, tráva a povlečení)', Object.keys(h.state.pripominky).join(','), 'kytky,vysavac,bio,popelnice,pesRano,pesVecer,sekacka,trava,povleceni');
+  check('výchozí intervaly: kytky 7, vysavač 7, tráva 10, povlečení 28 dní',
+    ['kytky', 'vysavac', 'trava', 'povleceni'].map(id => h.state.pripominky[id].dni).join(','), '7,7,10,28');
   check('sekačka má přepínač, výchozí zapnutý', h.state.pripominky.sekacka.zapnuto, true);
   check('nic není aktivované ručně', Object.values(h.state.pripominky).every(p => p.aktivovano === 0), true);
   check('nic neodťuknuto', Object.values(h.state.pripominky).every(p => p.hotovo === 0), true);
@@ -110,6 +112,36 @@ nadpis('5) Záloha a stream');
   check('  i ve snímku zálohy',
     zdroj.includes("'/api/pripominky/restore': { pripominky: state.pripominky }"), true);
   check('stav jde v úvodním snímku streamu', /\n    pripominky: state\.pripominky,\n/.test(zdroj), true);
+}
+
+nadpis('Interval a odťuknutí s datem');
+{
+  const h = build();
+  check('kytky na 3 dny', h.api.pripominkaInterval('kytky', 3) + ' ' + h.state.pripominky.kytky.dni, 'true 3');
+  check('  14 ano, 15 ne', h.api.pripominkaInterval('vysavac', 14) + ' ' + h.api.pripominkaInterval('vysavac', 15), 'true false');
+  check('  2 ne', h.api.pripominkaInterval('trava', 2), false);
+  check('povlečení po týdnech (7, 14, 21, 28)', [7, 14, 21, 28, 10, 35].map(d => h.api.pripominkaInterval('povleceni', d)).join(','),
+    'true,true,true,true,false,false');
+  check('popelnice interval nemá', h.api.pripominkaInterval('popelnice', 7), false);
+  const r = h.zavolej('/api/pripominky/:id/interval', { id: 'kytky' }, { dni: 5 });
+  check('endpoint interval', r.status + ' ' + h.state.pripominky.kytky.dni, '200 5');
+  check('  mimo rozsah 400', h.zavolej('/api/pripominky/:id/interval', { id: 'kytky' }, { dni: 30 }).status, 400);
+  check('  bez intervalu 404', h.zavolej('/api/pripominky/:id/interval', { id: 'bio' }, { dni: 5 }).status, 404);
+  // „Udělal jsem to včera": datum z kalendáře v appce
+  const ted = 100 * 86400000;
+  h.api.pripominkaHotovo('povleceni', false, ted, ted - 86400000);
+  check('odťuknuto včera', h.state.pripominky.povleceni.hotovo, ted - 86400000);
+  h.api.pripominkaHotovo('kytky', false, ted, ted + 5000);
+  check('  budoucnost neprojde (platí teď)', h.state.pripominky.kytky.hotovo, ted);
+  h.api.pripominkaHotovo('trava', false, ted, ted - 90 * 86400000);
+  check('  víc než 2 měsíce zpět neprojde (platí teď)', h.state.pripominky.trava.hotovo, ted);
+  h.api.pripominkaHotovo('povleceni', true);
+  check('  Zpět vrátí předchozí', h.state.pripominky.povleceni.hotovo, 0);
+  const z = h.zavolej('/api/pripominky/:id/hotovo', { id: 'vysavac' }, { kdy: Date.now() - 2 * 86400000 });
+  check('endpoint hotovo bere datum', z.status + ' ' + (Math.abs(h.state.pripominky.vysavac.hotovo - (Date.now() - 2 * 86400000)) < 5000), '200 true');
+  const o = build();
+  o.api.pripominkyObnov({ pripominky: { kytky: { dni: 4 }, povleceni: { dni: 21 }, trava: { dni: 99 } } });
+  check('interval přežije nasazení (záloha)', [o.state.pripominky.kytky.dni, o.state.pripominky.povleceni.dni, o.state.pripominky.trava.dni].join(','), '4,21,10');
 }
 
 nadpis('Zima vypne trávu a sekačku');

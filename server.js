@@ -1312,15 +1312,24 @@ function saunaZapnutoObnov(b, now = Date.now()) {
 // Kytky, vysavač, popelnice, pes, sekačka. Server drží jen to, kdy se co naposledy
 // odťuklo, a přepínač, kterým jde každou připomínku vypnout. Kdy připomínka svítí, si počítá appka podle hodin — v neděli
 // ve 12:00 se tak nemusí nic nikam posílat.
-const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka', 'trava'];
+const PRIPOMINKY_IDS = ['kytky', 'vysavac', 'bio', 'popelnice', 'pesRano', 'pesVecer', 'sekacka', 'trava', 'povleceni'];
+// Připomínky s nastavitelným intervalem (ve dnech): rozsah a krok voliče v appce
+const PRIPOMINKY_INTERVAL = {
+  kytky: { od: 3, do: 14, krok: 1 },
+  vysavac: { od: 3, do: 14, krok: 1 },
+  trava: { od: 3, do: 14, krok: 1 },
+  povleceni: { od: 7, do: 28, krok: 7 }     // 1–4 týdny
+};
+// Odťuknutí s datem v minulosti („udělal jsem to včera") — dál než tohle ne
+const PRIPOMINKY_ZPETNE_MS = 60 * 86400000;
 // Vypnout jde každá připomínka (třeba pes na dovolené, kytky v zimě)
 const PRIPOMINKY_S_PREPINACEM = PRIPOMINKY_IDS;
 
 function pripominkyVychozi() {
   return {
     // `aktivovano` = ručně rozsvíceno („Aktivovat teď“) — svítí, dokud se neodťukne
-    kytky: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
-    vysavac: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
+    kytky: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0, dni: 7 },
+    vysavac: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0, dni: 7 },
     bio: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     popelnice: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     // Krmení psa: ráno od 5:00, večer od 16:00, den se láme ve 3:00 (počítá appka)
@@ -1330,16 +1339,21 @@ function pripominkyVychozi() {
     // z `offlineOd` sekačky). Přepínač se vypíná, když je sekačka vypnutá schválně.
     sekacka: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 },
     // Posekat trávu: po 10 dnech od posledního odťuknutí (počítá appka)
-    trava: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0 }
+    trava: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0, dni: 10 },
+    // Vyprat povlečení: výchozí po 4 týdnech
+    povleceni: { zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0, dni: 28 }
   };
 }
 
-// Odťuknutí. `zpet` vrací omylem odťuknuté na předchozí čas.
-function pripominkaHotovo(id, zpet, now = Date.now()) {
+// Odťuknutí. `zpet` vrací omylem odťuknuté na předchozí čas. `kdy` = kdy se to
+// doopravdy udělalo (z kalendáře v appce, třeba včera) — ne v budoucnu a nejvýš
+// dva měsíce zpátky; jinak platí teď.
+function pripominkaHotovo(id, zpet, now = Date.now(), kdy) {
   const p = state.pripominky[id];
   if (!p) return false;
+  const cas = Number.isFinite(kdy) && kdy <= now && kdy >= now - PRIPOMINKY_ZPETNE_MS ? kdy : now;
   if (zpet) { p.hotovo = p.predtim || 0; p.predtim = 0; }
-  else { p.predtim = p.hotovo; p.hotovo = now; }
+  else { p.predtim = p.hotovo; p.hotovo = cas; }
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }
@@ -1349,6 +1363,17 @@ function pripominkaAktivuj(id, now = Date.now()) {
   const p = state.pripominky[id];
   if (!p) return false;
   p.aktivovano = now;
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+// Interval ve dnech (volič vedle přepínače). Jen připomínky, které ho mají, a jen
+// v jejich rozsahu a kroku.
+function pripominkaInterval(id, dni) {
+  const r = PRIPOMINKY_INTERVAL[id];
+  if (!r || !state.pripominky[id]) return false;
+  if (!Number.isInteger(dni) || dni < r.od || dni > r.do || (dni - r.od) % r.krok) return false;
+  state.pripominky[id].dni = dni;
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }
@@ -1405,6 +1430,8 @@ function pripominkyObnov(b) {
     if (Number.isFinite(aktivovano) && aktivovano > (p.aktivovano || 0)) p.aktivovano = aktivovano;
     if (PRIPOMINKY_S_PREPINACEM.includes(id) && typeof z.zapnuto === 'boolean') p.zapnuto = z.zapnuto;
     if (z.zimaVypnulo === true) p.zimaVypnulo = true;
+    const r = PRIPOMINKY_INTERVAL[id], dni = Number(z.dni);
+    if (r && Number.isInteger(dni) && dni >= r.od && dni <= r.do && !((dni - r.od) % r.krok)) p.dni = dni;
   }
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
@@ -1417,12 +1444,25 @@ app.post('/api/pripominky/restore', (req, res) => {
 
 app.post('/api/pripominky/:id/hotovo', (req, res) => {
   const zpet = !!(req.body && req.body.zpet === true);
-  if (!pripominkaHotovo(req.params.id, zpet)) return res.status(404).json({ error: 'Neznámá připomínka.' });
+  const kdy = req.body && Number(req.body.kdy);
+  if (!pripominkaHotovo(req.params.id, zpet, Date.now(), Number.isFinite(kdy) ? kdy : undefined)) {
+    return res.status(404).json({ error: 'Neznámá připomínka.' });
+  }
   res.json({ ok: true, pripominky: state.pripominky });
 });
 
 app.post('/api/pripominky/:id/aktivovat', (req, res) => {
   if (!pripominkaAktivuj(req.params.id)) return res.status(404).json({ error: 'Neznámá připomínka.' });
+  res.json({ ok: true, pripominky: state.pripominky });
+});
+
+app.post('/api/pripominky/:id/interval', (req, res) => {
+  const r = PRIPOMINKY_INTERVAL[req.params.id];
+  if (!r) return res.status(404).json({ error: 'Tahle připomínka interval nemá.' });
+  const dni = Number(req.body && req.body.dni);
+  if (!pripominkaInterval(req.params.id, dni)) {
+    return res.status(400).json({ error: `Interval musí být ${r.od}–${r.do} dní.` });
+  }
   res.json({ ok: true, pripominky: state.pripominky });
 });
 
