@@ -2143,14 +2143,18 @@
   .prip-telo{flex:1;min-width:0;}
   .prip-nazev{font-size:15px;font-weight:700;color:var(--navy);}
   .prip-text{font-size:12px;color:var(--grey-text);margin-top:2px;white-space:pre-line;line-height:1.4;}
+  /* „Naposledy …" je klepací — tečkované podtržení napoví, že jde změnit */
+  .prip-naposledy{display:block;border:none;background:none;padding:0;margin-top:2px;font:inherit;font-size:12px;
+    color:var(--grey-text);text-align:left;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;}
+  .prip-radek.sviti .prip-naposledy{color:var(--orange-dark);font-weight:600;}
+  .prip-nastaveni{display:flex;flex-direction:column;align-items:center;gap:6px;flex:0 0 52px;}
   .prip-datum{margin-top:12px;text-align:center;}
   /* Volič intervalu je úzký „štítek" bez šipky — na telefonu je řádek plný */
-  .timer-select.prip-interval{height:30px;padding:0 2px;font-size:12px;font-weight:600;border-radius:10px;
-    flex:0 0 auto;width:44px;-webkit-appearance:none;appearance:none;text-align:center;text-align-last:center;}
-  .prip-interval-misto{flex:0 0 44px;}
+  .timer-select.prip-interval{height:26px;padding:0 2px;font-size:12px;font-weight:600;border-radius:9px;
+    flex:0 0 auto;width:52px;-webkit-appearance:none;appearance:none;text-align:center;text-align-last:center;}
   .prip-radek.sviti .prip-text{color:var(--orange-dark);font-weight:600;}
-  .prip-akce{display:flex;align-items:center;gap:4px;flex:0 0 auto;}
-  .prip-akce .sek-btn{flex:0 0 auto;width:64px;padding-left:3px;padding-right:3px;font-size:12px;}
+  .prip-akce{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
+  .prip-akce .sek-btn{flex:0 0 auto;width:72px;padding-left:3px;padding-right:3px;font-size:12px;}
   .prip-akce .sek-btn.sviti{background:var(--orange);color:#fff;}
   .prip-akce .sek-btn.schovane{visibility:hidden;}
   .prip-akce .sek-btn.odpocet{opacity:1;color:var(--grey-text);}
@@ -11746,15 +11750,15 @@ function pripominkaStav(def, p, now = Date.now()) {
   if (def.dni) {
     // Interval nastavený voličem (server), jinak výchozí z definice
     const perioda = (Number(p.dni) || def.dni) * PRIP_DEN;
-    if (!hotovo) return { sviti: true, text: 'Zatím neodťuknuto', dalsi: null };
-    // Dva řádky: kdy bylo naposledy hotovo, pod tím kdy příště
-    const naposledy = 'Naposledy hotovo ' + pripDatum(pripNastenne(hotovo));
+    if (!hotovo) return { sviti: true, naposledy: 'Naposledy: zatím nikdy', text: '', dalsi: null };
+    // Dva řádky: kdy naposledy (klepnutím jde datum změnit), pod tím kdy příště
+    const naposledy = 'Naposledy ' + pripDatum(pripNastenne(hotovo));
     const pristi = pripDatum(pripNastenne(hotovo + perioda));
     if (now - hotovo >= perioda) {
       const dni = Math.floor((now - hotovo) / PRIP_DEN);
-      return { sviti: true, text: naposledy + ' (před ' + dni + ' dny)\nPříště ' + pristi + ' — už je čas', dalsi: null };
+      return { sviti: true, naposledy: naposledy + ' (před ' + dni + ' dny)', text: 'Příště ' + pristi + ' — už je čas', dalsi: null };
     }
-    return { sviti: false, dalsi: hotovo + perioda, text: naposledy + '\nPříště ' + pristi };
+    return { sviti: false, dalsi: hotovo + perioda, naposledy, text: 'Příště ' + pristi };
   }
   // Popelnice: okno od poledne den před svozem do poledne dne svozu
   const W = pripNastenne(now);
@@ -11770,12 +11774,12 @@ function pripominkaStav(def, p, now = Date.now()) {
     : PRIP_KDY[def.svoz] + ' ' + pripDatum(S + PRIP_DEN));
   // Odťuknout jde i dřív: počítá se k nejbližšímu svozu všechno od poledne dne
   // minulého svozu (tedy od konce předchozího okna)
-  const naposledy = hotovo ? 'Naposledy vyndáno ' + pripDatum(pripNastenne(hotovo)) + '\n' : '';
+  const naposledy = hotovo ? 'Naposledy ' + pripDatum(pripNastenne(hotovo)) : 'Naposledy: zatím nikdy';
   if (hotovo && pripNastenne(hotovo) >= S - 6 * PRIP_DEN) {
-    return { sviti: false, text: naposledy + 'Vyndáno ✓ · ' + kdySvoz, dalsi: naReal(S + 7 * PRIP_DEN) };
+    return { sviti: false, naposledy, text: 'Vyndáno ✓ · ' + kdySvoz, dalsi: naReal(S + 7 * PRIP_DEN) };
   }
-  if (!vOkne) return { sviti: false, text: naposledy + 'Příští ' + kdySvoz, dalsi: naReal(S) };
-  return { sviti: true, text: naposledy + 'Vyndat — ' + kdySvoz, dalsi: null };
+  if (!vOkne) return { sviti: false, naposledy, text: 'Příští ' + kdySvoz, dalsi: naReal(S) };
+  return { sviti: true, naposledy, text: 'Vyndat — ' + kdySvoz, dalsi: null };
 }
 
 // Kolik zbývá do další akce: pod den v hodinách, jinak ve dnech (zaokrouhleno nahoru)
@@ -11811,14 +11815,16 @@ const pripDatumOknoEl = document.getElementById('pripDatumOkno');
 const pripDatumEl = document.getElementById('pripDatum');
 let pripDatumDef = null;
 const pripIsoDen = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-function pripDatumOtevri(def) {
-  if (!pripDatumOknoEl || !pripDatumEl) return pripOdtukni(def);
+function pripDatumOtevri(def, puvodne) {
+  if (!pripDatumOknoEl || !pripDatumEl) return;
   pripDatumDef = def;
   const dnes = new Date();
   pripDatumEl.max = pripIsoDen(dnes);
   pripDatumEl.min = pripIsoDen(new Date(Date.now() - 59 * PRIP_DEN));
-  pripDatumEl.value = pripIsoDen(dnes);
-  document.getElementById('pripDatumNadpis').textContent = def.nazev + ' — kdy hotovo?';
+  // Předvybrané je to, co tam teď je (jinak dnešek)
+  const start = puvodne && Date.now() - puvodne < 59 * PRIP_DEN ? new Date(puvodne) : dnes;
+  pripDatumEl.value = pripIsoDen(start);
+  document.getElementById('pripDatumNadpis').textContent = def.nazev + ' — kdy naposledy?';
   pripDatumOknoEl.hidden = false;
 }
 function pripDatumKdy(hodnota, now = Date.now()) {
@@ -11872,10 +11878,22 @@ function renderPripominky(now = Date.now()) {
     const nazev = document.createElement('div');
     nazev.className = 'prip-nazev';
     nazev.textContent = def.nazev;
-    const text = document.createElement('div');
-    text.className = 'prip-text';
-    text.textContent = st.text;
-    telo.append(nazev, text);
+    telo.appendChild(nazev);
+    // „Naposledy 2. 10." — klepnutím kalendář a jde zadat jiné datum (třeba včera)
+    if (st.naposledy) {
+      const nap = document.createElement('button');
+      nap.type = 'button';
+      nap.className = 'prip-naposledy';
+      nap.textContent = st.naposledy;
+      nap.addEventListener('click', () => pripDatumOtevri(def, Number(p && p.hotovo) || 0));
+      telo.appendChild(nap);
+    }
+    if (st.text) {
+      const text = document.createElement('div');
+      text.className = 'prip-text';
+      text.textContent = st.text;
+      telo.appendChild(text);
+    }
     // Rozsvítit hned, i když na ni ještě není čas (zvoneček / záložka psa se objeví)
     if (!st.sviti) {
       const akt = document.createElement('button');
@@ -11901,9 +11919,11 @@ function renderPripominky(now = Date.now()) {
     btn.textContent = zpet ? 'Zpět' : odpocet ? pripOdpocet(st.dalsi - now) : 'Hotovo';
     // Schová se jen naoko — místo zůstane, ať jsou tlačítka pěkně pod sebou
     btn.classList.toggle('schovane', !zpet && !st.sviti && !odpocet);
-    // Hotovo ze seznamu se ptá na datum („udělal jsem to včera"); „Zpět" do 5 s
-    // a denní krmení psa jdou rovnou
-    btn.addEventListener('click', () => (zpet || def.denne || def.sekacka) ? pripOdtukni(def) : pripDatumOtevri(def));
+    // Oranžové Hotovo = teď. Jiné datum se zadá klepnutím na „Naposledy …"
+    btn.addEventListener('click', () => pripOdtukni(def));
+    // Přepínač a pod ním volič intervalu — ve sloupci, ať zbude místo na text
+    const nastaveni = document.createElement('div');
+    nastaveni.className = 'prip-nastaveni';
     if (def.interval) {
       const sel = document.createElement('select');
       sel.className = 'timer-select prip-interval';
@@ -11918,12 +11938,7 @@ function renderPripominky(now = Date.now()) {
       }
       sel.value = String((p && Number(p.dni)) || def.dni);
       sel.addEventListener('change', () => pripPost('/api/pripominky/' + def.id + '/interval', { dni: Number(sel.value) }));
-      akce.appendChild(sel);
-    } else {
-      // Místo pro volič zůstane i bez něj, ať jsou přepínače a Hotovo pod sebou
-      const misto = document.createElement('span');
-      misto.className = 'prip-interval-misto';
-      akce.appendChild(misto);
+      nastaveni.appendChild(sel);
     }
     if (def.prepinac) {
       const sw = document.createElement('button');
@@ -11932,8 +11947,9 @@ function renderPripominky(now = Date.now()) {
       sw.className = 'toggle-switch prip-prepinac' + (zapnuto ? ' on' : '');
       sw.setAttribute('aria-label', 'Připomínat ' + def.nazev);
       sw.addEventListener('click', () => pripPost('/api/pripominky/' + def.id + '/zapnuto', { zapnuto: !zapnuto }));
-      akce.appendChild(sw);
+      nastaveni.insertBefore(sw, nastaveni.firstChild);
     }
+    akce.appendChild(nastaveni);
     akce.appendChild(btn);
     radek.append(ikona, telo, akce);
     pripSeznamEl.appendChild(radek);
@@ -12065,7 +12081,7 @@ function pripPanelRender(now = Date.now()) {
     nazev.textContent = def.ikona + ' ' + def.nazev;
     const stav = document.createElement('div');
     stav.className = 'prip-panel-stav';
-    stav.textContent = zpet ? 'Hotovo ✓' : st.text;
+    stav.textContent = zpet ? 'Hotovo ✓' : (st.text || st.naposledy || '');
     text.append(nazev, stav);
     text.addEventListener('click', () => { pripPanelOtevri(false); pripOtevri(); });
     const hotovo = document.createElement('button');
