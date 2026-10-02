@@ -1352,8 +1352,15 @@ function pripominkaHotovo(id, zpet, now = Date.now(), kdy) {
   const p = state.pripominky[id];
   if (!p) return false;
   const cas = Number.isFinite(kdy) && kdy <= now && kdy >= now - PRIPOMINKY_ZPETNE_MS ? kdy : now;
-  if (zpet) { p.hotovo = p.predtim || 0; p.predtim = 0; }
-  else { p.predtim = p.hotovo; p.hotovo = cas; }
+  if (zpet) {
+    p.hotovo = p.predtim || 0; p.predtim = 0;
+    if (p.aktivovanoPred) { p.aktivovano = p.aktivovanoPred; p.aktivovanoPred = 0; }
+  } else {
+    p.predtim = p.hotovo; p.hotovo = cas;
+    // Odťuknutí ruší ruční „Aktivovat teď" — i když je datum v minulosti (včera),
+    // jinak by aktivace (dnes) byla novější a připomínka by svítila dál
+    p.aktivovanoPred = p.aktivovano || 0; p.aktivovano = 0;
+  }
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }

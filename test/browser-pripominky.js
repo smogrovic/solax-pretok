@@ -62,7 +62,19 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('bez odťuknutí svítí hned', sviti('kytky', { hotovo: 0 }, ted), 'true');
   check('  i vysavač', sviti('vysavac', null, ted), 'true');
   check('odťuknuté před 6 dny nesvítí', sviti('kytky', { hotovo: ted - 6 * DEN }, ted), 'false');
-  check('  těsně před 7 dny ještě ne', sviti('kytky', { hotovo: ted - 7 * DEN + MIN }, ted), 'false');
+  // Počítá se po dnech: hotovo 16. 9. → svítí od půlnoci 23. 9.
+  check('  hotovo 16. 9.: 22. 9. ve 23:59 ještě ne', sviti('kytky', { hotovo: praha('2026-09-16', 18) }, praha('2026-09-22', 23) + 59 * MIN), 'false');
+  check('  23. 9. od půlnoci už ano', sviti('kytky', { hotovo: praha('2026-09-16', 18) }, praha('2026-09-23', 0)), 'true');
+  // (pomocník praha() počítá s letním časem; po 25. 10. je v Praze UTC+1, proto Date.UTC)
+  // Vysavač: ráno aktivovaný, pak „hotovo včera" (1. 10.) → svítit začne až 8. 10.
+  const vys = { dni: 7, hotovo: praha('2026-10-01', 12), aktivovano: 0 };
+  check('hotovo včera 1. 10. → dnes 2. 10. nesvítí', sviti('vysavac', vys, praha('2026-10-02', 9)), 'false');
+  check('  a říká Příště 8. 10.', pripominkaStav(def('vysavac'), vys, praha('2026-10-02', 9)).text, 'Příště 8. 10.');
+  check('  7. 10. večer ještě ne', sviti('vysavac', vys, praha('2026-10-07', 23)), 'false');
+  check('  8. 10. ráno ano', sviti('vysavac', vys, praha('2026-10-08', 0) + MIN), 'true');
+  check('  odpočet ráno 2. 10. „za 6 dní"', pripOdpocet(pripominkaStav(def('vysavac'), vys, praha('2026-10-02', 9)).dalsi - praha('2026-10-02', 9)), 'za 6 dní');
+  check('povlečení 4 týdny: hotovo 1. 10. → příště 29. 10.', pripominkaStav(def('povleceni'), { hotovo: praha('2026-10-01', 20) }, praha('2026-10-02', 9)).text, 'Příště 29. 10.');
+  check('  přes změnu času (25. 10.) svítí 29. 10. od půlnoci', sviti('povleceni', { hotovo: praha('2026-10-01', 20) }, Date.UTC(2026, 9, 28, 23, 0)) + ',' + sviti('povleceni', { hotovo: praha('2026-10-01', 20) }, Date.UTC(2026, 9, 28, 22, 59)), 'true,false');
   check('po 7 dnech svítí', sviti('kytky', { hotovo: ted - 7 * DEN }, ted), 'true');
   const st9 = pripominkaStav(def('vysavac'), { hotovo: ted - 9 * DEN }, ted);
   check('  naposledy a pod tím příště', st9.naposledy + ' | ' + st9.text, 'Naposledy 14. 9. (před 9 dny) | Příště 21. 9. — už je čas');
@@ -191,6 +203,11 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   radek('povleceni').querySelector('.prip-naposledy').click();
   document.getElementById('pripDatumZpet').click();
   await wait(30);
+  radek('povleceni').querySelector('.prip-naposledy').click();
+  const boxR = document.querySelector('#pripDatumOkno .potvrz-box').getBoundingClientRect();
+  const poleR = document.getElementById('pripDatum').getBoundingClientRect();
+  check('pole s datem nevyčuhuje z okna', poleR.right <= boxR.right - 10 && poleR.left >= boxR.left + 10, 'true');
+  document.getElementById('pripDatumZpet').click();
   check('Zpět v kalendáři nic neodťukne', POSLANO.length + ' ' + document.getElementById('pripDatumOkno').hidden, '0 true');
   POSLANO.length = 0;
   pripData.vysavac.hotovo = 0; renderPripominky();
@@ -267,8 +284,8 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('hotové kytky nesvítí', sviti('kytky', kytkyHotove, T0), 'false');
   check('po aktivaci svítí', sviti('kytky', { ...kytkyHotove, aktivovano: T0 - MIN }, T0), 'true');
   check('  s textem', pripominkaStav(def('kytky'), { ...kytkyHotove, aktivovano: T0 - MIN }, T0).text, 'Aktivováno ručně');
-  check('po odťuknutí zhasne a běží 7 dní',
-    pripominkaStav(def('kytky'), { hotovo: T0, aktivovano: T0 - MIN }, T0 + MIN).dalsi, T0 + 7 * DEN);
+  check('po odťuknutí zhasne a běží do půlnoci za 7 dní',
+    pripominkaStav(def('kytky'), { hotovo: T0, aktivovano: T0 - MIN }, T0 + MIN).dalsi, praha('2026-09-30', 0));
   check('aktivace svítí i u vypnutého BIO', sviti('bio', { zapnuto: false, aktivovano: T0 }, T0), 'true');
   check('i mimo okno svozu', sviti('popelnice', { aktivovano: T0 }, praha('2026-09-26', 10)), 'true');
   pripData = { trava: { hotovo: Date.now() }, povleceni: { hotovo: Date.now() }, kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
@@ -392,7 +409,8 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   OUT.push('\\n12) Posekat trávu (po 10 dnech)');
   check('bez odťuknutí svítí', sviti('trava', { zapnuto: true, hotovo: 0 }, T), 'true');
   check('po 9 dnech ještě ne', sviti('trava', { zapnuto: true, hotovo: T - 9 * DEN }, T), 'false');
-  check('  a odpočítává den', pripOdpocet(pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 9 * DEN }, T).dalsi - T), 'za 1 den');
+  // Termín je půlnoc desátého dne — odpočet ukazuje zbytek dnešního dne (v hodinách)
+  check('  a odpočítává do půlnoci', /^za \\d+ h$/.test(pripOdpocet(pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 9 * DEN }, T).dalsi - T)), 'true');
   check('po 10 dnech svítí', sviti('trava', { zapnuto: true, hotovo: T - 10 * DEN }, T), 'true');
   check('  s textem o dnech', pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 12 * DEN }, T).naposledy, 'Naposledy 20. 9. (před 12 dny)');
   check('vypnutá nesvítí', sviti('trava', { zapnuto: false, hotovo: 0 }, T), 'false');

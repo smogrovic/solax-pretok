@@ -137,6 +137,12 @@ nadpis('Interval a odťuknutí s datem');
   check('  víc než 2 měsíce zpět neprojde (platí teď)', h.state.pripominky.trava.hotovo, ted);
   h.api.pripominkaHotovo('povleceni', true);
   check('  Zpět vrátí předchozí', h.state.pripominky.povleceni.hotovo, 0);
+  // Aktivováno ráno, pak „hotovo včera" — aktivace se zruší, jinak by svítila dál
+  h.state.pripominky.vysavac.aktivovano = ted - 3600000;
+  h.api.pripominkaHotovo('vysavac', false, ted, ted - 86400000);
+  check('odťuknutí s datem včera zruší ruční aktivaci', h.state.pripominky.vysavac.aktivovano + ' ' + h.state.pripominky.vysavac.hotovo, '0 ' + (ted - 86400000));
+  h.api.pripominkaHotovo('vysavac', true);
+  check('  Zpět vrátí aktivaci i předchozí hotovo', h.state.pripominky.vysavac.aktivovano, ted - 3600000);
   const z = h.zavolej('/api/pripominky/:id/hotovo', { id: 'vysavac' }, { kdy: Date.now() - 2 * 86400000 });
   check('endpoint hotovo bere datum', z.status + ' ' + (Math.abs(h.state.pripominky.vysavac.hotovo - (Date.now() - 2 * 86400000)) < 5000), '200 true');
   const o = build();

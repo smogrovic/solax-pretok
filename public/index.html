@@ -783,6 +783,7 @@
     display:none;
   }
   .pin-input{
+    box-sizing:border-box;
     width:100%;
     padding:12px;
     border:1px solid rgba(44,62,80,0.15);
@@ -2148,7 +2149,8 @@
     color:var(--grey-text);text-align:left;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;}
   .prip-radek.sviti .prip-naposledy{color:var(--orange-dark);font-weight:600;}
   .prip-nastaveni{display:flex;flex-direction:column;align-items:center;gap:6px;flex:0 0 52px;}
-  .prip-datum{margin-top:12px;text-align:center;}
+  .prip-datum{margin-top:12px;text-align:center;box-sizing:border-box;display:block;width:100%;min-width:0;
+    -webkit-appearance:none;appearance:none;letter-spacing:1px;}
   /* Volič intervalu je úzký „štítek" bez šipky — na telefonu je řádek plný */
   .timer-select.prip-interval{height:26px;padding:0 2px;font-size:12px;font-weight:600;border-radius:9px;
     flex:0 0 auto;width:52px;-webkit-appearance:none;appearance:none;text-align:center;text-align-last:center;}
@@ -11712,6 +11714,8 @@ function pripPosun(t) {
 // „Nástěnné" hodiny: čas posunutý tak, aby getUTC* vracely pražské datum a hodinu
 const pripNastenne = t => t + pripPosun(t);
 const pripDatum = w => { const d = new Date(w); return d.getUTCDate() + '. ' + (d.getUTCMonth() + 1) + '.'; };
+// Zpátky z nástěnných hodin na skutečný čas (i přes změnu letního času)
+const pripZNastennych = w => w - pripPosun(w - pripPosun(w));
 
 // → { sviti, text, dalsi }. `dalsi` je okamžik další akce, pokud je hotovo a čeká
 // se — tlačítko pak místo „Hotovo" odpočítává, kolik zbývá.
@@ -11749,16 +11753,20 @@ function pripominkaStav(def, p, now = Date.now()) {
   }
   if (def.dni) {
     // Interval nastavený voličem (server), jinak výchozí z definice
-    const perioda = (Number(p.dni) || def.dni) * PRIP_DEN;
+    const dniIntervalu = Number(p.dni) || def.dni;
     if (!hotovo) return { sviti: true, naposledy: 'Naposledy: zatím nikdy', text: '', dalsi: null };
-    // Dva řádky: kdy naposledy (klepnutím jde datum změnit), pod tím kdy příště
-    const naposledy = 'Naposledy ' + pripDatum(pripNastenne(hotovo));
-    const pristi = pripDatum(pripNastenne(hotovo + perioda));
-    if (now - hotovo >= perioda) {
-      const dni = Math.floor((now - hotovo) / PRIP_DEN);
+    // Počítá se po DNECH: hotovo 1. 10. (kdykoli během dne) + 7 dní → svítí od
+    // půlnoci 8. 10. Text „Příště 8. 10." tak sedí s tím, kdy se rozsvítí.
+    const denHotovo = Math.floor(pripNastenne(hotovo) / PRIP_DEN) * PRIP_DEN;
+    const terminW = denHotovo + dniIntervalu * PRIP_DEN;
+    const termin = pripZNastennych(terminW);
+    const naposledy = 'Naposledy ' + pripDatum(denHotovo);
+    const pristi = pripDatum(terminW);
+    if (now >= termin) {
+      const dni = Math.floor((pripNastenne(now) - denHotovo) / PRIP_DEN);
       return { sviti: true, naposledy: naposledy + ' (před ' + dni + ' dny)', text: 'Příště ' + pristi + ' — už je čas', dalsi: null };
     }
-    return { sviti: false, dalsi: hotovo + perioda, naposledy, text: 'Příště ' + pristi };
+    return { sviti: false, dalsi: termin, naposledy, text: 'Příště ' + pristi };
   }
   // Popelnice: okno od poledne den před svozem do poledne dne svozu
   const W = pripNastenne(now);
@@ -11797,6 +11805,9 @@ function pripSviticich(now = Date.now()) {
 
 // Hotovo, a do pěti vteřin „Zpět" — ze seznamu i z panelu u zvonečku
 function pripOdtukni(def, kdy) {
+  // Odťuknutí ruší ruční aktivaci hned (server to udělá taky) — jinak by do jeho
+  // odpovědi připomínka svítila dál
+  if (pripData && pripData[def.id] && (pripZpet[def.id] || 0) <= Date.now()) pripData[def.id].aktivovano = 0;
   if ((pripZpet[def.id] || 0) > Date.now()) {
     delete pripZpet[def.id];
     renderPripominky();
