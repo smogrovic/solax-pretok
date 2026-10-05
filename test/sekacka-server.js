@@ -35,7 +35,7 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
   const casovace = [];
   const cekani = [];
   const api = new Function(
-    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'crypto', 'fetch', 'process', 'scheduleEvery', 'delay',
+    'state', 'app', 'requireAuth', 'addLog', 'addLogDen', 'broadcast', 'crypto', 'fetch', 'process', 'scheduleEvery', 'delay',
     'pripominkaZapnuto',
     CODE + '\n; return { anthbotEnabled, anthbotPodpisovyKlic, anthbotKoduj, anthbotOtisk,'
          + ' anthbotKanonickeHlavicky, anthbotAutorizace, anthbotCas, anthbotOverovaciToken,'
@@ -53,6 +53,7 @@ function build({ email = 'a@b.cz', heslo = 'tajne' } = {}) {
     { get: (c, f) => { routy['GET ' + c] = f; }, post: (c, f) => { routy['POST ' + c] = f; } },
     () => true,
     (m, level) => logy.push((level === 'error' ? 'CHYBA ' : '') + m),
+    (sk, m) => logy.push(m),   // denní řádek závlahy/sekačky/vysavače
     (udalost, data) => zpravy.push({ udalost, data }),
     require('crypto'),
     (...a) => globalThis.fetch(...a),

@@ -440,13 +440,53 @@ function pruneHistory() {
 // `tEnd` — dokud výpadek trvá, neroste počet řádků, jen se posouvá konec rozsahu.
 // `at` = kdy se to STALO (ne kdy jsme na to přišli). Používá to hlídač výpadků: řádek
 // má pokrývat celý výpadek, ne jen tu část od jeho odhalení.
-function addLog(msg, level, at) {
+function addLog(msg, level, at, sk) {
   const entry = { t: at || Date.now(), msg };
   if (level) entry.level = level;
+  if (sk) entry.sk = sk;
   state.log.push(entry);
   pruneHistory();
   broadcast('log', { entry });
   return entry;
+}
+
+// Závlaha, sekačka a vysavač hlásí každou změnu stavu a za den by z toho bylo
+// desítky řádků. Každé z nich proto patří jeden řádek na den: další stavy se k němu
+// jen připisují s časem a posouvá se konec rozsahu (`tEnd`). `sk` je skupina —
+// podle ní appka i obnova ze zálohy řádek poznají, i když se mu mění text.
+// Chyby se sem neposílají, ty mají vlastní řádky.
+const LOG_DEN_SKUPINY = ['zavlaha', 'sekacka', 'vysavac'];
+const LOG_DEN_MAX_ZNAKU = 300;   // víc neprojde obnovou ze zálohy v telefonu
+function pragueHM(at) {
+  const { hour, minute } = pragueTime(at);
+  return `${hour}:${String(minute).padStart(2, '0')}`;
+}
+function addLogDen(sk, msg, at = Date.now()) {
+  const i = msg.indexOf(': ');
+  const prefix = i > 0 ? msg.slice(0, i) : msg;
+  const kus = `${pragueHM(at)} ${i > 0 ? msg.slice(i + 2) : ''}`.trim();
+  const den = pragueDateString(at);
+  let e = null;
+  for (let j = state.log.length - 1; j >= 0; j--) {
+    const x = state.log[j];
+    if (pragueDateString(x.t) < den) break;
+    if (x.sk === sk && x.level !== 'error' && pragueDateString(x.t) === den) { e = x; break; }
+  }
+  if (!e) {
+    return addLog(`${prefix}: ${kus}`, undefined, at, sk);
+  }
+  const hlava = prefix + ': ';
+  const telo = e.msg.startsWith(hlava) ? e.msg.slice(hlava.length) : e.msg;
+  const kusy = telo.split(' · ').filter(k => k !== '…');
+  kusy.push(kus);
+  // Přeteklý řádek ztratí nejstarší stavy, nejnovější zůstanou
+  let zkraceno = telo.startsWith('… · ');
+  const sloz = () => hlava + (zkraceno ? '… · ' : '') + kusy.join(' · ');
+  while (sloz().length > LOG_DEN_MAX_ZNAKU && kusy.length > 1) { kusy.shift(); zkraceno = true; }
+  e.msg = sloz().slice(0, LOG_DEN_MAX_ZNAKU);
+  if (at > e.t) e.tEnd = at;
+  broadcast('logUpdate', { entry: e });
+  return e;
 }
 
 function addAssistantLog(text) {
@@ -1942,12 +1982,15 @@ app.post('/api/log/restore', (req, res) => {
   // Vlastní záznamy jdou do nového pole beze změny (ne jako kopie) — na běžící výpadek
   // drží odkaz checkSources a prodlužuje mu rozsah
   const merged = [];
+  // Denní řádek závlahy/sekačky/vysavače mění text — pozná se podle skupiny, jinak
+  // by se ze zálohy vrátila jeho starší verze jako druhý řádek
+  const klic = e => e.t + '|' + (LOG_DEN_SKUPINY.includes(e.sk) ? 'sk:' + e.sk : e.msg);
   for (const e of state.log) {
-    seen.add(e.t + '|' + e.msg);
+    seen.add(klic(e));
     merged.push(e);
   }
   for (const e of clean) {
-    const key = e.t + '|' + e.msg;
+    const key = klic(e);
     if (seen.has(key)) continue;
     seen.add(key);
     // Červené výpadky si nesou `level` a rozsah `tEnd` — bez nich by se po každém
@@ -1955,6 +1998,7 @@ app.post('/api/log/restore', (req, res) => {
     const zaznam = { t: e.t, msg: e.msg };
     if (e.level === 'error' || e.level === 'notif') zaznam.level = e.level;
     if (typeof e.tEnd === 'number' && e.tEnd > e.t && e.tEnd <= now) zaznam.tEnd = e.tEnd;
+    if (LOG_DEN_SKUPINY.includes(e.sk)) zaznam.sk = e.sk;
     merged.push(zaznam);
   }
   merged.sort((a, b) => a.t - b.t);
@@ -9022,10 +9066,10 @@ app.post('/api/zavlaha/stav', (req, res) => {
   zavlahaZapisBeh(ted);   // musí být PŘED přepsáním, počítá se z minulého hlášení
   zavlahaStav = stav;
   zavlahaKdy = ted;
-  if (hlaska) addLog(hlaska);
-  else if (bylTicho) addLog('Závlaha: most na NASu se zase ozývá');
+  if (hlaska) addLogDen('zavlaha', hlaska);
+  else if (bylTicho) addLogDen('zavlaha', 'Závlaha: most na NASu se zase ozývá');
   const posun = zavlahaPlanTik(ted);
-  if (posun) addLog(posun);
+  if (posun) addLogDen('zavlaha', posun);
   const ukoly = zavlahaVyzvedni();
   zavlahaPosli();
   res.json({ ok: true, ukoly });
@@ -9042,7 +9086,7 @@ app.post('/api/zavlaha/spust', (req, res) => {
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
   zavlahaZapamatujMinuty([{ zona, minut }]);
   zavlahaZarad({ typ: 'spust', zona, minut });
-  addLog(`Závlaha: ${zavlahaNazev(zona)} na ${minut} min (ručně)`);
+  addLogDen('zavlaha', `Závlaha: ${zavlahaNazev(zona)} na ${minut} min (ručně)`);
   res.json({ success: true, message: `${zavlahaNazev(zona)}: pouštím na ${minut} min.` });
 });
 
@@ -9053,7 +9097,7 @@ app.post('/api/zavlaha/serie', (req, res) => {
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
   zavlahaZapamatujMinuty(kroky);
   const prvni = zavlahaPlanStart(kroky);
-  addLog(`Závlaha: řada ${kroky.length} zón na ${celkem} min — začíná ${zavlahaNazev(prvni.zona)}`);
+  addLogDen('zavlaha', `Závlaha: řada ${kroky.length} zón na ${celkem} min — začíná ${zavlahaNazev(prvni.zona)}`);
   res.json({
     success: true,
     message: `Řada běží: ${zavlahaSeznam(kroky.map(k => k.zona))}.`,
@@ -9065,7 +9109,7 @@ app.post('/api/zavlaha/stop', (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!zavlahaZive()) return res.status(503).json({ error: 'Most na NASu se neozývá — závlahu teď ovládat nejde.' });
   zavlahaZarad({ typ: 'stop' });
-  addLog(zavlahaPlanZrus('Závlaha: řada zrušena (ručně)') || 'Závlaha: zastavit všechno (ručně)');
+  addLogDen('zavlaha', zavlahaPlanZrus('Závlaha: řada zrušena (ručně)') || 'Závlaha: zastavit všechno (ručně)');
   res.json({ success: true, message: 'Zastavuji závlahu.' });
 });
 
@@ -9265,8 +9309,11 @@ app.post('/api/vysavac/stav', (req, res) => {
   const stav = vysavacOcisti(req.body);
   if (!stav) return res.status(400).json({ error: 'Chybí stav.' });
   const bylTicho = !vysavacZive();
-  for (const z of vysavacZmena(vysavacStav, stav)) addLog(z);
-  if (bylTicho && vysavacKdy) addLog('Vysavač: most na NASu se zase ozývá');
+  // Porucha a vypršelé přihlášení jsou zprávy samy o sobě, zbytek je průběh dne
+  for (const z of vysavacZmena(vysavacStav, stav)) {
+    if (/porucha|vypršelo|selhal/.test(z)) addLog(z); else addLogDen('vysavac', z);
+  }
+  if (bylTicho && vysavacKdy) addLogDen('vysavac', 'Vysavač: most na NASu se zase ozývá');
   vysavacStav = stav;
   vysavacKdy = Date.now();
   const ukoly = vysavacVyzvedni();
@@ -9284,7 +9331,7 @@ app.post('/api/vysavac/povel', (req, res) => {
   }
   vysavacZarad(ukol);
   const mistnosti = ukol.ids ? ` (${ukol.ids.map(id => (vysavacStav.mistnosti.find(m => m.id === id) || {}).jmeno || id).join(', ')})` : '';
-  addLog(`Vysavač: ${VYSAVAC_POPIS_TYPU[ukol.typ]}${mistnosti} — odesláno`);
+  addLogDen('vysavac', `Vysavač: ${VYSAVAC_POPIS_TYPU[ukol.typ]}${mistnosti} — odesláno`);
   res.json({ success: true, message: 'Odesláno — vysavač povel dostane do půl minuty.' });
 });
 
@@ -9802,13 +9849,13 @@ async function sekackaNacti(znovu = false) {
     state.sekacka.potiz = null;
     const ted = anthbotStavZeStinu(stin);
     if (ted && ted !== drive) {
-      addLog(`Sekačka: ${ANTHBOT_STAVY_CESKY[ted] || ted}`);
+      addLogDen('sekacka', `Sekačka: ${ANTHBOT_STAVY_CESKY[ted] || ted}`);
     }
     // Odpojení je zpráva sama o sobě — příkazy se k sekačce nedostanou
     const bylaOnline = anthbotCislo((state.sekacka.__drive || {}).online);
     const jeOnline = anthbotCislo(stin.online);
     if (bylaOnline !== null && jeOnline !== null && (bylaOnline !== 0) !== (jeOnline !== 0)) {
-      addLog(jeOnline ? 'Sekačka: zase na příjmu' : 'Sekačka: odpojila se');
+      addLogDen('sekacka', jeOnline ? 'Sekačka: zase na příjmu' : 'Sekačka: odpojila se');
     }
     state.sekacka.__drive = { online: stin.online };
     sekackaOdmlka(jeOnline);
@@ -9900,7 +9947,7 @@ app.post('/api/sekacka/povel', async (req, res) => {
       });
     }
 
-    addLog(`Sekačka: ${volba.popis} (ručně, tvar ${zabralo.tvar})`);
+    addLogDen('sekacka', `Sekačka: ${volba.popis} (ručně, tvar ${zabralo.tvar})`);
     const popisStavu = ANTHBOT_STAVY_CESKY[zabralo.stav] || zabralo.stav;
     res.json({ success: true, message: `Sekačka: ${volba.popis} — ${popisStavu}.` });
   } catch (err) {

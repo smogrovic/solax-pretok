@@ -16,7 +16,7 @@ const CODE = between('// ---------- Vysavač Xiaomi (most na NASu) ----------',
 function build() {
   const logy = [], zpravy = [], routy = {};
   const h = { pustDal: true };
-  const api = new Function('app', 'requireAuth', 'addLog', 'broadcast',
+  const api = new Function('app', 'requireAuth', 'addLog', 'addLogDen', 'broadcast',
     CODE + '\n; return { vysavacZive, vysavacPayload, vysavacOcisti, vysavacZmena, vysavacZarad,'
          + ' vysavacVyzvedni, vysavacUkol, VYSAVAC_TICHO_MS, VYSAVAC_UKOL_PLATI_MS, VYSAVAC_FRONTA_MAX,'
          + ' get fronta() { return vysavacFronta; }, set fronta(v) { vysavacFronta = v; },'
@@ -26,6 +26,7 @@ function build() {
     { post: (c, fn) => { routy['POST ' + c] = fn; } },
     (req, res) => { if (h.pustDal) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     t => logy.push(t),
+    (sk, m) => logy.push(m),   // denní řádek závlahy/sekačky/vysavače
     (typ, data) => zpravy.push({ typ, data })
   );
   const volej = (cesta, telo) => {

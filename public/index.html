@@ -11180,8 +11180,14 @@ function connectStream() {
     // Prodloužený výpadek — přepíšeme stávající záznam, nepřidáváme nový řádek
     const d = JSON.parse(e.data);
     if (!d.entry) return;
-    const i = logEntries.findIndex(x => x.t === d.entry.t && x.msg === d.entry.msg);
-    if (i >= 0) logEntries[i] = d.entry; else logEntries.push(d.entry);
+    // Denní řádek závlahy/sekačky/vysavače mění text, pozná se podle skupiny `sk`
+    const i = logEntries.findIndex(x => x.t === d.entry.t
+      && (d.entry.sk ? x.sk === d.entry.sk : x.msg === d.entry.msg));
+    if (i >= 0) logEntries[i] = d.entry;
+    else {
+      logEntries.push(d.entry);
+      logEntries.sort((a, b) => a.t - b.t);
+    }
     renderLog();
     saveLogLocal();
   });

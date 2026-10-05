@@ -22,7 +22,7 @@ function build() {
   const zpravy = [];
   const routy = {};
   const api = new Function(
-    'state', 'app', 'requireAuth', 'addLog', 'broadcast', 'pragueDateString', 'scheduleEvery',
+    'state', 'app', 'requireAuth', 'addLog', 'addLogDen', 'broadcast', 'pragueDateString', 'scheduleEvery',
     CODE + '\n; return { zavlahaZive, zavlahaNazev, zavlahaPayload, zavlahaCisloZony,'
          + ' zavlahaMinuty, zavlahaOcisti, zavlahaZony, zavlahaZarad, zavlahaVyzvedni,'
          + ' zavlahaZmena, zavlahaPrejmenuj, zavlahaSeznam, ZAVLAHA_MINUT_MAX,'
@@ -44,6 +44,7 @@ function build() {
     { get: (c, f) => { routy['GET ' + c] = f; }, post: (c, f) => { routy['POST ' + c] = f; } },
     () => true,
     (m, level) => logy.push((level === 'error' ? 'CHYBA ' : '') + m),
+    (sk, m) => logy.push(m),   // denní řádek závlahy/sekačky/vysavače
     (udalost, data) => zpravy.push({ udalost, data }),
     at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(at === undefined ? Date.now() : at)),
     () => {}
