@@ -1757,6 +1757,12 @@
     margin-top:12px;
     align-items:stretch;
   }
+  /* Časovače jsou sbalené pod tlačítkem. Sbalená karta ukáže jen seznam
+     nastavených časovačů; když žádný není, zmizí celá. */
+  .timer-card.sbaleno > :not(.timer-list){display:none !important;}
+  .timer-card.sbaleno .timer-list{margin-top:0;}
+  .timer-card.sbaleno:has(.timer-list:empty){display:none;}
+  .sbal-btn:has(+ .timer-card[hidden]){display:none;}
   .timer-select,
   .timer-time{
     width:100%;
@@ -2615,7 +2621,7 @@
         </div>
       </div>
 
-      <div class="card lockable timer-card blind-timer-card">
+      <div class="card lockable timer-card blind-timer-card" data-sbal-klic="zaluzie1">
         <div class="graph-title">Časovač žaluzií</div>
         <select class="timer-select bt-device"></select>
         <div class="timer-form-row">
@@ -2732,7 +2738,7 @@
         <div class="blinds-list" id="blindsList2"></div>
       </div>
 
-      <div class="card lockable timer-card blind-timer-card">
+      <div class="card lockable timer-card blind-timer-card" data-sbal-klic="zaluzie2">
         <div class="graph-title">Časovač žaluzií</div>
         <select class="timer-select bt-device"></select>
         <div class="timer-form-row">
@@ -3415,11 +3421,11 @@
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Bazén (filtrace)</div>
           <ul class="logic-list">
-            <li>Okno <b>8:00</b> → hodina před západem.</li>
+            <li>Okno <b>8:00</b> → hodina před západem. Minimální SOC: 12h <b>50 %</b> → 17h+ <b>90 %</b>.</li>
             <li><b>Zapne</b> při přebytku nad <b>1850 W</b>, <b>vypne</b> pod <b>−200 W</b> (nejdřív po 30 min).</li>
-            <li>Minimální SOC: 12h <b>50 %</b> → 17h+ <b>90 %</b>.</li>
             <li><b>Aspoň 2 h denně.</b> Co chybí, dožene natvrdo mezi <b>13:00 a 15:00</b>.</li>
             <li><b>+24 h</b> jede natvrdo (do 72 h), ruší ho <b>Zrušit</b> nebo ruční OFF.</li>
+            <li><b>Teplota vody</b> se měří v tepelném čerpadle, jen když voda teče. Jinak ukazuje poslední naměřenou. V zimě je čerpadlo vypnuté (<b>offline</b>).</li>
           </ul>
         </div>
 
@@ -3698,6 +3704,8 @@ function sbalStav(klic) {
 function sbalNastav(klic, sbaleno) {
   try { localStorage.setItem('sbaleno:' + klic, sbaleno ? 'ano' : 'ne'); } catch {}
   for (const el of document.querySelectorAll(`[data-sbal-obsah="${klic}"]`)) el.hidden = sbaleno;
+  // Karta časovače se nesbaluje celá — nastavené časovače zůstanou vidět
+  for (const el of document.querySelectorAll(`[data-sbal-casovac="${klic}"]`)) el.classList.toggle('sbaleno', sbaleno);
   const btn = document.querySelector(`.sbal-btn[data-sbal="${klic}"]`);
   if (btn) {
     btn.classList.toggle('otevreno', !sbaleno);
@@ -3705,7 +3713,29 @@ function sbalNastav(klic, sbaleno) {
   }
 }
 
+// Každá karta časovače (kromě rozvrhu, ten má tlačítko vlastní) dostane nad sebe
+// rozbalovací tlačítko s jejím nadpisem
+function casovaceSbal() {
+  document.querySelectorAll('.timer-card').forEach((karta, i) => {
+    if (karta.id === 'rozvrhCard' || karta.dataset.sbalCasovac) return;
+    // Klíč z id karty nebo jejího seznamu — pořadí karet se může změnit
+    const seznam = karta.querySelector('.timer-list[id]');
+    const klic = 'casovac-' + (karta.id || karta.dataset.sbalKlic || (seznam && seznam.id) || i);
+    const nadpis = karta.querySelector('.graph-title');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sbal-btn' + (karta.classList.contains('jen-full') ? ' jen-full' : '');
+    btn.dataset.sbal = klic;
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = '<span></span><i>▾</i>';
+    btn.firstChild.textContent = nadpis ? nadpis.textContent : 'Časovač';
+    karta.dataset.sbalCasovac = klic;
+    karta.parentNode.insertBefore(btn, karta);
+  });
+}
+
 function sbalPripoj() {
+  casovaceSbal();
   for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) {
     const klic = btn.dataset.sbal;
     sbalNastav(klic, sbalStav(klic));
@@ -8745,21 +8775,8 @@ const hpStupne = v => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') + 
 // Když se teplota vody nenajde, je špatně mapovaný datový bod — kódy Fairland
 // nedokumentuje a liší se model od modelu. Ať se nemusí lovit přes /api/heatpump/raw,
 // vypíšeme rovnou, co čerpadlo posílá; stačí pak screenshot karty. Platí i pro
-// nedostupné čerpadlo: poslední známé kódy jsou pořád k něčemu.
-// Čidlo teploty je v čerpadle, ne v bazénu: bez proudící vody měří trubku, která
-// rychle vychladne. Server proto posílá poslední hodnotu naměřenou za chodu a k ní
-// `zive` (měří se právě teď) a `duvod` (proč místo čísla pomlčka).
-// `zivaMozna` je false, když je čerpadlo nedostupné: pak je každé číslo z minulosti,
-// ať už voda koluje nebo ne, a musí si nést čas měření.
-function hpPoznamkaTeploty(pt, zivaMozna = true) {
-  if (!pt) return null;
-  if (pt.duvod === 'zima') return 'Bazén je v zimě vypnutý.';
-  if (pt.duvod === 'zatim') return 'Teplota se změří, až se bazén rozběhne — bez proudící vody čidlo měří trubku.';
-  if (!zivaMozna) return `Naměřeno v ${fmtSolTime(pt.at)}.`;
-  if (!pt.zive) return `Naměřeno v ${fmtSolTime(pt.at)}, voda teď nekoluje.`;
-  return null;
-}
-
+// čerpadlo offline: poslední známé kódy jsou pořád k něčemu.
+// Proč je teplota vody poslední naměřená za chodu, vysvětluje Logika automatiky.
 function hpDiagnostika(d) {
   if (typeof d.tempC === 'number' || !Array.isArray(d.dp) || !d.dp.length) return;
   const dg = document.createElement('div');
@@ -8780,7 +8797,8 @@ function renderHeatpump() {
   const pt = d.poolTemp || null;
   if (!zname) {
     hpLightEl.className = 'traffic-light';
-    hpStateEl.textContent = 'nedostupné';
+    // V zimě je čerpadlo vypnuté — „nedostupné" znělo jako porucha
+    hpStateEl.textContent = 'offline';
     // Zapamatovaná teplota vody na výpadku čerpadla nezávisí — je to poslední
     // změřená voda a nese si čas měření, takže se nevydává za čerstvou
     hpTempEl.textContent = hpStupne(pt && pt.c) || '– °C';
@@ -8788,15 +8806,8 @@ function renderHeatpump() {
     // Každá z nich chce jinou reakci, tak ať je poznat, o kterou jde.
     hpMetaEl.textContent = d.error ? d.error
       : !d.fetchedAt ? 'Čeká se na první dotaz na Tuyu — po nasazení to trvá pár minut.'
-      : d.online === false ? `Tuya hlásí čerpadlo jako offline. Poslední data v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`
+      : d.online === false ? `Poslední data v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`
       : `Data zestárla, poslední v ${fmtSolTime(new Date(d.fetchedAt).getTime())}.`;
-    // Číslo nad tím je zapamatovaná voda — bez data měření by vypadalo jako čerstvé
-    const poznOff = hpPoznamkaTeploty(pt, false);
-    if (poznOff) {
-      const p = document.createElement('div');
-      p.textContent = poznOff;
-      hpMetaEl.appendChild(p);
-    }
     hpDiagnostika(d);
     return;
   }
@@ -8825,13 +8836,6 @@ function renderHeatpump() {
   if (d.fault) kus('chyba ', String(d.fault));
   if (!veta.childNodes.length) veta.appendChild(document.createTextNode('Cíl ani příkon čerpadlo nehlásí.'));
   hpMetaEl.appendChild(veta);
-
-  const pozn = hpPoznamkaTeploty(pt);
-  if (pozn) {
-    const p = document.createElement('div');
-    p.textContent = pozn;
-    hpMetaEl.appendChild(p);
-  }
 
   // Čerpadlo odpovídá, jen teplotu vody mezi hodnotami nemá. Pomlčka by vypadala jako
   // výpadek, a to je něco úplně jiného — tady je vada v tom, co Tuya nabízí.

@@ -61,21 +61,21 @@ setTimeout(() => {
   // „Z čerpadla nechodí data" znamenalo čtyři různé věci naráz a při ladění se pak
   // jen hádalo, o kterou jde. Každá chce jinou reakci.
   ukaz(zaklad({ online: false }));
-  check('offline = nedostupné', hpState.textContent, 'nedostupné');
+  check('offline se píše offline', hpState.textContent, 'offline');
   check('  semafor zhasne úplně', hpLight.className, 'traffic-light');
   // Zapamatovaná voda na dostupnosti čerpadla nezávisí — ale musí být vidět, že je stará
   check('  zapamatovaná teplota platí dál', hpTemp.textContent, '26,4 °C');
-  check('  a nese čas měření', /Naměřeno v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
-  check('  hláška řekne, že to hlásí Tuya', /Tuya hlásí čerpadlo jako offline/.test(hpMeta.textContent), 'true');
+  // Vysvětlivky pod teplotou jsou v Logice automatiky, na kartě jen čas posledních dat
+  check('  bez dlouhých vysvětlivek', /Naměřeno|Tuya hlásí/.test(hpMeta.textContent), 'false');
   check('  i kdy naposledy dorazila data', /Poslední data v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
 
   const stara = new Date(T - 40 * MIN).toISOString();
   ukaz(zaklad({ fetchedAt: stara, poolTemp: bezTeploty }));
-  check('zestárlá data taky', hpState.textContent, 'nedostupné');
+  check('zestárlá data taky', hpState.textContent, 'offline');
   check('  a bez naměřené vody je pomlčka', hpTemp.textContent, '– °C');
   ukaz(zaklad({ fetchedAt: stara }));
   check('  ale řeknou, že jen zestárla', /zestárla/.test(hpMeta.textContent), 'true');
-  check('  a neplete se s offline', /offline/.test(hpMeta.textContent), 'false');
+  check('  a neplete se s offline', /^Poslední data/.test(hpMeta.textContent), 'false');
 
   // Hned po nasazení ještě žádný dotaz neproběhl — to není porucha
   ukaz({ enabled: true, dp: [] });
@@ -84,7 +84,7 @@ setTimeout(() => {
 
   ukaz(zaklad({ online: false, error: 'Tuya: sign invalid (1004)' }));
   check('chyba z Tuyi má přednost', /sign invalid/.test(hpMeta.textContent), 'true');
-  check('  a nepřekryje ji obecná hláška', /offline/.test(hpMeta.textContent), 'false');
+  check('  a nepřekryje ji obecná hláška', /Poslední data/.test(hpMeta.textContent), 'false');
 
   // I u nedostupného čerpadla jsou poslední známé kódy k něčemu
   ukaz(zaklad({ online: false, tempC: null, poolTemp: bezTeploty, dp: [{ code: 'inlet_temp', value: 29 }] }));
@@ -188,17 +188,17 @@ setTimeout(() => {
 
   ukaz(zaklad({ on: false, poolTemp: { c: 26.4, at: T - 90 * MIN, zive: false, duvod: null } }));
   check('po vypnutí drží zapamatovanou', hpTemp.textContent, '26,4 °C');
-  check('  a řekne, že voda nekoluje', /voda teď nekoluje/.test(hpMeta.textContent), 'true');
-  check('  i kdy se měřilo', /Naměřeno v \\d\\d?:\\d\\d/.test(hpMeta.textContent), 'true');
+  check('  vysvětlivka pod teplotou už není', /Naměřeno|nekoluje/.test(hpMeta.textContent), 'false');
 
   ukaz(zaklad({ poolTemp: { c: null, at: null, zive: false, duvod: 'zima' } }));
   check('v zimě je pomlčka', hpTemp.textContent, '– °C');
-  check('  a řekne se proč', /v zimě vypnutý/.test(hpMeta.textContent), 'true');
+  check('  bez vysvětlivky', /v zimě vypnutý/.test(hpMeta.textContent), 'false');
   check('  ne jako porucha čerpadla', /nehlásí|offline|zestárla/.test(hpMeta.textContent), 'false');
 
   ukaz(zaklad({ poolTemp: bezTeploty }));
   check('bez jediného měření taky pomlčka', hpTemp.textContent, '– °C');
-  check('  a řekne se, na co se čeká', /až se bazén rozběhne/.test(hpMeta.textContent), 'true');
+  check('  bez vysvětlivky, na co se čeká', /až se bazén rozběhne/.test(hpMeta.textContent), 'false');
+  check('vysvětlivka z karty zmizela i z kódu', typeof hpPoznamkaTeploty, 'undefined');
 
   // Past: velké číslo se bere ze zapamatované teploty, ne ze syrového čidla. Kdyby se
   // vrátilo tempC, byla by tu zase teplota trubky.
