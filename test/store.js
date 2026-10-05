@@ -34,11 +34,14 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     // Měření sauny mají vlastní klíč (kv.nahrev), všechno ostatní jde do hlavního
     const nahrev = String(url).includes('saunaNahrev');
     if (nahrev && kv.nahrevChyba) throw new Error('síť');
+    // Data o topení taky (kv.topeni)
+    const topeni = String(url).includes('%3Atopeni');
+    if (topeni && kv.topeniChyba) throw new Error('síť');
     if (String(url).includes('/set/')) {
-      if (nahrev) kv.nahrev = init.body; else kv.hodnota = init.body;
+      if (nahrev) kv.nahrev = init.body; else if (topeni) kv.topeni = init.body; else kv.hodnota = init.body;
       return { ok: true, json: async () => ({ result: 'OK' }) };
     }
-    const v = nahrev ? kv.nahrev : kv.hodnota;
+    const v = nahrev ? kv.nahrev : (topeni ? kv.topeni : kv.hodnota);
     return { ok: true, json: async () => ({ result: v === undefined ? null : v }) };
   };
 
@@ -46,10 +49,10 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
-    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov', 'topeniObnov',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
-      storeNahrevUloz, STORE_NAHREV_KEY,
+      storeNahrevUloz, STORE_NAHREV_KEY, storeTopeniUloz, STORE_TOPENI_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
   )(state, zlib, fakeFetch, pushSubscriptions, [], [], [],
     [{ id: 1, zapnuto: true, dny: [true, true, true, true, true, false, false],
@@ -69,6 +72,13 @@ function build({ env = {}, state: st, kv = {} } = {}) {
       for (const r of telo.zaznamy) if (!m.has(r.start)) m.set(r.start, r);
       n.zaznamy = [...m.values()].sort((a, b) => a.start - b.start);
       return true;
+    },
+    telo => {
+      const t = state.topeni;
+      const m = new Map(t.zaznamy.map(r => [r.t, r]));
+      for (const r of telo.zaznamy) if (!m.has(r.t)) m.set(r.t, r);
+      t.zaznamy = [...m.values()].sort((a, b) => a.t - b.t);
+      return true;
     });
 
   process.env = puvodni;
@@ -78,6 +88,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
 function vzorovyStav() {
   const t = Date.now() - 60000;
   return {
+    topeni: { bezici: null, zaznamy: [] },
     autoMode: 'winter',
     tempAutoOn: 23, tempAutoOnRooms: { obyvak: 24 },
     tempAutoWinter: 21, tempAutoWinterRooms: { obyvak: 20 },
@@ -180,8 +191,8 @@ nadpis('3) Ukládání');
   const h = build({ env: UPSTASH });
   (async () => {
     check('bez načtení se NEUKLÁDÁ', await h.api.storeSave(), false);
-    // Měření sauny mají vlastní klíč a vlastní pojistku (oddíl 7) — tady jde o hlavní
-    check('  a do hlavního klíče nic neodešlo', h.volani.filter(v => !v.url.includes('saunaNahrev')).length, 0);
+    // Měření sauny i data o topení mají vlastní klíč a vlastní pojistku (oddíl 7) — tady jde o hlavní
+    check('  a do hlavního klíče nic neodešlo', h.volani.filter(v => !/saunaNahrev|%3Atopeni|:topeni/.test(v.url)).length, 0);
     await h.api.storeLoad(3000);
     check('načtení prázdného klíče projde', h.api.nactenoFlag(), true);
     check('teď už se uloží', await h.api.storeSave(), true);
@@ -513,6 +524,29 @@ nadpis('7) Měření nahřívání sauny — vlastní klíč, nic se neztratí')
   })();
 }
 
+nadpis('8) Data o topení — vlastní klíč, nic se neztratí');
+{
+  (async () => {
+    const kv = {};
+    const st = prazdnyStav();
+    st.topeni = { bezici: null, zaznamy: [{ t: 9 * 3600000, n: 30 }] };
+    const h = build({ env: UPSTASH, state: st, kv });
+    kv.topeni = h.api.storeEncode({ zaznamy: [{ t: 3600000, n: 30 }, { t: 2 * 3600000, n: 30 }] });
+    check('vlastní klíč vedle hlavního', h.api.STORE_TOPENI_KEY, 'solax:topeni');
+    await h.api.storeTopeniUloz();
+    check('před zápisem se načte a sloučí', h.api.storeDecode(kv.topeni).zaznamy.map(z => z.t / 3600000).join(','), '1,2,9');
+    check('  hlavní klíč zůstal netknutý', kv.hodnota, undefined);
+    check('beze změny se znovu neposílá', await h.api.storeTopeniUloz(), false);
+
+    const kv2 = { topeniChyba: true };
+    const st2 = prazdnyStav();
+    st2.topeni = { bezici: null, zaznamy: [{ t: 9 * 3600000, n: 30 }] };
+    const h2 = build({ env: UPSTASH, state: st2, kv: kv2 });
+    check('bez načtení se klíč nepřepíše', await h2.api.storeTopeniUloz(), false);
+    check('  nic se nezapsalo', kv2.topeni, undefined);
+  })();
+}
+
 function prazdnyStav() {
   return {
     autoMode: 'on', tempAutoOn: 22, tempAutoOnRooms: { obyvak: 22 },
@@ -527,7 +561,8 @@ function prazdnyStav() {
     usageDays: [],
     wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,
     tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false },
-    manualHold: {}, assistantLog: []
+    manualHold: {}, assistantLog: [],
+    topeni: { bezici: null, zaznamy: [] }
   };
 }
 

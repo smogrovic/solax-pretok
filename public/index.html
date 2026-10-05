@@ -1762,7 +1762,7 @@
   .timer-card.sbaleno > :not(.timer-list){display:none !important;}
   .timer-card.sbaleno .timer-list{margin-top:0;}
   .timer-card.sbaleno:has(.timer-list:empty){display:none;}
-  .sbal-btn:has(+ .timer-card[hidden]){display:none;}
+  .sbal-btn[data-sbal^="casovac-"]:has(+ .timer-card[hidden]){display:none;}
   .timer-select,
   .timer-time{
     width:100%;
@@ -2553,6 +2553,17 @@
       <div class="card stats-card" data-sbal-obsah="fve">
         <div class="graph-title">Spotřeba domu po měsících</div>
         <div class="wbsrc-list" id="dumMonths"></div>
+      </div>
+
+      <!-- Podklad pro analýzu topení: server každou hodinu zapíše průměr venku,
+           v pokojích a odhad topení ze spotřeby domu. Tady se jen ukazuje. -->
+      <button class="sbal-btn" data-sbal="topeni" type="button" aria-expanded="false">Topení a teplota v domě<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="topeni">
+        <div class="graph-title">Topení po dnech</div>
+        <div class="wbsrc-list" id="topeniList"></div>
+        <div class="wbsrc-note" id="topeniPozn"></div>
+        <button class="sbal-btn" id="topeniKopirBtn" type="button">Zkopírovat data<i id="topeniStav">▾</i></button>
+        <textarea class="diag-zaloha" id="topeniZaloha" readonly hidden></textarea>
       </div>
 
       <div class="meta">
@@ -9016,6 +9027,93 @@ async function nahrevZkopiruj() {
 
 if (nahrevKopirBtnEl) nahrevKopirBtnEl.addEventListener('click', nahrevZkopiruj);
 
+// ---------- Topení a teplota v domě (FVE) ----------
+// Server sbírá hodinové průměry sám; appka dostane jen denní souhrn a celou řadu
+// si stáhne až tlačítkem, ať se stovky kilobajtů netahají při každém připojení.
+let topeniData = null;
+const topeniListEl = document.getElementById('topeniList');
+const topeniPoznEl = document.getElementById('topeniPozn');
+const topeniKopirBtnEl = document.getElementById('topeniKopirBtn');
+const topeniStavEl = document.getElementById('topeniStav');
+const topeniZalohaEl = document.getElementById('topeniZaloha');
+
+function topeniStupne(v) {
+  return typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' °C' : '–';
+}
+
+function renderTopeni() {
+  if (!topeniListEl) return;
+  const dny = (topeniData && topeniData.dny) || [];
+  topeniListEl.textContent = '';
+  if (!dny.length) {
+    const p = document.createElement('div');
+    p.className = 'log-empty';
+    p.textContent = 'Zatím nic — první záznam přibude po celé hodině.';
+    topeniListEl.appendChild(p);
+  }
+  for (const d of [...dny].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'wbsrc-row';
+    const head = document.createElement('div');
+    head.className = 'wbsrc-head';
+    const den = document.createElement('span');
+    den.className = 'wbsrc-day';
+    den.textContent = denNadpis(new Date(d.d + 'T12:00:00').getTime());
+    const kwh = document.createElement('span');
+    kwh.textContent = 'topení ~' + String(d.topeniKwh).replace('.', ',') + ' kWh';
+    head.appendChild(den);
+    head.appendChild(kwh);
+    row.appendChild(head);
+    const tep = document.createElement('div');
+    tep.className = 'wbsrc-legend';
+    tep.textContent = 'venku ' + topeniStupne(d.venkuC) + ' · doma ' + topeniStupne(d.pokojeC)
+      + (d.hodin < 24 ? ' · ' + d.hodin + ' h dat' : '');
+    row.appendChild(tep);
+    topeniListEl.appendChild(row);
+  }
+  if (topeniPoznEl) {
+    const m = (topeniData && topeniData.model) || {};
+    topeniPoznEl.textContent = 'Topení se odhaduje: spotřeba domu bez bojlerů a sauny, minus stálý odběr '
+      + (m.zakladW || 400) + ' W a večer (' + (m.vareniOd || 17) + '–' + (m.vareniDo || 20) + ' h) vaření '
+      + (m.vareniW || 500) + ' W. '
+      + (topeniData && topeniData.hodin ? topeniData.hodin + ' hodin dat. Tlačítkem pošli data k analýze.' : '');
+  }
+}
+
+async function topeniZkopiruj() {
+  if (!topeniKopirBtnEl) return;
+  if (topeniStavEl) topeniStavEl.textContent = 'stahuji…';
+  let text = null;
+  try {
+    const r = await fetch('/api/topeni', { headers: { 'X-Auth-Token': authToken } });
+    if (r.status === 401) { setLocked(true); if (topeniStavEl) topeniStavEl.textContent = 'zamčeno'; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    text = JSON.stringify(await r.json(), null, 1);
+  } catch {
+    if (topeniStavEl) topeniStavEl.textContent = 'nestáhlo se';
+    return;
+  }
+  const kb = Math.max(1, Math.round(text.length / 1024));
+  let doSchranky = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    doSchranky = true;
+  } catch {}
+  // Po stažení už Safari kliknutí nemusí uznat — pak aspoň text k ručnímu označení
+  if (doSchranky) {
+    if (topeniZalohaEl) topeniZalohaEl.hidden = true;
+    if (topeniStavEl) topeniStavEl.textContent = `zkopírováno, ${kb} kB`;
+  } else if (topeniZalohaEl) {
+    topeniZalohaEl.hidden = false;
+    topeniZalohaEl.value = text;
+    topeniZalohaEl.focus();
+    topeniZalohaEl.select();
+    if (topeniStavEl) topeniStavEl.textContent = 'označ a zkopíruj';
+  }
+}
+
+if (topeniKopirBtnEl) topeniKopirBtnEl.addEventListener('click', topeniZkopiruj);
+
 function renderSaunaDays() {
   if (!saunaTotalEl) return;
   let celkem = 0;
@@ -10924,6 +11022,8 @@ function applySnapshot(snap) {
   // v Upstashi.
   saunaNahrevData = snap.saunaNahrev || null;
   bezpecne(renderSaunaNahrev);
+  topeniData = snap.topeni || null;
+  bezpecne(renderTopeni);
   saunaZapnutoData = snap.saunaZapnuto || null;
   bezpecne(renderHuum);
   pripData = snap.pripominky || null;
@@ -11358,6 +11458,10 @@ function connectStream() {
   es.addEventListener('saunaTimers', e => {
     huumTimersData = JSON.parse(e.data).timers || [];
     bezpecne(renderHuumTimers);
+  });
+  es.addEventListener('topeni', e => {
+    topeniData = JSON.parse(e.data).topeni || null;
+    bezpecne(renderTopeni);
   });
   es.addEventListener('saunaNahrev', e => {
     saunaNahrevData = JSON.parse(e.data).saunaNahrev || null;

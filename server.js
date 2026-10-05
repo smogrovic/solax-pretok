@@ -278,7 +278,8 @@ const state = {
   saunaBlockUntil: 0,
   saunaDays: [],     // { d, wh, ms } — spotřeba a doba topení po dnech (7 dní)
   saunaRelace: { od: 0, konec: 0 },  // saunování podle HUUM: od zapnutí kamen/světla do vypnutí obojího
-  saunaNahrev: { bezici: null, zaznamy: [] },  // jak dlouho se sauna nahřívá (podklad pro předpověď)
+  saunaNahrev: { bezici: null, zaznamy: [] },
+  topeni: { bezici: null, zaznamy: [] },        // hodinové průměry pro analýzu topení (stránka FVE)  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
@@ -540,6 +541,7 @@ function snapshot() {
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
     saunaNahrev: state.saunaNahrev,
+    topeni: topeniPayload(),
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
     saunaTimers,
@@ -1015,6 +1017,143 @@ function recordGridSplit({ wbW, poolW, loadW, importW, dtH }) {
   recordUsageDay(dumW, poBazenu, dtH);
 
   return { auto, bazen, dumW, dum: Math.min(dumW, poBazenu) };
+}
+
+// ---------- Topení v domě (podklad pro analýzu) ----------
+// Stejně jako nahřívání sauny se tu jen sbírají data, ze kterých se pak dá zjistit,
+// jak dům topí v závislosti na venkovní teplotě. Jeden záznam = jedna hodina:
+// průměr venku, v pokojích (nástěnná čidla), spotřeba domu (bez auta a bazénu)
+// a z ní odhad topení. Topení samo měřák nemá, takže se odhaduje: od spotřeby domu
+// se odečtou bojlery a sauna (ty měřené jsou), stálý odběr domu (~400 W) a večer
+// vaření. Surová čísla se ukládají taky — odhad jde v analýze přepočítat jinak.
+const TOPENI_ZAKLAD_W = 400;
+const TOPENI_VARENI_W = 500;      // průměr přes večerní hodiny, ne špička plotny
+const TOPENI_VARENI_OD = 17;      // včetně (Praha)
+const TOPENI_VARENI_DO = 20;      // bez
+const TOPENI_DNU = 120;
+const TOPENI_MIN_VZORKU = 10;     // hodina s menším pokrytím (výpadek, restart) se zahodí
+const TOPENI_SOUHRN_DNU = 14;
+const TOPENI_POKOJE = ['obyvak', 'loznice', 'elenka', 'miky'];
+
+function topeniOdhadW(dumW, bojleryW, saunaW, hodina) {
+  if (typeof dumW !== 'number' || !Number.isFinite(dumW)) return null;
+  const vareni = hodina >= TOPENI_VARENI_OD && hodina < TOPENI_VARENI_DO ? TOPENI_VARENI_W : 0;
+  return Math.max(0, Math.round(dumW - (bojleryW || 0) - (saunaW || 0) - TOPENI_ZAKLAD_W - vareni));
+}
+
+// Volá se z updateRuntimes s tím, co se tam zrovna spočítalo. Nevědět se smí cokoli —
+// chybějící hodnota se do průměru prostě nepočítá.
+function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
+  const t = state.topeni;
+  const hodina = Math.floor(now / 3600000) * 3600000;   // Praha má celé hodiny posunu
+  if (t.bezici && t.bezici.t !== hodina) topeniUzavri();
+  if (!t.bezici) t.bezici = { t: hodina, s: {}, c: {} };
+  const b = t.bezici;
+  const pridej = (k, v) => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return;
+    b.s[k] = (b.s[k] || 0) + v;
+    b.c[k] = (b.c[k] || 0) + 1;
+  };
+  pridej('dumW', dumW);
+  pridej('bojleryW', bojleryW);
+  pridej('saunaW', saunaW);
+  const w = state.weather;
+  if (w && cerstve(w.fetchedAt, 2 * 3600000)) pridej('venkuC', w.tempC);
+  for (const k of TOPENI_POKOJE) {
+    const c = state.sensors[k];
+    // Čidlo hlásí jen při změně — ticho do šesti hodin je pořád platná teplota
+    if (c && c.reportedAt && now - c.reportedAt <= SENSOR_SILENCE_LOG_MS) pridej('p_' + k, c.tempC);
+  }
+  const ac = state.aircon;
+  if (ac && cerstve(ac.fetchedAt, 30 * 60000)) {
+    // Kolik klimatizací zrovna topí a jestli topí Aquarea — ať jde topení rozpadnout
+    pridej('klimaTopi', (ac.devices || []).filter(d => d.power === true && d.mode === 'heat').length);
+    const aq = (ac.aquarea || [])[0];
+    if (aq && Array.isArray(aq.zones)) pridej('aqTopi', aq.zones.some(z => z.on) ? 1 : 0);
+  }
+}
+
+function topeniUzavri() {
+  const t = state.topeni;
+  const b = t.bezici;
+  t.bezici = null;
+  if (!b || (b.c.dumW || 0) < TOPENI_MIN_VZORKU) return null;
+  const prumer = k => (b.c[k] ? b.s[k] / b.c[k] : null);
+  const zaokr = (v, d) => Math.round(v * d) / d;
+  const z = { t: b.t, n: b.c.dumW };
+  const venku = prumer('venkuC');
+  if (venku !== null) z.venkuC = zaokr(venku, 10);
+  const pokoje = {};
+  for (const k of TOPENI_POKOJE) {
+    const v = prumer('p_' + k);
+    if (v !== null) pokoje[k] = zaokr(v, 10);
+  }
+  if (Object.keys(pokoje).length) z.pokoje = pokoje;
+  for (const k of ['dumW', 'bojleryW', 'saunaW']) {
+    const v = prumer(k);
+    if (v !== null) z[k] = Math.round(v);
+  }
+  const klima = prumer('klimaTopi');
+  if (klima !== null) z.klimaTopi = zaokr(klima, 10);
+  const aq = prumer('aqTopi');
+  if (aq !== null) z.aqTopi = zaokr(aq, 100);
+  z.topeniW = topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(b.t).hour);
+  t.zaznamy.push(z);
+  const od = Date.now() - TOPENI_DNU * 86400000;
+  t.zaznamy = t.zaznamy.filter(r => r.t >= od);
+  broadcast('topeni', { topeni: topeniPayload() });
+  if (typeof storeTopeniUloz === 'function') storeTopeniUloz().catch(() => {});
+  return z;
+}
+
+// Do appky jde jen denní souhrn — celá řada má stovky kilobajtů a stahuje se
+// až tlačítkem (GET /api/topeni)
+function topeniSouhrn(zaznamy = state.topeni.zaznamy) {
+  const dny = new Map();
+  for (const z of zaznamy) {
+    const d = pragueDateString(z.t);
+    let r = dny.get(d);
+    if (!r) { r = { d, hodin: 0, wh: 0, venku: [], pokoje: [] }; dny.set(d, r); }
+    r.hodin++;
+    if (typeof z.topeniW === 'number') r.wh += z.topeniW;
+    if (typeof z.venkuC === 'number') r.venku.push(z.venkuC);
+    const p = Object.values(z.pokoje || {});
+    if (p.length) r.pokoje.push(p.reduce((a, b) => a + b, 0) / p.length);
+  }
+  const prumer = a => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null);
+  return [...dny.values()].sort((a, b) => a.d.localeCompare(b.d)).slice(-TOPENI_SOUHRN_DNU)
+    .map(r => ({ d: r.d, hodin: r.hodin, topeniKwh: Math.round(r.wh / 100) / 10,
+      venkuC: prumer(r.venku), pokojeC: prumer(r.pokoje) }));
+}
+
+function topeniModel() {
+  return { zakladW: TOPENI_ZAKLAD_W, vareniW: TOPENI_VARENI_W, vareniOd: TOPENI_VARENI_OD, vareniDo: TOPENI_VARENI_DO };
+}
+
+function topeniPayload() {
+  return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel() };
+}
+
+// Sloučení ze zálohy podle hodiny. Nic se neubírá; stejná hodina ve dvou verzích →
+// vyhraje ta s víc vzorky.
+function topeniObnov(telo, now = Date.now()) {
+  const z = telo && Array.isArray(telo.zaznamy) ? telo.zaznamy : null;
+  if (!z) return false;
+  const t = state.topeni;
+  const podle = new Map(t.zaznamy.map(r => [r.t, r]));
+  const od = now - TOPENI_DNU * 86400000;
+  let zmena = false;
+  for (const r of z) {
+    if (!r || !Number.isFinite(r.t) || r.t % 3600000 !== 0 || r.t < od || r.t > now
+        || !Number.isFinite(r.n) || r.n <= 0) continue;
+    const mam = podle.get(r.t);
+    if (!mam || r.n > mam.n) { podle.set(r.t, r); zmena = true; }
+  }
+  if (zmena) {
+    t.zaznamy = [...podle.values()].sort((a, b) => a.t - b.t);
+    broadcast('topeni', { topeni: topeniPayload() });
+  }
+  return true;
 }
 
 // ---------- Sauna ----------
@@ -1680,6 +1819,12 @@ function updateRuntimes() {
   const saunaW = (typeof state.sauna.powerW === 'number' && cerstve(state.sauna.fetchedAt))
     ? state.sauna.powerW : null;
   if (saunaW !== null) recordSaunaDay(saunaW, dtH);
+  // Topení: spotřeba domu jen ze čerstvých dat střídače, jinak hodina zůstane bez ní
+  topeniVzorek({
+    dumW: podil ? podil.dumW : null,
+    bojleryW: (boiler ? Math.max(0, b1W) : 0) + Math.max(0, b2Kw) * 1000,
+    saunaW
+  }, now);
 
   // Měsíční součty — každý okruh jen z čerstvého měření. Rozpad na síť a FVE se bere
   // z téhož řetězu jako denní karty, aby se ta dvě místa nikdy nerozešla.
@@ -2187,6 +2332,12 @@ app.post('/api/sauna-days/restore', (req, res) => {
 app.post('/api/sauna/zapnuto/restore', (req, res) => {
   if (!saunaZapnutoObnov(req.body)) return res.status(400).json({ error: 'Chybí od a naposledy.' });
   res.json({ ok: true, od: state.saunaZapnuto.od || 0 });
+});
+
+// Celá hodinová řada o topení — stahuje se až tlačítkem „Zkopírovat data" na FVE
+app.get('/api/topeni', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  res.json({ zaznamy: state.topeni.zaznamy, model: topeniModel() });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
@@ -10638,8 +10789,42 @@ async function storeNahrevUloz() {
   return true;
 }
 
+// Data o topení: vlastní klíč ze stejného důvodu jako měření sauny — ukládá se po
+// každé uzavřené hodině a hlavní snímek se tím nenafukuje
+const STORE_TOPENI_KEY = `${process.env.STORE_PREFIX || 'solax'}:topeni`;
+let storeTopeniNacteno = false;
+let storeTopeniLast = '';
+
+async function storeTopeniNacti() {
+  const r = await storeFetch(`/get/${encodeURIComponent(STORE_TOPENI_KEY)}`);
+  const snap = storeDecode(r && r.result);
+  if (snap && Array.isArray(snap.zaznamy)) topeniObnov(snap);
+  storeTopeniNacteno = true;
+}
+
+async function storeTopeniUloz() {
+  if (!storeEnabled) return false;
+  if (!storeTopeniNacteno) {
+    try { await storeTopeniNacti(); } catch (err) {
+      console.error('Načtení dat o topení z Upstash selhalo:', err.message);
+      return false;
+    }
+  }
+  const z = state.topeni.zaznamy;
+  const otisk = z.length + ':' + (z.length ? z[z.length - 1].t + ':' + z[0].t : '');
+  if (otisk === storeTopeniLast) return false;
+  await storeFetch(`/set/${encodeURIComponent(STORE_TOPENI_KEY)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: storeEncode({ at: Date.now(), zaznamy: z })
+  });
+  storeTopeniLast = otisk;
+  return true;
+}
+
 async function storeSave() {
   if (storeEnabled) storeNahrevUloz().catch(err => console.error('Záloha měření sauny selhala:', err.message));
+  if (storeEnabled) storeTopeniUloz().catch(err => console.error('Záloha dat o topení selhala:', err.message));
   if (!storeEnabled || !storeLoaded) return false;
   const snap = storeSnapshot();
   const otisk = storeOtisk(snap);
@@ -10697,6 +10882,7 @@ async function storeLoad(port) {
   storeStav.loadedAt = Date.now();
   console.log(`Záloha načtena (${obnoveno}/${STORE_POSTS.length}, ${fmtPragueTime(snap.at)})`);
   try { await storeNahrevNacti(); } catch (err) { console.error('Načtení měření sauny z Upstash selhalo:', err.message); }
+  try { await storeTopeniNacti(); } catch (err) { console.error('Načtení dat o topení z Upstash selhalo:', err.message); }
 }
 
 function storeStart() {

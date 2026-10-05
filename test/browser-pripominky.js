@@ -412,7 +412,9 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   // Termín je půlnoc desátého dne — odpočet ukazuje zbytek dnešního dne (v hodinách)
   check('  a odpočítává do půlnoci', /^za \\d+ h$/.test(pripOdpocet(pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 9 * DEN }, T).dalsi - T)), 'true');
   check('po 10 dnech svítí', sviti('trava', { zapnuto: true, hotovo: T - 10 * DEN }, T), 'true');
-  check('  s textem o dnech', pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 12 * DEN }, T).naposledy, 'Naposledy 20. 9. (před 12 dny)');
+  check('  s textem o dnech', pripominkaStav(def('trava'), { zapnuto: true, hotovo: T - 12 * DEN }, T).naposledy,
+    // Datum podle dnešku — natvrdo zapsané přestalo sedět, jakmile ten den minul
+    'Naposledy ' + new Date(T - 12 * DEN).getDate() + '. ' + (new Date(T - 12 * DEN).getMonth() + 1) + '. (před 12 dny)');
   check('vypnutá nesvítí', sviti('trava', { zapnuto: false, hotovo: 0 }, T), 'false');
   sekackaData = { ...sekackaData, zapnuto: false, offlineOd: 0 };
   renderPripominky();

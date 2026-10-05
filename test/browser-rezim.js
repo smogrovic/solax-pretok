@@ -208,6 +208,9 @@ setTimeout(async () => {
 
   // Časovač nabízel žaluzie z DRUHÉ stránky: Miky i Elenka patří na stránku dvě,
   // ta je schovaná, a jejich pokoj se kreslí na první
+  // Časovače jsou sbalené a prázdná karta se schová — rozbalit jako ťuknutím
+  sbalNastav('casovac-zaluzie1', false);
+  sbalNastav('casovac-zaluzie2', false);
   const casovac = [...document.querySelectorAll('#blindsList1')].length
     ? [...document.querySelectorAll('.blind-timer-card')].find(c => c.getClientRects().length) : null;
   const nabidka = () => [...casovac.querySelectorAll('.bt-device option')].map(o => o.textContent);

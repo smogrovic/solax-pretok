@@ -21,6 +21,10 @@ setTimeout(() => {
   check('tlačítko je hned před kartou', btn && btn.nextElementSibling === karta, true);
   check('tlačítko nese nadpis karty', btn.textContent.replace('▾', '').trim(),
     karta.querySelector('.graph-title').textContent.trim());
+  // Rozvrh je sbalený přes hidden — jeho vlastní tlačítko se schovat nesmí
+  sbalNastav('rozvrh', true);
+  check('sbalený rozvrh má tlačítko vidět',
+    document.querySelector('.sbal-btn[data-sbal="rozvrh"]').getClientRects().length > 0, true);
   check('rozvrh žaluzií své tlačítko nedostal',
     !!document.querySelector('.sbal-btn[data-sbal="casovac-rozvrhCard"]'), false);
   const vsechny = document.querySelectorAll('.timer-card:not(#rozvrhCard)');
