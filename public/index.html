@@ -2547,11 +2547,11 @@
       <div class="card stats-card" data-sbal-obsah="fve">
         <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
         <div class="wbsrc-list" id="usageSrcList"></div>
-        <div class="wbsrc-note">Barák kromě auta a bazénu: dům, oba bojlery a sauna. Ze sítě se nejdřív započítá auto (karta na Wallboxu), pak bazén (karta na Bazénu) a sem jde zbytek — všechny tři dohromady dají celý odběr ze sítě.</div>
+        <div class="wbsrc-note">Celý dům včetně auta, bazénu, obou bojlerů a sauny. Rozpad na auto a bazén je na jejich stránkách.</div>
       </div>
 
       <div class="card stats-card" data-sbal-obsah="fve">
-        <div class="graph-title">Spotřeba domu po měsících</div>
+        <div class="graph-title">Spotřeba celého domu po měsících</div>
         <div class="wbsrc-list" id="dumMonths"></div>
       </div>
 
@@ -8036,8 +8036,24 @@ function renderPoolSrc() {
     { prazdno: 'nic nejelo', prazdnoCelkem: 'zatím nic nejelo' });
 }
 
+// Celý dům po dnech: dům (bez auta a bazénu) + bazén + auto. Server je dělí jedním
+// řetězem, takže součet sedí na celou spotřebu i na celý odběr ze sítě.
+function celyDumDny() {
+  const dny = new Map();
+  for (const rada of [usageDaysData, poolDaysData, wbDaysData]) {
+    for (const r of rada || []) {
+      if (!r || typeof r.d !== 'string') continue;
+      const c = dny.get(r.d) || { d: r.d, grid: 0, pv: 0 };
+      c.grid += Number(r.grid) || 0;
+      c.pv += Number(r.pv) || 0;
+      dny.set(r.d, c);
+    }
+  }
+  return [...dny.values()];
+}
+
 function renderUsageSrc() {
-  renderSrcKarta(usageSrcListEl, usageDaysData,
+  renderSrcKarta(usageSrcListEl, celyDumDny(),
     { prazdno: 'bez dat', prazdnoCelkem: 'zatím bez dat' });
 }
 
@@ -9174,8 +9190,28 @@ const MESIC_KARTY = [
   { el: document.getElementById('saunaMonths'), kus: 'sauna', split: false },
   { el: document.getElementById('poolMonths'), kus: 'pool', split: true },
   { el: document.getElementById('wbMonths'), kus: 'wb', split: true },
-  { el: document.getElementById('dumMonths'), kus: 'dum', split: true }
+  // Celý dům: dům + bazén + auto, stejně jako sedmidenní karta nad ní
+  { el: document.getElementById('dumMonths'), kus: 'celek', split: true }
 ];
+const MESIC_KUSY = ['sauna', 'pool', 'wb', 'dum'];
+const CELEK_KUSY = ['dum', 'pool', 'wb'];
+// Měsíc za celý dům. Rozpad síť/FVE jen když ho mají všechny tři okruhy, které
+// v měsíci něco braly — jinak by se nevědomé „nevíme" sečetlo jako „samé slunce".
+function mesicCelek(r) {
+  const out = { ...r, celek: 0 };
+  let grid = 0, pv = 0, rozpad = true;
+  for (const k of CELEK_KUSY) {
+    const v = Number(r[k]) || 0;
+    if (!(v > 0)) continue;
+    out.celek += v;
+    if (typeof r[k + 'Grid'] === 'number' && typeof r[k + 'Pv'] === 'number') {
+      grid += r[k + 'Grid'];
+      pv += r[k + 'Pv'];
+    } else rozpad = false;
+  }
+  if (rozpad && out.celek > 0) { out.celekGrid = grid; out.celekPv = pv; }
+  return out;
+}
 const MESICE_CZ = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen',
   'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
 let monthsData = [];
@@ -9224,7 +9260,8 @@ function renderMonths() {
   const bezici = tentoMesic();
   const hotove = (monthsData || [])
     .filter(r => r && typeof r.m === 'string' && r.m < bezici)
-    .sort((a, b) => b.m.localeCompare(a.m));
+    .sort((a, b) => b.m.localeCompare(a.m))
+    .map(mesicCelek);
   for (const { el, kus, split } of MESIC_KARTY) {
     if (!el) continue;
     el.textContent = '';
@@ -9295,8 +9332,22 @@ function mergeMonths(a, b) {
   const mapa = new Map();
   for (const r of [...(a || []), ...(b || [])]) {
     if (!r || typeof r.m !== 'string') continue;
-    const m = mapa.get(r.m) || { m: r.m, sauna: 0, pool: 0, wb: 0 };
-    for (const k of ['sauna', 'pool', 'wb']) m[k] = Math.max(m[k], Number(r[k]) || 0);
+    const m = mapa.get(r.m) || { m: r.m, sauna: 0, pool: 0, wb: 0, dum: 0 };
+    // Dům i rozpad síť/FVE se dřív zahazovaly a měsíční karta domu byla prázdná.
+    // Rozpad se bere z té verze, která má u okruhu větší součet — ať k sobě sedí.
+    for (const k of MESIC_KUSY) {
+      const v = Number(r[k]) || 0;
+      if (v > (m[k] || 0) || (v === m[k] && typeof r[k + 'Grid'] === 'number' && typeof m[k + 'Grid'] !== 'number')) {
+        m[k] = v;
+        if (typeof r[k + 'Grid'] === 'number' && typeof r[k + 'Pv'] === 'number') {
+          m[k + 'Grid'] = r[k + 'Grid'];
+          m[k + 'Pv'] = r[k + 'Pv'];
+        } else {
+          delete m[k + 'Grid'];
+          delete m[k + 'Pv'];
+        }
+      }
+    }
     mapa.set(r.m, m);
   }
   return [...mapa.values()].sort((x, y) => x.m.localeCompare(y.m)).slice(-13);
@@ -9306,7 +9357,7 @@ async function maybeRestoreMonths(server) {
   if (!local.length) return;
   const chybi = local.some(l => {
     const r = (server || []).find(x => x.m === l.m);
-    return !r || ['sauna', 'pool', 'wb'].some(k => (Number(l[k]) || 0) > (r[k] || 0) + 1);
+    return !r || MESIC_KUSY.some(k => (Number(l[k]) || 0) > (r[k] || 0) + 1);
   });
   if (!chybi) return;
   try {
@@ -11141,7 +11192,7 @@ function applySnapshot(snap) {
   siteDnyData = mergeSiteDny(serverSiteDny, localSiteDny);
   saveSiteDnyLocal();
   maybeRestoreSiteDny(serverSiteDny, localSiteDny);
-  // Odkud šla spotřeba baráku (kromě auta a bazénu)
+  // Odkud šla spotřeba — dům bez auta a bazénu; karta je sečte s nimi
   const serverUsageDays = snap.usageDays || [];
   const localUsageDays = loadUsageDaysLocal();
   usageDaysData = mergeWbDays(serverUsageDays, localUsageDays);
@@ -11395,6 +11446,7 @@ function connectStream() {
   es.addEventListener('wbDays', e => {
     wbDaysData = mergeWbDays(JSON.parse(e.data).wbDays || [], wbDaysData);
     renderWbSrc();
+    renderUsageSrc();       // celý dům na FVE auto zahrnuje
     saveWbDaysLocal();
   });
   es.addEventListener('wallbox', e => {
@@ -11414,6 +11466,7 @@ function connectStream() {
   es.addEventListener('poolDays', e => {
     poolDaysData = mergeWbDays(JSON.parse(e.data).poolDays || [], poolDaysData);
     renderPoolSrc();
+    renderUsageSrc();       // celý dům na FVE bazén zahrnuje
     renderStats();          // „Bazén celkem" na Přehledu jede z téže řady
     savePoolDaysLocal();
   });

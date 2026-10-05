@@ -101,9 +101,36 @@ setTimeout(() => {
   const celkem = radky[radky.length - 1];
   check('součet je za celých 7 dní', /Celkem za 7 dní/.test(celkem.textContent), true);
   check('  a sečte oba dny', /24,0 kWh/.test(celkem.textContent), true);
+  // Celý dům: k domu se přičte bazén a auto (ze sítě i z FVE)
+  poolDaysData = [{ d: den(0), grid: 1000, pv: 2000 }];
+  wbDaysData = [{ d: den(0), grid: 2000, pv: 4000 }, { d: den(2), grid: 0, pv: 5000 }];
+  renderUsageSrc();
+  const cele = document.querySelectorAll('#usageSrcList .wbsrc-row');
+  check('celý dům: dům + bazén + auto', /21,0 kWh/.test(cele[0].querySelector('.wbsrc-head').textContent), true);
+  check('  ze sítě sečteno', /ze sítě 6,0 kWh/.test(cele[0].textContent), true);
+  check('  z FVE sečteno', cele[0].textContent.includes('15,0 kWh z FVE (71 %)'), true);
+  check('den jen s autem se ukáže', /5,0 kWh/.test(cele[2].textContent), true);
+  check('celkem za 7 dní ze všech tří', /Celkem za 7 dní/.test(cele[7].textContent) && /38,0 kWh/.test(cele[7].textContent), true);
+  check('text pod kartou mluví o celém domě', /Celý dům včetně auta, bazénu/.test(document.querySelector('[data-sbal-obsah="fve"] .wbsrc-note').textContent), true);
+  poolDaysData = [];
+  wbDaysData = [];
   usageDaysData = [];
   renderUsageSrc();
   check('bez dat to řekne', /zatím bez dat/.test(document.getElementById('usageSrcList').textContent), true);
+
+  // Měsíce: celý dům a rozpad; slučování nesmí zahodit dům ani rozpad
+  const mm = mergeMonths([{ m: '2026-08', sauna: 0, pool: 100000, poolGrid: 40000, poolPv: 60000,
+    wb: 200000, wbGrid: 50000, wbPv: 150000, dum: 300000, dumGrid: 100000, dumPv: 200000 }], []);
+  check('slučování měsíců drží dům', mm[0].dum, 300000);
+  check('  i rozpad', mm[0].dumGrid + '/' + mm[0].dumPv, '100000/200000');
+  const c = mesicCelek(mm[0]);
+  check('měsíc celého domu', c.celek, 600000);
+  check('  rozpad sečtený', c.celekGrid + '/' + c.celekPv, '190000/410000');
+  check('bez rozpadu u jednoho okruhu se nedokreslí', 'celekGrid' in mesicCelek({ m: 'x', dum: 5, dumGrid: 1, dumPv: 4, wb: 3 }), false);
+  monthsData = mm;
+  renderMonths();
+  check('měsíční karta ukazuje celý dům', /600,0 kWh/.test(document.getElementById('dumMonths').textContent), true);
+  check('  s pruhem síť/FVE', /ze sítě 190,0 kWh/.test(document.getElementById('dumMonths').textContent), true);
 
   // 5) karta wallboxu zůstala nedotčená
   wbDaysData = [{ d: den(0), grid: 1000, pv: 3000 }];
