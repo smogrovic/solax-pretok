@@ -40,7 +40,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     saunaDays: [],
     saunaNahrev: { bezici: null, zaznamy: [] },
     saunaZapnuto: { od: 0, naposledy: 0 },
-    weather: { tempC: venku },
+    weather: { tempC: venku, vitrMs: 3.5, fetchedAt: new Date(now).toISOString() },
     huum: huum === null ? {} : huum,
     devices: {
       pool: pool === null ? { online: true, isOn: null } : { online: true, isOn: pool },
@@ -314,6 +314,32 @@ nadpis('7) Když měřák mlčí');
   check('po půl hodině se bazén může vrátit', h.api.saunaBlokuje(), 'false');
 }
 
+nadpis('Měření nahřívání — počasí, dveře, příkon');
+{
+  // Počasí, které se nepodařilo stáhnout, se nesmí zapsat jako dnešní
+  const h = build({ venku: 8 });
+  h.state.weather.fetchedAt = new Date(h.now - 3 * 3600000).toISOString();
+  h.api.updateSauna(6000);
+  const b = () => h.state.saunaNahrev.bezici;
+  check('staré počasí se na startu nezapíše', b().venkuC, 'null');
+  check('  ani vítr', b().vitrMs, 'null');
+  check('  ani do bodu', 'venkuC' in b().body[0], false);
+  // Zpátky čerstvé a dveře otevřené
+  h.state.weather = { tempC: 5, vitrMs: 6, fetchedAt: new Date(h.now).toISOString() };
+  h.state.huum.doorClosed = false;
+  h.posun(2); h.api.nahrevVzorek(40, h.now);
+  const bod = b().body[b().body.length - 1];
+  check('čerstvé počasí jde do bodu', bod.venkuC + '/' + bod.vitrMs, '5/6');
+  check('otevřené dveře se poznamenají', bod.otevreno, true);
+  h.state.huum.doorClosed = true;
+  h.posun(2); h.api.nahrevVzorek(45, h.now);
+  check('zavřené dveře bez poznámky', 'otevreno' in b().body[b().body.length - 1], false);
+  h.state.weather.tempC = 3;
+  const zaznam = b();
+  h.api.nahrevKonec(h.now);
+  check('na konci se zapíše venkovní teplota', zaznam.venkuKonecC, 3);
+}
+
 nadpis('Měření nahřívání');
 {
   // Začátek se bere z odběru i ze stisku ON. Z odběru proto, že sauna jde pustit
@@ -326,7 +352,10 @@ nadpis('Měření nahřívání');
   check('  s venkovní teplotou', b().venkuC, 8);
   check('  s teplotou v sauně', b().odC, 22);
   check('  a s cílem z kamen', b().cilC, 79);
-  check('  teplota na startu je první bod', JSON.stringify(b().body), '[{"min":0,"c":22,"topi":true}]');
+  check('  s větrem', b().vitrMs, 3.5);
+  // Ke každému bodu počasí a skutečný příkon kamen — kvůli ztrátám
+  check('  teplota na startu je první bod', JSON.stringify(b().body),
+    '[{"min":0,"c":22,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000}]');
 
   // Vzorky chodí z dotazů na kamna, po dvou minutách
   h.posun(2); h.api.nahrevVzorek(31, h.now);
@@ -548,7 +577,7 @@ nadpis('Měření nahřívání přežije nasazení');
   check('vyhraje dřívější měření ze zálohy', b.start, T - 30 * 60000);
   check('  s původní startovní teplotou', b.odC, 25);
   check('  vzorky nového se připojí s přepočtenými minutami', JSON.stringify(b.body.slice(-2)),
-    '[{"min":30,"c":64},{"min":32,"c":71}]');
+    '[{"min":30,"c":64,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000},{"min":32,"c":71,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000}]');
   check('  práh 60 zůstane z původního měření', b.prahy[60].min, 24);
   check('  práh 70 se doplní z nového', b.prahy[70].min, 32);
   check('  a maximum sedí', b.maxC, 71);

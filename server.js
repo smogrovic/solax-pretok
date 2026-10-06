@@ -1329,6 +1329,18 @@ function saunaOdhad(now = Date.now()) {
   return out;
 }
 
+// Počasí jen čerstvé: kdyby se nedalo stáhnout, zapsala by se hodiny stará hodnota
+// a ztráty v analýze by se počítaly z jiného počasí
+const NAHREV_POCASI_MS = 2 * 3600000;
+function nahrevPocasi(now = Date.now()) {
+  const w = state.weather;
+  if (!w || !w.fetchedAt || now - new Date(w.fetchedAt).getTime() > NAHREV_POCASI_MS) return { venkuC: null, vitrMs: null };
+  return {
+    venkuC: typeof w.tempC === 'number' ? w.tempC : null,
+    vitrMs: typeof w.vitrMs === 'number' ? w.vitrMs : null
+  };
+}
+
 function nahrevStart(duvod, now = Date.now()) {
   const n = state.saunaNahrev;
   if (n.bezici) return;           // z appky i z odběru přijde obojí — zakládá se jednou
@@ -1336,7 +1348,7 @@ function nahrevStart(duvod, now = Date.now()) {
   n.bezici = {
     start: now,
     duvod,
-    venkuC: state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null,
+    ...nahrevPocasi(now),
     odC: typeof huum.temperature === 'number' ? huum.temperature : null,
     cilC: typeof huum.targetTemperature === 'number' ? huum.targetTemperature : null,
     prahy: {},
@@ -1356,7 +1368,18 @@ function nahrevVzorek(c, now = Date.now()) {
   const min = Math.round((now - b.start) / 6000) / 10;
   // Pro přefitování modelu: topí kamna zrovna? (příkon ze Shelly nad prahem)
   const topi = typeof saunaTopi === 'function' ? saunaTopi() : null;
-  if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min, c, topi });
+  // Ke každému bodu i to, co ovlivňuje ztráty: počasí (za hodinu nahřívání se večer
+  // ochladí), skutečný příkon kamen a otevřené dveře (pustí ven spoustu tepla)
+  const bod = { min, c, topi };
+  const { venkuC, vitrMs } = nahrevPocasi(now);
+  if (venkuC !== null) bod.venkuC = venkuC;
+  if (vitrMs !== null) bod.vitrMs = vitrMs;
+  const sa = state.sauna;
+  if (sa && typeof sa.powerW === 'number' && sa.fetchedAt && now - new Date(sa.fetchedAt).getTime() <= 10 * 60000) {
+    bod.w = Math.round(sa.powerW);
+  }
+  if (state.huum && state.huum.doorClosed === false) bod.otevreno = true;
+  if (b.body.length < NAHREV_BODU_MAX) b.body.push(bod);
   // Když při zapnutí nebyla teplota z kamen známá, bere se první vzorek
   if (b.odC === null || b.odC === undefined) b.odC = c;
   b.maxC = b.maxC === null ? c : Math.max(b.maxC, c);
@@ -1388,6 +1411,9 @@ function nahrevKonec(now = Date.now()) {
   if (b.body.length < 2 && !Object.keys(b.prahy).length) b.kratke = true;
   if (nahrevTepleOdStartu(b)) b.teplyStart = true;
   b.konec = now;
+  // Venku na konci — spolu se startem dá, jak se během nahřívání ochladilo
+  const konecPocasi = nahrevPocasi(now);
+  if (konecPocasi.venkuC !== null) b.venkuKonecC = konecPocasi.venkuC;
   n.zaznamy.push(b);
   const pozn = b.teplyStart ? ', začalo už teplé' : (b.kratke ? ', jen bliknutí' : '');
   addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min${pozn})`);
@@ -1434,7 +1460,7 @@ function nahrevObnov(telo, now = Date.now()) {
     if (nove) {
       const posun = (nove.start - b.start) / 60000;
       const min = x => Math.round((x + posun) * 10) / 10;
-      for (const v of nove.body) if (b.body.length < NAHREV_BODU_MAX) b.body.push({ min: min(v.min), c: v.c });
+      for (const v of nove.body) if (b.body.length < NAHREV_BODU_MAX) b.body.push({ ...v, min: min(v.min) });
       for (const [k, v] of Object.entries(nove.prahy)) if (!b.prahy[k]) b.prahy[k] = { min: min(v.min), c: v.c };
       if (typeof nove.maxC === 'number') b.maxC = typeof b.maxC === 'number' ? Math.max(b.maxC, nove.maxC) : nove.maxC;
     }
@@ -3419,6 +3445,8 @@ async function fetchWeather() {
     // Východ slunce se ukládá kvůli rozvrhu žaluzií — západ appka používala už dřív
     state.weather = {
       tempC,
+      // Vítr kvůli ztrátám sauny (stojí venku) — ochlazuje stěny víc než samotná teplota
+      vitrMs: data.wind && typeof data.wind.speed === 'number' ? data.wind.speed : null,
       sunsetMs: data.sys.sunset * 1000,
       sunriseMs: typeof data.sys.sunrise === 'number' ? data.sys.sunrise * 1000 : null,
       fetchedAt: new Date().toISOString()
