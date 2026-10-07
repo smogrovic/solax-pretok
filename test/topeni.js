@@ -17,7 +17,7 @@ function build(now) {
   const realNow = Date.now;
   const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'SENSOR_SILENCE_LOG_MS', 'DATA_MAX_AGE_MS',
     CODE + '\n; return { topeniOdhadW, topeniVzorek, topeniUzavri, topeniSouhrn, topeniPayload, topeniObnov,'
-         + ' TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
+         + ' topeniNavod, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
   )(state, (u, d) => zpravy.push({ u, d }), { get: (c, f) => { routy[c] = f; } }, () => true,
     6 * HOD, 10 * 60000);
   return { state, zpravy, api, routy, realNow };
@@ -110,6 +110,20 @@ nadpis('3) Souhrn, ořez a obnova');
   check('obnova bez zaznamy selže', api.topeniObnov({}), false);
 }
 
+nadpis('4) Návod pro AI');
+{
+  const { api } = build();
+  const t = api.topeniNavod().join('\n');
+  check('je to pole řádků', Array.isArray(api.topeniNavod()), true);
+  check('stálý odběr z modelu', t.includes(api.TOPENI_ZAKLAD_W + ' W stálý odběr'), true);
+  check('vaření z modelu', t.includes(api.TOPENI_VARENI_W + ' W v hodinách 17:00–20:00'), true);
+  check('minimum vzorků z kódu', t.includes('méně než ' + api.TOPENI_MIN_VZORKU + ' vzorky'), true);
+  check('zmiňuje cyklování', /cykluje/.test(t), true);
+  check('radí denní součty', /denními součty/.test(t), true);
+  check('upozorní na COP', /COP/.test(t), true);
+  check('časové pásmo', /Europe\/Prague/.test(t), true);
+}
+
 nadpis('4) Napojení');
 {
   const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
@@ -117,6 +131,7 @@ nadpis('4) Napojení');
   check('do appky jde souhrn', /topeni: topeniPayload\(\),/.test(SRC), true);
   check('ukládá se do vlastního klíče', /storeTopeniUloz\(\)/.test(SRC) && /:topeni`/.test(SRC), true);
   check('po startu se načte', /await storeTopeniNacti\(\)/.test(SRC), true);
+  check('návod jde v odpovědi první', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), zaznamy/.test(SRC), true);
   check('celá řada jen přes zámek', /app\.get\('\/api\/topeni', \(req, res\) => \{\s*if \(!requireAuth/.test(SRC), true);
 }
 

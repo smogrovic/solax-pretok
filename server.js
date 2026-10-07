@@ -1130,6 +1130,21 @@ function topeniModel() {
   return { zakladW: TOPENI_ZAKLAD_W, vareniW: TOPENI_VARENI_W, vareniOd: TOPENI_VARENI_OD, vareniDo: TOPENI_VARENI_DO };
 }
 
+// Návod pro AI, které dostane zkopírovaná data. Čísla se berou z modelu, ať text
+// nemůže tvrdit něco jiného, než se doopravdy počítalo.
+function topeniNavod() {
+  const m = topeniModel();
+  return [
+    'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
+    'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
+    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0. Obě konstanty jsou hrubé odhady (viz `model`). Klidně je přepočítej ze surových dumW/bojleryW/saunaW — např. stálý odběr urči z nočních hodin teplých dnů, kdy se netopí (aqTopi = 0, klimaTopi = 0).',
+    'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
+    'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
+    'POZOR: topeniW je ELEKTRICKÝ příkon, ne teplo. Teplo = příkon × COP (u vzduch-voda zhruba 2–5, klesá s venkovní teplotou), takže skutečná tepelná ztráta domu je vyšší. Odečet stálého odběru a vaření je hrubý, denní součty jsou spolehlivější než hodiny.'
+  ];
+}
+
 function topeniPayload() {
   return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel() };
 }
@@ -2363,7 +2378,8 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 // Celá hodinová řada o topení — stahuje se až tlačítkem „Zkopírovat data" na FVE
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
-  res.json({ zaznamy: state.topeni.zaznamy, model: topeniModel() });
+  // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
+  res.json({ navod: topeniNavod(), model: topeniModel(), zaznamy: state.topeni.zaznamy });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
