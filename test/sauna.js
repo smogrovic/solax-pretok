@@ -40,7 +40,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     saunaDays: [],
     saunaNahrev: { bezici: null, zaznamy: [] },
     saunaZapnuto: { od: 0, naposledy: 0 },
-    weather: { tempC: venku, vitrMs: 3.5, fetchedAt: new Date(now).toISOString() },
+    weather: { tempC: venku, vitrMs: 3.5, srazkyMm: 0, fetchedAt: new Date(now).toISOString() },
     huum: huum === null ? {} : huum,
     devices: {
       pool: pool === null ? { online: true, isOn: null } : { online: true, isOn: pool },
@@ -56,7 +56,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     CODE2 + '\n; return { saunaTopi, saunaBlokuje, saunaPayload, updateSauna, recordSaunaDay,'
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
-          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY,'
+          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, pocasiSrazky,'
           + ' odhadNabehu, saunaOdhad, SAUNA_TERMOSTAT,'
           + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
           + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
@@ -324,12 +324,19 @@ nadpis('Měření nahřívání — počasí, dveře, příkon');
   check('staré počasí se na startu nezapíše', b().venkuC, 'null');
   check('  ani vítr', b().vitrMs, 'null');
   check('  ani do bodu', 'venkuC' in b().body[0], false);
+  check('srážky ze starého počasí: null v hlavičce', b().srazkyMm, 'null');
+  check('  i v bodě (klíč je, hodnota null)', 'srazkyMm' in b().body[0] && b().body[0].srazkyMm === null, true);
   // Zpátky čerstvé a dveře otevřené
-  h.state.weather = { tempC: 5, vitrMs: 6, fetchedAt: new Date(h.now).toISOString() };
+  h.state.weather = { tempC: 5, vitrMs: 6, srazkyMm: 1.2, fetchedAt: new Date(h.now).toISOString() };
   h.state.huum.doorClosed = false;
   h.posun(2); h.api.nahrevVzorek(40, h.now);
   const bod = b().body[b().body.length - 1];
-  check('čerstvé počasí jde do bodu', bod.venkuC + '/' + bod.vitrMs, '5/6');
+  check('čerstvé počasí jde do bodu', bod.venkuC + '/' + bod.vitrMs + '/' + bod.srazkyMm, '5/6/1.2');
+  // Čerstvé počasí, ale hodinový údaj o srážkách chybí → null, ne 0
+  h.state.weather.srazkyMm = null;
+  h.posun(1); h.api.nahrevVzorek(42, h.now);
+  check('chybějící srážky v čerstvém počasí = null', b().body[b().body.length - 1].srazkyMm, 'null');
+  h.state.weather.srazkyMm = 1.2;
   check('otevřené dveře se poznamenají', bod.otevreno, true);
   h.state.huum.doorClosed = true;
   h.posun(2); h.api.nahrevVzorek(45, h.now);
@@ -338,6 +345,31 @@ nadpis('Měření nahřívání — počasí, dveře, příkon');
   const zaznam = b();
   h.api.nahrevKonec(h.now);
   check('na konci se zapíše venkovní teplota', zaznam.venkuKonecC, 3);
+}
+
+nadpis('Srážky z OpenWeatherMap');
+{
+  const h = build();
+  const sr = h.api.pocasiSrazky;
+  check('déšť za hodinu', sr({ rain: { '1h': 0.84 } }), 0.8);
+  check('déšť + sníh se sečtou', sr({ rain: { '1h': 0.5 }, snow: { '1h': 1.2 } }), 1.7);
+  check('bez srážek (pole chybí) = 0', sr({ main: { temp: 5 } }), 0);
+  check('jen tříhodinový údaj = null', sr({ rain: { '3h': 2 } }), 'null');
+  check('hlavička nese srážky při startu', (() => {
+    const g = build({ venku: 8 });
+    g.state.weather.srazkyMm = 2.4;
+    g.api.updateSauna(6000);
+    return g.state.saunaNahrev.bezici.srazkyMm;
+  })(), 2.4);
+  // Data, co už máme, se nesmí ztratit: staré body bez srážek zůstanou, jak byly
+  const g = build({ huum: { temperature: 64, targetTemperature: 80 } });
+  const T = g.now;
+  const stare = { start: T - 900000000, body: [{ min: 0, c: 20, topi: true }, { min: 30, c: 70 }], prahy: {} };
+  const nove = { start: T - 800000000, body: [{ min: 0, c: 21, srazkyMm: 0.3 }, { min: 30, c: 71, srazkyMm: null }], prahy: {} };
+  g.api.nahrevObnov({ zaznamy: [stare, nove] }, T);
+  const z = g.state.saunaNahrev.zaznamy;
+  check('obnova: staré body beze změny', JSON.stringify(z[0].body), JSON.stringify(stare.body));
+  check('  nové si srážky ponechají', JSON.stringify(z[1].body.map(x => x.srazkyMm)), '[0.3,null]');
 }
 
 nadpis('Měření nahřívání');
@@ -355,7 +387,7 @@ nadpis('Měření nahřívání');
   check('  s větrem', b().vitrMs, 3.5);
   // Ke každému bodu počasí a skutečný příkon kamen — kvůli ztrátám
   check('  teplota na startu je první bod', JSON.stringify(b().body),
-    '[{"min":0,"c":22,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000}]');
+    '[{"min":0,"c":22,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
 
   // Vzorky chodí z dotazů na kamna, po dvou minutách
   h.posun(2); h.api.nahrevVzorek(31, h.now);
@@ -577,7 +609,7 @@ nadpis('Měření nahřívání přežije nasazení');
   check('vyhraje dřívější měření ze zálohy', b.start, T - 30 * 60000);
   check('  s původní startovní teplotou', b.odC, 25);
   check('  vzorky nového se připojí s přepočtenými minutami', JSON.stringify(b.body.slice(-2)),
-    '[{"min":30,"c":64,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000},{"min":32,"c":71,"topi":true,"venkuC":8,"vitrMs":3.5,"w":6000}]');
+    '[{"min":30,"c":64,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000},{"min":32,"c":71,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
   check('  práh 60 zůstane z původního měření', b.prahy[60].min, 24);
   check('  práh 70 se doplní z nového', b.prahy[70].min, 32);
   check('  a maximum sedí', b.maxC, 71);

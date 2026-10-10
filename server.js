@@ -1354,11 +1354,28 @@ function saunaOdhad(now = Date.now()) {
 const NAHREV_POCASI_MS = 2 * 3600000;
 function nahrevPocasi(now = Date.now()) {
   const w = state.weather;
-  if (!w || !w.fetchedAt || now - new Date(w.fetchedAt).getTime() > NAHREV_POCASI_MS) return { venkuC: null, vitrMs: null };
+  if (!w || !w.fetchedAt || now - new Date(w.fetchedAt).getTime() > NAHREV_POCASI_MS) {
+    return { venkuC: null, vitrMs: null, srazkyMm: null };
+  }
   return {
     venkuC: typeof w.tempC === 'number' ? w.tempC : null,
-    vitrMs: typeof w.vitrMs === 'number' ? w.vitrMs : null
+    vitrMs: typeof w.vitrMs === 'number' ? w.vitrMs : null,
+    srazkyMm: typeof w.srazkyMm === 'number' ? w.srazkyMm : null
   };
+}
+
+// Srážky za poslední hodinu (mm) z odpovědi OpenWeatherMap: déšť + sníh. Když neprší,
+// OWM pole vůbec nepošle — to je 0, ne „nevíme". Null jen když blok přijde, ale
+// hodinový údaj v něm chybí (třeba jen „3h").
+function pocasiSrazky(data) {
+  let mm = 0;
+  for (const k of ['rain', 'snow']) {
+    const blok = data && data[k];
+    if (!blok) continue;
+    if (typeof blok['1h'] !== 'number' || !Number.isFinite(blok['1h'])) return null;
+    mm += blok['1h'];
+  }
+  return Math.round(mm * 10) / 10;
 }
 
 function nahrevStart(duvod, now = Date.now()) {
@@ -1391,9 +1408,11 @@ function nahrevVzorek(c, now = Date.now()) {
   // Ke každému bodu i to, co ovlivňuje ztráty: počasí (za hodinu nahřívání se večer
   // ochladí), skutečný příkon kamen a otevřené dveře (pustí ven spoustu tepla)
   const bod = { min, c, topi };
-  const { venkuC, vitrMs } = nahrevPocasi(now);
+  const { venkuC, vitrMs, srazkyMm } = nahrevPocasi(now);
   if (venkuC !== null) bod.venkuC = venkuC;
   if (vitrMs !== null) bod.vitrMs = vitrMs;
+  // Srážky se zapisují vždy — null znamená „údaj nebyl", 0 „nepršelo"
+  bod.srazkyMm = srazkyMm;
   const sa = state.sauna;
   if (sa && typeof sa.powerW === 'number' && sa.fetchedAt && now - new Date(sa.fetchedAt).getTime() <= 10 * 60000) {
     bod.w = Math.round(sa.powerW);
@@ -3666,6 +3685,8 @@ async function fetchWeather() {
       tempC,
       // Vítr kvůli ztrátám sauny (stojí venku) — ochlazuje stěny víc než samotná teplota
       vitrMs: data.wind && typeof data.wind.speed === 'number' ? data.wind.speed : null,
+      // Srážky za hodinu — mokré stěny sauny ztrácejí víc tepla
+      srazkyMm: pocasiSrazky(data),
       sunsetMs: data.sys.sunset * 1000,
       sunriseMs: typeof data.sys.sunrise === 'number' ? data.sys.sunrise * 1000 : null,
       fetchedAt: new Date().toISOString()
