@@ -281,7 +281,9 @@ const state = {
   saunaNahrev: { bezici: null, zaznamy: [] },
   topeni: { bezici: null, zaznamy: [] },        // hodinové průměry pro analýzu topení (stránka FVE)  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
-  pripominky: pripominkyVychozi(),  // kdy se co naposledy odťuklo + přepínače popelnic
+  pripominky: pripominkyVychozi(),
+  nakup: [],         // nákupní seznam: { id, text, t }
+  oznameni: null,    // upozornění přes celou appku: { id, text, od }  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -544,6 +546,8 @@ function snapshot() {
     topeni: topeniPayload(),
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
+    nakup: state.nakup,
+    oznameni: state.oznameni,
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
@@ -1545,6 +1549,73 @@ const PRIPOMINKY_ZPETNE_MS = 60 * 86400000;
 // Vypnout jde každá připomínka (třeba pes na dovolené, kytky v zimě)
 const PRIPOMINKY_S_PREPINACEM = PRIPOMINKY_IDS;
 
+// Vlastní připomínky z appky. Leží ve stejném objektu jako pevné, takže na ně platí
+// stejné Hotovo, Aktivovat, přepínač i záloha. Opakovaná = každých N dní (jako
+// kytky), jednorázová = svítí od data a po Hotovo zmizí.
+const PRIPOMINKY_VLASTNI_MAX = 20;
+const PRIPOMINKY_VLASTNI_DNI = { od: 1, do: 365 };
+const PRIPOMINKY_JEDNOU_UKLID_MS = 2 * 86400000;   // hotová jednorázová ještě dva dny pro „Zpět"
+const jeVlastni = id => typeof id === 'string' && /^v_[a-z0-9]{8}$/.test(id)
+  && Object.prototype.hasOwnProperty.call(state.pripominky, id);
+const maPrepinac = id => PRIPOMINKY_S_PREPINACEM.includes(id) || jeVlastni(id);
+
+// Ověří zadání z appky (i ze zálohy) → { vlastni, dni } nebo { chyba }
+function pripominkaVlastniOver(b, now = Date.now()) {
+  if (!b || typeof b !== 'object') return { chyba: 'Chybí zadání.' };
+  const nazev = typeof b.nazev === 'string' ? b.nazev.trim() : '';
+  if (!nazev || nazev.length > 40) return { chyba: 'Název musí mít 1–40 znaků.' };
+  const ikona = typeof b.ikona === 'string' && b.ikona.trim() && [...b.ikona.trim()].length <= 8 ? b.ikona.trim() : '📌';
+  if (b.typ === 'opak') {
+    const dni = Number(b.dni);
+    if (!Number.isInteger(dni) || dni < PRIPOMINKY_VLASTNI_DNI.od || dni > PRIPOMINKY_VLASTNI_DNI.do) {
+      return { chyba: `Interval musí být ${PRIPOMINKY_VLASTNI_DNI.od}–${PRIPOMINKY_VLASTNI_DNI.do} dní.` };
+    }
+    return { vlastni: { nazev, ikona, typ: 'opak' }, dni };
+  }
+  if (b.typ === 'jednou') {
+    const m = typeof b.datum === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(b.datum);
+    const t = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
+    if (!m || !Number.isFinite(t) || new Date(t).getUTCDate() !== +m[3]) return { chyba: 'Neplatné datum.' };
+    if (t > now + 2 * 365 * 86400000) return { chyba: 'Datum nejvýš dva roky dopředu.' };
+    return { vlastni: { nazev, ikona, typ: 'jednou', datum: b.datum } };
+  }
+  return { chyba: 'Neznámý typ připomínky.' };
+}
+
+function pripominkaVlastniVytvor(b, now = Date.now()) {
+  const v = pripominkaVlastniOver(b, now);
+  if (v.chyba) return v;
+  const pocet = Object.keys(state.pripominky).filter(jeVlastni).length;
+  if (pocet >= PRIPOMINKY_VLASTNI_MAX) return { chyba: `Vlastních připomínek může být nejvýš ${PRIPOMINKY_VLASTNI_MAX}.` };
+  let id;
+  do { id = 'v_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0'); } while (state.pripominky[id]);
+  state.pripominky[id] = { vlastni: v.vlastni, zapnuto: true, hotovo: 0, predtim: 0, aktivovano: 0, vytvoreno: now,
+    ...(v.dni ? { dni: v.dni } : {}) };
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return { id };
+}
+
+function pripominkaVlastniSmaz(id) {
+  if (!jeVlastni(id)) return false;
+  delete state.pripominky[id];
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return true;
+}
+
+// Hotová jednorázová po dvou dnech zmizí úplně (do té doby ji appka jen nekreslí)
+function pripominkyUklid(now = Date.now()) {
+  let zmena = false;
+  for (const id of Object.keys(state.pripominky)) {
+    const p = state.pripominky[id];
+    if (!jeVlastni(id) || p.vlastni.typ !== 'jednou') continue;
+    if (p.hotovo && p.hotovo > (p.aktivovano || 0) && now - p.hotovo > PRIPOMINKY_JEDNOU_UKLID_MS) {
+      delete state.pripominky[id];
+      zmena = true;
+    }
+  }
+  return zmena;
+}
+
 function pripominkyVychozi() {
   return {
     // `aktivovano` = ručně rozsvíceno („Aktivovat teď“) — svítí, dokud se neodťukne
@@ -1569,6 +1640,8 @@ function pripominkyVychozi() {
 // doopravdy udělalo (z kalendáře v appce, třeba včera) — ne v budoucnu a nejvýš
 // dva měsíce zpátky; jinak platí teď.
 function pripominkaHotovo(id, zpet, now = Date.now(), kdy) {
+  if (!Object.prototype.hasOwnProperty.call(state.pripominky, id)) return false;
+  pripominkyUklid(now);
   const p = state.pripominky[id];
   if (!p) return false;
   const cas = Number.isFinite(kdy) && kdy <= now && kdy >= now - PRIPOMINKY_ZPETNE_MS ? kdy : now;
@@ -1587,6 +1660,7 @@ function pripominkaHotovo(id, zpet, now = Date.now(), kdy) {
 
 // „Aktivovat teď“: připomínka se rozsvítí hned, bez ohledu na čas
 function pripominkaAktivuj(id, now = Date.now()) {
+  if (!Object.prototype.hasOwnProperty.call(state.pripominky, id)) return false;
   const p = state.pripominky[id];
   if (!p) return false;
   p.aktivovano = now;
@@ -1597,7 +1671,8 @@ function pripominkaAktivuj(id, now = Date.now()) {
 // Interval ve dnech (volič vedle přepínače). Jen připomínky, které ho mají, a jen
 // v jejich rozsahu a kroku.
 function pripominkaInterval(id, dni) {
-  const r = PRIPOMINKY_INTERVAL[id];
+  const r = jeVlastni(id) && state.pripominky[id].vlastni.typ === 'opak'
+    ? { ...PRIPOMINKY_VLASTNI_DNI, krok: 1 } : PRIPOMINKY_INTERVAL[id];
   if (!r || !state.pripominky[id]) return false;
   if (!Number.isInteger(dni) || dni < r.od || dni > r.do || (dni - r.od) % r.krok) return false;
   state.pripominky[id].dni = dni;
@@ -1606,7 +1681,7 @@ function pripominkaInterval(id, dni) {
 }
 
 function pripominkaZapnuto(id, zapnuto) {
-  if (!PRIPOMINKY_S_PREPINACEM.includes(id)) return false;
+  if (!maPrepinac(id)) return false;
   state.pripominky[id].zapnuto = zapnuto;
   // Kdo na přepínač sáhl sám, rozhodl — konec zimy ho už nepřepne
   delete state.pripominky[id].zimaVypnulo;
@@ -1660,6 +1735,25 @@ function pripominkyObnov(b) {
     const r = PRIPOMINKY_INTERVAL[id], dni = Number(z.dni);
     if (r && Number.isInteger(dni) && dni >= r.od && dni <= r.do && !((dni - r.od) % r.krok)) p.dni = dni;
   }
+  // Vlastní připomínky: chybějící se převezmou (po nasazení server začíná bez nich),
+  // existující se sloučí jako pevné. Co neprojde kontrolou, se zahodí.
+  const cislo = v => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+  for (const [id, z] of Object.entries(b.pripominky)) {
+    if (!/^v_[a-z0-9]{8}$/.test(id) || !z || typeof z !== 'object' || !z.vlastni) continue;
+    const p = state.pripominky[id];
+    if (!p) {
+      if (Object.keys(state.pripominky).filter(jeVlastni).length >= PRIPOMINKY_VLASTNI_MAX) continue;
+      const v = pripominkaVlastniOver({ ...z.vlastni, dni: z.dni });
+      if (v.chyba) continue;
+      state.pripominky[id] = { vlastni: v.vlastni, zapnuto: z.zapnuto !== false, hotovo: cislo(z.hotovo),
+        predtim: cislo(z.predtim), aktivovano: cislo(z.aktivovano), vytvoreno: cislo(z.vytvoreno),
+        ...(v.dni ? { dni: v.dni } : {}) };
+      continue;
+    }
+    if (cislo(z.hotovo) > p.hotovo) { p.hotovo = cislo(z.hotovo); p.predtim = cislo(z.predtim); }
+    if (cislo(z.aktivovano) > (p.aktivovano || 0)) p.aktivovano = cislo(z.aktivovano);
+  }
+  pripominkyUklid();
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }
@@ -1693,12 +1787,120 @@ app.post('/api/pripominky/:id/interval', (req, res) => {
   res.json({ ok: true, pripominky: state.pripominky });
 });
 
+app.post('/api/pripominky/vlastni', (req, res) => {
+  const r = pripominkaVlastniVytvor(req.body);
+  if (r.chyba) return res.status(400).json({ error: r.chyba });
+  res.json({ ok: true, id: r.id, pripominky: state.pripominky });
+});
+
+app.post('/api/pripominky/:id/smazat', (req, res) => {
+  if (!pripominkaVlastniSmaz(req.params.id)) return res.status(404).json({ error: 'Smazat jde jen vlastní připomínku.' });
+  res.json({ ok: true, pripominky: state.pripominky });
+});
+
 app.post('/api/pripominky/:id/zapnuto', (req, res) => {
-  if (!PRIPOMINKY_S_PREPINACEM.includes(req.params.id)) return res.status(404).json({ error: 'Tahle připomínka přepínač nemá.' });
+  if (!maPrepinac(req.params.id)) return res.status(404).json({ error: 'Tahle připomínka přepínač nemá.' });
   const z = req.body && req.body.zapnuto;
   if (typeof z !== 'boolean') return res.status(400).json({ error: 'Chybí zapnuto (true/false).' });
   pripominkaZapnuto(req.params.id, z);
   res.json({ ok: true, pripominky: state.pripominky });
+});
+
+// ---------- Nákupní seznam ----------
+// Odrážky „co koupit". Zámek se neuplatňuje (stránku Připomínky vidí i děti).
+// Odškrtnutím položka zmizí; „Zpět" ji pošle znovu se stejným id a časem, takže
+// se vrátí na své místo.
+const NAKUP_MAX = 50;
+const NAKUP_TEXT_MAX = 80;
+
+function nakupPridej(b, now = Date.now()) {
+  const text = b && typeof b.text === 'string' ? b.text.trim().replace(/\s+/g, ' ') : '';
+  if (!text) return { chyba: 'Napiš, co koupit.' };
+  if (state.nakup.length >= NAKUP_MAX) return { chyba: `Na seznamu může být nejvýš ${NAKUP_MAX} položek.` };
+  const vraceni = b && typeof b.id === 'string' && /^n_[a-z0-9]{8}$/.test(b.id)
+    && Number.isFinite(b.t) && b.t > 0 && b.t <= now;
+  if (vraceni && state.nakup.some(x => x.id === b.id)) return { ok: true };
+  let id = vraceni ? b.id : null;
+  while (!id || state.nakup.some(x => x.id === id)) id = 'n_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+  const polozka = { id, text: text.slice(0, NAKUP_TEXT_MAX), t: vraceni ? b.t : now };
+  // Vrácená jde před položky se stejným nebo pozdějším časem — tam, kde byla
+  const i = vraceni ? state.nakup.findIndex(x => x.t >= b.t) : -1;
+  if (i >= 0) state.nakup.splice(i, 0, polozka); else state.nakup.push(polozka);
+  broadcast('nakup', { nakup: state.nakup });
+  return { ok: true, id };
+}
+
+function nakupSmaz(id) {
+  const i = state.nakup.findIndex(x => x.id === id);
+  if (i < 0) return false;
+  state.nakup.splice(i, 1);
+  broadcast('nakup', { nakup: state.nakup });
+  return true;
+}
+
+// Záloha po nasazení — jen do prázdného seznamu. Co se mezitím přidalo nebo
+// odškrtlo, je novější než záloha.
+function nakupObnov(b) {
+  if (!b || !Array.isArray(b.nakup)) return false;
+  if (state.nakup.length) return true;
+  for (const x of b.nakup.slice(0, NAKUP_MAX)) {
+    if (!x || typeof x.id !== 'string' || !/^n_[a-z0-9]{8}$/.test(x.id) || typeof x.text !== 'string'
+        || !x.text.trim() || !Number.isFinite(x.t) || state.nakup.some(y => y.id === x.id)) continue;
+    state.nakup.push({ id: x.id, text: x.text.trim().slice(0, NAKUP_TEXT_MAX), t: x.t });
+  }
+  state.nakup.sort((a, c) => a.t - c.t);
+  broadcast('nakup', { nakup: state.nakup });
+  return true;
+}
+
+app.post('/api/nakup', (req, res) => {
+  const r = nakupPridej(req.body);
+  if (r.chyba) return res.status(400).json({ error: r.chyba });
+  res.json({ ok: true, nakup: state.nakup });
+});
+app.post('/api/nakup/restore', (req, res) => {
+  if (!nakupObnov(req.body)) return res.status(400).json({ error: 'Chybí nakup.' });
+  res.json({ ok: true, polozek: state.nakup.length });
+});
+app.post('/api/nakup/:id/smazat', (req, res) => {
+  if (!nakupSmaz(req.params.id)) return res.status(404).json({ error: 'Položka už na seznamu není.' });
+  res.json({ ok: true, nakup: state.nakup });
+});
+
+// ---------- Upozornění pro všechny ----------
+// Text z Logiky automatiky, který appka ukáže přes celou obrazovku na všech
+// zařízeních (i přes kalendář na iPadu), dokud ho někdo neodklikne. Odkliknutí
+// platí pro všechny — ale jen to upozornění, které dotyčný viděl (id).
+const OZNAMENI_MAX = 200;
+function oznameniNastav(text, now = Date.now()) {
+  const t = typeof text === 'string' ? text.trim() : '';
+  if (!t || t.length > OZNAMENI_MAX) return { chyba: `Upozornění musí mít 1–${OZNAMENI_MAX} znaků.` };
+  state.oznameni = { id: 'o_' + now.toString(36), text: t, od: now };
+  broadcast('oznameni', { oznameni: state.oznameni });
+  return { ok: true };
+}
+function oznameniZrus(id) {
+  if (!state.oznameni || state.oznameni.id !== id) return false;
+  state.oznameni = null;
+  broadcast('oznameni', { oznameni: null });
+  return true;
+}
+function oznameniObnov(o, now = Date.now()) {
+  if (state.oznameni || !o || typeof o !== 'object') return;
+  if (typeof o.id !== 'string' || !/^o_[a-z0-9]{1,12}$/.test(o.id) || typeof o.text !== 'string'
+      || !o.text.trim() || o.text.length > OZNAMENI_MAX || !Number.isFinite(o.od) || o.od > now) return;
+  state.oznameni = { id: o.id, text: o.text.trim(), od: o.od };
+}
+
+app.post('/api/oznameni', (req, res) => {
+  const r = oznameniNastav(req.body && req.body.text);
+  if (r.chyba) return res.status(400).json({ error: r.chyba });
+  res.json({ ok: true, oznameni: state.oznameni });
+});
+app.post('/api/oznameni/zrusit', (req, res) => {
+  // Už odkliknuté někým jiným není chyba — výsledek je stejný
+  oznameniZrus(req.body && req.body.id);
+  res.json({ ok: true, oznameni: state.oznameni });
 });
 
 // ---------- Spotřeba po měsících ----------
@@ -10569,6 +10771,7 @@ const STORE_POSTS = [
   '/api/sauna/nahrev/restore',
   '/api/sauna/zapnuto/restore',
   '/api/pripominky/restore',
+  '/api/nakup/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -10613,6 +10816,7 @@ function storeSnapshot() {
     '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy, bezici: state.saunaNahrev.bezici },
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
+    '/api/nakup/restore': { nakup: state.nakup },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
@@ -10657,6 +10861,8 @@ function storeSnapshot() {
     sekackaPosekano: (state.sekacka && state.sekacka.posekano) || null,
     rozvrhVerze: state.rozvrhVerze || 0,
     saunaPoMin: state.saunaPoMin || 15,
+    // Neodkliknuté upozornění musí přežít nasazení
+    oznameni: state.oznameni,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -10694,6 +10900,7 @@ function storeApplyPrimo(p) {
   }
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
+  if (p.oznameni && typeof oznameniObnov === 'function') oznameniObnov(p.oznameni, now);
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {

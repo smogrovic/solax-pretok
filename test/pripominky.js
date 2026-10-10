@@ -10,8 +10,10 @@ function build() {
   const app = { post: (cesta, fn) => { routy[cesta] = fn; } };
   const state = {};
   const api = new Function('state', 'broadcast', 'app', 'addLog',
-    CODE + '\n; state.pripominky = pripominkyVychozi();'
-         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima };'
+    CODE + '\n; state.pripominky = pripominkyVychozi(); state.nakup = []; state.oznameni = null;'
+         + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima,'
+         + ' pripominkaVlastniVytvor, pripominkaVlastniSmaz, pripominkyUklid, PRIPOMINKY_VLASTNI_MAX,'
+         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, oznameniNastav, oznameniZrus, oznameniObnov };'
   )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
@@ -200,6 +202,131 @@ nadpis('Zima vypne trávu a sekačku');
   setAutoMode('winter');
   setAutoMode('winter');
   check('jezdec: do zimy, ze zimy (i na vypnuto), mezi zapnuto/vypnuto nic', JSON.stringify(zima), '[true,false,true]');
+}
+
+nadpis('V) Vlastní připomínky');
+{
+  const h = build();
+  const DEN = 86400000;
+  const r = h.zavolej('/api/pripominky/vlastni', {}, { nazev: '  Vyměnit filtr ', ikona: '🔧', typ: 'opak', dni: 30 });
+  check('opakovaná se vytvoří', r.status, 200);
+  const id = r.json.id;
+  check('  id vlastní', /^v_[a-z0-9]{8}$/.test(id), true);
+  const p = h.state.pripominky[id];
+  check('  název oříznutý', p.vlastni.nazev, 'Vyměnit filtr');
+  check('  ikona i interval', p.vlastni.ikona + ' ' + p.dni, '🔧 30');
+  check('  zapnutá, neodťuknutá', p.zapnuto === true && p.hotovo === 0, true);
+  check('  appka se dozví', h.broadcasts.some(b => b.e === 'pripominky' && b.d.pripominky[id]), true);
+  check('interval jde změnit v rozsahu 1–365', h.api.pripominkaInterval(id, 365), true);
+  check('  mimo rozsah ne', h.api.pripominkaInterval(id, 366), false);
+  check('přepínač jde i u vlastní', h.zavolej('/api/pripominky/:id/zapnuto', { id }, { zapnuto: false }).status, 200);
+  check('  a vypne ji', h.state.pripominky[id].zapnuto, false);
+  check('hotovo funguje', h.api.pripominkaHotovo(id, false, 1000), true);
+
+  const j = h.zavolej('/api/pripominky/vlastni', {}, { nazev: 'Zubař', typ: 'jednou', datum: '2026-10-20' });
+  check('jednorázová se vytvoří', h.state.pripominky[j.json.id].vlastni.datum, '2026-10-20');
+  check('  bez intervalu', 'dni' in h.state.pripominky[j.json.id], false);
+  check('  ikona bez zadání 📌', h.state.pripominky[j.json.id].vlastni.ikona, '📌');
+
+  const spatne = [
+    [{ nazev: '', typ: 'opak', dni: 5 }, 'prázdný název'],
+    [{ nazev: 'x'.repeat(41), typ: 'opak', dni: 5 }, 'dlouhý název'],
+    [{ nazev: 'a', typ: 'opak', dni: 0 }, 'nulový interval'],
+    [{ nazev: 'a', typ: 'opak', dni: 2.5 }, 'necelý interval'],
+    [{ nazev: 'a', typ: 'jednou', datum: '2026-02-30' }, 'neexistující den'],
+    [{ nazev: 'a', typ: 'jednou', datum: '20.10.2026' }, 'jiný formát data'],
+    [{ nazev: 'a', typ: 'jednou', datum: '2031-01-01' }, 'víc než dva roky dopředu'],
+    [{ nazev: 'a', typ: 'jindy' }, 'neznámý typ']
+  ];
+  for (const [b, co] of spatne) check('odmítne: ' + co, h.zavolej('/api/pripominky/vlastni', {}, b).status, 400);
+
+  check('pevnou smazat nejde', h.zavolej('/api/pripominky/:id/smazat', { id: 'kytky' }, {}).status, 404);
+  check('  ani nesmysl', h.zavolej('/api/pripominky/:id/smazat', { id: '__proto__' }, {}).status, 404);
+  check('hotovo na __proto__ neprojde', h.zavolej('/api/pripominky/:id/hotovo', { id: '__proto__' }, {}).status, 404);
+  check('vlastní smazat jde', h.zavolej('/api/pripominky/:id/smazat', { id }, {}).status, 200);
+  check('  a je pryč', id in h.state.pripominky, false);
+
+  const h2 = build();
+  for (let i = 0; i < h2.api.PRIPOMINKY_VLASTNI_MAX; i++) h2.api.pripominkaVlastniVytvor({ nazev: 'p' + i, typ: 'opak', dni: 3 });
+  check('nejvýš 20 vlastních', !!h2.api.pripominkaVlastniVytvor({ nazev: 'navíc', typ: 'opak', dni: 3 }).chyba, true);
+
+  // Úklid: hotová jednorázová po dvou dnech zmizí, opakovaná ne
+  const h3 = build();
+  const T = Date.UTC(2026, 9, 10, 12);
+  const a = h3.api.pripominkaVlastniVytvor({ nazev: 'jednou', typ: 'jednou', datum: '2026-10-10' }, T).id;
+  const o = h3.api.pripominkaVlastniVytvor({ nazev: 'opak', typ: 'opak', dni: 3 }, T).id;
+  h3.api.pripominkaHotovo(a, false, T);
+  h3.api.pripominkaHotovo(o, false, T);
+  h3.api.pripominkyUklid(T + DEN);
+  check('hotová jednorázová den po — ještě drží (Zpět)', a in h3.state.pripominky, true);
+  h3.api.pripominkyUklid(T + 3 * DEN);
+  check('  po dvou dnech zmizí', a in h3.state.pripominky, false);
+  check('opakovaná zůstává', o in h3.state.pripominky, true);
+
+  // Obnova po nasazení: chybějící vlastní se převezmou, nesmysl ne
+  const h4 = build();
+  h4.api.pripominkyObnov({ pripominky: {
+    v_abcd1234: { vlastni: { nazev: 'Filtr', ikona: '🔧', typ: 'opak' }, dni: 30, zapnuto: false, hotovo: 5000 },
+    v_zzzz9999: { vlastni: { nazev: '', typ: 'opak' }, dni: 30 },
+    v_xxxx0000: { vlastni: { nazev: 'zlý', typ: 'opak' }, dni: 9999 },
+    jinyklic: { vlastni: { nazev: 'cizí', typ: 'opak' }, dni: 3 }
+  } });
+  check('obnova převezme platnou vlastní', JSON.stringify(h4.state.pripominky.v_abcd1234 && [h4.state.pripominky.v_abcd1234.dni, h4.state.pripominky.v_abcd1234.zapnuto, h4.state.pripominky.v_abcd1234.hotovo]), '[30,false,5000]');
+  check('  neplatné ne', ['v_zzzz9999', 'v_xxxx0000', 'jinyklic'].some(k => k in h4.state.pripominky), false);
+  h4.api.pripominkaHotovo('v_abcd1234', false, 9000);
+  h4.api.pripominkyObnov({ pripominky: { v_abcd1234: { vlastni: { nazev: 'Filtr', typ: 'opak' }, dni: 30, hotovo: 6000 } } });
+  check('  novější odťuknutí serveru vyhraje', h4.state.pripominky.v_abcd1234.hotovo, 9000);
+}
+
+nadpis('N) Nákupní seznam');
+{
+  const h = build();
+  const r = h.zavolej('/api/nakup', {}, { text: '  mléko   polotučné ' });
+  check('přidá položku', r.status, 200);
+  check('  text učesaný', h.state.nakup[0].text, 'mléko polotučné');
+  check('  appka se dozví', h.broadcasts.some(b => b.e === 'nakup' && b.d.nakup.length === 1), true);
+  check('prázdné nejde', h.zavolej('/api/nakup', {}, { text: '   ' }).status, 400);
+  h.zavolej('/api/nakup', {}, { text: 'x'.repeat(200) });
+  check('dlouhý text se ořízne', h.state.nakup[1].text.length, 80);
+  const smazana = { ...h.state.nakup[0] };
+  check('smazání', h.zavolej('/api/nakup/:id/smazat', { id: smazana.id }, {}).status, 200);
+  check('  je pryč', h.state.nakup.some(x => x.id === smazana.id), false);
+  check('  podruhé 404', h.zavolej('/api/nakup/:id/smazat', { id: smazana.id }, {}).status, 404);
+  h.zavolej('/api/nakup', {}, { text: smazana.text, id: smazana.id, t: smazana.t });
+  check('Zpět vrátí na původní místo', h.state.nakup[0].id + ' ' + h.state.nakup[0].text, smazana.id + ' mléko polotučné');
+  h.zavolej('/api/nakup', {}, { text: smazana.text, id: smazana.id, t: smazana.t });
+  check('  dvojí Zpět nezdvojí', h.state.nakup.filter(x => x.id === smazana.id).length, 1);
+  while (h.state.nakup.length < h.api.NAKUP_MAX) h.api.nakupPridej({ text: 'p' + h.state.nakup.length });
+  check('nejvýš 50', h.zavolej('/api/nakup', {}, { text: 'navíc' }).status, 400);
+
+  const h2 = build();
+  h2.api.nakupObnov({ nakup: [{ id: 'n_aaaa1111', text: 'chleba', t: 5 }, { id: 'zly', text: 'x', t: 1 }, { id: 'n_bbbb2222', text: '', t: 2 }] });
+  check('obnova do prázdného, jen platné', h2.state.nakup.map(x => x.text).join(','), 'chleba');
+  h2.api.nakupObnov({ nakup: [{ id: 'n_cccc3333', text: 'máslo', t: 9 }] });
+  check('  do neprázdného nic', h2.state.nakup.length, 1);
+}
+
+nadpis('O) Upozornění pro všechny');
+{
+  const h = build();
+  check('prázdné nejde', h.zavolej('/api/oznameni', {}, { text: '  ' }).status, 400);
+  check('moc dlouhé nejde', h.zavolej('/api/oznameni', {}, { text: 'x'.repeat(201) }).status, 400);
+  check('nastaví se', h.zavolej('/api/oznameni', {}, { text: ' Večeře v 18:00! ' }).status, 200);
+  const o = h.state.oznameni;
+  check('  text', o.text, 'Večeře v 18:00!');
+  check('  appka se dozví', h.broadcasts.some(b => b.e === 'oznameni' && b.d.oznameni && b.d.oznameni.id === o.id), true);
+  h.zavolej('/api/oznameni/zrusit', {}, { id: 'o_jine' });
+  check('cizí id neodklikne', !!h.state.oznameni, true);
+  h.zavolej('/api/oznameni/zrusit', {}, { id: o.id });
+  check('správné id odklikne', h.state.oznameni, 'null');
+  check('  všem', h.broadcasts.some(b => b.e === 'oznameni' && b.d.oznameni === null), true);
+
+  const h2 = build();
+  h2.api.oznameniObnov({ id: 'o_abc', text: 'Ze zálohy', od: 1000 });
+  check('obnova ze zálohy', h2.state.oznameni && h2.state.oznameni.text, 'Ze zálohy');
+  const h3 = build();
+  h3.api.oznameniObnov({ id: 'zle id', text: 'x', od: 1 });
+  check('  nesmysl ne', h3.state.oznameni, 'null');
 }
 
 konec();

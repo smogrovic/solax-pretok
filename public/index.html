@@ -1377,6 +1377,58 @@
   }
   .potvrz-zpet{background:rgba(44,62,80,0.08);color:var(--grey-text);}
   .potvrz-ano{background:var(--orange);color:#fff;}
+  .potvrz-btns.jeden{grid-template-columns:1fr;}
+  /* Vlastní připomínka */
+  .vlastni-pole{margin-top:12px;width:100%;box-sizing:border-box;}
+  /* Textová pole si od pole na PIN berou jen rámeček — ne rozpálené písmo na střed */
+  .vlastni-pole, .nakup-pridat .pin-input, .oznameni-vstup{letter-spacing:normal;text-align:left;font-size:15px;}
+  .vlastni-ikony{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;}
+  .vlastni-ikony button{border:none;background:rgba(44,62,80,0.06);border-radius:10px;font-size:20px;
+    width:38px;height:38px;padding:0;cursor:pointer;}
+  .vlastni-ikony button.on{background:var(--orange);box-shadow:0 0 0 2px rgba(245,147,61,0.35);}
+  .vlastni-typ{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;}
+  .vlastni-typ button{border:none;border-radius:12px;padding:9px 6px;font:inherit;font-size:13px;font-weight:700;
+    background:rgba(44,62,80,0.06);color:var(--grey-text);cursor:pointer;}
+  .vlastni-typ button.on{background:var(--navy);color:#fff;}
+  .vlastni-radek{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;
+    font-size:13px;color:var(--grey-text);}
+  .vlastni-radek[hidden]{display:none;}
+  .vlastni-radek .pin-input{margin:0;width:auto;}
+  .vlastni-chyba{color:var(--red, #c0392b);}
+  /* Nákupní seznam */
+  .nakup-pridat{display:flex;gap:8px;margin-top:12px;}
+  .nakup-pridat .pin-input{flex:1;margin:0;min-width:0;box-sizing:border-box;}
+  .nakup-pridat button{border:none;border-radius:14px;padding:0 14px;font:inherit;font-size:13px;font-weight:700;
+    background:#2e9d57;color:#fff;cursor:pointer;}
+  .nakup-seznam{list-style:none;margin:12px 0 0;padding:0;max-height:52vh;overflow:auto;}
+  .nakup-seznam li{display:flex;align-items:center;gap:10px;padding:9px 2px;font-size:15px;color:var(--navy);}
+  .nakup-seznam li + li{border-top:1px solid rgba(44,62,80,0.08);}
+  .nakup-seznam li .nakup-text{flex:1;overflow-wrap:anywhere;}
+  .nakup-seznam li.koupeno .nakup-text{text-decoration:line-through;color:var(--muted);}
+  .nakup-odskrt{flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:2px solid #2e9d57;background:none;
+    padding:0;cursor:pointer;}
+  .nakup-zpet{flex:0 0 auto;border:none;border-radius:10px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;
+    background:rgba(44,62,80,0.08);color:var(--grey-text);cursor:pointer;}
+  .nakup-prazdno{font-size:13px;color:var(--muted);text-align:center;padding:14px 0 4px;}
+  .nakup-proklik{width:100%;display:flex;align-items:center;gap:8px;border:none;border-radius:14px;
+    padding:12px 14px;margin-top:10px;background:rgba(46,157,87,0.10);color:#1f6e3c;font:inherit;
+    font-size:14px;font-weight:700;cursor:pointer;text-align:left;}
+  .nakup-proklik .nakup-pocet{margin-left:auto;font-weight:600;color:#2e9d57;}
+  .prip-pridat{margin-top:10px;}
+  .prip-smazat{border:none;background:none;padding:2px 0;margin-top:2px;font:inherit;font-size:11px;
+    color:var(--muted);text-decoration:underline;cursor:pointer;align-self:flex-start;}
+  /* Upozornění pro všechny: červený box přes celou appku, nad vším (i kalendářem) */
+  .oznameni{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+    padding:20px;background:rgba(20,10,10,0.55);}
+  .oznameni[hidden]{display:none;}
+  .oznameni-box{width:100%;max-width:420px;box-sizing:border-box;background:#c62828;color:#fff;border-radius:22px;
+    padding:24px 22px 18px;text-align:center;box-shadow:0 0 0 6px rgba(198,40,40,0.25), 0 12px 40px rgba(0,0,0,0.35);}
+  .oznameni-nadpis{font-size:13px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;opacity:0.85;}
+  .oznameni-text{font-size:24px;font-weight:800;line-height:1.3;margin-top:10px;white-space:pre-line;overflow-wrap:anywhere;}
+  .oznameni-box button{margin-top:18px;border:none;border-radius:14px;padding:12px 28px;font:inherit;font-size:15px;
+    font-weight:800;background:#fff;color:#c62828;cursor:pointer;}
+  .oznameni-vstup{width:100%;box-sizing:border-box;resize:vertical;font:inherit;font-size:14px;margin-top:10px;}
+  .oznameni-poslat{width:100%;margin-top:8px;background:#c62828;color:#fff;}
   .away-row{
     display:flex;
     align-items:center;
@@ -2188,6 +2240,9 @@
     box-shadow:0 0 0 4px rgba(255,213,74,0.25), 0 0 16px 5px rgba(255,190,40,0.5);}
   .prip-zalozka.pes-vecer{background:#2c3e70;color:#fff;
     box-shadow:0 0 0 4px rgba(44,62,112,0.2), 0 0 16px 5px rgba(44,62,112,0.45);}
+  /* Nákupní seznam: zelený, ať se nemíchá s oranžovým zvonečkem */
+  .prip-zalozka.nakup{background:#2e9d57;color:#fff;
+    box-shadow:0 0 0 4px rgba(46,157,87,0.2), 0 0 16px 5px rgba(46,157,87,0.45);}
   /* Aura: rozmazané okolí, které se ke krajům ztrácí */
   .prip-zalozka::before{
     content:"";position:absolute;inset:-11px;z-index:-1;border-radius:26px;
@@ -2207,6 +2262,12 @@
     }
     .prip-zalozka.pes-rano{box-shadow:0 0 0 8px rgba(255,213,74,0.25), 0 0 32px 10px rgba(255,190,40,0.5);}
     .prip-zalozka.pes-vecer{box-shadow:0 0 0 8px rgba(44,62,112,0.2), 0 0 32px 10px rgba(44,62,112,0.45);}
+    .prip-zalozka.nakup{box-shadow:0 0 0 8px rgba(46,157,87,0.2), 0 0 32px 10px rgba(46,157,87,0.45);}
+    .nakup-box{max-width:560px;}
+    .nakup-seznam li{font-size:20px;}
+    .oznameni-box{max-width:760px;padding:40px 44px;}
+    .oznameni-text{font-size:44px;}
+    .oznameni-box button{font-size:24px;padding:16px 40px;}
     .prip-zalozka::before{inset:-22px;border-radius:52px;}
   }
   /* Panel rozbalený ze zvonečku: oranžový jako zvoneček, nad obsahem stránky */
@@ -2299,6 +2360,7 @@
 
 <div class="prip-plovouci" id="pripPlovouci" hidden>
   <button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
+  <button class="prip-zalozka nakup" id="nakupZalozka" type="button" hidden aria-label="Nákupní seznam"></button>
   <button class="prip-zalozka pes-rano" id="pesRanoZalozka" type="button" hidden aria-label="Nakrmeno ráno">☀️🐕🥣</button>
   <button class="prip-zalozka pes-vecer" id="pesVecerZalozka" type="button" hidden aria-label="Nakrmeno večer">🌙🐕🥣</button>
 </div>
@@ -3302,6 +3364,8 @@
         <div class="graph-title">Připomínky</div>
         <div class="prip-seznam" id="pripSeznam"></div>
         <div class="zavlaha-hint" id="pripHint"></div>
+        <button class="sbal-btn prip-pridat" id="pripPridatBtn" type="button">+ Vlastní připomínka</button>
+        <button class="nakup-proklik" id="nakupProklik" type="button">🛒 Nákupní seznam<span class="nakup-pocet" id="nakupProklikPocet"></span> ›</button>
       </div>
     </div>
   </div>
@@ -3409,6 +3473,16 @@
           <div class="rezim-btns" id="rezimBtns"></div>
           <div class="rezim-hint" id="rezimHint"></div>
         </div>
+      </div>
+
+      <!-- Vlastní upozornění: po potvrzení ho appka ukáže přes celou obrazovku na všech
+           zařízeních (i přes kalendář), dokud ho někdo neodklikne -->
+      <div class="card" data-rezim="full">
+        <div class="asst-log-title">Upozornění pro všechny</div>
+        <textarea class="pin-input oznameni-vstup" id="oznameniVstup" maxlength="200" rows="2"
+                  placeholder="Text, který se ukáže přes celou appku…"></textarea>
+        <button class="sek-btn oznameni-poslat" id="oznameniPoslat" type="button">Zobrazit všem</button>
+        <div class="rezim-hint" id="oznameniHint"></div>
       </div>
 
       <div class="card logic-card">
@@ -3627,6 +3701,46 @@
       <button class="potvrz-zpet" id="potvrzZpet" type="button">Zpět</button>
       <button class="potvrz-ano" id="potvrzAno" type="button">Potvrdit</button>
     </div>
+  </div>
+</div>
+
+<div class="potvrz" id="vlastniOkno" hidden>
+  <div class="potvrz-box">
+    <div class="potvrz-nadpis">Vlastní připomínka</div>
+    <input class="pin-input vlastni-pole" id="vlastniNazev" type="text" maxlength="40" placeholder="Co připomenout" autocomplete="off">
+    <div class="vlastni-ikony" id="vlastniIkony"></div>
+    <div class="vlastni-typ" id="vlastniTyp">
+      <button type="button" data-typ="opak" class="on">Opakovat</button>
+      <button type="button" data-typ="jednou">Jednou</button>
+    </div>
+    <div class="vlastni-radek" id="vlastniOpak">každých <select class="timer-select" id="vlastniDni"></select></div>
+    <div class="vlastni-radek" id="vlastniJednou" hidden>dne <input class="pin-input" id="vlastniDatum" type="date"></div>
+    <div class="potvrz-text vlastni-chyba" id="vlastniChyba"></div>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="vlastniZpet" type="button">Zrušit</button>
+      <button class="potvrz-ano" id="vlastniUlozit" type="button">Uložit</button>
+    </div>
+  </div>
+</div>
+<div class="potvrz" id="nakupOkno" hidden>
+  <div class="potvrz-box nakup-box">
+    <div class="potvrz-nadpis">🛒 Nákupní seznam</div>
+    <form class="nakup-pridat" id="nakupForm">
+      <input class="pin-input" id="nakupVstup" type="text" maxlength="80" placeholder="Co koupit…" autocomplete="off">
+      <button type="submit">Přidat</button>
+    </form>
+    <ul class="nakup-seznam" id="nakupSeznam"></ul>
+    <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
+    <div class="potvrz-btns jeden">
+      <button class="potvrz-zpet" id="nakupZavrit" type="button">Zavřít</button>
+    </div>
+  </div>
+</div>
+<div class="oznameni" id="oznameniOkno" hidden role="alertdialog" aria-labelledby="oznameniText">
+  <div class="oznameni-box">
+    <div class="oznameni-nadpis">⚠️ Upozornění</div>
+    <div class="oznameni-text" id="oznameniText"></div>
+    <button type="button" id="oznameniOk">Rozumím</button>
   </div>
 </div>
 
@@ -11078,6 +11192,10 @@ function applySnapshot(snap) {
   saunaZapnutoData = snap.saunaZapnuto || null;
   bezpecne(renderHuum);
   pripData = snap.pripominky || null;
+  nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
+  bezpecne(renderNakup);
+  oznameniData = snap.oznameni || null;
+  bezpecne(renderOznameni);
   bezpecne(renderPripominky);
   huumTimersData = snap.saunaTimers || [];
   bezpecne(renderHuumTimers);
@@ -11500,6 +11618,14 @@ function connectStream() {
     renderMonths();
     saveMonthsLocal();
   });
+  es.addEventListener('nakup', e => {
+    nakupData = JSON.parse(e.data).nakup || [];
+    bezpecne(renderNakup);
+  });
+  es.addEventListener('oznameni', e => {
+    oznameniData = JSON.parse(e.data).oznameni || null;
+    bezpecne(renderOznameni);
+  });
   es.addEventListener('pripominky', e => {
     pripData = JSON.parse(e.data).pripominky || null;
     bezpecne(renderPripominky);
@@ -11849,12 +11975,33 @@ const PRIPOMINKY = [
   { id: 'pesRano', nazev: 'Nakrmit psa ráno', ikona: '🐕', denne: { od: 5 }, zalozka: 'pesRanoZalozka', symbol: '☀️🐕🥣', prepinac: true },
   { id: 'pesVecer', nazev: 'Nakrmit psa večer', ikona: '🐕', denne: { od: 16 }, zalozka: 'pesVecerZalozka', symbol: '🌙🐕🥣', prepinac: true }
 ];
+// Vlastní připomínky z appky: leží v pripData vedle pevných (klíč v_…)
+const PRIP_VLASTNI_VOLBY = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 21, 28, 30, 45, 60, 90, 180, 365];
+function pripDefinice() {
+  const vlastni = [];
+  for (const [id, p] of Object.entries(pripData || {})) {
+    if (!/^v_/.test(id) || !p || !p.vlastni) continue;
+    const v = p.vlastni;
+    const def = { id, nazev: v.nazev, ikona: v.ikona || '📌', prepinac: true, vlastni: true, vytvoreno: Number(p.vytvoreno) || 0 };
+    if (v.typ === 'jednou') def.jednou = v.datum;
+    else { def.dni = Number(p.dni) || 7; def.interval = { volby: PRIP_VLASTNI_VOLBY }; }
+    vlastni.push(def);
+  }
+  vlastni.sort((a, b) => a.vytvoreno - b.vytvoreno);
+  return PRIPOMINKY.concat(vlastni);
+}
 const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
 const PRIP_SEKACKA_MS = 3600000;   // jak dlouho sekačka mlčí, než se připomínka rozsvítí
 
 // Připomínka sekačky jen tam, kde je sekačka nastavená. Zima ji neschovává —
 // vypne ji přepínačem server a řádek zůstane vidět.
 function pripViditelna(def) {
+  // Hotová jednorázová zmizí (kromě pěti vteřin na „Zpět")
+  if (def.jednou) {
+    const p = pripData && pripData[def.id];
+    const h = Number(p && p.hotovo) || 0;
+    return !h || h < (Number(p.aktivovano) || 0) || (pripZpet[def.id] || 0) > Date.now();
+  }
   if (!def.sekacka) return true;
   return !!(sekackaData && sekackaData.zapnuto);
 }
@@ -11865,6 +12012,10 @@ const pripHintEl = document.getElementById('pripHint');
 const pripZalozkaEl = document.getElementById('pripZalozka');
 const pripSlideEl = document.getElementById('pripominkySlide');
 let pripData = null;
+// Nákupní seznam — zelená záložka se obnovuje spolu se zvonečkem (pripZalozkaObnov)
+let nakupData = [];
+const nakupZalozkaEl = document.getElementById('nakupZalozka');
+const nakupProklikPocetEl = document.getElementById('nakupProklikPocet');
 const pripZpet = {};   // id → do kdy jde odťuknutí vrátit
 let pripPraha = null;
 
@@ -11894,6 +12045,18 @@ function pripominkaStav(def, p, now = Date.now()) {
   if (aktivovano && aktivovano >= hotovo) return { sviti: true, text: 'Aktivováno ručně', dalsi: null };
   // Vypnutá přepínačem nesvítí — jen ruční „Aktivovat teď" výš má přednost
   if (def.prepinac && p.zapnuto === false) return { sviti: false, text: 'Připomínka vypnutá', dalsi: null };
+  if (def.jednou) {
+    // Svítí od pražské půlnoci zadaného dne, dokud se neodťukne
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(def.jednou) || [0, 1970, 1, 1];
+    const terminW = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (hotovo) return { sviti: false, text: 'Hotovo ✓', dalsi: null };
+    const kdy = pripDatum(terminW);
+    if (now >= pripZNastennych(terminW)) {
+      const dnes = Math.floor(pripNastenne(now) / PRIP_DEN) * PRIP_DEN === terminW;
+      return { sviti: true, text: dnes ? 'Dnes' : 'Od ' + kdy, dalsi: null };
+    }
+    return { sviti: false, text: 'Dne ' + kdy, dalsi: pripZNastennych(terminW) };
+  }
   if (def.sekacka) {
     const od = Number(sekackaData && sekackaData.offlineOd) || 0;
     if (!od) return { sviti: false, text: 'Sekačka je na příjmu', dalsi: null };
@@ -11966,7 +12129,7 @@ function pripOdpocet(ms) {
 
 // Zvoneček počítá jen připomínky bez vlastní záložky — pes má svoje
 function pripSviticich(now = Date.now()) {
-  return PRIPOMINKY.filter(def => !def.zalozka && pripViditelna(def)
+  return pripDefinice().filter(def => !def.zalozka && pripViditelna(def)
     && pripominkaStav(def, pripData && pripData[def.id], now).sviti).length;
 }
 
@@ -12041,7 +12204,7 @@ async function pripPost(adresa, telo) {
 function renderPripominky(now = Date.now()) {
   if (!pripSeznamEl) return;
   pripSeznamEl.textContent = '';
-  for (const def of PRIPOMINKY) {
+  for (const def of pripDefinice()) {
     if (!pripViditelna(def)) continue;
     const p = pripData && pripData[def.id];
     const st = pripominkaStav(def, p, now);
@@ -12086,6 +12249,18 @@ function renderPripominky(now = Date.now()) {
       });
       telo.appendChild(akt);
     }
+    // Vlastní jde smazat (pevné ne — ty se jen vypínají přepínačem)
+    if (def.vlastni) {
+      const smaz = document.createElement('button');
+      smaz.type = 'button';
+      smaz.className = 'prip-smazat';
+      smaz.textContent = 'Smazat';
+      smaz.addEventListener('click', async () => {
+        if (!(await zeptejSe('Smazat připomínku?', def.ikona + ' ' + def.nazev))) return;
+        pripPost('/api/pripominky/' + def.id + '/smazat', {});
+      });
+      telo.appendChild(smaz);
+    }
     const akce = document.createElement('div');
     akce.className = 'prip-akce';
     const btn = document.createElement('button');
@@ -12107,7 +12282,12 @@ function renderPripominky(now = Date.now()) {
       sel.className = 'timer-select prip-interval';
       sel.setAttribute('aria-label', 'Jak často: ' + def.nazev);
       const iv = def.interval;
-      for (let d = iv.od; d <= iv.do; d += iv.krok) {
+      const nyni = (p && Number(p.dni)) || def.dni;
+      const volby = [];
+      if (iv.volby) volby.push(...new Set([...iv.volby, nyni]));
+      else for (let d = iv.od; d <= iv.do; d += iv.krok) volby.push(d);
+      volby.sort((a, b) => a - b);
+      for (const d of volby) {
         const o = document.createElement('option');
         o.value = String(d);
         const t = d / 7;
@@ -12143,6 +12323,13 @@ function pripZalozkaObnov(now = Date.now()) {
   // Zvoneček je vidět i na stránce Připomínky — jen když nic nesvítí, schová se
   pripZalozkaEl.hidden = !kolik;
   pripZalozkaEl.textContent = '🔔 ' + kolik;
+  // Zelený košík: svítí, dokud je na nákupním seznamu aspoň jedna položka
+  const nakupu = (nakupData || []).length;
+  if (nakupZalozkaEl) {
+    nakupZalozkaEl.hidden = !nakupu;
+    nakupZalozkaEl.textContent = '🛒 ' + nakupu;
+  }
+  if (nakupProklikPocetEl) nakupProklikPocetEl.textContent = nakupu ? ' · ' + nakupu : '';
   bezpecne(() => pripPanelRender(now));
   // Záložky psa: jen na iPadu (široký displej), vidět, když krmení svítí (i na
   // stránce Připomínky), a 5 s po odťuknutí jako „Zpět“. Na telefonu je krmení
@@ -12241,7 +12428,7 @@ function pripPanelPolohuj() {
 function pripPanelRender(now = Date.now()) {
   if (!pripPanelEl || !pripPanelOtevreny) return;
   // Stejné připomínky, jaké počítá zvoneček, a k nim ty, co jdou ještě vrátit
-  const polozky = PRIPOMINKY.filter(def => !def.zalozka && pripViditelna(def)
+  const polozky = pripDefinice().filter(def => !def.zalozka && pripViditelna(def)
     && ((pripZpet[def.id] || 0) > now || pripominkaStav(def, pripData && pripData[def.id], now).sviti));
   if (!polozky.length) { pripPanelOtevri(false); return; }
   pripPanelEl.textContent = '';
@@ -12287,6 +12474,7 @@ if (pripPanelEl) {
 // Co dělá které tlačítko skupiny po klepnutí
 function pripPlovouciAkce(el) {
   if (el === pripZalozkaEl) { pripPanelOtevri(!pripPanelOtevreny); return; }
+  if (el === nakupZalozkaEl) { pripPanelOtevri(false); nakupOtevri(true); return; }
   const def = PRIPOMINKY.find(d => d.zalozka && d.zalozka === el.id);
   if (def) pesKlepnuti(def);
 }
@@ -12334,6 +12522,225 @@ if (pripPlovouciEl) {
   window.addEventListener('resize', () => bezpecne(pripPoziceUmisti));
 }
 setInterval(() => bezpecne(renderPripominky), 60000);
+
+// ---------- Vlastní připomínka (okno) ----------
+const VLASTNI_IKONY = ['📌', '💊', '🦷', '🚗', '🔧', '💡', '🎂', '📞', '🧾', '🐾', '🌿', '🧺', '🧴', '🔋', '📦', '⭐'];
+const vlastniOknoEl = document.getElementById('vlastniOkno');
+const vlastniNazevEl = document.getElementById('vlastniNazev');
+const vlastniIkonyEl = document.getElementById('vlastniIkony');
+const vlastniDniEl = document.getElementById('vlastniDni');
+const vlastniDatumEl = document.getElementById('vlastniDatum');
+const vlastniChybaEl = document.getElementById('vlastniChyba');
+let vlastniIkona = VLASTNI_IKONY[0];
+let vlastniTyp = 'opak';
+
+function vlastniNastavTyp(typ) {
+  vlastniTyp = typ;
+  for (const b of document.querySelectorAll('#vlastniTyp button')) b.classList.toggle('on', b.dataset.typ === typ);
+  document.getElementById('vlastniOpak').hidden = typ !== 'opak';
+  document.getElementById('vlastniJednou').hidden = typ !== 'jednou';
+}
+function vlastniOtevri() {
+  if (!vlastniOknoEl) return;
+  vlastniNazevEl.value = '';
+  vlastniChybaEl.textContent = '';
+  vlastniIkona = VLASTNI_IKONY[0];
+  vlastniIkonyEl.textContent = '';
+  for (const ik of VLASTNI_IKONY) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = ik;
+    b.classList.toggle('on', ik === vlastniIkona);
+    b.addEventListener('click', () => {
+      vlastniIkona = ik;
+      for (const x of vlastniIkonyEl.children) x.classList.toggle('on', x === b);
+    });
+    vlastniIkonyEl.appendChild(b);
+  }
+  vlastniDniEl.textContent = '';
+  for (const d of PRIP_VLASTNI_VOLBY) {
+    const o = document.createElement('option');
+    o.value = String(d);
+    o.textContent = d + (d === 1 ? ' den' : d < 5 ? ' dny' : ' dní');
+    vlastniDniEl.appendChild(o);
+  }
+  vlastniDniEl.value = '7';
+  // Jednou: výchozí zítřek, dřív než dnes nejde
+  const zitra = new Date(Date.now() + PRIP_DEN);
+  vlastniDatumEl.min = pripIsoDen(new Date());
+  vlastniDatumEl.value = pripIsoDen(zitra);
+  vlastniNastavTyp('opak');
+  vlastniOknoEl.hidden = false;
+}
+function vlastniTelo() {
+  const telo = { nazev: vlastniNazevEl.value.trim(), ikona: vlastniIkona, typ: vlastniTyp };
+  if (vlastniTyp === 'opak') telo.dni = Number(vlastniDniEl.value);
+  else telo.datum = vlastniDatumEl.value;
+  return telo;
+}
+async function vlastniUloz() {
+  const telo = vlastniTelo();
+  if (!telo.nazev) { vlastniChybaEl.textContent = 'Napiš, co připomenout.'; return; }
+  try {
+    const res = await fetch('/api/pripominky/vlastni', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+    if (data.pripominky) pripData = data.pripominky;
+    vlastniOknoEl.hidden = true;
+    renderPripominky();
+  } catch (err) {
+    vlastniChybaEl.textContent = err.message || 'Nepodařilo se uložit.';
+  }
+}
+if (vlastniOknoEl) {
+  document.getElementById('pripPridatBtn').addEventListener('click', vlastniOtevri);
+  document.getElementById('vlastniZpet').addEventListener('click', () => { vlastniOknoEl.hidden = true; });
+  document.getElementById('vlastniUlozit').addEventListener('click', vlastniUloz);
+  for (const b of document.querySelectorAll('#vlastniTyp button')) b.addEventListener('click', () => vlastniNastavTyp(b.dataset.typ));
+}
+
+// ---------- Nákupní seznam ----------
+// Odškrtnutím položka zmizí ze serveru hned; pět vteřin je místo ní „Zpět",
+// které ji pošle zpátky se stejným id a časem (vrátí se na své místo).
+const nakupZpet = new Map();   // id → { polozka, do }
+const nakupOknoEl = document.getElementById('nakupOkno');
+const nakupSeznamEl = document.getElementById('nakupSeznam');
+const nakupVstupEl = document.getElementById('nakupVstup');
+const nakupChybaEl = document.getElementById('nakupChyba');
+
+function nakupOtevri(ano) {
+  if (!nakupOknoEl) return;
+  nakupOknoEl.hidden = !ano;
+  if (ano) { nakupChybaEl.textContent = ''; renderNakup(); }
+}
+
+function renderNakup(now = Date.now()) {
+  for (const [id, z] of nakupZpet) if (z.do <= now) nakupZpet.delete(id);
+  bezpecne(() => pripZalozkaObnov(now));
+  if (!nakupSeznamEl) return;
+  nakupSeznamEl.textContent = '';
+  const radky = [...(nakupData || []).map(p => ({ p, zpet: false })),
+    ...[...nakupZpet.values()].filter(z => !(nakupData || []).some(p => p.id === z.polozka.id)).map(z => ({ p: z.polozka, zpet: true }))]
+    .sort((a, b) => a.p.t - b.p.t);
+  if (!radky.length) {
+    const li = document.createElement('li');
+    li.className = 'nakup-prazdno';
+    li.textContent = 'Seznam je prázdný.';
+    nakupSeznamEl.appendChild(li);
+    return;
+  }
+  for (const { p, zpet } of radky) {
+    const li = document.createElement('li');
+    li.className = zpet ? 'koupeno' : '';
+    li.dataset.id = p.id;
+    const text = document.createElement('span');
+    text.className = 'nakup-text';
+    text.textContent = p.text;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    if (zpet) {
+      btn.className = 'nakup-zpet';
+      btn.textContent = 'Zpět';
+      btn.addEventListener('click', () => nakupVrat(p));
+      li.append(text, btn);
+    } else {
+      btn.className = 'nakup-odskrt';
+      btn.setAttribute('aria-label', 'Koupeno: ' + p.text);
+      btn.addEventListener('click', () => nakupOdskrtni(p));
+      li.append(btn, text);
+    }
+    nakupSeznamEl.appendChild(li);
+  }
+}
+
+async function nakupPost(adresa, telo) {
+  if (nakupChybaEl) nakupChybaEl.textContent = '';
+  try {
+    const res = await fetch(adresa, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+    if (Array.isArray(data.nakup)) nakupData = data.nakup;
+    renderNakup();
+    return true;
+  } catch (err) {
+    if (nakupChybaEl) nakupChybaEl.textContent = err.message || 'Nepodařilo se uložit.';
+    return false;
+  }
+}
+
+function nakupOdskrtni(p) {
+  nakupData = nakupData.filter(x => x.id !== p.id);
+  nakupZpet.set(p.id, { polozka: p, do: Date.now() + 5000 });
+  setTimeout(() => bezpecne(renderNakup), 5100);
+  renderNakup();
+  nakupPost('/api/nakup/' + encodeURIComponent(p.id) + '/smazat', {});
+}
+
+function nakupVrat(p) {
+  nakupZpet.delete(p.id);
+  if (!nakupData.some(x => x.id === p.id)) nakupData = [...nakupData, p].sort((a, b) => a.t - b.t);
+  renderNakup();
+  nakupPost('/api/nakup', { text: p.text, id: p.id, t: p.t });
+}
+
+if (nakupOknoEl) {
+  document.getElementById('nakupProklik').addEventListener('click', () => nakupOtevri(true));
+  document.getElementById('nakupZavrit').addEventListener('click', () => nakupOtevri(false));
+  document.getElementById('nakupForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const text = nakupVstupEl.value.trim();
+    if (!text) return;
+    if (await nakupPost('/api/nakup', { text })) nakupVstupEl.value = '';
+    nakupVstupEl.focus();
+  });
+}
+
+// ---------- Upozornění pro všechny ----------
+// Červený box přes celou appku (i přes kalendář) na všech zařízeních, dokud ho
+// někdo neodklikne. Napsat se dá v Logice automatiky.
+let oznameniData = null;
+const oznameniOknoEl = document.getElementById('oznameniOkno');
+function renderOznameni() {
+  if (!oznameniOknoEl) return;
+  oznameniOknoEl.hidden = !oznameniData;
+  if (oznameniData) document.getElementById('oznameniText').textContent = oznameniData.text;
+}
+async function oznameniPost(adresa, telo) {
+  const res = await fetch(adresa, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+  return data;
+}
+if (oznameniOknoEl) {
+  document.getElementById('oznameniOk').addEventListener('click', () => {
+    const id = oznameniData && oznameniData.id;
+    oznameniData = null;
+    renderOznameni();
+    if (id) oznameniPost('/api/oznameni/zrusit', { id }).catch(() => {});
+  });
+  const vstup = document.getElementById('oznameniVstup');
+  const hint = document.getElementById('oznameniHint');
+  document.getElementById('oznameniPoslat').addEventListener('click', async () => {
+    const text = vstup.value.trim();
+    hint.textContent = '';
+    if (!text) { hint.textContent = 'Napiš text upozornění.'; return; }
+    if (!(await zeptejSe('Zobrazit upozornění všem?', text))) return;
+    try {
+      const data = await oznameniPost('/api/oznameni', { text });
+      vstup.value = '';
+      oznameniData = data.oznameni || null;
+      renderOznameni();
+    } catch (err) {
+      hint.textContent = err.message;
+    }
+  });
+}
 
 // ---------- Kalendář ----------
 // Panel stojí mimo pás stránek a přepíná se vlastní záložkou. Na iPadu tak zabere
