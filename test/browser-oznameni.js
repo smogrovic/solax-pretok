@@ -24,8 +24,28 @@ setTimeout(async () => {
   const okno = document.getElementById('oznameniOkno');
   check('bez upozornění nic', okno.hidden, true);
   // Kalendář přes celou obrazovku (iPad) — upozornění musí být nad ním
+  const siroky = window.innerWidth >= 1000;
+  const zal = document.getElementById('oznameniZalozka');
+  if (!siroky) {
+    // Telefon: jen červená záložka u zvonečku, box až po klepnutí
+    oznameniData = { id: 'o_abc', text: 'Večeře v 18:00!', od: Date.now() };
+    renderOznameni();
+    check('telefon: přes displej nesvítí', okno.hidden, true);
+    check('  červená záložka v rohu', zal.getClientRects().length > 0, true);
+    check('  je červená', getComputedStyle(zal).backgroundColor, 'rgb(198, 40, 40)');
+    pripPlovouciAkce(zal);
+    check('  klepnutí ukáže text', okno.hidden, false);
+    check('  s tlačítkem nechat na iPadu', document.getElementById('oznameniZavrit').getClientRects().length > 0, true);
+    dotazy = [];
+    document.getElementById('oznameniZavrit').click();
+    await pockej(20);
+    check('  Zavřít jen u sebe', okno.hidden + ' ' + dotazy.length + ' ' + (zal.getClientRects().length > 0), 'true 0 true');
+    pripPlovouciAkce(zal);
+  } else {
+    check('iPad: červená záložka není', (oznameniData = { id: 'o_abc', text: 'Večeře v 18:00!', od: Date.now() }, renderOznameni(), zal.hidden), true);
+    check('  ani Zavřít jen u sebe', document.getElementById('oznameniZavrit').hidden, true);
+  }
   try { kalOtevri(true); } catch {}
-  oznameniData = { id: 'o_abc', text: 'Večeře v 18:00!', od: Date.now() };
   renderOznameni();
   check('upozornění je vidět', okno.getClientRects().length > 0, true);
   check('  s textem', document.getElementById('oznameniText').textContent, 'Večeře v 18:00!');
@@ -62,7 +82,7 @@ setTimeout(async () => {
   document.getElementById('potvrzAno').click();
   await pockej(30);
   check('po potvrzení odešle', dotazy[0] && dotazy[0].url + ' ' + dotazy[0].telo.text, '/api/oznameni Zavřete okna, bude bouřka');
-  check('  a hned se ukáže', okno.hidden, false);
+  check('  a hned se ukáže (na iPadu přes displej, na telefonu záložka)', siroky ? !okno.hidden : !zal.hidden, true);
   check('  pole se vyprázdní', vstup.value, '');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 

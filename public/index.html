@@ -1427,6 +1427,9 @@
   .oznameni-text{font-size:24px;font-weight:800;line-height:1.3;margin-top:10px;white-space:pre-line;overflow-wrap:anywhere;}
   .oznameni-box button{margin-top:18px;border:none;border-radius:14px;padding:12px 28px;font:inherit;font-size:15px;
     font-weight:800;background:#fff;color:#c62828;cursor:pointer;}
+  .oznameni-box .oznameni-zavrit{display:block;margin:10px auto 0;background:none;color:#fff;
+    text-decoration:underline;font-weight:600;font-size:13px;padding:6px;}
+  .oznameni-zavrit[hidden]{display:none;}
   .oznameni-vstup{width:100%;box-sizing:border-box;resize:vertical;font:inherit;font-size:14px;margin-top:10px;}
   .oznameni-poslat{width:100%;margin-top:8px;background:#c62828;color:#fff;}
   .away-row{
@@ -2240,6 +2243,9 @@
     box-shadow:0 0 0 4px rgba(255,213,74,0.25), 0 0 16px 5px rgba(255,190,40,0.5);}
   .prip-zalozka.pes-vecer{background:#2c3e70;color:#fff;
     box-shadow:0 0 0 4px rgba(44,62,112,0.2), 0 0 16px 5px rgba(44,62,112,0.45);}
+  /* Upozornění pro všechny na telefonu: červená záložka místo celé obrazovky */
+  .prip-zalozka.oznameni-zal{background:#c62828;color:#fff;
+    box-shadow:0 0 0 4px rgba(198,40,40,0.2), 0 0 16px 5px rgba(198,40,40,0.45);}
   /* Nákupní seznam: zelený, ať se nemíchá s oranžovým zvonečkem */
   .prip-zalozka.nakup{background:#2e9d57;color:#fff;
     box-shadow:0 0 0 4px rgba(46,157,87,0.2), 0 0 16px 5px rgba(46,157,87,0.45);}
@@ -2359,6 +2365,7 @@
 </div>
 
 <div class="prip-plovouci" id="pripPlovouci" hidden>
+  <button class="prip-zalozka oznameni-zal" id="oznameniZalozka" type="button" hidden aria-label="Upozornění">⚠️</button>
   <button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
   <button class="prip-zalozka nakup" id="nakupZalozka" type="button" hidden aria-label="Nákupní seznam"></button>
   <button class="prip-zalozka pes-rano" id="pesRanoZalozka" type="button" hidden aria-label="Nakrmeno ráno">☀️🐕🥣</button>
@@ -3741,6 +3748,8 @@
     <div class="oznameni-nadpis">⚠️ Upozornění</div>
     <div class="oznameni-text" id="oznameniText"></div>
     <button type="button" id="oznameniOk">Rozumím</button>
+    <!-- Jen na telefonu: zavřít si to u sebe, na iPadu upozornění zůstane -->
+    <button type="button" class="oznameni-zavrit" id="oznameniZavrit">Zavřít, nechat na iPadu</button>
   </div>
 </div>
 
@@ -12475,6 +12484,7 @@ if (pripPanelEl) {
 function pripPlovouciAkce(el) {
   if (el === pripZalozkaEl) { pripPanelOtevri(!pripPanelOtevreny); return; }
   if (el === nakupZalozkaEl) { pripPanelOtevri(false); nakupOtevri(true); return; }
+  if (el.id === 'oznameniZalozka') { pripPanelOtevri(false); oznameniRozbaleno = true; renderOznameni(); return; }
   const def = PRIPOMINKY.find(d => d.zalozka && d.zalozka === el.id);
   if (def) pesKlepnuti(def);
 }
@@ -12702,13 +12712,23 @@ if (nakupOknoEl) {
 // ---------- Upozornění pro všechny ----------
 // Červený box přes celou appku (i přes kalendář) na všech zařízeních, dokud ho
 // někdo neodklikne. Napsat se dá v Logice automatiky.
+// Přes celou obrazovku jen na iPadu (široký displej) — je to vzkaz domů. Na telefonu
+// svítí jen červená záložka u zvonečku a box se ukáže až po klepnutí na ni.
 let oznameniData = null;
+let oznameniRozbaleno = false;
 const oznameniOknoEl = document.getElementById('oznameniOkno');
+const oznameniZalozkaEl = document.getElementById('oznameniZalozka');
 function renderOznameni() {
   if (!oznameniOknoEl) return;
-  oznameniOknoEl.hidden = !oznameniData;
+  const siroky = window.matchMedia('(min-width: 1000px)').matches;
+  if (!oznameniData) oznameniRozbaleno = false;
+  oznameniOknoEl.hidden = !oznameniData || (!siroky && !oznameniRozbaleno);
+  document.getElementById('oznameniZavrit').hidden = siroky;
+  if (oznameniZalozkaEl) oznameniZalozkaEl.hidden = !oznameniData || siroky;
   if (oznameniData) document.getElementById('oznameniText').textContent = oznameniData.text;
+  bezpecne(() => pripZalozkaObnov());
 }
+window.addEventListener('resize', () => bezpecne(renderOznameni));
 async function oznameniPost(adresa, telo) {
   const res = await fetch(adresa, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo)
@@ -12718,6 +12738,10 @@ async function oznameniPost(adresa, telo) {
   return data;
 }
 if (oznameniOknoEl) {
+  document.getElementById('oznameniZavrit').addEventListener('click', () => {
+    oznameniRozbaleno = false;
+    renderOznameni();
+  });
   document.getElementById('oznameniOk').addEventListener('click', () => {
     const id = oznameniData && oznameniData.id;
     oznameniData = null;
