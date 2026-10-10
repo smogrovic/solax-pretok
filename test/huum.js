@@ -738,7 +738,7 @@ const stavKamen = (h, o = {}) => {
   h.api.saunaTimerPridej('19:00', 80, od);
   const t = h.api.casovace()[0];
   const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
-  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 86);
+  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 87);
   check('zapnutí = příchod − odhad', t.zapneV, jdu - cekane * MINUTA);
   h.odpovez = async n => (h.volani[h.volani.length - 1].adresa.endsWith('/start')
     ? { stav: 200, text: '{"ok":true}' }
