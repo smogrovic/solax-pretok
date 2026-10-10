@@ -499,13 +499,13 @@ nadpis('Model náběhu');
   const h = build();
   const T = Date.UTC(2026, 8, 24, 16, 0, 0);
   const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
-  const blizko = (x, y) => x !== null && Math.abs(x - y) <= 1;
-  // Zadání modelu: rozjezd 5,9 + τ 118,7 · ln(…), T_max = 137 + 0,55 · venku
-  check('venku 14,94, start 27, cíl 60 → ~45 min', blizko(o(14.94, 27, 60).minut, 45), 'true');
-  check('venku 14,94, start 27, cíl 80 → ~77 min', blizko(o(14.94, 27, 80).minut, 77), 'true');
-  check('venku −20, start 10, cíl 85 → ~129 min', blizko(o(-20, 10, 85).minut, 129), 'true');
-  check('venku −20, start −20, cíl 85 → ~157 min', blizko(o(-20, -20, 85).minut, 157), 'true');
-  check('rozjezd se připočítá (cíl těsně nad startem ≈ 5,9 min)', blizko(o(10, 20, 20.01).minut, 5.9), 'true');
+  const blizko = (x, y) => x !== null && Math.abs(x - y) <= 0.5;
+  // Zadání modelu: rozjezd 5,7 + τ 109,7 · ln(…), T_max = 129,7 + 0,55 · venku
+  check('venku 14,94, start 27, cíl 60 → ~44 min', blizko(o(14.94, 27, 60).minut, 44.4), 'true');
+  check('venku 14,94, start 27, cíl 80 → ~77 min', blizko(o(14.94, 27, 80).minut, 77.0), 'true');
+  check('venku −20, start 10, cíl 85 → ~134 min', blizko(o(-20, 10, 85).minut, 134.2), 'true');
+  check('venku −20, start −20, cíl 85 → ~161 min', blizko(o(-20, -20, 85).minut, 160.9), 'true');
+  check('rozjezd se připočítá (cíl těsně nad startem ≈ 5,7 min)', blizko(o(10, 20, 20.01).minut, 5.7), 'true');
   check('cíl 90 je nedosažitelný (termostat)', JSON.stringify(o(10, 20, 90)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
   check('cíl nad stropem taky, bez výjimky', o(-600, 20, 80).dosazitelne, 'false');
   check('cíl pod startem = hned', o(10, 70, 60).minut + ' ' + o(10, 70, 60).dosazitelne, '0 true');
@@ -523,7 +523,7 @@ nadpis('Model náběhu');
     bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
   const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
   const n = netopi.api.saunaOdhad(netopi.now);
-  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd, '0 20 10 118.7 5.9');
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd, '0 20 10 109.7 5.7');
   // Kamna už hřejí: z rozjezdu zbývá jen to, co ještě neuběhlo
   const hreje = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
     fetchedAt: new Date(h.now).toISOString() } });
