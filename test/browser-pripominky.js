@@ -109,10 +109,26 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('odťuknuté před svozem se na další týden nepřenese',
     sviti('bio', { zapnuto: true, hotovo: praha('2026-09-21', 8) }, praha('2026-09-27', 12)), 'true');
   check('vypnutý přepínač nesvítí', sviti('bio', { zapnuto: false, hotovo: 0 }, praha('2026-09-27', 20)), 'false');
-  // Zimní čas: v lednu je Praha UTC + 1 h
-  check('v zimním čase neděle 12:00 svítí',
-    sviti('bio', bio, Date.parse('2026-01-04T11:00:00Z')), 'true');
-  check('  a 11:59 ještě ne', sviti('bio', bio, Date.parse('2026-01-04T10:59:00Z')), 'false');
+  // Zimní čas: v lednu je Praha UTC + 1 h (BIO je v lednu mimo sezónu — na popelnici)
+  check('v zimním čase středa 12:00 svítí',
+    sviti('popelnice', { zapnuto: true, hotovo: 0 }, Date.parse('2026-01-07T11:00:00Z')), 'true');
+  check('  a 11:59 ještě ne', sviti('popelnice', { zapnuto: true, hotovo: 0 }, Date.parse('2026-01-07T10:59:00Z')), 'false');
+
+  OUT.push('\\n3b) BIO jen v sezóně 1. 4. – 31. 10.');
+  // Zimní čas pro listopad: Praha = UTC + 1 h
+  const prahaZ = (d, hod, min) => Date.parse(d + 'T00:00:00Z') + (hod - 1) * H + (min || 0) * MIN;
+  check('poslední svoz 26. 10. svítí v neděli', sviti('bio', bio, prahaZ('2026-10-25', 12)), 'true');
+  check('  a v pondělí dopoledne', pripominkaStav(def('bio'), bio, prahaZ('2026-10-26', 9)).text, 'Vyndat — svoz dnes dopoledne');
+  const poSvozu = pripominkaStav(def('bio'), bio, prahaZ('2026-10-26', 13));
+  check('po svozu 26. 10. nelže o 2. 11.', poSvozu.text, 'Mimo sezónu · další svoz 5. 4.');
+  check('  a neodpočítává', poSvozu.dalsi, 'null');
+  check('v listopadu (ručně zapnutá) v neděli nesvítí', sviti('bio', bio, prahaZ('2026-11-08', 13)), 'false');
+  check('  ani v pondělí', sviti('bio', bio, prahaZ('2026-11-09', 9)), 'false');
+  check('v březnu ukazuje první svoz sezóny', pripominkaStav(def('bio'), bio, prahaZ('2027-03-25', 10)).text, 'Mimo sezónu · další svoz 5. 4.');
+  check('  Aktivovat teď funguje i mimo sezónu', sviti('bio', { zapnuto: true, hotovo: 0, aktivovano: prahaZ('2026-11-08', 10) }, prahaZ('2026-11-08', 11)), 'true');
+  check('v dubnu jako dřív: neděle 4. 4. 12:00 svítí', sviti('bio', bio, praha('2027-04-04', 12)), 'true');
+  check('  svoz 5. 4.', pripominkaStav(def('bio'), bio, praha('2027-04-05', 9)).text, 'Vyndat — svoz dnes dopoledne');
+  check('popelnice (bez sezóny) v listopadu svítí dál', sviti('popelnice', { zapnuto: true, hotovo: 0 }, prahaZ('2026-11-11', 13)), 'true');
 
   OUT.push('\\n4) Popelnice (svoz ve čtvrtek)');
   const pop = { zapnuto: true, hotovo: 0 };

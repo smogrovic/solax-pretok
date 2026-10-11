@@ -13,7 +13,7 @@ function build() {
     CODE + '\n; state.pripominky = pripominkyVychozi(); state.nakup = []; state.oznameni = null;'
          + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima,'
          + ' pripominkaVlastniVytvor, pripominkaVlastniSmaz, pripominkyUklid, PRIPOMINKY_VLASTNI_MAX,'
-         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, oznameniNastav, oznameniZrus, oznameniObnov };'
+         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, oznameniNastav, oznameniZrus, oznameniObnov, vSezone, pripominkySezona };'
   )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
@@ -327,6 +327,58 @@ nadpis('O) Upozornění pro všechny');
   const h3 = build();
   h3.api.oznameniObnov({ id: 'zle id', text: 'x', od: 1 });
   check('  nesmysl ne', h3.state.oznameni, 'null');
+}
+
+nadpis('S) BIO jen v sezóně');
+{
+  const h = build();
+  // Praha: v říjnu UTC+2 do 25. 10., pak UTC+1
+  const P = (d, hod, min = 0, posun = 1) => Date.parse(d + 'T00:00:00Z') + (hod - posun) * 3600000 + min * 60000;
+  check('31. 3. mimo', h.api.vSezone('bio', P('2027-03-31', 12, 0, 2)), false);
+  check('1. 4. v sezóně', h.api.vSezone('bio', P('2027-04-01', 0, 1, 2)), true);
+  check('31. 10. 23:30 Praha ještě v sezóně', h.api.vSezone('bio', P('2026-10-31', 23, 30)), true);
+  check('1. 11. 0:30 Praha už mimo', h.api.vSezone('bio', P('2026-11-01', 0, 30)), false);
+  check('ostatní připomínky sezónu nemají', h.api.vSezone('popelnice', P('2026-12-01', 12)), true);
+
+  const p = h.state.pripominky.bio;
+  check('první běh v sezóně nic nepřepne', h.api.pripominkySezona(P('2026-10-11', 12, 0, 2)).length + ' ' + p.zapnuto + ' ' + p.sezona, '0 true v');
+  h.logy.length = 0;
+  h.api.pripominkySezona(P('2026-11-01', 8));
+  check('1. 11. vypne', p.zapnuto + ' ' + p.sezonaVypnulo, 'false true');
+  check('  a zapíše do logu', /BIO vypnuta mimo sezónu/.test(h.logy.join('|')), true);
+  h.api.pripominkySezona(P('2026-11-02', 8));
+  check('další běh nic', p.zapnuto, false);
+  // Ruční zapnutí v listopadu (mimořádný svoz) — další běh ho nevypne
+  h.zavolej('/api/pripominky/:id/zapnuto', { id: 'bio' }, { zapnuto: true });
+  h.api.pripominkySezona(P('2026-11-20', 8));
+  check('ruční zapnutí mimo sezónu drží', p.zapnuto, true);
+  check('  a příznak sezóny zmizel', 'sezonaVypnulo' in p, false);
+
+  // Jaro zapne jen to, co vypnula sezóna
+  const h2 = build();
+  const b2 = h2.state.pripominky.bio;
+  h2.api.pripominkySezona(P('2026-11-05', 8));
+  h2.api.pripominkySezona(P('2027-04-01', 6, 0, 2));
+  check('1. 4. zapne, co vypnula sezóna', b2.zapnuto + ' ' + ('sezonaVypnulo' in b2), 'true false');
+  const h3 = build();
+  const b3 = h3.state.pripominky.bio;
+  h3.zavolej('/api/pripominky/:id/zapnuto', { id: 'bio' }, { zapnuto: false });
+  h3.api.pripominkySezona(P('2026-11-05', 8));
+  h3.api.pripominkySezona(P('2027-04-01', 6, 0, 2));
+  check('ručně vypnutou jaro nezapne', b3.zapnuto, false);
+  // Server běžící poprvé až mimo sezónu (nasazení v zimě) ji vypne taky
+  const h4 = build();
+  h4.api.pripominkySezona(P('2027-01-10', 8));
+  check('první běh mimo sezónu vypne', h4.state.pripominky.bio.zapnuto, false);
+
+  // Obnova přenese, co se vidělo naposledy — nasazení na přelomu nepřepne dvakrát
+  const h5 = build();
+  h5.api.pripominkyObnov({ pripominky: { bio: { zapnuto: false, hotovo: 0, sezona: 'mimo', sezonaVypnulo: true } } });
+  check('obnova přenese sezónu', h5.state.pripominky.bio.sezona + ' ' + h5.state.pripominky.bio.sezonaVypnulo, 'mimo true');
+  h5.api.pripominkySezona(P('2026-11-10', 8));
+  check('  a další běh nic nedělá', h5.state.pripominky.bio.zapnuto, false);
+  h5.api.pripominkyObnov({ pripominky: { bio: { sezona: 'nesmysl' } } });
+  check('nesmysl se nepřevezme', h5.state.pripominky.bio.sezona, 'mimo');
 }
 
 konec();

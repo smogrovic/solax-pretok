@@ -3643,7 +3643,7 @@
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
             <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 2 h · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
-            <li>Log si pamatuje <b>týden</b>. Časovače přežijí nasazení.</li>
+            <li>Log si pamatuje <b>týden</b>. Časovače přežijí nasazení. Popelnice <b>BIO</b> se připomíná jen <b>1. 4. – 31. 10.</b></li>
           </ul>
         </div>
       </div>
@@ -11967,12 +11967,13 @@ function updateDots() {
 // neodťukne (svezená je tak jako tak). Server drží jen časy odťuknutí a přepínače;
 // kdy co svítí, se počítá tady podle hodin, v pražském čase.
 const PRIPOMINKY = [
-  // Přepínač má každá — vypnutá připomínka nesvítí (pes na dovolené, BIO v zimě…)
+  // Přepínač má každá — vypnutá připomínka nesvítí (pes na dovolené, BIO mimo sezónu…)
   // `interval` = volič vedle přepínače (dny; u povlečení po týdnech). Nastavenou
   // hodnotu drží server (p.dni), `dni` je jen výchozí.
   { id: 'kytky', nazev: 'Zalít kytky', ikona: '🪴', dni: 7, prepinac: true, interval: { od: 3, do: 14, krok: 1 } },
   { id: 'vysavac', nazev: 'Vyčistit vysavač', ikona: '🧹', dni: 7, prepinac: true, interval: { od: 3, do: 14, krok: 1 } },
-  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true },  // pondělí
+  // BIO se sváží jen v sezóně; mimo ni server přepínač sám vypne (a v dubnu zapne)
+  { id: 'bio', nazev: 'Popelnice BIO', ikona: '🍂', svoz: 1, prepinac: true, sezona: { od: '04-01', do: '10-31' } },  // pondělí
   { id: 'popelnice', nazev: 'Popelnice', ikona: '🗑️', svoz: 4, prepinac: true },    // čtvrtek dopoledne
   // Sekačka hodinu není na příjmu — nejspíš někde uvízla. Přepínač se vypíná, když je
   // vypnutá schválně (server ho po jejím návratu zapne sám). V zimě ji vypne server.
@@ -12116,6 +12117,18 @@ function pripominkaStav(def, p, now = Date.now()) {
   const vOkne = W < zacatek + PRIP_DEN;
   // Okno, o které jde: to právě běžící, jinak nejbližší příští
   const S = vOkne ? zacatek : zacatek + 7 * PRIP_DEN;
+  // Sezónní svoz (BIO): den svozu mimo sezónu se nepočítá — místo „příští svoz 2. 11."
+  // řekne první svoz příští sezóny
+  if (def.sezona) {
+    const md = w => { const d = new Date(w); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); };
+    const denSvozu = S + PRIP_DEN;
+    if (md(denSvozu) < def.sezona.od || md(denSvozu) > def.sezona.do) {
+      let prvni = denSvozu;
+      while (md(prvni) < def.sezona.od || md(prvni) > def.sezona.do) prvni += 7 * PRIP_DEN;
+      const nap = hotovo ? 'Naposledy ' + pripDatum(pripNastenne(hotovo)) : 'Naposledy: zatím nikdy';
+      return { sviti: false, naposledy: nap, text: 'Mimo sezónu · další svoz ' + pripDatum(prvni), dalsi: null };
+    }
+  }
   const naReal = w => w - (W - now);   // zpátky z nástěnných hodin (posun kolem poledne je stálý)
   const kdySvoz = 'svoz ' + (vOkne ? (new Date(W).getUTCDay() === def.svoz ? 'dnes dopoledne' : 'zítra')
     : PRIP_KDY[def.svoz] + ' ' + pripDatum(S + PRIP_DEN));

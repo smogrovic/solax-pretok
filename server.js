@@ -1703,8 +1703,9 @@ function pripominkaInterval(id, dni) {
 function pripominkaZapnuto(id, zapnuto) {
   if (!maPrepinac(id)) return false;
   state.pripominky[id].zapnuto = zapnuto;
-  // Kdo na přepínač sáhl sám, rozhodl — konec zimy ho už nepřepne
+  // Kdo na přepínač sáhl sám, rozhodl — konec zimy ani začátek sezóny ho už nepřepne
   delete state.pripominky[id].zimaVypnulo;
+  delete state.pripominky[id].sezonaVypnulo;
   broadcast('pripominky', { pripominky: state.pripominky });
   return true;
 }
@@ -1714,6 +1715,41 @@ function pripominkaZapnuto(id, zapnuto) {
 // vypnula zima. Co měl člověk vypnuté už předtím, nechá se být.
 const PRIPOMINKY_ZIMNI = ['trava', 'sekacka'];
 const PRIPOMINKY_ZIMNI_NAZVY = { trava: 'posekat trávu', sekacka: 'vysvobodit sekačku' };
+
+// Sezónní připomínky: BIO popelnice se sváží jen od 1. 4. do 31. 10. Mimo sezónu se
+// přepínač sám vypne, na začátku sezóny sám zapne — ale jen na PŘECHODU (pamatuje si,
+// co viděl naposledy). Kdo si ji mimo sezónu ručně zapne (mimořádný svoz), tomu ji
+// další běh nevypne; kdo ji měl vypnutou sám, tomu ji jaro nezapne.
+const PRIPOMINKY_SEZONA = { bio: { od: '04-01', do: '10-31', nazev: 'popelnice BIO' } };
+const pripPrahaDen = now => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(now));
+function vSezone(id, now = Date.now()) {
+  const s = PRIPOMINKY_SEZONA[id];
+  if (!s) return true;
+  const md = pripPrahaDen(now).slice(5);   // MM-DD v Praze
+  return md >= s.od && md <= s.do;
+}
+function pripominkySezona(now = Date.now()) {
+  const zmeny = [];
+  for (const id of Object.keys(PRIPOMINKY_SEZONA)) {
+    const p = state.pripominky[id];
+    if (!p) continue;
+    const ted = vSezone(id, now) ? 'v' : 'mimo';
+    if (p.sezona === ted) continue;
+    p.sezona = ted;
+    if (ted === 'mimo' && p.zapnuto !== false) {
+      p.zapnuto = false;
+      p.sezonaVypnulo = true;
+      zmeny.push(`${PRIPOMINKY_SEZONA[id].nazev} vypnuta mimo sezónu`);
+    } else if (ted === 'v' && p.sezonaVypnulo) {
+      p.zapnuto = true;
+      delete p.sezonaVypnulo;
+      zmeny.push(`${PRIPOMINKY_SEZONA[id].nazev} zapnuta na sezónu`);
+    }
+  }
+  if (zmeny.length) addLog(`Připomínky: ${zmeny.join(', ')}`);
+  broadcast('pripominky', { pripominky: state.pripominky });
+  return zmeny;
+}
 
 function pripominkyZima(zima) {
   const zmeneno = [];
@@ -1752,6 +1788,10 @@ function pripominkyObnov(b) {
     if (Number.isFinite(aktivovano) && aktivovano > (p.aktivovano || 0)) p.aktivovano = aktivovano;
     if (PRIPOMINKY_S_PREPINACEM.includes(id) && typeof z.zapnuto === 'boolean') p.zapnuto = z.zapnuto;
     if (z.zimaVypnulo === true) p.zimaVypnulo = true;
+    if (PRIPOMINKY_SEZONA[id]) {
+      if (z.sezona === 'v' || z.sezona === 'mimo') p.sezona = z.sezona;
+      if (z.sezonaVypnulo === true) p.sezonaVypnulo = true;
+    }
     const r = PRIPOMINKY_INTERVAL[id], dni = Number(z.dni);
     if (r && Number.isInteger(dni) && dni >= r.od && dni <= r.do && !((dni - r.od) % r.krok)) p.dni = dni;
   }
@@ -1825,6 +1865,9 @@ app.post('/api/pripominky/:id/zapnuto', (req, res) => {
   pripominkaZapnuto(req.params.id, z);
   res.json({ ok: true, pripominky: state.pripominky });
 });
+
+// Sezóna BIO: jednou za hodinu, poprvé až po načtení zálohy (ta nese, co se viděla naposledy)
+if (typeof scheduleEvery === 'function') scheduleEvery(() => pripominkySezona(), 3600000, 6 * 60000);
 
 // ---------- Nákupní seznam ----------
 // Odrážky „co koupit". Zámek se neuplatňuje (stránku Připomínky vidí i děti).
