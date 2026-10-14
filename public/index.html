@@ -1725,12 +1725,14 @@
     pointer-events:auto;
     touch-action:none;
   }
-  .huum-power.topi{background:var(--orange);color:#fff;}
+  /* Zapnutá zelená, vypnutá červená; neznámý stav (kamna mlčí) zůstává šedý */
+  .huum-power.topi{background:#2e9d57;color:#fff;}
+  .huum-power.vypnuto{background:#c62828;color:#fff;}
   .huum-power-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);}
   #huumPowerRing{stroke:var(--orange);opacity:0;}
   .huum-power.drzi #huumPowerRing{opacity:1;}
-  /* Když topí, je tlačítko samo oranžové — oranžový obvod by na něm při vypínání zmizel */
-  .huum-power.topi #huumPowerRing{stroke:#fff;}
+  /* Na zeleném i červeném tlačítku je obvod podržení bílý — barevný by na něm zanikl */
+  .huum-power.topi #huumPowerRing, .huum-power.vypnuto #huumPowerRing{stroke:#fff;}
   .huum-power-ico{width:34px;height:34px;}
   .huum-odhad{text-align:center;font-size:17px;font-weight:800;letter-spacing:-0.01em;color:var(--grey-text);margin-top:4px;min-height:22px;}
   .huum-odhad:empty{display:none;}
@@ -8640,6 +8642,7 @@ function renderHuumTopeni(d, cerstve) {
   if (huumTopiTed === true) saunaTopilaAt = Date.now();
   huumTeplotaTed = cerstve && d && typeof d.temperature === 'number' ? d.temperature : null;
   e.btn.classList.toggle('topi', huumTopiTed === true);
+  e.btn.classList.toggle('vypnuto', huumTopiTed === false);
   e.btn.setAttribute('aria-label', huumTopiTed === true ? 'Vypnout saunu' : 'Zapnout saunu');
   dialKresli();
   // iPad na zdi: rozjetá sauna má přednost před kalendářem

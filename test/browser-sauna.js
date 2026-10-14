@@ -454,7 +454,8 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
 
   dotyk('pointerdown');
   await wait(300);
-  check('při zapínání je obvod oranžový', getComputedStyle(top('huumPowerRing')).stroke, 'rgb(245, 147, 61)');
+  check('vypnutá sauna = červené tlačítko', getComputedStyle(btn).backgroundColor, 'rgb(198, 40, 40)');
+  check('při zapínání je obvod bílý (na červeném)', getComputedStyle(top('huumPowerRing')).stroke, 'rgb(255, 255, 255)');
   await wait(900);
   check('podr\u017een\u00ed zapne', POSLANO[0].adresa, '/api/sauna/huum-start');
   check('  s teplotou z \u010d\u00edseln\u00edku', POSLANO[0].telo.teplota, 65);
@@ -462,6 +463,8 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   await wait(60);
   check('stav se p\u0159evezme z odpov\u011bdi', huumState.textContent, 'top\u00ed');
   check('  a vyp\u00edna\u010d je rozsv\u00edcen\u00fd', btn.classList.contains('topi'), 'true');
+  check('  zelen\u011b', getComputedStyle(btn).backgroundColor, 'rgb(46, 157, 87)');
+  check('  a u\u017e ne \u010derven\u011b', btn.classList.contains('vypnuto'), 'false');
 
   OUT.push('\\n8e2b) Změna teploty při topení jen po potvrzení');
   const okno = top('potvrzOkno');
@@ -507,11 +510,11 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   const obvod = top('huumPowerRing');
   dotyk('pointerdown');
   await wait(300);
-  // Při vypínání je tlačítko oranžové — obvod musí mít jinou barvu, jinak není vidět
+  // Při vypínání je tlačítko zelené — obvod musí mít jinou barvu, jinak není vidět
   check('při vypínání obvod nabíhá',
     getComputedStyle(obvod).opacity + ',' + btn.classList.contains('drzi'), '1,true');
-  check('  bíle přes oranžové tlačítko',
-    getComputedStyle(obvod).stroke + ' / ' + getComputedStyle(btn).backgroundColor, 'rgb(255, 255, 255) / rgb(245, 147, 61)');
+  check('  bíle přes zelené tlačítko',
+    getComputedStyle(obvod).stroke + ' / ' + getComputedStyle(btn).backgroundColor, 'rgb(255, 255, 255) / rgb(46, 157, 87)');
   await wait(900);
   dotyk('pointerup');
   await wait(60);
