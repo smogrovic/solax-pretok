@@ -11054,7 +11054,11 @@ async function storeFetch(cesta, init = {}) {
 
 // Co o záloze ví appka (řádek na stránce Log) — ať je vidět, že to opravdu jede
 const storeStav = { enabled: storeEnabled, loadedAt: 0, savedAt: 0, error: null };
-function storePayload() { return { ...storeStav }; }
+// Která verze běží (Render nastavuje RENDER_GIT_COMMIT při každém nasazení) — appka ji
+// ukáže pod zálohou na stránce Log, ať je hned poznat, jestli se nasazení povedlo
+const APP_VERZE = String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7);
+const APP_SPUSTENO = Date.now();
+function storePayload() { return { ...storeStav, verze: APP_VERZE, spusteno: APP_SPUSTENO }; }
 
 // Dokud se záloha nenačte, se NEUKLÁDÁ: kdyby Upstash při startu jen kýchl, uložil by
 // se o deset minut později prázdný stav a čtyři dny historie by byly pryč.

@@ -36,6 +36,12 @@ setTimeout(() => {
 
   renderStore({ enabled: true, savedAt: T.getTime() });
   check('po opravě červená zmizí', el.classList.contains('bad'), false);
+  renderStore({ enabled: true, savedAt: T.getTime(), verze: 'b950250', spusteno: T.getTime() });
+  check('ukáže nasazenou verzi', /Verze b950250 \\(spuštěno /.test(el.textContent), true);
+  renderStore({ enabled: false, verze: 'b950250' });
+  check('  i při vypnuté záloze', /Verze b950250/.test(el.textContent), true);
+  renderStore({ enabled: true, savedAt: T.getTime(), verze: '' });
+  check('bez verze nic navíc', /Verze/.test(el.textContent), false);
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

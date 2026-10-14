@@ -4021,18 +4021,25 @@ function renderStore(d) {
   if (!storeNoteEl) return;
   storeNoteEl.classList.remove('bad');
   if (!d || !d.enabled) {
-    storeNoteEl.textContent = 'Záloha na serveru: vypnutá — data drží jen tenhle telefon.';
+    storeNoteEl.textContent = 'Záloha na serveru: vypnutá — data drží jen tenhle telefon.' + verzeText(d);
     return;
   }
   if (d.error) {
-    storeNoteEl.textContent = 'Záloha na serveru: nejde uložit (' + d.error + ')';
+    storeNoteEl.textContent = 'Záloha na serveru: nejde uložit (' + d.error + ')' + verzeText(d);
     storeNoteEl.classList.add('bad');
     return;
   }
   const casti = [];
   if (d.loadedAt) casti.push('obnoveno v ' + formatTime(d.loadedAt));
   casti.push(d.savedAt ? 'uloženo v ' + formatTime(d.savedAt) : 'čeká na první uložení');
-  storeNoteEl.textContent = 'Záloha na serveru: ' + casti.join(', ') + '.';
+  storeNoteEl.textContent = 'Záloha na serveru: ' + casti.join(', ') + '.' + verzeText(d);
+}
+// „Verze b950250 (spuštěno 22:24)" — podle toho je poznat, jestli nasazení proběhlo
+function verzeText(d) {
+  if (!d || !d.verze) return '';
+  const kdy = d.spusteno ? new Date(d.spusteno).toLocaleString('cs-CZ',
+    { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  return ' Verze ' + d.verze + (kdy ? ' (spuštěno ' + kdy + ')' : '') + '.';
 }
 
 let lastSolaxData = null;

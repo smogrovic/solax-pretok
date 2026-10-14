@@ -566,4 +566,13 @@ function prazdnyStav() {
   };
 }
 
+nadpis('9) Nasazená verze');
+{
+  const h = build({ env: { ...UPSTASH, RENDER_GIT_COMMIT: 'b950250abcdef' } });
+  check('verze z Renderu, zkrácená', h.api.storePayload().verze, 'b950250');
+  check('  i čas spuštění', typeof h.api.storePayload().spusteno, 'number');
+  const h2 = build({ env: UPSTASH });
+  check('bez Renderu prázdná', h2.api.storePayload().verze, '');
+}
+
 setTimeout(konec, 200);   // asynchronní bloky výš musí doběhnout
