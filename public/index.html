@@ -2261,6 +2261,10 @@
     pointer-events:none;
   }
   .prip-zalozka[hidden]{display:none;}
+  /* Emoji svítících připomínek pod sebou — stejné mezery jako zbytek skupiny */
+  .prip-emoji-sloupec{display:flex;flex-direction:column;align-items:flex-start;gap:14px;}
+  .prip-emoji-sloupec[hidden]{display:none;}
+  .prip-zalozka.prip-emoji{font-size:18px;padding:2px 8px;}
   /* Na iPadu na zdi je to 2× větší — kouká se na to z dálky */
   @media (min-width: 1000px) {
     .prip-plovouci{gap:22px;}
@@ -2271,6 +2275,8 @@
     .prip-zalozka.pes-rano{box-shadow:0 0 0 8px rgba(255,213,74,0.25), 0 0 32px 10px rgba(255,190,40,0.5);}
     .prip-zalozka.pes-vecer{box-shadow:0 0 0 8px rgba(44,62,112,0.2), 0 0 32px 10px rgba(44,62,112,0.45);}
     .prip-zalozka.nakup{box-shadow:0 0 0 8px rgba(46,157,87,0.2), 0 0 32px 10px rgba(46,157,87,0.45);}
+    .prip-emoji-sloupec{gap:22px;}
+    .prip-zalozka.prip-emoji{font-size:36px;padding:4px 16px;}
     .nakup-box{max-width:560px;}
     .nakup-seznam li{font-size:20px;}
     .oznameni-box{max-width:760px;padding:40px 44px;}
@@ -2368,7 +2374,8 @@
 
 <div class="prip-plovouci" id="pripPlovouci" hidden>
   <button class="prip-zalozka oznameni-zal" id="oznameniZalozka" type="button" hidden aria-label="Upozornění">⚠️</button>
-  <button class="prip-zalozka" id="pripZalozka" type="button" hidden aria-label="Připomínky"></button>
+  <!-- Svítící připomínky: každá svým emoji, pod sebou (plní pripZalozkaObnov) -->
+  <div class="prip-emoji-sloupec" id="pripEmoji" hidden></div>
   <button class="prip-zalozka nakup" id="nakupZalozka" type="button" hidden aria-label="Nákupní seznam"></button>
   <button class="prip-zalozka pes-rano" id="pesRanoZalozka" type="button" hidden aria-label="Nakrmeno ráno">☀️🐕🥣</button>
   <button class="prip-zalozka pes-vecer" id="pesVecerZalozka" type="button" hidden aria-label="Nakrmeno večer">🌙🐕🥣</button>
@@ -12029,7 +12036,7 @@ const PRIP_DEN = 86400000;
 const PRIP_KDY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
 const pripSeznamEl = document.getElementById('pripSeznam');
 const pripHintEl = document.getElementById('pripHint');
-const pripZalozkaEl = document.getElementById('pripZalozka');
+const pripEmojiEl = document.getElementById('pripEmoji');
 const pripSlideEl = document.getElementById('pripominkySlide');
 let pripData = null;
 // Nákupní seznam — zelená záložka se obnovuje spolu se zvonečkem (pripZalozkaObnov)
@@ -12276,6 +12283,8 @@ function renderPripominky(now = Date.now()) {
       akt.addEventListener('click', () => {
         pripData = pripData || {};
         pripData[def.id] = { ...(pripData[def.id] || {}), aktivovano: Date.now() };
+        // Je zrovna na stránce Připomínky — vyskakovat jí to nemusí
+        if (pripZnameSvitici) pripZnameSvitici.add(def.id);
         renderPripominky();
         pripPost('/api/pripominky/' + def.id + '/aktivovat', {});
       });
@@ -12349,12 +12358,51 @@ function renderPripominky(now = Date.now()) {
 
 const pripPlovouciEl = document.getElementById('pripPlovouci');
 
+// Svítící připomínky (bez psa, ten má vlastní záložky) — a k nim ty, které jdou
+// ještě 5 s vrátit, ať má jejich panel ke kterému emoji patřit
+function pripSvitici(now = Date.now(), iZpet = false) {
+  return pripDefinice().filter(def => !def.zalozka && pripViditelna(def)
+    && ((iZpet && (pripZpet[def.id] || 0) > now) || pripominkaStav(def, pripData && pripData[def.id], now).sviti));
+}
+
+// Co svítilo při minulém překreslení. Nově rozsvícená připomínka sama vyskočí.
+// Po načtení appky (první data a pár vteřin na dojetí ostatních, třeba sekačky)
+// se jen zapamatuje, co svítí — jinak by každé otevření appky vysypalo všechno.
+let pripZnameSvitici = null;
+let pripKlidDo = 0;
+const PRIP_POP_KLID_MS = 5000;
+const pripPanelEl = document.getElementById('pripPanel');
+let pripPanelOtevreny = false;
+let pripPanelIds = [];
+let PRIP_PANEL_MS = 60000;   // jak dlouho panel čeká na klepnutí, než se schová do emoji
+let pripPanelCasovac = null;
+
 function pripZalozkaObnov(now = Date.now()) {
-  if (!pripZalozkaEl) return;
-  const kolik = pripSviticich(now);
-  // Zvoneček je vidět i na stránce Připomínky — jen když nic nesvítí, schová se
-  pripZalozkaEl.hidden = !kolik;
-  pripZalozkaEl.textContent = '🔔 ' + kolik;
+  if (!pripEmojiEl) return;
+  // Emoji jsou vidět i na stránce Připomínky — jen když nic nesvítí, schovají se
+  const defs = pripSvitici(now, true);
+  const ids = defs.map(d => d.id);
+  if (ids.join(',') !== [...pripEmojiEl.children].map(b => b.dataset.id).join(',')) {
+    pripEmojiEl.textContent = '';
+    for (const def of defs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'prip-zalozka prip-emoji';
+      b.dataset.id = def.id;
+      b.textContent = def.ikona;
+      b.setAttribute('aria-label', def.nazev);
+      pripEmojiEl.appendChild(b);
+    }
+  }
+  pripEmojiEl.hidden = !ids.length;
+  const svitiTed = new Set(pripSvitici(now).map(d => d.id));
+  if (pripData) {
+    if (!pripZnameSvitici) pripKlidDo = Date.now() + PRIP_POP_KLID_MS;
+    const nova = pripZnameSvitici && Date.now() >= pripKlidDo
+      ? [...svitiTed].filter(id => !pripZnameSvitici.has(id)) : [];
+    if (nova.length) pripPanelOtevri([...new Set([...(pripPanelOtevreny ? pripPanelIds : []), ...nova])]);
+    pripZnameSvitici = svitiTed;
+  }
   // Zelený košík: svítí, dokud je na nákupním seznamu aspoň jedna položka
   const nakupu = (nakupData || []).length;
   if (nakupZalozkaEl) {
@@ -12429,39 +12477,49 @@ function pripPoziceUmisti() {
   pripPlovouciEl.style.top = Math.round(y) + 'px';
   return true;
 }
-// ---------- Panel u zvonečku ----------
-// Klepnutí na zvoneček nepřepíná stránku: pod ním se rozbalí oranžový panel se
-// svítícími připomínkami a tlačítkem Hotovo. Na stránku Připomínky vede až klepnutí
-// na text připomínky. Panel stojí mimo plovoucí skupinu — ta si kvůli tažení bere
-// ukazatel a tlačítka uvnitř by klepnutí nedostala.
-const pripPanelEl = document.getElementById('pripPanel');
-let pripPanelOtevreny = false;
+// ---------- Panel u emoji ----------
+// Klepnutí na emoji nepřepíná stránku: vedle něj se rozbalí oranžový panel s tou
+// připomínkou a tlačítkem Hotovo (nově rozsvícená vyskočí sama). Když se do minuty
+// na nic neklepne, schová se zpátky do emoji. Na stránku Připomínky vede klepnutí
+// na text. Panel stojí mimo plovoucí skupinu — ta si kvůli tažení bere ukazatel
+// a tlačítka uvnitř by klepnutí nedostala.
 
-function pripPanelOtevri(ano) {
-  pripPanelOtevreny = !!ano && !!pripPanelEl;
+function pripPanelOdpocet() {
+  clearTimeout(pripPanelCasovac);
+  pripPanelCasovac = pripPanelOtevreny ? setTimeout(() => pripPanelOtevri(false), PRIP_PANEL_MS) : null;
+}
+
+// `ids` = které připomínky ukázat; cokoli prázdného panel zavře
+function pripPanelOtevri(ids) {
+  pripPanelIds = Array.isArray(ids) ? ids : [];
+  pripPanelOtevreny = pripPanelIds.length > 0 && !!pripPanelEl;
   if (!pripPanelEl) return;
   pripPanelEl.hidden = !pripPanelOtevreny;
+  pripPanelOdpocet();
   if (pripPanelOtevreny) pripPanelRender();
 }
 
-// Pod zvoneček, oříznuto do okna. Schovaný zvoneček (po posledním Hotovo běží
-// ještě „Zpět") nemá rozměry — pak panel zůstane, kde je.
+// Vedle emoji první z připomínek (vpravo, a když se nevejde, vlevo), v okně.
+// Emoji, které už zmizelo, nemá rozměry — pak panel zůstane, kde je.
 function pripPanelPolohuj() {
-  if (!pripPanelOtevreny || !pripZalozkaEl) return;
-  const z = pripZalozkaEl.getBoundingClientRect();
-  if (!z.width) return;
+  if (!pripPanelOtevreny || !pripEmojiEl) return;
+  const kotva = pripEmojiEl.querySelector('[data-id="' + pripPanelIds[0] + '"]');
+  const z = kotva && kotva.getBoundingClientRect();
+  if (!z || !z.width) return;
   const r = pripPanelEl.getBoundingClientRect();
-  const x = Math.max(8, Math.min(z.left, window.innerWidth - r.width - 8));
-  const y = Math.max(8, Math.min(z.bottom + 10, window.innerHeight - r.height - 8));
+  let x = z.right + 14;
+  if (x + r.width > window.innerWidth - 8) x = z.left - r.width - 14;
+  x = Math.max(8, Math.min(x, window.innerWidth - r.width - 8));
+  const y = Math.max(8, Math.min(z.top - 4, window.innerHeight - r.height - 8));
   pripPanelEl.style.left = Math.round(x) + 'px';
   pripPanelEl.style.top = Math.round(y) + 'px';
 }
 
 function pripPanelRender(now = Date.now()) {
   if (!pripPanelEl || !pripPanelOtevreny) return;
-  // Stejné připomínky, jaké počítá zvoneček, a k nim ty, co jdou ještě vrátit
-  const polozky = pripDefinice().filter(def => !def.zalozka && pripViditelna(def)
-    && ((pripZpet[def.id] || 0) > now || pripominkaStav(def, pripData && pripData[def.id], now).sviti));
+  // Jen ty, kvůli kterým se otevřel — a jen dokud svítí nebo jdou vrátit
+  const svitici = pripSvitici(now, true);
+  const polozky = pripPanelIds.map(id => svitici.find(d => d.id === id)).filter(Boolean);
   if (!polozky.length) { pripPanelOtevri(false); return; }
   pripPanelEl.textContent = '';
   for (const def of polozky) {
@@ -12493,11 +12551,12 @@ function pripPanelRender(now = Date.now()) {
 }
 
 if (pripPanelEl) {
-  // Klepnutí mimo panel i zvoneček ho zavře
+  // Klepnutí mimo panel i emoji ho zavře; klepnutí do panelu posune minutový odpočet
   document.addEventListener('pointerdown', ev => {
     if (!pripPanelOtevreny) return;
     const t = ev.target;
-    if (pripPanelEl.contains(t) || (pripPlovouciEl && pripPlovouciEl.contains(t))) return;
+    if (pripPanelEl.contains(t)) { pripPanelOdpocet(); return; }
+    if (pripPlovouciEl && pripPlovouciEl.contains(t)) return;
     pripPanelOtevri(false);
   });
   window.addEventListener('resize', () => bezpecne(pripPanelPolohuj));
@@ -12505,7 +12564,13 @@ if (pripPanelEl) {
 
 // Co dělá které tlačítko skupiny po klepnutí
 function pripPlovouciAkce(el) {
-  if (el === pripZalozkaEl) { pripPanelOtevri(!pripPanelOtevreny); return; }
+  if (el.classList.contains('prip-emoji')) {
+    const id = el.dataset.id;
+    // Klepnutí na emoji otevřené připomínky panel zavře
+    const jenTahle = pripPanelOtevreny && pripPanelIds.length === 1 && pripPanelIds[0] === id;
+    pripPanelOtevri(jenTahle ? false : [id]);
+    return;
+  }
   if (el === nakupZalozkaEl) { pripPanelOtevri(false); nakupOtevri(true); return; }
   if (el.id === 'oznameniZalozka') { pripPanelOtevri(false); oznameniRozbaleno = true; renderOznameni(); return; }
   const def = PRIPOMINKY.find(d => d.zalozka && d.zalozka === el.id);

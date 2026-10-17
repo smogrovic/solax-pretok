@@ -135,58 +135,58 @@ setTimeout(() => {
   check('  bez něj kalendář', document.getElementById('kalPanel').hidden, false);
   wrap.scrollTo = plynule;
 
-  R.push('\\n8) Zvoneček je na iPadu 2× větší');
-  const zv = document.getElementById('pripZalozka');
-  check('na iPadu 2× větší než na telefonu (28,8 px)', getComputedStyle(zv).fontSize, '28.8px');
+  R.push('\\n8) Emoji připomínek jsou na iPadu 2× větší');
+  pripData = { kytky: { hotovo: 0 }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
+  renderPripominky();
+  const zv = () => document.querySelector('#pripEmoji .prip-emoji[data-id="kytky"]');
+  check('na iPadu 2× větší než na telefonu (36 px)', getComputedStyle(zv()).fontSize, '36px');
 
   pripData = { pesRano: { hotovo: 0, aktivovano: Date.now() } };
   renderPripominky();
   check('na iPadu je záložka psa vidět', document.getElementById('pesRanoZalozka').hidden, false);
-  R.push('\\n9) Zvoneček jde odtáhnout');
+  R.push('\\n9) Emoji jdou odtáhnout (celá skupina)');
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
-  // Pes nakrmený, ať je ve skupině jen zvoneček (psy testuje browser-pripominky)
+  // Pes nakrmený, ať jsou ve skupině jen kytky (psy testuje browser-pripominky)
   pripData = { kytky: { hotovo: 0 }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
   kalOtevri(false); wrap.scrollLeft = 0; updateDots(); renderPripominky();
-  check('zvoneček je vidět', zv.hidden, false);
+  check('emoji kytek je vidět', !!zv() && !document.getElementById('pripEmoji').hidden, true);
   let otevreno = 0;
   const kamSrolovat = wrap.scrollTo;
   wrap.scrollTo = () => { otevreno++; };
-  const r0 = zv.getBoundingClientRect();
-  const ptr = (typ, x, y) => zv.dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 5, clientX: x, clientY: y }));
+  const r0 = zv().getBoundingClientRect();
+  const ptr = (typ, x, y) => zv().dispatchEvent(new PointerEvent(typ, { bubbles: true, pointerId: 5, clientX: x, clientY: y }));
   ptr('pointerdown', r0.left + 10, r0.top + 10);
   ptr('pointermove', r0.left + 60, r0.top + 210);
-  ptr('pointermove', r0.left + 510, r0.top + 410);
-  ptr('pointerup', r0.left + 510, r0.top + 410);
-  zv.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-  const r1 = zv.getBoundingClientRect();
-  check('posune se s prstem', Math.round(r1.left - r0.left) + ',' + Math.round(r1.top - r0.top), '500,400');
+  ptr('pointermove', r0.left + 510, r0.top + 360);
+  ptr('pointerup', r0.left + 510, r0.top + 360);
+  zv().dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  const r1 = zv().getBoundingClientRect();
+  check('posune se s prstem', Math.round(r1.left - r0.left) + ',' + Math.round(r1.top - r0.top), '500,350');
   check('  a tažení Připomínky neotevře', otevreno, 0);
   let ulozeno = null;
   try { ulozeno = JSON.parse(localStorage.getItem('pripZvonekPozice')); } catch {}
   check('  poloha se zapamatuje', !!ulozeno && Math.round(ulozeno.x * innerWidth) === Math.round(r1.left), true);
   renderPripominky();
-  check('překreslení ji nevrátí pod lištu', Math.round(zv.getBoundingClientRect().top), Math.round(r1.top));
+  check('překreslení ji nevrátí pod lištu', Math.round(zv().getBoundingClientRect().top), Math.round(r1.top));
   // Malý pohyb prstu je pořád klepnutí
   ptr('pointerdown', r1.left + 10, r1.top + 10);
   ptr('pointermove', r1.left + 13, r1.top + 12);
   ptr('pointerup', r1.left + 13, r1.top + 12);
-  zv.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-  // Klepnutí rozbalí panel u zvonečku; na stránku se jde až z textu v panelu
+  zv().dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  // Klepnutí rozbalí panel u emoji; na stránku se jde až z textu v panelu
   check('klepnutí stránku nepřepne', otevreno, 0);
-  check('  ale rozbalí panel u zvonečku', document.getElementById('pripPanel').hidden, false);
+  check('  ale rozbalí panel u emoji', document.getElementById('pripPanel').hidden, false);
   document.querySelector('#pripPanel .prip-panel-text').click();
   check('text v panelu Připomínky otevře', otevreno, 1);
   check('  a panel se zavře', document.getElementById('pripPanel').hidden, true);
-  // Po otevření se zvoneček schová, takže se měří jeho nastavená poloha
-  // Poloha patří celé plovoucí skupině se zvonečkem a záložkami psa
+  // Poloha patří celé plovoucí skupině s emoji a záložkami psa
   const skupina = document.getElementById('pripPlovouci');
-  check('  a zvoneček se nehne', skupina.style.left, Math.round(r1.left) + 'px');
-  zv.hidden = false;
+  check('  a skupina se nehne', skupina.style.left, Math.round(r1.left) + 'px');
   // Ven z okna se odtáhnout nedá
   ptr('pointerdown', r1.left + 10, r1.top + 10);
   ptr('pointermove', r1.left + 5000, r1.top + 5000);
   ptr('pointerup', r1.left + 5000, r1.top + 5000);
-  const r2 = zv.getBoundingClientRect();
+  const r2 = zv().getBoundingClientRect();
   check('za okraj okna neuteče', r2.right <= innerWidth + 1 && r2.bottom <= innerHeight + 1, true);
   wrap.scrollTo = kamSrolovat;
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}

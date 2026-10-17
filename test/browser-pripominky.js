@@ -239,60 +239,94 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('přepínač BIO se vypne', POSLANO[0] && POSLANO[0].adresa + ' ' + JSON.stringify(POSLANO[0].telo),
     '/api/pripominky/bio/zapnuto {"zapnuto":false}');
 
-  OUT.push('\\n6) Vystrčená záložka');
-  const zal = document.getElementById('pripZalozka');
+  OUT.push('\\n6) Emoji svítících připomínek na kraji');
+  const emo = document.getElementById('pripEmoji');
+  const panel = document.getElementById('pripPanel');
+  const emojiIds = () => [...emo.querySelectorAll('.prip-emoji')].map(b => b.dataset.id).join(',');
+  const tlac = id => emo.querySelector('.prip-emoji[data-id="' + id + '"]');
   sliderWrap.scrollTo({ left: 0 }); await wait(100); updateDots();
+  // Start appky: co už svítí, nevyskočí
+  pripZnameSvitici = null; pripPanelOtevri(false);
   pripData = { trava: { hotovo: Date.now() }, povleceni: { hotovo: Date.now() }, kytky: { hotovo: 0 }, vysavac: { hotovo: 0 }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };
   renderPripominky();
-  check('na jiné stránce je vidět', zal.hidden, 'false');
-  check('  s počtem', zal.textContent, '🔔 2');
-  const rz = zal.getBoundingClientRect();
+  check('na jiné stránce jsou vidět emoji svítících', emo.hidden, 'false');
+  check('  každá svým emoji, v pořadí seznamu', emojiIds(), 'kytky,vysavac');
+  check('  s ikonou', tlac('kytky').textContent + tlac('vysavac').textContent, '🪴🧹');
+  check('  bez zvonečku', !!document.getElementById('pripZalozka'), 'false');
+  const r1 = tlac('kytky').getBoundingClientRect(), r2 = tlac('vysavac').getBoundingClientRect();
+  check('  pod sebou', Math.round(r1.left) === Math.round(r2.left) && r2.top > r1.bottom, 'true');
   const listaDole = document.querySelector('.page-tabs-bar').getBoundingClientRect().bottom;
-  check('zvoneček je vlevo pod lištou záložek', rz.left < 30 && rz.top >= listaDole && rz.top < listaDole + 30, 'true');
-  check('  s aurou kolem', getComputedStyle(zal, '::before').backdropFilter, 'blur(6px)');
-  check('  o 20 % menší než dřív (14,4 px místo 18)', getComputedStyle(zal).fontSize, '14.4px');
-  // Plynulé rolování headless prohlížeč nedojede — zachytí se, kam se rolovalo
+  check('  vlevo pod lištou záložek', r1.left < 30 && r1.top >= listaDole && r1.top < listaDole + 30, 'true');
+  check('  s aurou', getComputedStyle(tlac('kytky'), '::before').backdropFilter, 'blur(6px)');
+  check('  oranžové', getComputedStyle(tlac('kytky')).backgroundColor, 'rgb(245, 147, 61)');
+  check('po načtení appky nic nevyskočí', panel.hidden, 'true');
+  // Klepnutí na emoji: panel jen s tou připomínkou
   const slides = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
   const cil = slides.indexOf(document.getElementById('pripominkySlide'));
   let kam = null;
   const puvodni = sliderWrap.scrollTo;
   sliderWrap.scrollTo = o => { kam = o.left; };
-  const panel = document.getElementById('pripPanel');
-  zal.click();
-  check('klepnutí na zvoneček stránku nepřepne', kam, null);
-  check('  ale rozbalí oranžový panel', panel.hidden, 'false');
-  const kolik = Number(zal.textContent.replace(/\\D/g, ''));
-  check('  řádků je tolik, kolik ukazuje zvoneček', panel.querySelectorAll('.prip-panel-radek').length, kolik);
-  const rp = panel.getBoundingClientRect(), rz2 = zal.getBoundingClientRect();
-  check('  panel je pod zvonečkem a v okně', rp.top >= rz2.bottom && rp.right <= innerWidth && rp.left >= 0, 'true');
-  check('  oranžový', getComputedStyle(panel).backgroundColor, getComputedStyle(zal).backgroundColor);
-  // Hotovo z panelu
+  pripPlovouciAkce(tlac('vysavac'));
+  check('klepnutí na emoji stránku nepřepne', kam, null);
+  check('  ale rozbalí panel', panel.hidden, 'false');
+  check('  jen s tou připomínkou', [...panel.querySelectorAll('.prip-panel-radek')].map(r => r.dataset.id).join(','), 'vysavac');
+  check('  s Hotovo', panel.querySelector('.prip-panel-hotovo').textContent, 'Hotovo');
+  const rp = panel.getBoundingClientRect(), re = tlac('vysavac').getBoundingClientRect();
+  check('  vedle emoji a v okně', rp.left >= re.right && rp.right <= innerWidth && Math.abs(rp.top - re.top) < 20, 'true');
+  check('  oranžový', getComputedStyle(panel).backgroundColor, getComputedStyle(tlac('kytky')).backgroundColor);
+  // Hotovo z panelu, Zpět
   POSLANO.length = 0;
-  const prvni = panel.querySelector('.prip-panel-radek');
-  const idPrvni = prvni.dataset.id;
-  prvni.querySelector('.prip-panel-hotovo').click();
-  check('Hotovo v panelu odťukne', POSLANO.some(x => x.adresa === '/api/pripominky/' + idPrvni + '/hotovo'), 'true');
-  check('  a ukáže Zpět', panel.querySelector('.prip-panel-radek[data-id="' + idPrvni + '"] .prip-panel-hotovo').textContent, 'Zpět');
-  panel.querySelector('.prip-panel-radek[data-id="' + idPrvni + '"] .prip-panel-hotovo').click();
-  check('  Zpět vrátí', POSLANO.some(x => x.adresa === '/api/pripominky/' + idPrvni + '/hotovo' && x.telo && x.telo.zpet), 'true');
-  // Druhé klepnutí na zvoneček panel zavře, třetí zase otevře
-  zal.click();
-  check('druhé klepnutí na zvoneček panel zavře', panel.hidden, 'true');
-  zal.click();
+  panel.querySelector('.prip-panel-hotovo').click();
+  check('Hotovo v panelu odťukne', POSLANO.some(x => x.adresa === '/api/pripominky/vysavac/hotovo'), 'true');
+  check('  a ukáže Zpět', panel.querySelector('.prip-panel-hotovo').textContent, 'Zpět');
+  check('  emoji při Zpět zůstává', !!tlac('vysavac'), 'true');
+  panel.querySelector('.prip-panel-hotovo').click();
+  check('  Zpět vrátí', POSLANO.some(x => x.adresa === '/api/pripominky/vysavac/hotovo' && x.telo && x.telo.zpet), 'true');
+  // Druhé klepnutí na stejné emoji panel zavře, na jiné ho přepne
+  pripPanelOtevri(['vysavac']);
+  pripPlovouciAkce(tlac('vysavac'));
+  check('klepnutí na emoji otevřené připomínky panel zavře', panel.hidden, 'true');
+  pripPlovouciAkce(tlac('vysavac'));
+  pripPlovouciAkce(tlac('kytky'));
+  check('klepnutí na jiné emoji přepne panel', [...panel.querySelectorAll('.prip-panel-radek')].map(r => r.dataset.id).join(','), 'kytky');
   document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   check('klepnutí jinam panel zavře', panel.hidden, 'true');
-  zal.click();
+  // Minutový odpočet (v testu zkrácený)
+  const puvodniMs = PRIP_PANEL_MS;
+  PRIP_PANEL_MS = 300;
+  pripPlovouciAkce(tlac('kytky'));
+  await wait(200);
+  panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await wait(200);
+  check('klepnutí do panelu odpočet posune', panel.hidden, 'false');
+  await wait(250);
+  check('bez klepnutí se panel schová', panel.hidden, 'true');
+  check('  a emoji zůstane', !!tlac('kytky'), 'true');
+  // Nově rozsvícená připomínka vyskočí sama (po klidu po startu)
+  pripKlidDo = 0;
+  pripData = { ...pripData, popelnice: { hotovo: 0, aktivovano: Date.now() } };
+  renderPripominky();
+  check('nově rozsvícená vyskočí sama', [...panel.querySelectorAll('.prip-panel-radek')].map(r => r.dataset.id).join(','), 'popelnice');
+  pripData = { ...pripData, trava: { hotovo: 0, aktivovano: Date.now() }, povleceni: { hotovo: 0, aktivovano: Date.now() } };
+  renderPripominky();
+  check('další nové se přidají k otevřenému', [...panel.querySelectorAll('.prip-panel-radek')].map(r => r.dataset.id).sort().join(','), 'popelnice,povleceni,trava');
+  await wait(350);
+  check('  a po odpočtu se schovají do emoji', panel.hidden + ' ' + emojiIds(), 'true kytky,vysavac,popelnice,trava,povleceni');
+  renderPripominky();
+  check('co už svítilo, znovu nevyskočí', panel.hidden, 'true');
+  PRIP_PANEL_MS = puvodniMs;
+  // Klepnutí na text v panelu přejede na Připomínky
+  pripPlovouciAkce(tlac('kytky'));
   panel.querySelector('.prip-panel-text').click();
   sliderWrap.scrollTo = puvodni;
   check('klepnutí na text v panelu přejede na Připomínky', Math.round(kam / sirkaStranky()), cil);
   check('  a panel se zavře', panel.hidden, 'true');
   sliderWrap.scrollLeft = cil * sirkaStranky(); updateDots();
-  check('i na Připomínkách je zvoneček vidět', zal.hidden, 'false');
+  check('i na Připomínkách jsou emoji vidět', emo.hidden, 'false');
   sliderWrap.scrollLeft = 0; updateDots();
-  check('zpátky jinde je zase vidět', zal.hidden, 'false');
   pripData = { trava: { hotovo: Date.now() }, povleceni: { hotovo: Date.now() }, kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false }, popelnice: { hotovo: Date.now() } };
   renderPripominky();
-  check('když nic nesvítí, záložka není', zal.hidden, 'true');
+  check('když nic nesvítí, emoji nejsou', emo.hidden, 'true');
 
   OUT.push('\\n8) Aktivovat teď');
   const T0 = praha('2026-09-23', 10);
@@ -314,7 +348,8 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   check('  pošle aktivaci', POSLANO[0] && POSLANO[0].adresa, '/api/pripominky/kytky/aktivovat');
   check('  a hned svítí', radek('kytky').classList.contains('sviti'), 'true');
   check('  u svítící už tlačítko není', !!radek('kytky').querySelector('.prip-aktivovat'), 'false');
-  check('  a zvoneček ji počítá', document.getElementById('pripZalozka').textContent, '🔔 1');
+  check('  a má své emoji', emojiIds(), 'kytky');
+  check('  ale nevyskočí (je zrovna v seznamu)', panel.hidden, 'true');
 
   OUT.push('\\n9) Krmení psa');
   const pes = { hotovo: 0 };
@@ -347,17 +382,17 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
   // Dál jako na iPadu — široký displej se podvrhne
   const puvodniMM = window.matchMedia;
   window.matchMedia = q => /min-width: 1000px/.test(q) ? { matches: true } : puvodniMM.call(window, q);
-  check('záložky psa jsou v plovoucí skupině se zvonečkem',
-    skupina.contains(psR) && skupina.contains(psV) && skupina.contains(document.getElementById('pripZalozka')), 'true');
+  check('záložky psa jsou v plovoucí skupině s emoji',
+    skupina.contains(psR) && skupina.contains(psV) && skupina.contains(emo), 'true');
   pripData = { trava: { hotovo: Date.now() }, povleceni: { hotovo: Date.now() }, kytky: { hotovo: Date.now() }, vysavac: { hotovo: Date.now() }, bio: { zapnuto: false },
                popelnice: { hotovo: Date.now() }, pesRano: { hotovo: 0, aktivovano: Date.now() }, pesVecer: { hotovo: Date.now() } };
   renderPripominky();
   check('hladový pes (ráno) = záložka vidět', psR.hidden, 'false');
   check('  se symbolem', psR.textContent, '☀️🐕🥣');
   check('nakrmený (večer) = schovaná', psV.hidden, 'true');
-  check('zvoneček psa nepočítá', document.getElementById('pripZalozka').hidden, 'true');
+  check('pes mezi emoji připomínek není', emo.hidden, 'true');
   check('skupina je vidět', skupina.hidden, 'false');
-  // Na stránce Připomínky zvoneček mizí, pes ne
+  // Pes je vidět i na stránce Připomínky
   const vid = Array.from(sliderWrap.querySelectorAll('.slide:not([hidden])'));
   sliderWrap.scrollLeft = vid.indexOf(document.getElementById('pripominkySlide')) * sirkaStranky(); updateDots();
   check('pes je vidět i na stránce Připomínky', psR.hidden, 'false');
