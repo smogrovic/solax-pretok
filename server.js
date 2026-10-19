@@ -11627,6 +11627,7 @@ async function rohlikOauthStart(redirect, now = Date.now()) {
   const verifier = rohlikB64(crypto.randomBytes(32));
   const challenge = rohlikB64(crypto.createHash('sha256').update(verifier).digest());
   rohlikPrihlaseni.set(stav, { verifier, redirect, do: now + ROHLIK_OAUTH_STAV_MS });
+  rohlikDiag.start = { clientId: k.clientId, redirect, kdy: now };
   const u = new URL(meta.authorization_endpoint);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('client_id', k.clientId);
@@ -11988,6 +11989,10 @@ function rohlikKodZAdresy(text) {
 app.post('/api/rohlik/oauth/kod', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const { code, stav, error, popis } = rohlikKodZAdresy(req.body && req.body.adresa);
+  // Adresa ze staršího pokusu (stav už neplatí) — ne odpověď na ten současný
+  if (stav && !rohlikPrihlaseni.has(stav)) {
+    return res.status(400).json({ error: 'Tahle adresa je ze staršího pokusu — zkus znovu od kroku 1.' });
+  }
   if (error) {
     // Rohlík přihlášení odmítl — důvod je v adrese, bez něj se nedá nic opravit
     const duvod = rohlikTajne(popis || error).slice(0, 200);
@@ -11998,7 +12003,9 @@ app.post('/api/rohlik/oauth/kod', async (req, res) => {
       rohlikDiag.staraRegistrace = { clientId: state.rohlikOauth.clientId, meta: state.rohlikOauth.meta };
       delete state.rohlikOauth.clientId; delete state.rohlikOauth.redirect; delete state.rohlikOauth.meta;
     }
-    return res.status(400).json({ error: 'Rohlík přihlášení odmítl: ' + duvod });
+    rohlikDiag.prihlaseni.clientId = rohlikDiag.start && rohlikDiag.start.clientId;
+    if (stav) rohlikPrihlaseni.delete(stav);
+    return res.status(400).json({ error: 'Rohlík přihlášení odmítl: ' + duvod + ' — zkus znovu od kroku 1.' });
   }
   if (!code || !stav) return res.status(400).json({ error: 'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.' });
   try {
@@ -12025,7 +12032,7 @@ app.get('/api/rohlik/diagnostika', async (req, res) => {
   const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
     oauth: { prihlaseno: rohlikPrihlasen(), klient: o.clientId || null, redirect: o.redirect || null, obnovovaciToken: !!o.refresh,
       vyprsi: o.exp ? new Date(o.exp).toISOString() : null, meta: o.meta || null, staraRegistrace: rohlikDiag.staraRegistrace || null },
-    prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null };
+    prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null, start: rohlikDiag.start || null };
   if (rohlikPrihlasen()) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));

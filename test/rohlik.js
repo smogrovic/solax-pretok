@@ -183,8 +183,8 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     // Vložená adresa z nefunkční stránky localhost
     check('vložená adresa bez kódu', (await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback' } })).out.error,
       'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.');
-    check('  cizí stav', (await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?code=KOD&state=cizi' } })).out.error,
-      'Přihlášení vypršelo (platí 10 min), zkus to znovu.');
+    check('  adresa ze staršího pokusu', (await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?code=KOD&state=cizi' } })).out.error,
+      'Tahle adresa je ze staršího pokusu — zkus znovu od kroku 1.');
     const z = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: '  http://localhost:3334/oauth/callback?code=KOD&state=' + encodeURIComponent(u.searchParams.get('state')) + '&iss=x ' } });
     check('vložená celá adresa přihlásí', JSON.stringify(z.out), '{"ok":true,"rohlik":{"enabled":true,"prihlaseno":true}}');
     const tok = f.log.filter(x => x.url === 'https://auth.rohlik.cz/token').pop().telo;
@@ -224,13 +224,16 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     // Rohlík přihlášení odmítl: důvod z vložené adresy
     const f = falesny({ nastroje: NASTROJE_A });
     const h = build(f, { prihlasen: false });
-    await h.volej('POST /api/rohlik/prihlasit');
-    const r = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=access_denied&error_description=User+denied+access&state=x' } });
-    check('odmítnutí: důvod z adresy', r.kod + ' ' + r.out.error, '400 Rohlík přihlášení odmítl: User denied access');
+    const st1 = new URL((await h.volej('POST /api/rohlik/prihlasit')).out.url).searchParams.get('state');
+    const stara = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=access_denied&error_description=X&state=stary' } });
+    check('stará chybová adresa nemate', stara.out.error, 'Tahle adresa je ze staršího pokusu — zkus znovu od kroku 1.');
+    const r = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=access_denied&error_description=User+denied+access&state=' + st1 } });
+    check('odmítnutí: důvod z adresy', r.kod + ' ' + r.out.error, '400 Rohlík přihlášení odmítl: User denied access — zkus znovu od kroku 1.');
     const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
-    check('  i v diagnostice', d.prihlaseni.error + ' ' + d.prihlaseni.popis, 'access_denied User denied access');
+    check('  i v diagnostice, s klientem', d.prihlaseni.error + ' ' + d.prihlaseni.popis + ' ' + d.prihlaseni.clientId, 'access_denied User denied access klient-1');
+    check('  a start pokusu', d.start.clientId, 'klient-1');
     const r2 = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=invalid_scope&error_description=The%20requested%20scope%20is%20invalid' } });
-    check('  odmítnutý rozsah', r2.out.error, 'Rohlík přihlášení odmítl: The requested scope is invalid');
+    check('  odmítnutý rozsah', r2.out.error, 'Rohlík přihlášení odmítl: The requested scope is invalid — zkus znovu od kroku 1.');
     const s2 = new URL((await h.volej('POST /api/rohlik/prihlasit')).out.url);
     check('  další pokus bez scope', s2.searchParams.has('scope'), false);
     // Neznámý klient: příští přihlášení se zaregistruje znovu

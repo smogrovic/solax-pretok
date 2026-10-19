@@ -183,10 +183,12 @@ setTimeout(async () => {
   check('nepřihlášený: tlačítko přihlásit', document.getElementById('rohlikPrihlaseni').hidden, false);
   check('  bez seznamu a bez Přidat', document.getElementById('rohlikSeznam').hidden + ' ' + document.getElementById('rohlikPridat').hidden, 'true true');
   check('  nic se nehledá', dotazy.length, 0);
+  document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback?error=stara';
   document.getElementById('rohlikPrihlasitBtn').click();
   await pockej(30);
   check('Přihlásit pošle požadavek se zámkem', dotazy[0] && dotazy[0].url, '/api/rohlik/prihlasit');
   check('  ukáže krok 2 s polem na adresu', document.getElementById('rohlikKrok2').hidden, false);
+  check('  pole na adresu je po startu prázdné', document.getElementById('rohlikAdresa').value, '');
   // Dokončení vloženou adresou
   dotazy = [];
   odpoved = (url, telo) => url === '/api/rohlik/oauth/kod'
@@ -196,6 +198,7 @@ setTimeout(async () => {
   document.getElementById('rohlikDokoncitBtn').click();
   await pockej(30);
   check('adresa bez kódu: chyba', document.getElementById('rohlikStav').textContent, 'V adrese chybí kód.');
+  check('  a pole se vyprázdní', document.getElementById('rohlikAdresa').value, '');
   document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback?code=KOD&state=S';
   document.getElementById('rohlikDokoncitBtn').click();
   await pockej(120);
