@@ -17,13 +17,14 @@ function falesny({ nastroje, hledani, kosik, sse = false, init401 = false, vyprs
   const odpovez = (status, telo, hlavicky = {}) => ({
     status,
     headers: { get: k => hlavicky[k.toLowerCase()] || null },
-    text: async () => (sse && telo ? `event: message\ndata: ${JSON.stringify(telo)}\n\n` : (telo ? JSON.stringify(telo) : ''))
+    text: async () => (typeof telo === 'string' ? telo
+      : (sse && telo ? `event: message\ndata: ${JSON.stringify(telo)}\n\n` : (telo ? JSON.stringify(telo) : '')))
   });
   const fetch = async (url, opts) => {
     const telo = JSON.parse(opts.body);
     log.push({ url, hlavicky: opts.headers, telo });
     if (telo.method === 'initialize') {
-      if (init401) return odpovez(401, null);
+      if (init401) return init401 === true ? odpovez(401, null) : odpovez(init401.status, init401.telo, init401.hlavicky || {});
       sezeni++;
       return odpovez(200, { jsonrpc: '2.0', id: telo.id, result: { protocolVersion: '2025-03-26' } }, { 'mcp-session-id': 'S' + sezeni });
     }
@@ -137,10 +138,36 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const f = falesny({ init401: true, nastroje: NASTROJE_A });
     const h = build(f);
     const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
-    check('špatné heslo česky', r.kod + ' ' + r.out.error, '502 Rohlík: špatný e-mail nebo heslo.');
+    check('odmítnutí bez důvodu: kód', r.kod + ' ' + r.out.error, '502 Rohlík odmítl přihlášení (HTTP 401).');
     const d = await h.volej('GET /api/rohlik/diagnostika');
     const vse = JSON.stringify(d.out);
     check('diagnostika neobsahuje heslo ani e-mail', vse.includes(HESLO) || vse.includes(EMAIL), false);
+  }
+  {
+    // Rozlišení odmítnutí: ochrana proti robotům, OAuth, zpráva od Rohlíku
+    const zkus = async init401 => (await build(falesny({ init401, nastroje: NASTROJE_A })).volej('GET /api/rohlik/hledat', { query: { q: 'x' } })).out.error;
+    check('403 s HTML = blokace serveru', await zkus({ status: 403, telo: '<!DOCTYPE html><title>Just a moment...</title> cloudflare', hlavicky: { 'content-type': 'text/html' } }),
+      'Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
+    check('401 s Bearer = chce OAuth', await zkus({ status: 401, telo: '', hlavicky: { 'www-authenticate': 'Bearer resource_metadata="https://mcp.rohlik.cz/.well-known/oauth"' } }),
+      'Rohlík chce přihlášení přes OAuth, ne heslem.');
+    check('401 se zprávou ji ukáže', await zkus({ status: 401, telo: JSON.stringify({ error: { message: 'Invalid credentials' } }), hlavicky: { 'content-type': 'application/json' } }),
+      'Rohlík odmítl přihlášení (HTTP 401): Invalid credentials');
+    const h = build(falesny({ init401: { status: 401, telo: '{"message":"bad"}', hlavicky: { 'www-authenticate': 'Basic' } }, nastroje: NASTROJE_A }));
+    await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
+    check('diagnostika: co přesně přišlo', d.prihlaseni.stav + ' ' + d.prihlaseni.wwwAuthenticate + ' ' + d.prihlaseni.ukazka, '401 Basic {"message":"bad"}');
+    check('  e-mail maskovaný', d.udaje.email, 't•••@email.cz');
+    check('  heslo jen vyplněné ano/ne', JSON.stringify(d.udaje).includes(String(HESLO.length)) || !d.udaje.hesloVyplnene, false);
+  }
+  {
+    // Údaje s mezerou, novým řádkem a uvozovkami se učešou
+    const f = falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }) });
+    const h = build(f, { env: { ROHLIK_EMAIL: ' ' + EMAIL + '\n', ROHLIK_HESLO: '"' + HESLO + '" ' } });
+    await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('mezery a uvozovky se ořežou', f.log[0].hlavicky['rhl-email'] + '|' + (f.log[0].hlavicky['rhl-pass'] === HESLO), EMAIL + '|true');
+    const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
+    check('  diagnostika řekne co', d.udaje.upraveno.join('; '), 'e-mail: mezera nebo nový řádek na kraji; heslo: mezera nebo nový řádek na kraji; heslo: uvozovky kolem hodnoty');
+    check('  a heslo nevypíše', JSON.stringify(d).includes(HESLO), false);
   }
   {
     // Chyba od Rohlíku, která by heslo zopakovala

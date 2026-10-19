@@ -11414,13 +11414,25 @@ const server = app.listen(PORT, async () => {
 const ROHLIK_URL = process.env.ROHLIK_MCP_URL || 'https://mcp.rohlik.cz/mcp';
 const ROHLIK_TIMEOUT_MS = 15000;
 const ROHLIK_VYBER_MAX = 300;
-const ROHLIK_EMAIL = process.env.ROHLIK_EMAIL || '';
-const ROHLIK_HESLO = process.env.ROHLIK_HESLO || '';
+// Údaje vložené do Renderu mívají navíc mezeru, nový řádek nebo uvozovky — na pohled
+// to není poznat a Rohlík pak hlásí špatné heslo. Učeše se to a diagnostika řekne co.
+const rohlikUpraveno = [];
+function rohlikUdaj(hodnota, co) {
+  let v = String(hodnota || '');
+  const pred = v;
+  v = v.replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '');
+  if (v !== pred) rohlikUpraveno.push(`${co}: mezera nebo nový řádek na kraji`);
+  const m = /^(["'„“])(.*)(["'“”])$/.exec(v);
+  if (m) { v = m[2]; rohlikUpraveno.push(`${co}: uvozovky kolem hodnoty`); }
+  return v;
+}
+const ROHLIK_EMAIL = rohlikUdaj(process.env.ROHLIK_EMAIL, 'e-mail');
+const ROHLIK_HESLO = rohlikUdaj(process.env.ROHLIK_HESLO, 'heslo');
 const rohlikEnabled = !!(ROHLIK_EMAIL && ROHLIK_HESLO);
 let rohlikSezeni = null;          // Mcp-Session-Id
 let rohlikNastrojeCache = null;   // { seznam, ts }
 let rohlikRpcId = 1;
-const rohlikDiag = { chyba: null, kdy: 0, ukazka: null };
+const rohlikDiag = { chyba: null, kdy: 0, ukazka: null, prihlaseni: null };
 
 function rohlikTajne(text) {
   let t = String(text || '');
@@ -11461,10 +11473,11 @@ async function rohlikPost(telo) {
   const stopka = setTimeout(() => ctrl.abort(), ROHLIK_TIMEOUT_MS);
   try {
     const res = await fetch(ROHLIK_URL, { method: 'POST', headers: hlavicky, body: JSON.stringify(telo), signal: ctrl.signal });
-    const sid = res.headers && typeof res.headers.get === 'function' ? res.headers.get('mcp-session-id') : null;
+    const h = k => (res.headers && typeof res.headers.get === 'function' ? res.headers.get(k) : null);
+    const sid = h('mcp-session-id');
     if (sid) rohlikSezeni = sid;
     const text = await res.text();
-    return { status: res.status, text };
+    return { status: res.status, text, typ: h('content-type') || '', wwwAuth: h('www-authenticate') || '' };
   } catch (err) {
     throw new RohlikChyba(err && err.name === 'AbortError' ? 'Rohlík neodpověděl včas.' : 'Rohlík není dostupný.');
   } finally {
@@ -11472,12 +11485,33 @@ async function rohlikPost(telo) {
   }
 }
 
+// 401/403 neznamená vždycky špatné heslo: může to být i ochrana proti robotům
+// (HTML stránka místo JSON), nebo požadavek na OAuth. Co přesně přišlo, jde do
+// diagnostiky (bez tajností) a hláška se podle toho řídí.
+function rohlikOdmitnuti(r) {
+  const telo = rohlikTajne(r.text || '').slice(0, 300);
+  rohlikDiag.prihlaseni = { stav: r.status, typ: r.typ || '', wwwAuthenticate: rohlikTajne(r.wwwAuth || '').slice(0, 200), ukazka: telo, kdy: Date.now() };
+  if (/text\/html/i.test(r.typ || '') || /cloudflare|<html|captcha/i.test(telo)) {
+    return new RohlikChyba('Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
+  }
+  if (/bearer/i.test(r.wwwAuth || '') && !/rhl-/i.test(telo)) {
+    return new RohlikChyba('Rohlík chce přihlášení přes OAuth, ne heslem.');
+  }
+  let zprava = '';
+  try {
+    const j = JSON.parse(r.text);
+    zprava = (j && (j.error && (j.error.message || j.error) || j.message || j.detail)) || '';
+  } catch { zprava = /^[^<]{1,160}$/.test(telo) ? telo : ''; }
+  zprava = rohlikTajne(typeof zprava === 'string' ? zprava : JSON.stringify(zprava)).slice(0, 160);
+  return new RohlikChyba(`Rohlík odmítl přihlášení (HTTP ${r.status})` + (zprava ? `: ${zprava}` : '.'));
+}
+
 async function rohlikInit() {
   rohlikSezeni = null;
   const id = rohlikRpcId++;
   const r = await rohlikPost({ jsonrpc: '2.0', id, method: 'initialize', params: {
     protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'smg-home', version: '1' } } });
-  if (r.status === 401 || r.status === 403) throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo.');
+  if (r.status === 401 || r.status === 403) throw rohlikOdmitnuti(r);
   const o = rohlikPrectiOdpoved(r.text, id);
   if (r.status >= 400 || !o || o.error) {
     throw new RohlikChyba('Rohlík: přihlášení se nepovedlo' + (o && o.error && o.error.message ? ` (${rohlikTajne(o.error.message).slice(0, 120)})` : ` (HTTP ${r.status})`) + '.');
@@ -11493,7 +11527,7 @@ async function rohlikRpc(method, params) {
     const id = rohlikRpcId++;
     const r = await rohlikPost({ jsonrpc: '2.0', id, method, params });
     if ((r.status === 400 || r.status === 404) && pokus === 0) { rohlikSezeni = null; continue; }
-    if (r.status === 401 || r.status === 403) throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo.');
+    if (r.status === 401 || r.status === 403) throw rohlikOdmitnuti(r);
     const o = rohlikPrectiOdpoved(r.text, id);
     if (!o) throw new RohlikChyba(`Rohlík: nečekaná odpověď (HTTP ${r.status}).`);
     if (o.error) throw new RohlikChyba('Rohlík: ' + rohlikTajne(o.error.message || 'chyba').slice(0, 160));
@@ -11684,7 +11718,11 @@ app.post('/api/rohlik/vyber/restore', (req, res) => {
 // Pro doladění po nasazení: jaké nástroje Rohlík nabízí a poslední chyba. Bez hesel.
 app.get('/api/rohlik/diagnostika', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka };
+  const m = /^(.)(.*)(@.*)$/.exec(ROHLIK_EMAIL);
+  const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
+    udaje: { email: m ? m[1] + '•••' + m[3] : (ROHLIK_EMAIL ? '(bez @)' : '(prázdný)'), hesloVyplnene: !!ROHLIK_HESLO,
+      upraveno: rohlikUpraveno },
+    prihlaseni: rohlikDiag.prihlaseni };
   if (rohlikEnabled) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));
