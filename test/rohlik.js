@@ -221,6 +221,20 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  s odpovědí', /invalid_redirect_uri/.test(d.registrace.pokusy[0].odpoved), true);
   }
   {
+    // Rohlík přihlášení odmítl: důvod z vložené adresy
+    const f = falesny({ nastroje: NASTROJE_A });
+    const h = build(f, { prihlasen: false });
+    await h.volej('POST /api/rohlik/prihlasit');
+    const r = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=access_denied&error_description=User+denied+access&state=x' } });
+    check('odmítnutí: důvod z adresy', r.kod + ' ' + r.out.error, '400 Rohlík přihlášení odmítl: User denied access');
+    const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
+    check('  i v diagnostice', d.prihlaseni.error + ' ' + d.prihlaseni.popis, 'access_denied User denied access');
+    const r2 = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=invalid_scope&error_description=The%20requested%20scope%20is%20invalid' } });
+    check('  odmítnutý rozsah', r2.out.error, 'Rohlík přihlášení odmítl: The requested scope is invalid');
+    const s2 = new URL((await h.volej('POST /api/rohlik/prihlasit')).out.url);
+    check('  další pokus bez scope', s2.searchParams.has('scope'), false);
+  }
+  {
     // Rozběhnuté přihlášení platí jen 10 minut
     const f = falesny({ nastroje: NASTROJE_A });
     const h = build(f, { prihlasen: false });

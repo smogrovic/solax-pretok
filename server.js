@@ -11564,7 +11564,8 @@ async function rohlikOauthStart(redirect, now = Date.now()) {
   u.searchParams.set('code_challenge', challenge);
   u.searchParams.set('code_challenge_method', 'S256');
   u.searchParams.set('resource', meta.resource || ROHLIK_URL);
-  if (Array.isArray(meta.scopes) && meta.scopes.length) u.searchParams.set('scope', meta.scopes.join(' '));
+  // Když Rohlík odmítl rozsah, další pokus jde bez něj
+  if (Array.isArray(meta.scopes) && meta.scopes.length && !k.bezScope) u.searchParams.set('scope', meta.scopes.join(' '));
   return u.toString();
 }
 
@@ -11895,22 +11896,34 @@ app.get('/api/rohlik/oauth/zpet', async (req, res) => {
 // Vložená adresa z nefunkční stránky localhost (nebo jen kód) → dokončit přihlášení
 function rohlikKodZAdresy(text) {
   const t = String(text || '').trim();
-  let code = null, stav = null;
+  let code = null, stav = null, error = null, popis = null;
   try {
     const u = new URL(t);
     code = u.searchParams.get('code');
     stav = u.searchParams.get('state');
+    error = u.searchParams.get('error');
+    popis = u.searchParams.get('error_description');
   } catch {
-    const mc = /[?&]code=([^&#\s]+)/.exec(t), ms = /[?&]state=([^&#\s]+)/.exec(t);
-    code = mc ? decodeURIComponent(mc[1]) : null;
-    stav = ms ? decodeURIComponent(ms[1]) : null;
+    const p = k => {
+      const m = new RegExp('[?&]' + k + '=([^&#\\s]+)').exec(t);
+      if (!m) return null;
+      try { return decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch { return m[1]; }
+    };
+    code = p('code'); stav = p('state'); error = p('error'); popis = p('error_description');
   }
-  return { code, stav };
+  return { code, stav, error, popis };
 }
 
 app.post('/api/rohlik/oauth/kod', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const { code, stav } = rohlikKodZAdresy(req.body && req.body.adresa);
+  const { code, stav, error, popis } = rohlikKodZAdresy(req.body && req.body.adresa);
+  if (error) {
+    // Rohlík přihlášení odmítl — důvod je v adrese, bez něj se nedá nic opravit
+    const duvod = rohlikTajne(popis || error).slice(0, 200);
+    rohlikDiag.prihlaseni = { error, popis: duvod, kdy: Date.now() };
+    if (/scope/i.test(duvod) && state.rohlikOauth) state.rohlikOauth.bezScope = true;
+    return res.status(400).json({ error: 'Rohlík přihlášení odmítl: ' + duvod });
+  }
   if (!code || !stav) return res.status(400).json({ error: 'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.' });
   try {
     await rohlikOauthZpet(stav, code);
