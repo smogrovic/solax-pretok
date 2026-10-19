@@ -78,7 +78,7 @@ function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
   const api = new Function('state', 'app', 'requireAuth', 'broadcast', 'fetch', 'process', 'crypto',
     CODE + '\n; return { rohlikHledej, rohlikDoKosiku, rohlikVyrobky, rohlikPrectiOdpoved, rohlikKlic, rohlikZapamatuj,'
          + ' rohlikVyberObnov, rohlikArgKosik, rohlikArgHledani, ROHLIK_VYBER_MAX, rohlikPayload, rohlikOauthStart,'
-         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni, rohlikDiag };'
+         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni, rohlikDiag, rohlikWebCookiesObnov };'
   )(state, { get: (c, h) => { routy['GET ' + c] = h; }, post: (c, h) => { routy['POST ' + c] = h; } },
     (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push({ u, d }), f.fetch, { env }, require('crypto'));
@@ -94,10 +94,11 @@ function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
 
 // Falešný web Rohlíku (neveřejné rozhraní): přihlášení e-mailem → cookie, hledání, košík
 const EMAIL = 'jana.test@example.cz', HESLO = 'Heslo-Tajne-987';
-function falesnyWeb({ nedokonceno = false, html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false, neuklada = false, bezCookie = false,
+function falesnyWeb({ schvaleni = false, nedokonceno = false, html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false, neuklada = false, bezCookie = false,
     produkty = null, detaily = null } = {}) {
   const log = [];
   const kosik = {};
+  const zar = { schvaleno: false };
   let prihlaseni = 0, volani = 0;
   const odpovez = (status, telo, typ = 'application/json', cookie = null) => ({
     status,
@@ -113,11 +114,15 @@ function falesnyWeb({ nedokonceno = false, html = false, vyprsiPo = 0, spatneHes
       if (spatneHeslo || t.email !== EMAIL || t.password !== HESLO) {
         return odpovez(401, { status: 401, messages: [{ content: 'Neplatný e-mail ' + t.email + ' nebo heslo ' + t.password }] });
       }
+      // Nové zařízení: 202 + cookie zařízení; po schválení v e-mailu projde, jen když ji pošle zpátky
+      if (schvaleni && !(zar.schvaleno && /(^|; )zarizeni=Z1(;|$)/.test(opts.headers.Cookie || ''))) {
+        return odpovez(202, { status: 202, messages: [], data: null }, 'application/json', 'zarizeni=Z1; Path=/');
+      }
       if (nedokonceno) return odpovez(202, { status: 202, messages: [], data: null }, 'application/json', 'PHPSESSION=anon; Path=/');
       prihlaseni++;
       return odpovez(200, { status: 200, data: { user: { id: 1 } } }, 'application/json', bezCookie ? null : `PHPSESSIONID=sez${prihlaseni}; Path=/; HttpOnly`);
     }
-    if (opts.headers.Cookie !== 'PHPSESSIONID=sez' + prihlaseni) return odpovez(401, { status: 401 });
+    if (!new RegExp('(^|; )PHPSESSIONID=sez' + prihlaseni + '(;|$)').test(opts.headers.Cookie || '')) return odpovez(401, { status: 401 });
     volani++;
     if (vyprsiPo && volani === vyprsiPo) { prihlaseni += 100; return odpovez(401, { status: 401 }); }
     if (u.pathname === '/services/frontend-service/search-metadata') {
@@ -140,7 +145,7 @@ function falesnyWeb({ nedokonceno = false, html = false, vyprsiPo = 0, spatneHes
     }
     return odpovez(404, { status: 404 });
   };
-  return { fetch, log };
+  return { fetch, log, schval: () => { zar.schvaleno = true; } };
 }
 
 const NASTROJE_A = [
@@ -406,7 +411,30 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
     const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nazev: 'x', productId: 1, mnozstvi: 1 }] } });
     check('přihlášení 202 = chyba, košík se nevolá', r.out.error + ' ' + f.log.filter(x => /cart/.test(x.cesta)).length,
-      'Rohlík přihlášení nedokončil (stav 202) — nejspíš ho chce potvrdit; mrkni do pošty od Rohlíku (viz diagnostika). 0');
+      'Rohlík přihlášení nedokončil (stav 202) — chce schválit zařízení: v e-mailu od Rohlíku klepni na „Schválit“ a zkus to znovu. 0');
+  }
+  {
+    // Schválení zařízení e-mailem: cookie zařízení se při dalším přihlášení pošle zpátky
+    const f = falesnyWeb({ schvaleni: true });
+    const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    const pol = { body: { polozky: [{ nazev: 'Banány', productId: 9, mnozstvi: 1 }] } };
+    const r1 = await h.volej('POST /api/rohlik/kosik', pol);
+    check('nové zařízení: chce schválit', /schválit zařízení/.test(r1.out.error || ''), true);
+    f.schval();
+    const r2 = await h.volej('POST /api/rohlik/kosik', pol);
+    check('  po schválení projde se stejnou cookie zařízení', r2.kod + ' ' + (r2.out.error || 'ok'), '200 ok');
+    check('  cookies ve state pro zálohu', Object.keys(h.state.rohlikWebCookies).sort().join(), 'PHPSESSIONID,zarizeni');
+    // Po nasazení: záloha vrátí cookies a schválené zařízení platí dál
+    const h2 = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    check('obnova cookies ze zálohy', h2.api.rohlikWebCookiesObnov({ zarizeni: 'Z1', 'zle;jmeno': 'x', PHPSESSIONID: 'a;b' }), true);
+    check('  jen platné', JSON.stringify(h2.state.rohlikWebCookies), '{"zarizeni":"Z1"}');
+    check('  přihlášené nepřepíše', h2.api.rohlikWebCookiesObnov({ jine: '1' }), false);
+    const r3 = await h2.volej('POST /api/rohlik/kosik', pol);
+    check('  po obnově bez nového schvalování', r3.kod + ' ' + (r3.out.error || 'ok'), '200 ok');
+    await h2.volej('POST /api/rohlik/odhlasit');
+    check('odhlášení cookies smaže', JSON.stringify(h2.state.rohlikWebCookies), '{}');
+    check('cookies jsou v záloze (primo) a obnovují se', /rohlikWebCookies: state\.rohlikWebCookies/.test(SRC) && /rohlikWebCookiesObnov\(p\.rohlikWebCookies\)/.test(SRC), true);
+    check('  a do appky nejdou', /rohlikWebCookies/.test(SRC.slice(SRC.indexOf('function rohlikPayload'), SRC.indexOf('function rohlikPayload') + 200)), false);
   }
   {
     const f = falesnyWeb({ bezCookie: true });

@@ -11055,6 +11055,8 @@ function storeSnapshot() {
     oznameni: state.oznameni,
     // Přihlášení k Rohlíku — bez něj by se po každém nasazení muselo přihlašovat znovu
     rohlikOauth: state.rohlikOauth,
+    // Cookies webu Rohlíku (schválené zařízení) — jen sem, nikdy do appky ani do logu
+    rohlikWebCookies: state.rohlikWebCookies || null,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -11094,6 +11096,7 @@ function storeApplyPrimo(p) {
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
   if (p.oznameni && typeof oznameniObnov === 'function') oznameniObnov(p.oznameni, now);
   if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
+  if (p.rohlikWebCookies && typeof rohlikWebCookiesObnov === 'function') rohlikWebCookiesObnov(p.rohlikWebCookies);
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {
@@ -11695,6 +11698,8 @@ async function rohlikObnovToken() {
 function rohlikOdhlas() {
   if (state.rohlikOauth) { delete state.rohlikOauth.access; delete state.rohlikOauth.refresh; delete state.rohlikOauth.exp; }
   rohlikSezeni = null;
+  state.rohlikWebCookies = {};
+  rohlikWebPrihlasen = false;
   broadcast('rohlik', { rohlik: rohlikPayload() });
 }
 
@@ -11890,8 +11895,20 @@ const rohlikUdaj = v => String(v || '').trim().replace(/^(["'])(.*)\1$/, '$2');
 const ROHLIK_EMAIL = rohlikUdaj(process.env.ROHLIK_EMAIL);
 const ROHLIK_HESLO = rohlikUdaj(process.env.ROHLIK_HESLO);
 const rohlikWebZapnuto = !!(ROHLIK_EMAIL && ROHLIK_HESLO);
-let rohlikCookies = {};
+// Cookies relace jsou ve state a v záloze: Rohlík schvaluje „nové zařízení"
+// e-mailem a zařízení pozná podle nich — bez nich by chtěl schválení po každém nasazení
+if (!state.rohlikWebCookies) state.rohlikWebCookies = {};
 let rohlikWebPrihlasen = false;
+
+function rohlikWebCookiesObnov(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c) || Object.keys(state.rohlikWebCookies || {}).length) return false;
+  const out = {};
+  for (const [k, v] of Object.entries(c).slice(0, 30)) {
+    if (/^[\w.-]{1,100}$/.test(k) && typeof v === 'string' && v.length <= 4096 && !/[;\r\n]/.test(v)) out[k] = v;
+  }
+  state.rohlikWebCookies = out;
+  return true;
+}
 
 function rohlikUlozCookies(res) {
   const h = res && res.headers;
@@ -11901,10 +11918,10 @@ function rohlikUlozCookies(res) {
   else if (typeof h.get === 'function' && h.get('set-cookie')) radky = String(h.get('set-cookie')).split(/,(?=\s*[\w.-]+=)/);
   for (const r of radky) {
     const m = /^\s*([^=;\s]+)=([^;]*)/.exec(r);
-    if (m) rohlikCookies[m[1]] = m[2];
+    if (m) state.rohlikWebCookies[m[1]] = m[2];
   }
 }
-const rohlikCookieHlavicka = () => Object.entries(rohlikCookies).map(([k, v]) => `${k}=${v}`).join('; ');
+const rohlikCookieHlavicka = () => Object.entries(state.rohlikWebCookies).map(([k, v]) => `${k}=${v}`).join('; ');
 
 async function rohlikWebFetch(cesta, opts = {}) {
   const res = await rohlikFetch(ROHLIK_WEB + cesta, { ...opts, headers: {
@@ -11919,7 +11936,7 @@ async function rohlikWebFetch(cesta, opts = {}) {
   // Stopa pro diagnostiku: jen názvy cookies, text bez e-mailu a hesla
   const stopa = rohlikDiag.webStopa || (rohlikDiag.webStopa = []);
   stopa.push({ metoda: opts.method || 'GET', cesta: cesta.split('?')[0], stav: res.status, typ: String(typ).slice(0, 60),
-    ukazka: rohlikTajne(text).slice(0, 300), cookies: Object.keys(rohlikCookies), kdy: Date.now() });
+    ukazka: rohlikTajne(text).slice(0, 300), cookies: Object.keys(state.rohlikWebCookies), kdy: Date.now() });
   if (stopa.length > 10) stopa.splice(0, stopa.length - 10);
   return { status: res.status, j, text, typ };
 }
@@ -11934,7 +11951,7 @@ function rohlikWebChyba(r, co) {
 }
 
 async function rohlikWebLogin() {
-  rohlikCookies = {};
+  // Cookies se nemažou — nesou schválené zařízení
   rohlikWebPrihlasen = false;
   const r = await rohlikWebFetch('/services/frontend-service/login', { method: 'POST',
     body: JSON.stringify({ email: ROHLIK_EMAIL, password: ROHLIK_HESLO, name: '' }) });
@@ -11950,10 +11967,10 @@ async function rohlikWebLogin() {
   const stav = r.j && typeof r.j.status === 'number' ? r.j.status : r.status;
   if (stav !== 200 || r.status !== 200) {
     rohlikWebChyba(r, 'přihlášení');
-    throw new RohlikChyba(`Rohlík přihlášení nedokončil (stav ${stav}) — nejspíš ho chce potvrdit; mrkni do pošty od Rohlíku (viz diagnostika).`);
+    throw new RohlikChyba(`Rohlík přihlášení nedokončil (stav ${stav}) — chce schválit zařízení: v e-mailu od Rohlíku klepni na „Schválit“ a zkus to znovu.`);
   }
   // Bez cookie by se košík plnil v anonymní relaci, kterou na webu neuvidíš
-  if (!Object.keys(rohlikCookies).length) {
+  if (!Object.keys(state.rohlikWebCookies).length) {
     rohlikWebChyba(r, 'přihlášení');
     throw new RohlikChyba('Rohlík přihlášení nevrátilo relaci (viz diagnostika).');
   }
