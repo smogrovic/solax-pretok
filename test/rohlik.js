@@ -191,6 +191,19 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  ale řekne, že je přihlášeno', d.oauth.prihlaseno + ' ' + d.oauth.obnovovaciToken, 'true true');
   }
   {
+    // Odmítnutá registrace: důvod od Rohlíku do hlášky i diagnostiky
+    const f = falesny({ nastroje: NASTROJE_A });
+    const puvodni = f.fetch;
+    f.fetch = async (url, opts) => (String(url) === 'https://auth.rohlik.cz/register'
+      ? { status: 400, headers: { get: () => null }, text: async () => JSON.stringify({ error: 'invalid_redirect_uri', error_description: 'Redirect URI not allowed' }) }
+      : puvodni(url, opts));
+    const h = build(f, { prihlasen: false });
+    const r = await h.volej('POST /api/rohlik/prihlasit');
+    check('odmítnutá registrace řekne proč', r.out.error, 'Rohlík: registrace klienta se nepovedla (HTTP 400): Redirect URI not allowed');
+    const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
+    check('  diagnostika má celou odpověď', /invalid_redirect_uri/.test(d.registrace.odpoved) && d.registrace.redirect, 'https://app.test/api/rohlik/oauth/zpet');
+  }
+  {
     // Rozběhnuté přihlášení platí jen 10 minut
     const f = falesny({ nastroje: NASTROJE_A });
     const h = build(f, { prihlasen: false });

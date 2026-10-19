@@ -11523,7 +11523,11 @@ async function rohlikOauthKlient(meta, redirect) {
       token_endpoint_auth_method: 'none' })
   });
   if (r.status >= 300 || !r.j || !r.j.client_id) {
-    throw new RohlikChyba(`Rohlík: registrace klienta se nepovedla (HTTP ${r.status}).`);
+    // Proč Rohlík registraci odmítl — bez toho se nedá nic opravit
+    const duvod = r.j ? (r.j.error_description || r.j.error || '') : String(r.text || '').replace(/<[^>]*>/g, ' ').trim();
+    rohlikDiag.registrace = { stav: r.status, odpoved: rohlikTajne(String(r.text || '')).slice(0, 400), redirect, kdy: Date.now() };
+    throw new RohlikChyba(`Rohlík: registrace klienta se nepovedla (HTTP ${r.status})`
+      + (duvod ? `: ${rohlikTajne(String(duvod)).slice(0, 160)}` : '.'));
   }
   state.rohlikOauth = { ...o, meta, clientId: r.j.client_id, clientSecret: r.j.client_secret || null, redirect };
   return state.rohlikOauth;
@@ -11894,7 +11898,7 @@ app.get('/api/rohlik/diagnostika', async (req, res) => {
   const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
     oauth: { prihlaseno: rohlikPrihlasen(), klient: !!o.clientId, obnovovaciToken: !!o.refresh,
       vyprsi: o.exp ? new Date(o.exp).toISOString() : null, autorizace: o.meta ? o.meta.authorization_endpoint : null },
-    prihlaseni: rohlikDiag.prihlaseni };
+    prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null };
   if (rohlikPrihlasen()) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));
