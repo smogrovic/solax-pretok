@@ -32,7 +32,7 @@ const radek = id => document.querySelector('#pripSeznam .prip-radek[data-id="' +
 
   OUT.push('\\n1) Stránka');
   const tituly = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
-  check('stránka je hned za Úklidem', tituly[tituly.indexOf('Úklid') + 1], 'Připomínky');
+  check('stránka je hned za Závlahou', tituly[tituly.indexOf('Závlaha') + 1], 'Připomínky');
   pripData = null; renderPripominky();
   check('osm připomínek (i pes, tráva a povlečení; sekačka jen nastavená)', document.querySelectorAll('#pripSeznam .prip-radek').length, 8);
   check('přepínač má každá připomínka',

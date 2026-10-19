@@ -101,9 +101,21 @@ setTimeout(async () => {
   check('proklik na Připomínkách ukazuje počet', document.getElementById('nakupProklikPocet').textContent, ' · 2');
   check('zvoneček nákup nepočítá', pripSviticich(T), zvonekPred);
 
+  // Nákup je samostatná stránka — záložka na ni přejede
+  const strana = document.querySelector('.slide[data-title="Nákup"]');
+  check('nákup je samostatná stránka', !!strana && strana.contains(document.getElementById('nakupSeznam')), true);
+  check('  okno nákupu už není', !!document.getElementById('nakupOkno'), false);
+  const vsechny = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  check('  hned za Připomínkami', vsechny[vsechny.indexOf(document.getElementById('pripominkySlide')) + 1] === strana, true);
+  let kam = null;
+  const puvScroll = sliderWrap.scrollTo;
+  sliderWrap.scrollTo = o => { kam = o.left; };
   pripPlovouciAkce(zal);
-  const nokno = document.getElementById('nakupOkno');
-  check('klepnutí otevře seznam', nokno.hidden, false);
+  check('klepnutí na záložku přejede na stránku Nákup', kam, stranaNaStred(vsechny.indexOf(strana)));
+  kam = null;
+  document.getElementById('nakupProklik').click();
+  check('  i proklik z Připomínek', kam, stranaNaStred(vsechny.indexOf(strana)));
+  sliderWrap.scrollTo = puvScroll;
   check('  položky s odrážkami', [...document.querySelectorAll('#nakupSeznam li .nakup-text')].map(x => x.textContent).join(','), 'mléko,chleba');
 
   dotazy = [];
@@ -142,8 +154,6 @@ setTimeout(async () => {
   renderNakup();
   check('jen koupené = záložka nesvítí', vidi(zal), false);
   check('  ale v seznamu jsou', poradi(), 'mléko✓');
-  document.getElementById('nakupZavrit').click();
-  check('Zavřít', nokno.hidden, true);
   nakupData = [];
   renderNakup();
   check('vyprázdněný seznam záložku schová', vidi(zal), false);
@@ -232,6 +242,46 @@ setTimeout(async () => {
   check('  a v seznamu je štítek', !!document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik'), true);
   document.getElementById('rohlikZavrit').click();
   check('Zavřít', rok.hidden, true);
+
+  R.push('\\n4) Pravidelně kupované');
+  const obl = document.getElementById('nakupOblibene');
+  nakupOblibeneData = [{ text: 'Vajíčka', ikona: '🥚' }, { text: 'Mléko', ikona: '🥛' }, { text: 'Toaletní papír', ikona: '🧻' }];
+  nakupData = [{ id: 'n_aaaa1111', text: 'mléko', t: 1 }];
+  renderNakup();
+  check('bez klepnutí do pole schované', obl.hidden, true);
+  document.getElementById('nakupVstup').dispatchEvent(new Event('focus'));
+  check('klepnutí do pole ukáže pravidelné', obl.hidden, false);
+  check('  s ikonami', [...obl.querySelectorAll('button')].map(b => b.textContent).join(' | '), '🥚 Vajíčka | 🥛 Mléko | 🧻 Toaletní papír');
+  check('  co už je na seznamu, je zašedlé', [...obl.querySelectorAll('button')].map(b => b.classList.contains('uz')).join(), 'false,true,false');
+  dotazy = [];
+  odpoved = (url, telo) => url === '/api/nakup' ? { ok: true, nakup: [...nakupData, { id: 'n_dddd4444', text: telo.text, t: 4 }] } : { ok: true };
+  obl.querySelectorAll('button')[2].click();
+  await pockej(30);
+  check('klepnutí přidá položku', dotazy[0] && dotazy[0].url + ' ' + dotazy[0].telo.text, '/api/nakup Toaletní papír');
+  check('  a hned je zašedlá', obl.querySelectorAll('button')[2].classList.contains('uz'), true);
+  dotazy = [];
+  obl.querySelectorAll('button')[1].click();
+  await pockej(20);
+  check('zašedlá se nepřidá podruhé', dotazy.length, 0);
+  document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  check('klepnutí jinam nabídku schová', obl.hidden, true);
+
+  // Úprava v Logice automatiky
+  const ns = document.getElementById('oblibeneSeznam');
+  check('nastavení je v Logice automatiky', !!ns.closest('.slide[data-title="Logika automatiky"]'), true);
+  renderOblibeneNastaveni();
+  check('  ukazuje seznam', [...ns.querySelectorAll('.nazev')].map(n => n.textContent).join(' | '), '🥚 Vajíčka | 🥛 Mléko | 🧻 Toaletní papír');
+  dotazy = [];
+  odpoved = (url, telo) => url === '/api/nakup/oblibene' ? { ok: true, nakupOblibene: telo.polozky } : { ok: true };
+  ns.querySelectorAll('button')[1].click();
+  await pockej(30);
+  check('✕ odebere a uloží', dotazy[0] && dotazy[0].telo.polozky.map(p => p.text).join(), 'Vajíčka,Toaletní papír');
+  document.getElementById('oblibeneIkona').value = '🍞';
+  document.getElementById('oblibeneText').value = 'Rohlíky';
+  document.getElementById('oblibenePridat').click();
+  await pockej(30);
+  check('přidání nové s ikonou', JSON.stringify(dotazy[1] && dotazy[1].telo.polozky.slice(-1)[0]), JSON.stringify({ text: 'Rohlíky', ikona: '🍞' }));
+  check('  pole se vyprázdní', document.getElementById('oblibeneText').value, '');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

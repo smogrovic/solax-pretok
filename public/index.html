@@ -1439,6 +1439,21 @@
   .rohlik-odkazy{display:flex;gap:14px;margin-top:6px;font-size:12px;}
   .rohlik-odkazy button{border:none;background:none;padding:0;font:inherit;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .rohlik-info{font-size:12px;color:var(--muted);margin-top:6px;}
+  .nakup-karta{text-align:left;}
+  .nakup-karta .nakup-seznam, .nakup-karta .nakup-pridat, .nakup-karta .rohlik-btn{width:100%;align-self:stretch;box-sizing:border-box;}
+  .nakup-karta .graph-title{text-align:center;}
+  .nakup-oblibene{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+  .nakup-oblibene[hidden]{display:none;}
+  .nakup-oblibene button{border:none;border-radius:12px;padding:7px 10px;font:inherit;font-size:13px;font-weight:700;
+    background:rgba(46,157,87,0.10);color:#1f6e3c;cursor:pointer;}
+  .nakup-oblibene button.uz{opacity:0.4;}
+  .oblibene-seznam{margin-top:8px;}
+  .oblibene-radek{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid rgba(44,62,80,0.08);font-size:14px;color:var(--navy);}
+  .oblibene-radek .nazev{flex:1;}
+  .oblibene-radek button{border:none;background:none;font-size:16px;color:var(--muted);cursor:pointer;padding:2px 6px;}
+  .oblibene-pridat{display:flex;gap:6px;align-items:center;margin-top:8px;}
+  .oblibene-pridat .vlastni-pole{margin:0;flex:1;min-width:0;}
+  .oblibene-pridat select{width:auto;flex:0 0 auto;}
   .nakup-proklik{width:100%;display:flex;align-items:center;gap:8px;border:none;border-radius:14px;
     padding:12px 14px;margin-top:10px;background:rgba(46,157,87,0.10);color:#1f6e3c;font:inherit;
     font-size:14px;font-weight:700;cursor:pointer;text-align:left;}
@@ -2889,37 +2904,6 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <div class="card lockable jen-full" data-emoji="🛁">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="shellyLight"></div>
-            <div class="shelly-label">Bojler 1 (TČ)</div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="onBtn">ON</button>
-            <button class="power-btn off-btn" id="offBtn">OFF</button>
-          </div>
-          <div class="manual-hold" id="shellyHold"></div>
-          <div class="device-power" id="shellyPower"></div>
-        </div>
-      </div>
-
-      <!-- Oběhové čerpadlo: jen ruční ON, konec si hlídá auto-off v relé (15 min).
-           OFF tlačítko tu schválně není. -->
-      <div class="card lockable jen-full" data-emoji="🔄" id="obehCard">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="obehLight"></div>
-            <div class="shelly-label">Oběhové čerpadlo</div>
-          </div>
-          <div class="power-buttons">
-            <button class="power-btn on-btn" id="obehOnBtn">ON</button>
-          </div>
-          <div class="manual-hold" id="obehHold"></div>
-          <canvas id="obehTimeline"></canvas>
-        </div>
-      </div>
-
       <div class="card pool-card lockable" data-emoji="💡">
         <div class="lights-grid">
           <div class="light-cell">
@@ -2981,6 +2965,79 @@
                pod ní. V dětském režimu jsou Noční světla schovaná a schovaná
                buňka místo nezabírá — zbude čistá mřížka 2×2. -->
           <div id="tahomaSvetla"></div>
+        </div>
+      </div>
+
+      <!-- Sekačka a vysavač (dřív stránka Úklid) -->
+      <div class="card jen-full" data-emoji="🌱">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="sekLight"></div>
+            <div class="shelly-label">Sekačka <span class="state" id="sekStav">–</span></div>
+          </div>
+          <div class="sek-baterie" id="sekBaterie">– %</div>
+          <div class="zavlaha-meta" id="sekMeta"></div>
+        </div>
+      </div>
+
+      <div class="card lockable jen-full">
+        <div class="sek-tlacitka">
+          <button class="sek-btn hlavni" id="sekSekatBtn" type="button">Sekat</button>
+          <button class="sek-btn stop" id="sekStopBtn" type="button">Zastavit</button>
+          <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
+        </div>
+        <div class="zavlaha-hint" id="sekHint"></div>
+      </div>
+
+      <!-- Vysavač Xiaomi X20+ — ovládá ho most na NASu přes cloud Xiaomi -->
+      <div class="card jen-full" data-emoji="🧹" id="vysKarta">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="vysLight"></div>
+            <div class="shelly-label">Vysavač <span class="state" id="vysStav">–</span></div>
+          </div>
+          <div class="sek-baterie" id="vysBaterie">– %</div>
+          <div class="zavlaha-meta" id="vysMeta"></div>
+        </div>
+      </div>
+
+      <div class="card lockable jen-full">
+        <div class="sek-tlacitka">
+          <button class="sek-btn hlavni" id="vysUklidBtn" type="button">Vysát vše</button>
+          <button class="sek-btn stop" id="vysStopBtn" type="button">Zastavit</button>
+          <button class="sek-btn" id="vysDokBtn" type="button">Do doku</button>
+        </div>
+        <div class="zavlaha-hint" id="vysHint"></div>
+      </div>
+
+      <div class="card lockable jen-full" data-emoji="🛁">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="shellyLight"></div>
+            <div class="shelly-label">Bojler 1 (TČ)</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="onBtn">ON</button>
+            <button class="power-btn off-btn" id="offBtn">OFF</button>
+          </div>
+          <div class="manual-hold" id="shellyHold"></div>
+          <div class="device-power" id="shellyPower"></div>
+        </div>
+      </div>
+
+      <!-- Oběhové čerpadlo: jen ruční ON, konec si hlídá auto-off v relé (15 min).
+           OFF tlačítko tu schválně není. -->
+      <div class="card lockable jen-full" data-emoji="🔄" id="obehCard">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="obehLight"></div>
+            <div class="shelly-label">Oběhové čerpadlo</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="obehOnBtn">ON</button>
+          </div>
+          <div class="manual-hold" id="obehHold"></div>
+          <canvas id="obehTimeline"></canvas>
         </div>
       </div>
 
@@ -3348,60 +3405,6 @@
     </div>
   </div>
 
-  <!-- Stránka: Úklid -->
-  <div class="slide" data-title="Úklid" data-rezim="full">
-    <div class="page">
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card" data-emoji="🌱">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="sekLight"></div>
-            <div class="shelly-label">Sekačka <span class="state" id="sekStav">–</span></div>
-          </div>
-          <div class="sek-baterie" id="sekBaterie">– %</div>
-          <div class="zavlaha-meta" id="sekMeta"></div>
-        </div>
-      </div>
-
-      <div class="card lockable">
-        <div class="sek-tlacitka">
-          <button class="sek-btn hlavni" id="sekSekatBtn" type="button">Sekat</button>
-          <button class="sek-btn stop" id="sekStopBtn" type="button">Zastavit</button>
-          <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
-        </div>
-        <div class="zavlaha-hint" id="sekHint"></div>
-      </div>
-
-      <!-- Vysavač Xiaomi X20+ — ovládá ho most na NASu přes cloud Xiaomi -->
-      <div class="card" data-emoji="🧹" id="vysKarta">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="vysLight"></div>
-            <div class="shelly-label">Vysavač <span class="state" id="vysStav">–</span></div>
-          </div>
-          <div class="sek-baterie" id="vysBaterie">– %</div>
-          <div class="zavlaha-meta" id="vysMeta"></div>
-        </div>
-      </div>
-
-      <div class="card lockable">
-        <div class="sek-tlacitka">
-          <button class="sek-btn hlavni" id="vysUklidBtn" type="button">Vysát vše</button>
-          <button class="sek-btn stop" id="vysStopBtn" type="button">Zastavit</button>
-          <button class="sek-btn" id="vysDokBtn" type="button">Do doku</button>
-        </div>
-        <div class="zavlaha-hint" id="vysHint"></div>
-      </div>
-    </div>
-  </div>
-
   <!-- Stránka: Připomínky (vidí ji všichni, i děti — ať můžou odťuknout) -->
   <div class="slide" data-title="Připomínky" id="pripominkySlide">
     <div class="page">
@@ -3411,6 +3414,24 @@
         <div class="zavlaha-hint" id="pripHint"></div>
         <button class="sbal-btn prip-pridat" id="pripPridatBtn" type="button">+ Vlastní připomínka</button>
         <button class="nakup-proklik" id="nakupProklik" type="button">🛒 Nákupní seznam<span class="nakup-pocet" id="nakupProklikPocet"></span> ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stránka: Nákup (vidí ji všichni, i děti — ať můžou připsat) -->
+  <div class="slide" data-title="Nákup" id="nakupSlide">
+    <div class="page">
+      <div class="card nakup-karta">
+        <div class="graph-title">🛒 Nákupní seznam</div>
+        <form class="nakup-pridat" id="nakupForm">
+          <input class="pin-input" id="nakupVstup" type="text" maxlength="80" placeholder="Co koupit…" autocomplete="off">
+          <button type="submit">Přidat</button>
+        </form>
+        <!-- Pravidelně kupované — rozbalí se po klepnutí do pole -->
+        <div class="nakup-oblibene" id="nakupOblibene" hidden></div>
+        <ul class="nakup-seznam" id="nakupSeznam"></ul>
+        <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
+        <button class="rohlik-btn" id="rohlikBtn" type="button" hidden>🥐 Do košíku na Rohlíku</button>
       </div>
     </div>
   </div>
@@ -3528,6 +3549,18 @@
                   placeholder="Text, který se ukáže přes celou appku…"></textarea>
         <button class="sek-btn oznameni-poslat" id="oznameniPoslat" type="button">Zobrazit všem</button>
         <div class="rezim-hint" id="oznameniHint"></div>
+      </div>
+
+      <!-- Pravidelně kupované: nabízí se po klepnutí do pole na stránce Nákup -->
+      <div class="card" data-rezim="full">
+        <div class="asst-log-title">Nákup — pravidelné položky</div>
+        <div class="oblibene-seznam" id="oblibeneSeznam"></div>
+        <div class="oblibene-pridat">
+          <select class="timer-select" id="oblibeneIkona"></select>
+          <input class="pin-input vlastni-pole" id="oblibeneText" type="text" maxlength="40" placeholder="Název (např. Rohlíky)" autocomplete="off">
+          <button class="sek-btn" id="oblibenePridat" type="button">Přidat</button>
+        </div>
+        <div class="rezim-hint" id="oblibeneHint"></div>
       </div>
 
       <div class="card logic-card">
@@ -3680,8 +3713,8 @@
           <div class="logic-h">Data, notifikace, časovače</div>
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
-            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 3 h, pak à 30 min (po 3:30 červeně na iPadu) · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
-            <li>Log si pamatuje <b>týden</b>. Časovače přežijí nasazení. Popelnice <b>BIO</b> se připomíná jen <b>1. 4. – 31. 10.</b></li>
+            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 3 h, pak à 30 min · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
+            <li>Sauna po <b>3:30</b> červeně přes iPad. Log si pamatuje <b>týden</b>. Časovače přežijí nasazení. Popelnice <b>BIO</b> se připomíná jen <b>1. 4. – 31. 10.</b></li>
           </ul>
         </div>
       </div>
@@ -3764,21 +3797,6 @@
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="vlastniZpet" type="button">Zrušit</button>
       <button class="potvrz-ano" id="vlastniUlozit" type="button">Uložit</button>
-    </div>
-  </div>
-</div>
-<div class="potvrz" id="nakupOkno" hidden>
-  <div class="potvrz-box nakup-box">
-    <div class="potvrz-nadpis">🛒 Nákupní seznam</div>
-    <form class="nakup-pridat" id="nakupForm">
-      <input class="pin-input" id="nakupVstup" type="text" maxlength="80" placeholder="Co koupit…" autocomplete="off">
-      <button type="submit">Přidat</button>
-    </form>
-    <ul class="nakup-seznam" id="nakupSeznam"></ul>
-    <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
-    <button class="rohlik-btn" id="rohlikBtn" type="button" hidden>🥐 Do košíku na Rohlíku</button>
-    <div class="potvrz-btns jeden">
-      <button class="potvrz-zpet" id="nakupZavrit" type="button">Zavřít</button>
     </div>
   </div>
 </div>
@@ -11272,6 +11290,8 @@ function applySnapshot(snap) {
   pripData = snap.pripominky || null;
   rohlikData = snap.rohlik || null;
   nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
+  nakupOblibeneData = Array.isArray(snap.nakupOblibene) ? snap.nakupOblibene : [];
+  bezpecne(renderOblibeneNastaveni);
   bezpecne(renderNakup);
   oznameniData = snap.oznameni || null;
   bezpecne(renderOznameni);
@@ -11700,6 +11720,11 @@ function connectStream() {
   es.addEventListener('rohlik', e => {
     rohlikData = JSON.parse(e.data).rohlik || null;
     bezpecne(renderNakup);
+  });
+  es.addEventListener('nakupOblibene', e => {
+    nakupOblibeneData = JSON.parse(e.data).nakupOblibene || [];
+    bezpecne(renderOblibeneNastaveni);
+    bezpecne(renderNakupOblibene);
   });
   es.addEventListener('nakup', e => {
     nakupData = JSON.parse(e.data).nakup || [];
@@ -12759,7 +12784,7 @@ if (vlastniOknoEl) {
 // ---------- Nákupní seznam ----------
 // Odškrtnutá (koupená) položka zůstane 24 h přeškrtnutá na konci seznamu, pak ji
 // server smaže sám. Klepnutí na koupenou ji vrátí mezi nekoupené (= i oprava omylu).
-const nakupOknoEl = document.getElementById('nakupOkno');
+const nakupSlideEl = document.getElementById('nakupSlide');
 const nakupSeznamEl = document.getElementById('nakupSeznam');
 const nakupVstupEl = document.getElementById('nakupVstup');
 const nakupChybaEl = document.getElementById('nakupChyba');
@@ -12769,14 +12794,20 @@ const rohlikBtnEl = document.getElementById('rohlikBtn');
 // Co se ještě kupuje — jen to svítí na zelené záložce
 const nakupNekoupene = () => (nakupData || []).filter(p => !p.koupeno);
 
+// Nákup je samostatná stránka — „otevřít" = přejet na ni
 function nakupOtevri(ano) {
-  if (!nakupOknoEl) return;
-  nakupOknoEl.hidden = !ano;
-  if (ano) { nakupChybaEl.textContent = ''; renderNakup(); }
+  if (!ano || !nakupSlideEl) return;
+  if (kalPanelEl && !kalPanelEl.hidden) kalOtevri(false);
+  nakupChybaEl.textContent = '';
+  renderNakup();
+  const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
+  const i = slides.indexOf(nakupSlideEl);
+  if (i >= 0) sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
 }
 
 function renderNakup(now = Date.now()) {
   bezpecne(() => pripZalozkaObnov(now));
+  bezpecne(renderNakupOblibene);
   if (!nakupSeznamEl) return;
   nakupSeznamEl.textContent = '';
   const vse = nakupData || [];
@@ -12845,9 +12876,8 @@ function nakupOdskrtni(p, koupeno) {
   nakupPost('/api/nakup/' + encodeURIComponent(p.id) + '/koupeno', { koupeno });
 }
 
-if (nakupOknoEl) {
+if (nakupSlideEl) {
   document.getElementById('nakupProklik').addEventListener('click', () => nakupOtevri(true));
-  document.getElementById('nakupZavrit').addEventListener('click', () => nakupOtevri(false));
   document.getElementById('nakupForm').addEventListener('submit', async ev => {
     ev.preventDefault();
     const text = nakupVstupEl.value.trim();
@@ -13044,7 +13074,7 @@ async function rohlikPridej() {
 }
 
 if (rohlikOknoEl) {
-  rohlikBtnEl.addEventListener('click', () => { nakupOtevri(false); rohlikOtevri(); });
+  rohlikBtnEl.addEventListener('click', () => rohlikOtevri());
   document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
   rohlikPridatEl.addEventListener('click', rohlikPridej);
   document.getElementById('rohlikPrihlasitBtn').addEventListener('click', rohlikPrihlasit);
@@ -13095,6 +13125,90 @@ if (rohlikOknoEl) {
     });
   }, 800);
 })();
+
+// ---------- Nákup: pravidelně kupované ----------
+// Klepnutím do pole „Co koupit…" se pod ním rozbalí, co se kupuje pravidelně;
+// klepnutí položku rovnou přidá. Seznam se upravuje v Logice automatiky.
+let nakupOblibeneData = [];
+const nakupOblibeneEl = document.getElementById('nakupOblibene');
+const NAKUP_IKONY = ['🥚', '🍌', '🥓', '🧀', '🥛', '🧻', '🍞', '🧈', '🍎', '🥔', '🍅', '☕', '🧴', '🧼', '🐶', '🍺', '🛒'];
+
+function renderNakupOblibene() {
+  if (!nakupOblibeneEl) return;
+  nakupOblibeneEl.textContent = '';
+  const naSeznamu = new Set(nakupNekoupene().map(p => p.text.toLowerCase()));
+  for (const o of nakupOblibeneData || []) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = o.ikona + ' ' + o.text;
+    const uz = naSeznamu.has(o.text.toLowerCase());
+    b.classList.toggle('uz', uz);
+    // Pole nesmí ztratit fokus dřív, než klepnutí dojde (jinak by se nabídka schovala)
+    b.addEventListener('pointerdown', ev => ev.preventDefault());
+    b.addEventListener('click', () => { if (!uz) nakupPost('/api/nakup', { text: o.text }); });
+    nakupOblibeneEl.appendChild(b);
+  }
+}
+
+if (nakupVstupEl && nakupOblibeneEl) {
+  const ukaz = () => { renderNakupOblibene(); nakupOblibeneEl.hidden = !(nakupOblibeneData || []).length; };
+  nakupVstupEl.addEventListener('focus', ukaz);
+  nakupVstupEl.addEventListener('click', ukaz);
+  document.addEventListener('pointerdown', ev => {
+    if (nakupOblibeneEl.hidden) return;
+    if (ev.target === nakupVstupEl || nakupOblibeneEl.contains(ev.target)) return;
+    nakupOblibeneEl.hidden = true;
+  });
+}
+
+// Úprava v Logice automatiky
+const oblibeneSeznamEl = document.getElementById('oblibeneSeznam');
+const oblibeneHintEl = document.getElementById('oblibeneHint');
+function renderOblibeneNastaveni() {
+  if (!oblibeneSeznamEl) return;
+  oblibeneSeznamEl.textContent = '';
+  (nakupOblibeneData || []).forEach((o, i) => {
+    const r = document.createElement('div');
+    r.className = 'oblibene-radek';
+    const n = document.createElement('span');
+    n.className = 'nazev';
+    n.textContent = o.ikona + ' ' + o.text;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '✕';
+    x.setAttribute('aria-label', 'Odebrat ' + o.text);
+    x.addEventListener('click', () => oblibeneUloz(nakupOblibeneData.filter((_, j) => j !== i)));
+    r.append(n, x);
+    oblibeneSeznamEl.appendChild(r);
+  });
+}
+async function oblibeneUloz(polozky) {
+  if (oblibeneHintEl) oblibeneHintEl.textContent = '';
+  try {
+    const res = await fetch('/api/nakup/oblibene', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ polozky }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+    nakupOblibeneData = data.nakupOblibene || polozky;
+    renderOblibeneNastaveni();
+    renderNakupOblibene();
+    return true;
+  } catch (err) {
+    if (oblibeneHintEl) oblibeneHintEl.textContent = err.message;
+    return false;
+  }
+}
+if (oblibeneSeznamEl) {
+  const sel = document.getElementById('oblibeneIkona');
+  for (const ik of NAKUP_IKONY) { const o = document.createElement('option'); o.value = ik; o.textContent = ik; sel.appendChild(o); }
+  document.getElementById('oblibenePridat').addEventListener('click', async () => {
+    const vstup = document.getElementById('oblibeneText');
+    const text = vstup.value.trim();
+    if (!text) { oblibeneHintEl.textContent = 'Napiš název.'; return; }
+    if (await oblibeneUloz([...(nakupOblibeneData || []), { text, ikona: sel.value }])) vstup.value = '';
+  });
+}
 
 // ---------- Upozornění pro všechny ----------
 // Červený box přes celou appku (i přes kalendář) na všech zařízeních, dokud ho

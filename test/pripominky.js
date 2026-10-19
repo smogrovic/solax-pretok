@@ -5,16 +5,17 @@ const { check, nadpis, konec } = suite('připomínky');
 
 const CODE = between('// ---------- Připomínky ----------', '// ---------- Spotřeba po měsících ----------');
 
-function build() {
+function build({ odemceno = true } = {}) {
   const broadcasts = [], routy = {}, logy = [];
   const app = { post: (cesta, fn) => { routy[cesta] = fn; } };
   const state = {};
-  const api = new Function('state', 'broadcast', 'app', 'addLog',
+  const api = new Function('state', 'broadcast', 'app', 'addLog', 'requireAuth',
     CODE + '\n; state.pripominky = pripominkyVychozi(); state.nakup = []; state.oznameni = null;'
          + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima,'
          + ' pripominkaVlastniVytvor, pripominkaVlastniSmaz, pripominkyUklid, PRIPOMINKY_VLASTNI_MAX,'
-         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, nakupKoupeno, nakupUklid, oznameniNastav, oznameniZrus, oznameniObnov, vSezone, pripominkySezona };'
-  )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
+         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, nakupKoupeno, nakupUklid, nakupOblibeneVychozi, NAKUP_OBLIBENE_MAX, oznameniNastav, oznameniZrus, oznameniObnov, vSezone, pripominkySezona };'
+  )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t),
+    (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; });
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
     let status = 200, json = null;
@@ -344,6 +345,24 @@ nadpis('N2) Koupené 24 h přeškrtnuté');
   h3.api.nakupObnov({ nakup: [{ id: 'n_aaaa1111', text: 'a', t: 1, koupeno: ted - H },
     { id: 'n_bbbb2222', text: 'b', t: 2, koupeno: ted - 30 * H }, { id: 'n_cccc3333', text: 'c', t: 3, koupeno: ted + H }] });
   check('obnova: koupená drží, stará zmizí', h3.state.nakup.map(x => x.text + (x.koupeno ? '✓' : '')).join(','), 'a✓,c');
+}
+
+nadpis('N3) Pravidelně kupované');
+{
+  const h = build();
+  check('výchozích šest s ikonami', h.state.nakupOblibene.map(o => o.ikona + o.text).join(','), '🥚Vajíčka,🍌Banány,🥓Šunka,🧀Sýr,🥛Mléko,🧻Toaletní papír');
+  const r = h.zavolej('/api/nakup/oblibene', {}, { polozky: [{ text: '  Rohlíky ', ikona: '🍞' }, { text: 'rohlíky' }, { text: 'Kafe' }] });
+  check('uložení', r.status, 200);
+  check('  učesané, bez dvojic, výchozí ikona', JSON.stringify(h.state.nakupOblibene), JSON.stringify([{ text: 'Rohlíky', ikona: '🍞' }, { text: 'Kafe', ikona: '🛒' }]));
+  check('  appka se dozví', h.broadcasts.some(b => b.e === 'nakupOblibene'), true);
+  check('prázdný název neprojde', h.zavolej('/api/nakup/oblibene', {}, { polozky: [{ text: '' }] }).status, 400);
+  check('moc položek neprojde', h.zavolej('/api/nakup/oblibene', {}, { polozky: Array.from({ length: 31 }, (_, i) => ({ text: 'p' + i })) }).status, 400);
+  check('zamčená appka 401', build({ odemceno: false }).zavolej('/api/nakup/oblibene', {}, { polozky: [] }).status, 401);
+  const h2 = build();
+  h2.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'Ze zálohy', ikona: '🍺' }] });
+  check('obnova ze zálohy do výchozích', h2.state.nakupOblibene.map(o => o.text).join(), 'Ze zálohy');
+  h.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'Stará', ikona: '🍺' }] });
+  check('  upravené nepřepíše', h.state.nakupOblibene.map(o => o.text).join(), 'Rohlíky,Kafe');
 }
 
 nadpis('O) Upozornění pro všechny');

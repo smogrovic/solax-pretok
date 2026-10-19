@@ -284,6 +284,7 @@ const state = {
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),
   nakup: [],         // nákupní seznam: { id, text, t }
+  nakupOblibene: null, // pravidelně kupované (výchozí doplní nakupOblibeneVychozi)
   oznameni: null,    // upozornění přes celou appku: { id, text, od }
   rohlikVyber: {},   // zapamatované výrobky z Rohlíku: „mléko" → { productId, nazev, … }
   rohlikOauth: null, // přihlášení k Rohlíku (OAuth): klient, tokeny — nikdy nejde do appky  // kdy se co naposledy odťuklo + přepínače popelnic
@@ -550,6 +551,7 @@ function snapshot() {
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
     nakup: state.nakup,
+    nakupOblibene: state.nakupOblibene,
     oznameni: state.oznameni,
     rohlik: rohlikPayload(),
     saunaTimers,
@@ -1962,6 +1964,54 @@ function nakupObnov(b, now = Date.now()) {
   broadcast('nakup', { nakup: state.nakup });
   return true;
 }
+
+// Pravidelně kupované položky: klepnutím do pole „Co koupit…" se nabídnou k výběru.
+// Upravují se v Logice automatiky (pod zámkem — je to nastavení).
+const NAKUP_OBLIBENE_MAX = 30;
+function nakupOblibeneVychozi() {
+  return [{ text: 'Vajíčka', ikona: '🥚' }, { text: 'Banány', ikona: '🍌' }, { text: 'Šunka', ikona: '🥓' },
+    { text: 'Sýr', ikona: '🧀' }, { text: 'Mléko', ikona: '🥛' }, { text: 'Toaletní papír', ikona: '🧻' }];
+}
+// Ověří seznam z appky / ze zálohy → pole, nebo null
+function nakupOblibeneOver(vstup) {
+  if (!Array.isArray(vstup) || vstup.length > NAKUP_OBLIBENE_MAX) return null;
+  const out = [];
+  for (const x of vstup) {
+    const text = x && typeof x.text === 'string' ? x.text.trim().replace(/\s+/g, ' ') : '';
+    if (!text || text.length > 40) return null;
+    const ikona = x && typeof x.ikona === 'string' && x.ikona.trim() && [...x.ikona.trim()].length <= 8 ? x.ikona.trim() : '🛒';
+    if (out.some(y => y.text.toLowerCase() === text.toLowerCase())) continue;
+    out.push({ text, ikona });
+  }
+  return out;
+}
+if (!state.nakupOblibene) state.nakupOblibene = nakupOblibeneVychozi();
+function nakupOblibeneUloz(vstup) {
+  const p = nakupOblibeneOver(vstup);
+  if (!p) return false;
+  state.nakupOblibene = p;
+  state.nakupOblibeneUpraveno = true;
+  broadcast('nakupOblibene', { nakupOblibene: state.nakupOblibene });
+  return true;
+}
+app.post('/api/nakup/oblibene', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!nakupOblibeneUloz(req.body && req.body.polozky)) {
+    return res.status(400).json({ error: `Nejvýš ${NAKUP_OBLIBENE_MAX} položek, každá s názvem do 40 znaků.` });
+  }
+  res.json({ ok: true, nakupOblibene: state.nakupOblibene });
+});
+// Záloha: jen když tady ještě nikdo nic neupravil (po startu jsou výchozí)
+app.post('/api/nakup/oblibene/restore', (req, res) => {
+  const p = nakupOblibeneOver(req.body && req.body.polozky);
+  if (!p) return res.status(400).json({ error: 'Chybí polozky.' });
+  if (!state.nakupOblibeneUpraveno) {
+    state.nakupOblibene = p;
+    state.nakupOblibeneUpraveno = true;
+    broadcast('nakupOblibene', { nakupOblibene: state.nakupOblibene });
+  }
+  res.json({ ok: true });
+});
 
 app.post('/api/nakup', (req, res) => {
   const r = nakupPridej(req.body);
@@ -10894,6 +10944,7 @@ const STORE_POSTS = [
   '/api/sauna/zapnuto/restore',
   '/api/pripominky/restore',
   '/api/nakup/restore',
+  '/api/nakup/oblibene/restore',
   '/api/rohlik/vyber/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
@@ -10940,6 +10991,7 @@ function storeSnapshot() {
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
     '/api/nakup/restore': { nakup: state.nakup },
+    '/api/nakup/oblibene/restore': { polozky: state.nakupOblibene || [] },
     '/api/rohlik/vyber/restore': { vyber: state.rohlikVyber },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },

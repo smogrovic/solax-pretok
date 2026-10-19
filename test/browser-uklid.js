@@ -184,12 +184,17 @@ setTimeout(async () => {
   check('  a je vidět', chyba.classList.contains('show'), true);
   ODPOVED = { ok: true, status: 200, telo: { success: true, message: 'ok' } };
 
-  R.push('\\n7) Stránka je v menu');
+  R.push('\\n7) Sekačka a vysavač jsou na Ovládání (stránka Úklid zrušena)');
   const tituly = [...document.querySelectorAll('.slide')].map(s => s.dataset.title);
-  check('Úklid je mezi stránkami', tituly.includes('Úklid'), true);
-  const slide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Úklid');
-  check('  a má zámek jako ostatní', !!slide.querySelector('.lock-panel'), true);
-  check('  a zamykatelnou kartu', !!slide.querySelector('.card.lockable'), true);
+  check('stránka Úklid už není', tituly.includes('Úklid'), false);
+  const slide = document.querySelector('.slide[data-title="Ovládání"]');
+  check('sekačka je na Ovládání', slide.contains(document.getElementById('sekSekatBtn')), true);
+  check('  vysavač taky', slide.contains(document.getElementById('vysUklidBtn')), true);
+  check('  tlačítka jsou zamykatelná', !!document.getElementById('sekSekatBtn').closest('.card.lockable'), true);
+  // Pořadí karet: světla, sekačka, vysavač, bojler, oběhové čerpadlo, pak zbytek
+  const emoji = [...slide.querySelectorAll(':scope > .page > .card[data-emoji]')].map(c => c.dataset.emoji).join('');
+  check('pořadí: světla, sekačka, vysavač, bojler, oběh, zámek', emoji, '💡🌱🧹🛁🔄🔑');
+  check('  v dětském režimu sekačka ani vysavač nejsou', document.getElementById('vysKarta').classList.contains('jen-full'), true);
 
   R.push('\\n8) Vysavač Xiaomi');
   const vys = id => document.getElementById(id);
