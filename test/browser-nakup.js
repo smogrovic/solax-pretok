@@ -147,6 +147,59 @@ setTimeout(async () => {
   nakupData = [];
   renderNakup();
   check('vyprázdněný seznam záložku schová', vidi(zal), false);
+
+  R.push('\\n3) Rohlík');
+  const rbtn = document.getElementById('rohlikBtn');
+  rohlikData = null;
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
+  renderNakup();
+  check('bez nastaveného Rohlíku tlačítko není', rbtn.hidden, true);
+  rohlikData = { enabled: true };
+  renderNakup();
+  check('s Rohlíkem a nekoupenými je', rbtn.hidden, false);
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
+  renderNakup();
+  check('všechno v košíku nebo koupené = tlačítko není', rbtn.hidden, true);
+  check('štítek v košíku', document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik').textContent, '🛒 v košíku');
+
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }, { id: 'n_cccc3333', text: 'sýr', t: 3 }];
+  renderNakup();
+  dotazy = [];
+  odpoved = (url, telo) => {
+    if (url === '/api/rohlik/vyber') return { ok: true, vyber: { mleko: { productId: 1349777, nazev: 'Kunín Mléko 1,5 %', cena: 24.9 } } };
+    if (url.startsWith('/api/rohlik/hledat')) return { ok: true, vyrobky: /chleba/.test(decodeURIComponent(url))
+      ? [{ productId: 55, nazev: 'Chléb Šumava', cena: 39.9 }, { productId: 56, nazev: 'Chléb kmínový', cena: 35 }] : [] };
+    if (url === '/api/rohlik/kosik') return { ok: true, pridano: telo.polozky.length, nakup: nakupData.map(p => telo.polozky.some(x => x.nakupId === p.id) ? { ...p, kosik: 1 } : p) };
+    return { ok: true };
+  };
+  rbtn.click();
+  await pockej(80);
+  const rok = document.getElementById('rohlikOkno');
+  check('okno se otevře', rok.hidden, false);
+  check('  s tokenem', dotazy.find(d => d.url === '/api/rohlik/vyber') && true, true);
+  const box = id => document.querySelector('#rohlikSeznam .rohlik-polozka[data-id="' + id + '"]');
+  check('zapamatovaný výběr je předvybraný', box('n_aaaa1111').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Kunín Mléko'), true);
+  check('  a nehledá se', dotazy.some(d => /hledat\?q=Ml/.test(d.url)), false);
+  check('nové se hledají', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).length, 2);
+  check('  výsledky k výběru', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek').length, 2);
+  check('  nic nenalezeno se řekne', /Nic se nenašlo/.test(box('n_cccc3333').textContent), true);
+  check('tlačítko počítá vybrané', document.getElementById('rohlikPridat').textContent, 'Přidat do košíku (1)');
+  box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[1].click();
+  check('klepnutím se vybere', box('n_bbbb2222').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('kmínový'), true);
+  box('n_aaaa1111').querySelectorAll('.rohlik-mnozstvi button')[1].click();
+  check('množství +', box('n_aaaa1111').querySelector('.rohlik-pocet').textContent, '2×');
+  box('n_cccc3333').querySelector('.rohlik-preskocit').click();
+  check('přeskočit', box('n_cccc3333').classList.contains('preskoceno'), true);
+  dotazy = [];
+  document.getElementById('rohlikPridat').click();
+  await pockej(40);
+  const kos = dotazy.find(d => d.url === '/api/rohlik/kosik');
+  check('odešle vybrané s množstvím', kos && kos.telo.polozky.map(p => p.nakupId + ':' + p.productId + ':' + p.mnozstvi).join(','), 'n_aaaa1111:1349777:2,n_bbbb2222:56:1');
+  check('  hláška o přidání', /Přidáno 2 položek/.test(document.getElementById('rohlikStav').textContent), true);
+  check('  v okně zbude jen přeskočená', [...document.querySelectorAll('#rohlikSeznam .rohlik-polozka')].map(b => b.dataset.id).join(), 'n_cccc3333');
+  check('  a v seznamu je štítek', !!document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik'), true);
+  document.getElementById('rohlikZavrit').click();
+  check('Zavřít', rok.hidden, true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

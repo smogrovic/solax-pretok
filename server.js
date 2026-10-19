@@ -283,7 +283,8 @@ const state = {
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),
   nakup: [],         // nákupní seznam: { id, text, t }
-  oznameni: null,    // upozornění přes celou appku: { id, text, od }  // kdy se co naposledy odťuklo + přepínače popelnic
+  oznameni: null,    // upozornění přes celou appku: { id, text, od }
+  rohlikVyber: {},   // zapamatované výrobky z Rohlíku: „mléko" → { productId, nazev, … }  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -548,6 +549,7 @@ function snapshot() {
     pripominky: state.pripominky,
     nakup: state.nakup,
     oznameni: state.oznameni,
+    rohlik: { enabled: rohlikEnabled },
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
@@ -1933,6 +1935,7 @@ function nakupObnov(b, now = Date.now()) {
         || !x.text.trim() || !Number.isFinite(x.t) || state.nakup.some(y => y.id === x.id)) continue;
     const p = { id: x.id, text: x.text.trim().slice(0, NAKUP_TEXT_MAX), t: x.t };
     if (Number.isFinite(x.koupeno) && x.koupeno > 0 && x.koupeno <= now) p.koupeno = x.koupeno;
+    if (Number.isFinite(x.kosik) && x.kosik > 0 && x.kosik <= now) p.kosik = x.kosik;
     state.nakup.push(p);
   }
   state.nakup.sort((a, c) => a.t - c.t);
@@ -10872,6 +10875,7 @@ const STORE_POSTS = [
   '/api/sauna/zapnuto/restore',
   '/api/pripominky/restore',
   '/api/nakup/restore',
+  '/api/rohlik/vyber/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -10917,6 +10921,7 @@ function storeSnapshot() {
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
     '/api/nakup/restore': { nakup: state.nakup },
+    '/api/rohlik/vyber/restore': { vyber: state.rohlikVyber },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
@@ -11397,4 +11402,293 @@ const server = app.listen(PORT, async () => {
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
   scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
+});
+
+// ---------- Rohlík (košík) ----------
+// Položky z nákupního seznamu do košíku na Rohlíku přes jejich oficiální MCP server
+// (JSON-RPC přes HTTP). Objednávka se odsud NIKDY neodesílá — jen se plní košík,
+// objednává se v appce Rohlík. Přihlašovací údaje jsou jen v Render → Environment
+// (ROHLIK_EMAIL, ROHLIK_HESLO); nikam se nevypisují, do diagnostiky ani do logu.
+// Názvy a parametry nástrojů se zjišťují za běhu (tools/list) — v různých popisech
+// se liší a Rohlík je může měnit.
+const ROHLIK_URL = process.env.ROHLIK_MCP_URL || 'https://mcp.rohlik.cz/mcp';
+const ROHLIK_TIMEOUT_MS = 15000;
+const ROHLIK_VYBER_MAX = 300;
+const ROHLIK_EMAIL = process.env.ROHLIK_EMAIL || '';
+const ROHLIK_HESLO = process.env.ROHLIK_HESLO || '';
+const rohlikEnabled = !!(ROHLIK_EMAIL && ROHLIK_HESLO);
+let rohlikSezeni = null;          // Mcp-Session-Id
+let rohlikNastrojeCache = null;   // { seznam, ts }
+let rohlikRpcId = 1;
+const rohlikDiag = { chyba: null, kdy: 0, ukazka: null };
+
+function rohlikTajne(text) {
+  let t = String(text || '');
+  for (const v of [ROHLIK_EMAIL, ROHLIK_HESLO]) {
+    if (v) t = t.split(v).join('…');
+  }
+  return t;
+}
+
+// Odpověď MCP přijde jako JSON, nebo jako SSE („data: {…}") — bere se zpráva s id
+function rohlikPrectiOdpoved(text, id) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const zpravy = [];
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try { const j = JSON.parse(t); zpravy.push(...(Array.isArray(j) ? j : [j])); } catch {}
+  } else {
+    for (const blok of t.split(/\r?\n\r?\n/)) {
+      const data = blok.split(/\r?\n/).filter(r => r.startsWith('data:')).map(r => r.slice(5).trim()).join('\n');
+      if (!data) continue;
+      try { zpravy.push(JSON.parse(data)); } catch {}
+    }
+  }
+  return zpravy.find(z => z && z.id === id) || zpravy.find(z => z && (z.result || z.error)) || null;
+}
+
+class RohlikChyba extends Error {}
+
+async function rohlikPost(telo) {
+  const hlavicky = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+    'rhl-email': ROHLIK_EMAIL,
+    'rhl-pass': ROHLIK_HESLO
+  };
+  if (rohlikSezeni) hlavicky['Mcp-Session-Id'] = rohlikSezeni;
+  const ctrl = new AbortController();
+  const stopka = setTimeout(() => ctrl.abort(), ROHLIK_TIMEOUT_MS);
+  try {
+    const res = await fetch(ROHLIK_URL, { method: 'POST', headers: hlavicky, body: JSON.stringify(telo), signal: ctrl.signal });
+    const sid = res.headers && typeof res.headers.get === 'function' ? res.headers.get('mcp-session-id') : null;
+    if (sid) rohlikSezeni = sid;
+    const text = await res.text();
+    return { status: res.status, text };
+  } catch (err) {
+    throw new RohlikChyba(err && err.name === 'AbortError' ? 'Rohlík neodpověděl včas.' : 'Rohlík není dostupný.');
+  } finally {
+    clearTimeout(stopka);
+  }
+}
+
+async function rohlikInit() {
+  rohlikSezeni = null;
+  const id = rohlikRpcId++;
+  const r = await rohlikPost({ jsonrpc: '2.0', id, method: 'initialize', params: {
+    protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'smg-home', version: '1' } } });
+  if (r.status === 401 || r.status === 403) throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo.');
+  const o = rohlikPrectiOdpoved(r.text, id);
+  if (r.status >= 400 || !o || o.error) {
+    throw new RohlikChyba('Rohlík: přihlášení se nepovedlo' + (o && o.error && o.error.message ? ` (${rohlikTajne(o.error.message).slice(0, 120)})` : ` (HTTP ${r.status})`) + '.');
+  }
+  await rohlikPost({ jsonrpc: '2.0', method: 'notifications/initialized' });
+}
+
+// Jedno volání; bez sezení nebo po jeho vypršení (400/404) se jednou přihlásí znovu
+async function rohlikRpc(method, params) {
+  if (!rohlikEnabled) throw new RohlikChyba('Rohlík není nastavený (ROHLIK_EMAIL, ROHLIK_HESLO).');
+  for (let pokus = 0; pokus < 2; pokus++) {
+    if (!rohlikSezeni) await rohlikInit();
+    const id = rohlikRpcId++;
+    const r = await rohlikPost({ jsonrpc: '2.0', id, method, params });
+    if ((r.status === 400 || r.status === 404) && pokus === 0) { rohlikSezeni = null; continue; }
+    if (r.status === 401 || r.status === 403) throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo.');
+    const o = rohlikPrectiOdpoved(r.text, id);
+    if (!o) throw new RohlikChyba(`Rohlík: nečekaná odpověď (HTTP ${r.status}).`);
+    if (o.error) throw new RohlikChyba('Rohlík: ' + rohlikTajne(o.error.message || 'chyba').slice(0, 160));
+    return o.result;
+  }
+  throw new RohlikChyba('Rohlík: sezení se nepodařilo obnovit.');
+}
+
+async function rohlikNastroje(znovu = false) {
+  if (!znovu && rohlikNastrojeCache && Date.now() - rohlikNastrojeCache.ts < 6 * 3600000) return rohlikNastrojeCache.seznam;
+  const r = await rohlikRpc('tools/list', {});
+  const seznam = (r && Array.isArray(r.tools)) ? r.tools : [];
+  rohlikNastrojeCache = { seznam, ts: Date.now() };
+  return seznam;
+}
+
+// Nástroj podle slov v názvu (všechna musí sedět), např. ['search','product']
+function rohlikNastroj(seznam, slova, ne = []) {
+  return (seznam || []).find(t => {
+    const n = String(t && t.name || '').toLowerCase();
+    return slova.every(s => (Array.isArray(s) ? s.some(x => n.includes(x)) : n.includes(s))) && !ne.some(x => n.includes(x));
+  }) || null;
+}
+
+const rohlikVlastnosti = t => (t && t.inputSchema && t.inputSchema.properties) || {};
+
+// Argumenty pro hledání: textový parametr podle obvyklých názvů, jinak první řetězec
+function rohlikArgHledani(t, dotaz) {
+  const vl = rohlikVlastnosti(t);
+  const jmena = Object.keys(vl);
+  const klic = ['query', 'keyword', 'search', 'q', 'term', 'text', 'name'].find(k => jmena.includes(k))
+    || jmena.find(k => (vl[k] && vl[k].type) === 'string') || 'query';
+  const arg = { [klic]: dotaz };
+  for (const k of ['limit', 'max_results', 'maxResults', 'size']) if (jmena.includes(k)) { arg[k] = 8; break; }
+  return arg;
+}
+
+// Argumenty pro košík: pole položek (`items`, `products`) s productId + quantity,
+// nebo jednotlivá položka (product_id / productId + quantity)
+function rohlikArgKosik(t, polozky) {
+  const vl = rohlikVlastnosti(t);
+  const jmena = Object.keys(vl);
+  const poleKlic = jmena.find(k => vl[k] && vl[k].type === 'array');
+  if (poleKlic) {
+    const prvky = (vl[poleKlic].items && vl[poleKlic].items.properties) || {};
+    const pk = Object.keys(prvky);
+    const idK = ['productId', 'product_id', 'id'].find(k => pk.includes(k)) || 'productId';
+    const mnK = ['quantity', 'qty', 'amount', 'count'].find(k => pk.includes(k)) || 'quantity';
+    return [{ [poleKlic]: polozky.map(p => ({ [idK]: p.productId, [mnK]: p.mnozstvi })) }];
+  }
+  const idK = ['productId', 'product_id', 'id'].find(k => jmena.includes(k)) || 'productId';
+  const mnK = ['quantity', 'qty', 'amount', 'count'].find(k => jmena.includes(k)) || 'quantity';
+  return polozky.map(p => ({ [idK]: p.productId, [mnK]: p.mnozstvi }));
+}
+
+// Výrobky z výsledku nástroje — z structuredContent i z JSON v textu. Projde
+// libovolně vnořená pole a vezme objekty, které mají id a název.
+function rohlikVyrobky(result) {
+  const zdroje = [];
+  if (result && result.structuredContent) zdroje.push(result.structuredContent);
+  for (const c of (result && Array.isArray(result.content) ? result.content : [])) {
+    if (c && c.type === 'text' && typeof c.text === 'string') {
+      try { zdroje.push(JSON.parse(c.text)); } catch {}
+    }
+  }
+  const out = [], videno = new Set();
+  const cislo = v => (typeof v === 'number' ? v : (v && typeof v === 'object' && typeof v.amount === 'number' ? v.amount : null));
+  const projdi = (x, hloubka) => {
+    if (!x || hloubka > 6) return;
+    if (Array.isArray(x)) { for (const y of x) projdi(y, hloubka + 1); return; }
+    if (typeof x !== 'object') return;
+    const id = x.productId ?? x.product_id ?? x.id;
+    const nazev = x.name ?? x.productName ?? x.title;
+    if ((typeof id === 'number' || typeof id === 'string') && typeof nazev === 'string' && !videno.has(String(id))) {
+      videno.add(String(id));
+      out.push({
+        productId: id,
+        nazev: nazev.slice(0, 120),
+        cena: cislo(x.price ?? x.prices?.price ?? x.priceWithVat ?? x.actualPrice),
+        jednotka: typeof (x.textualAmount ?? x.unit ?? x.amount) === 'string' ? String(x.textualAmount ?? x.unit ?? x.amount).slice(0, 30) : null,
+        obrazek: [x.image, x.imageUrl, x.img, Array.isArray(x.images) ? x.images[0] : null]
+          .find(u => typeof u === 'string' && /^https:\/\//.test(u)) || null
+      });
+      return;
+    }
+    for (const v of Object.values(x)) projdi(v, hloubka + 1);
+  };
+  for (const z of zdroje) projdi(z, 0);
+  return out;
+}
+
+async function rohlikHledej(dotaz) {
+  const nastroje = await rohlikNastroje();
+  const t = rohlikNastroj(nastroje, ['search', 'product']) || rohlikNastroj(nastroje, ['search'], ['recipe', 'order']);
+  if (!t) throw new RohlikChyba('Rohlík: nástroj pro hledání nenalezen (viz diagnostika).');
+  const result = await rohlikRpc('tools/call', { name: t.name, arguments: rohlikArgHledani(t, dotaz) });
+  const vyrobky = rohlikVyrobky(result).slice(0, 8);
+  if (!vyrobky.length && result) {
+    rohlikDiag.ukazka = rohlikTajne(JSON.stringify(result)).slice(0, 600);
+  }
+  return vyrobky;
+}
+
+async function rohlikDoKosiku(polozky) {
+  const nastroje = await rohlikNastroje();
+  const t = rohlikNastroj(nastroje, ['cart', 'add']) || rohlikNastroj(nastroje, ['add', ['item', 'product']], ['list', 'recipe']);
+  if (!t) throw new RohlikChyba('Rohlík: nástroj pro košík nenalezen (viz diagnostika).');
+  for (const args of rohlikArgKosik(t, polozky)) {
+    const r = await rohlikRpc('tools/call', { name: t.name, arguments: args });
+    if (r && r.isError) {
+      const txt = (r.content || []).map(c => c && c.text).filter(Boolean).join(' ');
+      throw new RohlikChyba('Rohlík: ' + rohlikTajne(txt || 'košík odmítl položku').slice(0, 160));
+    }
+  }
+}
+
+// Paměť výběrů: „mléko" → konkrétní výrobek. Klíč bez diakritiky a velikosti písmen.
+const rohlikKlic = text => String(text || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80);
+
+function rohlikZapamatuj(text, v, now = Date.now()) {
+  const k = rohlikKlic(text);
+  if (!k || !v || (typeof v.productId !== 'number' && typeof v.productId !== 'string')) return;
+  state.rohlikVyber[k] = { productId: v.productId, nazev: String(v.nazev || '').slice(0, 120),
+    obrazek: typeof v.obrazek === 'string' && /^https:\/\//.test(v.obrazek) ? v.obrazek : null,
+    cena: typeof v.cena === 'number' ? v.cena : null, kdy: now };
+  const klice = Object.keys(state.rohlikVyber);
+  if (klice.length > ROHLIK_VYBER_MAX) {
+    klice.sort((a, b) => state.rohlikVyber[a].kdy - state.rohlikVyber[b].kdy);
+    for (const x of klice.slice(0, klice.length - ROHLIK_VYBER_MAX)) delete state.rohlikVyber[x];
+  }
+}
+
+function rohlikVyberObnov(b) {
+  if (!b || !b.vyber || typeof b.vyber !== 'object') return false;
+  for (const [k, v] of Object.entries(b.vyber)) {
+    if (typeof k !== 'string' || k.length > 80 || state.rohlikVyber[k] || !v) continue;
+    rohlikZapamatuj(k, v, Number.isFinite(v.kdy) ? v.kdy : 0);
+  }
+  return true;
+}
+
+const rohlikOdpovezChybou = (res, err) => {
+  rohlikDiag.chyba = rohlikTajne(err && err.message || String(err)).slice(0, 200);
+  rohlikDiag.kdy = Date.now();
+  res.status(err instanceof RohlikChyba ? 502 : 500).json({ error: err instanceof RohlikChyba ? err.message : 'Rohlík: chyba.' });
+};
+
+app.get('/api/rohlik/hledat', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const q = String((req.query && req.query.q) || '').trim().slice(0, 80);
+  if (!q) return res.status(400).json({ error: 'Chybí co hledat.' });
+  try { res.json({ ok: true, vyrobky: await rohlikHledej(q) }); }
+  catch (err) { rohlikOdpovezChybou(res, err); }
+});
+
+app.get('/api/rohlik/vyber', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  res.json({ ok: true, vyber: state.rohlikVyber });
+});
+
+app.post('/api/rohlik/kosik', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const vstup = req.body && Array.isArray(req.body.polozky) ? req.body.polozky.slice(0, 50) : [];
+  const polozky = vstup.filter(p => p && (typeof p.productId === 'number' || (typeof p.productId === 'string' && p.productId.length <= 40)))
+    .map(p => ({ ...p, mnozstvi: Number.isInteger(p.mnozstvi) && p.mnozstvi >= 1 && p.mnozstvi <= 20 ? p.mnozstvi : 1 }));
+  if (!polozky.length) return res.status(400).json({ error: 'Nic k přidání.' });
+  try {
+    await rohlikDoKosiku(polozky);
+  } catch (err) { return rohlikOdpovezChybou(res, err); }
+  const ted = Date.now();
+  for (const p of polozky) {
+    const n = state.nakup.find(x => x.id === p.nakupId);
+    if (n) {
+      n.kosik = ted;
+      rohlikZapamatuj(n.text, p, ted);
+    }
+  }
+  broadcast('nakup', { nakup: state.nakup });
+  res.json({ ok: true, pridano: polozky.length, nakup: state.nakup });
+});
+
+app.post('/api/rohlik/vyber/restore', (req, res) => {
+  if (!rohlikVyberObnov(req.body)) return res.status(400).json({ error: 'Chybí vyber.' });
+  res.json({ ok: true });
+});
+
+// Pro doladění po nasazení: jaké nástroje Rohlík nabízí a poslední chyba. Bez hesel.
+app.get('/api/rohlik/diagnostika', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka };
+  if (rohlikEnabled) {
+    try {
+      out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));
+    } catch (err) { out.chyba = rohlikTajne(err.message); }
+  }
+  res.json(JSON.parse(rohlikTajne(JSON.stringify(out))));
 });

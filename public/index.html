@@ -1410,6 +1410,29 @@
     padding:0;cursor:pointer;color:#fff;font-size:14px;font-weight:800;line-height:1;}
   .nakup-seznam li.koupeno .nakup-odskrt{background:#2e9d57;opacity:0.6;}
   .nakup-prazdno{font-size:13px;color:var(--muted);text-align:center;padding:14px 0 4px;}
+  .nakup-kosik{flex:0 0 auto;font-size:11px;font-weight:700;color:#2e9d57;background:rgba(46,157,87,0.12);
+    border-radius:8px;padding:2px 6px;}
+  .rohlik-btn{width:100%;margin-top:10px;border:none;border-radius:14px;padding:11px 12px;font:inherit;font-size:14px;
+    font-weight:800;background:#ffd23f;color:#3b2a00;cursor:pointer;}
+  .rohlik-btn[hidden]{display:none;}
+  .rohlik-box{max-width:520px;max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;}
+  .rohlik-seznam{overflow:auto;margin-top:10px;flex:1;min-height:0;}
+  .rohlik-polozka{padding:10px 0;border-top:1px solid rgba(44,62,80,0.1);}
+  .rohlik-polozka.preskoceno{opacity:0.45;}
+  .rohlik-hlava{display:flex;align-items:center;gap:8px;font-weight:800;color:var(--navy);font-size:14px;}
+  .rohlik-hlava .rohlik-nazev{flex:1;overflow-wrap:anywhere;}
+  .rohlik-mnozstvi{display:flex;align-items:center;gap:4px;}
+  .rohlik-mnozstvi button{width:26px;height:26px;border:none;border-radius:8px;background:rgba(44,62,80,0.08);
+    font:inherit;font-weight:800;cursor:pointer;padding:0;}
+  .rohlik-vyrobky{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .rohlik-vyrobek{display:flex;align-items:center;gap:8px;border:2px solid transparent;border-radius:12px;
+    background:rgba(44,62,80,0.05);padding:6px 8px;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--navy);}
+  .rohlik-vyrobek.vybrany{border-color:#2e9d57;background:rgba(46,157,87,0.10);}
+  .rohlik-vyrobek img{width:40px;height:40px;object-fit:contain;border-radius:8px;background:#fff;flex:0 0 auto;}
+  .rohlik-vyrobek .rohlik-cena{margin-left:auto;font-weight:800;white-space:nowrap;}
+  .rohlik-odkazy{display:flex;gap:14px;margin-top:6px;font-size:12px;}
+  .rohlik-odkazy button{border:none;background:none;padding:0;font:inherit;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
+  .rohlik-info{font-size:12px;color:var(--muted);margin-top:6px;}
   .nakup-proklik{width:100%;display:flex;align-items:center;gap:8px;border:none;border-radius:14px;
     padding:12px 14px;margin-top:10px;background:rgba(46,157,87,0.10);color:#1f6e3c;font:inherit;
     font-size:14px;font-weight:700;cursor:pointer;text-align:left;}
@@ -3747,8 +3770,21 @@
     </form>
     <ul class="nakup-seznam" id="nakupSeznam"></ul>
     <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
+    <button class="rohlik-btn" id="rohlikBtn" type="button" hidden>🥐 Do košíku na Rohlíku</button>
     <div class="potvrz-btns jeden">
       <button class="potvrz-zpet" id="nakupZavrit" type="button">Zavřít</button>
+    </div>
+  </div>
+</div>
+<div class="potvrz" id="rohlikOkno" hidden>
+  <div class="potvrz-box rohlik-box">
+    <div class="potvrz-nadpis">🥐 Do košíku na Rohlíku</div>
+    <div class="potvrz-text">Vyber výrobek ke každé položce. Appka si ho zapamatuje a příště ho vybere sama. Objednávku dokončíš v appce Rohlík.</div>
+    <div class="rohlik-seznam" id="rohlikSeznam"></div>
+    <div class="potvrz-text" id="rohlikStav"></div>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="rohlikZavrit" type="button">Zavřít</button>
+      <button class="potvrz-ano rohlik-pridat" id="rohlikPridat" type="button">Přidat do košíku</button>
     </div>
   </div>
 </div>
@@ -11218,6 +11254,7 @@ function applySnapshot(snap) {
   saunaZapnutoData = snap.saunaZapnuto || null;
   bezpecne(renderHuum);
   pripData = snap.pripominky || null;
+  rohlikData = snap.rohlik || null;
   nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
   bezpecne(renderNakup);
   oznameniData = snap.oznameni || null;
@@ -12707,6 +12744,8 @@ const nakupSeznamEl = document.getElementById('nakupSeznam');
 const nakupVstupEl = document.getElementById('nakupVstup');
 const nakupChybaEl = document.getElementById('nakupChyba');
 
+let rohlikData = null;
+const rohlikBtnEl = document.getElementById('rohlikBtn');
 // Co se ještě kupuje — jen to svítí na zelené záložce
 const nakupNekoupene = () => (nakupData || []).filter(p => !p.koupeno);
 
@@ -12731,6 +12770,7 @@ function renderNakup(now = Date.now()) {
     nakupSeznamEl.appendChild(li);
     return;
   }
+  if (rohlikBtnEl) rohlikBtnEl.hidden = !(rohlikData && rohlikData.enabled && nekoupene.some(p => !p.kosik));
   for (const p of [...nekoupene, ...koupene]) {
     const li = document.createElement('li');
     li.className = p.koupeno ? 'koupeno' : '';
@@ -12746,6 +12786,12 @@ function renderNakup(now = Date.now()) {
     btn.textContent = p.koupeno ? '✓' : '';
     btn.addEventListener('click', () => nakupOdskrtni(p, !p.koupeno));
     li.append(btn, text);
+    if (p.kosik && !p.koupeno) {
+      const k = document.createElement('span');
+      k.className = 'nakup-kosik';
+      k.textContent = '🛒 v košíku';
+      li.appendChild(k);
+    }
     nakupSeznamEl.appendChild(li);
   }
 }
@@ -12789,6 +12835,163 @@ if (nakupOknoEl) {
     if (await nakupPost('/api/nakup', { text })) nakupVstupEl.value = '';
     nakupVstupEl.focus();
   });
+}
+
+// ---------- Rohlík: nákupní seznam do košíku ----------
+// Ke každé nekoupené položce (která ještě není v košíku) jeden výrobek. Zapamatovaný
+// výběr je předvybraný, ostatní se hledají. Objednávka se odsud neodesílá.
+const rohlikOknoEl = document.getElementById('rohlikOkno');
+const rohlikSeznamEl = document.getElementById('rohlikSeznam');
+const rohlikStavEl = document.getElementById('rohlikStav');
+const rohlikPridatEl = document.getElementById('rohlikPridat');
+let rohlikRadky = [];   // { polozka, vyber, vysledky, hledam, chyba, preskocit, mnozstvi }
+
+const rohlikKlicJs = text => String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80);
+
+async function rohlikGet(adresa) {
+  const res = await fetch(adresa, { headers: { 'X-Auth-Token': authToken } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+  if (!res.ok) throw new Error(data.error || 'Rohlík neodpovídá.');
+  return data;
+}
+
+async function rohlikOtevri() {
+  if (!rohlikOknoEl) return;
+  const polozky = (nakupData || []).filter(p => !p.koupeno && !p.kosik).sort((a, b) => a.t - b.t);
+  rohlikRadky = polozky.map(p => ({ polozka: p, vyber: null, vysledky: null, hledam: false, chyba: '', preskocit: false, mnozstvi: 1 }));
+  rohlikStavEl.textContent = 'Načítám…';
+  rohlikOknoEl.hidden = false;
+  renderRohlik();
+  let vyber = {};
+  try { vyber = (await rohlikGet('/api/rohlik/vyber')).vyber || {}; }
+  catch (err) { rohlikStavEl.textContent = err.message; return; }
+  rohlikStavEl.textContent = '';
+  for (const r of rohlikRadky) r.vyber = vyber[rohlikKlicJs(r.polozka.text)] || null;
+  renderRohlik();
+  // Co nemá zapamatovaný výrobek, se hledá — po jednom, ať se Rohlík nezahltí
+  for (const r of rohlikRadky) if (!r.vyber) await rohlikHledej(r);
+}
+
+async function rohlikHledej(r) {
+  r.hledam = true; r.chyba = ''; renderRohlik();
+  try { r.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(r.polozka.text))).vyrobky || []; }
+  catch (err) { r.chyba = err.message; r.vysledky = []; }
+  r.hledam = false;
+  renderRohlik();
+}
+
+function rohlikVyrobekEl(v, vybrany, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rohlik-vyrobek' + (vybrany ? ' vybrany' : '');
+  if (v.obrazek) { const img = document.createElement('img'); img.src = v.obrazek; img.alt = ''; img.loading = 'lazy'; b.appendChild(img); }
+  const n = document.createElement('span');
+  n.textContent = v.nazev + (v.jednotka ? ' · ' + v.jednotka : '');
+  b.appendChild(n);
+  if (typeof v.cena === 'number') {
+    const c = document.createElement('span');
+    c.className = 'rohlik-cena';
+    c.textContent = v.cena.toFixed(2).replace('.', ',') + ' Kč';
+    b.appendChild(c);
+  }
+  if (onClick) b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderRohlik() {
+  if (!rohlikSeznamEl) return;
+  rohlikSeznamEl.textContent = '';
+  if (!rohlikRadky.length) {
+    const d = document.createElement('div');
+    d.className = 'rohlik-info';
+    d.textContent = 'Všechno z nákupního seznamu už je v košíku nebo koupené.';
+    rohlikSeznamEl.appendChild(d);
+  }
+  for (const r of rohlikRadky) {
+    const box = document.createElement('div');
+    box.className = 'rohlik-polozka' + (r.preskocit ? ' preskoceno' : '');
+    box.dataset.id = r.polozka.id;
+    const hlava = document.createElement('div');
+    hlava.className = 'rohlik-hlava';
+    const nazev = document.createElement('span');
+    nazev.className = 'rohlik-nazev';
+    nazev.textContent = r.polozka.text;
+    const mn = document.createElement('span');
+    mn.className = 'rohlik-mnozstvi';
+    const minus = document.createElement('button'); minus.type = 'button'; minus.textContent = '−';
+    const pocet = document.createElement('span'); pocet.className = 'rohlik-pocet'; pocet.textContent = r.mnozstvi + '×';
+    const plus = document.createElement('button'); plus.type = 'button'; plus.textContent = '+';
+    minus.addEventListener('click', () => { r.mnozstvi = Math.max(1, r.mnozstvi - 1); renderRohlik(); });
+    plus.addEventListener('click', () => { r.mnozstvi = Math.min(20, r.mnozstvi + 1); renderRohlik(); });
+    mn.append(minus, pocet, plus);
+    hlava.append(nazev, mn);
+    box.appendChild(hlava);
+    const vyrobky = document.createElement('div');
+    vyrobky.className = 'rohlik-vyrobky';
+    if (r.vyber) vyrobky.appendChild(rohlikVyrobekEl(r.vyber, true, null));
+    if (r.vysledky) {
+      for (const v of r.vysledky.slice(0, 5)) {
+        if (r.vyber && String(v.productId) === String(r.vyber.productId)) continue;
+        vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; r.vysledky = null; renderRohlik(); }));
+      }
+    }
+    box.appendChild(vyrobky);
+    const info = document.createElement('div');
+    info.className = 'rohlik-info';
+    info.textContent = r.hledam ? 'Hledám…' : r.chyba ? r.chyba
+      : (r.vysledky && !r.vysledky.length ? 'Nic se nenašlo.' : (!r.vyber && r.vysledky ? 'Klepni na výrobek.' : ''));
+    if (info.textContent) box.appendChild(info);
+    const odkazy = document.createElement('div');
+    odkazy.className = 'rohlik-odkazy';
+    if (r.vyber && !r.vysledky) {
+      const zmenit = document.createElement('button'); zmenit.type = 'button'; zmenit.textContent = 'změnit';
+      zmenit.addEventListener('click', () => rohlikHledej(r));
+      odkazy.appendChild(zmenit);
+    }
+    const presk = document.createElement('button'); presk.type = 'button'; presk.className = 'rohlik-preskocit';
+    presk.textContent = r.preskocit ? 'nepřeskakovat' : 'přeskočit';
+    presk.addEventListener('click', () => { r.preskocit = !r.preskocit; renderRohlik(); });
+    odkazy.appendChild(presk);
+    box.appendChild(odkazy);
+    rohlikSeznamEl.appendChild(box);
+  }
+  const n = rohlikRadky.filter(r => r.vyber && !r.preskocit).length;
+  rohlikPridatEl.textContent = 'Přidat do košíku (' + n + ')';
+  rohlikPridatEl.disabled = !n;
+}
+
+async function rohlikPridej() {
+  const polozky = rohlikRadky.filter(r => r.vyber && !r.preskocit).map(r => ({
+    nakupId: r.polozka.id, productId: r.vyber.productId, nazev: r.vyber.nazev,
+    obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, mnozstvi: r.mnozstvi }));
+  if (!polozky.length) return;
+  rohlikPridatEl.disabled = true;
+  rohlikStavEl.textContent = 'Přidávám…';
+  try {
+    const res = await fetch('/api/rohlik/kosik', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ polozky })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se přidat.');
+    if (Array.isArray(data.nakup)) nakupData = data.nakup;
+    renderNakup();
+    rohlikRadky = rohlikRadky.filter(r => !(r.vyber && !r.preskocit));
+    renderRohlik();
+    rohlikStavEl.textContent = 'Přidáno ' + data.pridano + ' položek. Objednávku dokonči v appce Rohlík.';
+  } catch (err) {
+    rohlikStavEl.textContent = err.message;
+    renderRohlik();
+  }
+}
+
+if (rohlikOknoEl) {
+  rohlikBtnEl.addEventListener('click', () => { nakupOtevri(false); rohlikOtevri(); });
+  document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
+  rohlikPridatEl.addEventListener('click', rohlikPridej);
 }
 
 // ---------- Upozornění pro všechny ----------
