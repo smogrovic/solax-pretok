@@ -11500,12 +11500,13 @@ let rohlikNastrojeCache = null;   // { seznam, ts }
 let rohlikRpcId = 1;
 const rohlikDiag = { chyba: null, kdy: 0, ukazka: null, prihlaseni: null };
 
-const rohlikPrihlasen = () => !!(state.rohlikOauth && state.rohlikOauth.access);
+// Přihlášeno = vyplněné údaje pro web (viz níž), nebo platný OAuth token
+const rohlikPrihlasen = () => rohlikWebZapnuto || !!(state.rohlikOauth && state.rohlikOauth.access);
 
 function rohlikTajne(text) {
   let t = String(text || '');
   const o = state.rohlikOauth || {};
-  for (const v of [o.access, o.refresh, o.clientSecret]) {
+  for (const v of [o.access, o.refresh, o.clientSecret, ROHLIK_EMAIL, ROHLIK_HESLO]) {
     if (v && v.length >= 6) t = t.split(v).join('…');
   }
   return t;
@@ -11835,7 +11836,7 @@ function rohlikVyrobky(result) {
       out.push({
         productId: id,
         nazev: nazev.slice(0, 120),
-        cena: cislo(x.price ?? x.prices?.price ?? x.priceWithVat ?? x.actualPrice),
+        cena: cislo(x.price?.full ?? x.price ?? x.prices?.price ?? x.priceWithVat ?? x.actualPrice),
         jednotka: typeof (x.textualAmount ?? x.unit ?? x.amount) === 'string' ? String(x.textualAmount ?? x.unit ?? x.amount).slice(0, 30) : null,
         obrazek: [x.image, x.imageUrl, x.img, Array.isArray(x.images) ? x.images[0] : null]
           .find(u => typeof u === 'string' && /^https:\/\//.test(u)) || null
@@ -11848,7 +11849,100 @@ function rohlikVyrobky(result) {
   return out;
 }
 
+// ---- Přihlášení e-mailem a heslem přes web Rohlíku ----
+// Oficiální MCP server pouští jen schválené aplikace (samoregistrovanou odmítne
+// u přihlášení: „OAuth 2.0 Parameter: client_id"). Tohle je neveřejné rozhraní
+// jejich webu — stejné, jaké používá integrace pro Home Assistant. Může se kdykoli
+// změnit. Údaje jen v Render → Environment (ROHLIK_EMAIL, ROHLIK_HESLO); nikam se
+// nevypisují. Když jsou vyplněné, má tahle cesta přednost před OAuth.
+const ROHLIK_WEB = process.env.ROHLIK_WEB_URL || 'https://www.rohlik.cz';
+const rohlikUdaj = v => String(v || '').trim().replace(/^(["'])(.*)\1$/, '$2');
+const ROHLIK_EMAIL = rohlikUdaj(process.env.ROHLIK_EMAIL);
+const ROHLIK_HESLO = rohlikUdaj(process.env.ROHLIK_HESLO);
+const rohlikWebZapnuto = !!(ROHLIK_EMAIL && ROHLIK_HESLO);
+let rohlikCookies = {};
+let rohlikWebPrihlasen = false;
+
+function rohlikUlozCookies(res) {
+  const h = res && res.headers;
+  if (!h) return;
+  let radky = [];
+  if (typeof h.getSetCookie === 'function') radky = h.getSetCookie();
+  else if (typeof h.get === 'function' && h.get('set-cookie')) radky = String(h.get('set-cookie')).split(/,(?=\s*[\w.-]+=)/);
+  for (const r of radky) {
+    const m = /^\s*([^=;\s]+)=([^;]*)/.exec(r);
+    if (m) rohlikCookies[m[1]] = m[2];
+  }
+}
+const rohlikCookieHlavicka = () => Object.entries(rohlikCookies).map(([k, v]) => `${k}=${v}`).join('; ');
+
+async function rohlikWebFetch(cesta, opts = {}) {
+  const res = await rohlikFetch(ROHLIK_WEB + cesta, { ...opts, headers: {
+    Accept: 'application/json', 'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    Cookie: rohlikCookieHlavicka(), ...(opts.headers || {}) } });
+  rohlikUlozCookies(res);
+  const text = await res.text();
+  let j = null;
+  try { j = JSON.parse(text); } catch {}
+  const typ = res.headers && typeof res.headers.get === 'function' ? (res.headers.get('content-type') || '') : '';
+  return { status: res.status, j, text, typ };
+}
+
+function rohlikWebChyba(r, co) {
+  rohlikDiag.web = { co, stav: r.status, ukazka: rohlikTajne(String(r.text || '')).slice(0, 300), kdy: Date.now() };
+  if (/text\/html/i.test(r.typ) || /cloudflare|<html|captcha/i.test(r.text || '')) {
+    return new RohlikChyba('Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
+  }
+  const zprava = r.j && (r.j.messages && r.j.messages[0] && r.j.messages[0].content || r.j.message || r.j.error);
+  return new RohlikChyba(`Rohlík (${co}): HTTP ${r.status}` + (zprava ? ` — ${rohlikTajne(String(zprava)).slice(0, 120)}` : ''));
+}
+
+async function rohlikWebLogin() {
+  rohlikCookies = {};
+  rohlikWebPrihlasen = false;
+  const r = await rohlikWebFetch('/services/frontend-service/login', { method: 'POST',
+    body: JSON.stringify({ email: ROHLIK_EMAIL, password: ROHLIK_HESLO, name: '' }) });
+  const odmitnuto = r.status === 401 || (r.status === 403 && !/html/i.test(r.typ))
+    || (r.j && (r.j.status === 401 || r.j.status === 403));
+  if (odmitnuto) {
+    rohlikWebChyba(r, 'přihlášení');
+    throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo (ROHLIK_EMAIL / ROHLIK_HESLO v Renderu).');
+  }
+  if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'přihlášení');
+  rohlikWebPrihlasen = true;
+}
+
+// Volání s přihlášením; vypršelé přihlášení (401/403) se jednou obnoví
+async function rohlikWeb(cesta, opts) {
+  if (!rohlikWebPrihlasen) await rohlikWebLogin();
+  let r = await rohlikWebFetch(cesta, opts);
+  if (r.status === 401 || (r.status === 403 && !/html/i.test(r.typ))) {
+    await rohlikWebLogin();
+    r = await rohlikWebFetch(cesta, opts);
+  }
+  return r;
+}
+
+async function rohlikWebHledej(dotaz) {
+  const q = new URLSearchParams({ search: dotaz, offset: '0', limit: '10', companyId: '1', canCorrect: 'true' });
+  const r = await rohlikWeb('/services/frontend-service/search-metadata?' + q.toString());
+  if (r.status >= 300 || !r.j) throw rohlikWebChyba(r, 'hledání');
+  const vyrobky = rohlikVyrobky({ structuredContent: r.j }).slice(0, 8);
+  if (!vyrobky.length) rohlikDiag.ukazka = rohlikTajne(r.text).slice(0, 600);
+  return vyrobky;
+}
+
+async function rohlikWebKosik(polozky) {
+  for (const p of polozky) {
+    const r = await rohlikWeb('/services/frontend-service/v2/cart', { method: 'POST', body: JSON.stringify({
+      actionId: null, productId: Number(p.productId), quantity: p.mnozstvi, recipeId: null, source: 'true:Shopping Lists' }) });
+    if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'košík');
+  }
+}
+
 async function rohlikHledej(dotaz) {
+  if (rohlikWebZapnuto) return rohlikWebHledej(dotaz);
   const nastroje = await rohlikNastroje();
   const t = rohlikNastroj(nastroje, ['search', 'product']) || rohlikNastroj(nastroje, ['search'], ['recipe', 'order']);
   if (!t) throw new RohlikChyba('Rohlík: nástroj pro hledání nenalezen (viz diagnostika).');
@@ -11861,6 +11955,7 @@ async function rohlikHledej(dotaz) {
 }
 
 async function rohlikDoKosiku(polozky) {
+  if (rohlikWebZapnuto) return rohlikWebKosik(polozky);
   const nastroje = await rohlikNastroje();
   const t = rohlikNastroj(nastroje, ['cart', 'add']) || rohlikNastroj(nastroje, ['add', ['item', 'product']], ['list', 'recipe']);
   if (!t) throw new RohlikChyba('Rohlík: nástroj pro košík nenalezen (viz diagnostika).');
@@ -12032,7 +12127,8 @@ app.get('/api/rohlik/diagnostika', async (req, res) => {
   const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
     oauth: { prihlaseno: rohlikPrihlasen(), klient: o.clientId || null, redirect: o.redirect || null, obnovovaciToken: !!o.refresh,
       vyprsi: o.exp ? new Date(o.exp).toISOString() : null, meta: o.meta || null, staraRegistrace: rohlikDiag.staraRegistrace || null },
-    prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null, start: rohlikDiag.start || null };
+    prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null, start: rohlikDiag.start || null,
+    web: { zapnuto: rohlikWebZapnuto, prihlasen: rohlikWebPrihlasen, posledni: rohlikDiag.web || null } };
   if (rohlikPrihlasen()) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));

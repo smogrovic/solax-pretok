@@ -71,17 +71,17 @@ function falesny({ nastroje, hledani, kosik, sse = false, odmitni = null, vyprsi
   return { fetch, log, st };
 }
 
-function build(f, { prihlasen = true, odemceno = true } = {}) {
+function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
   const state = { nakup: [], rohlikVyber: {},
     rohlikOauth: prihlasen ? { clientId: 'klient-1', access: ACCESS, refresh: REFRESH, redirect: 'https://app/api/rohlik/oauth/zpet' } : null };
   const routy = {}, zpravy = [];
   const api = new Function('state', 'app', 'requireAuth', 'broadcast', 'fetch', 'process', 'crypto',
     CODE + '\n; return { rohlikHledej, rohlikDoKosiku, rohlikVyrobky, rohlikPrectiOdpoved, rohlikKlic, rohlikZapamatuj,'
          + ' rohlikVyberObnov, rohlikArgKosik, rohlikArgHledani, ROHLIK_VYBER_MAX, rohlikPayload, rohlikOauthStart,'
-         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni };'
+         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni, rohlikDiag };'
   )(state, { get: (c, h) => { routy['GET ' + c] = h; }, post: (c, h) => { routy['POST ' + c] = h; } },
     (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
-    (u, d) => zpravy.push({ u, d }), f.fetch, process, require('crypto'));
+    (u, d) => zpravy.push({ u, d }), f.fetch, { env }, require('crypto'));
   const volej = async (cesta, { query, body } = {}) => {
     let out = null, kod = 200, kam = null;
     const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; }, redirect: u => { kam = u; return res; } };
@@ -89,6 +89,46 @@ function build(f, { prihlasen = true, odemceno = true } = {}) {
     return { out, kod, kam };
   };
   return { api, state, volej, zpravy };
+}
+
+
+// Falešný web Rohlíku (neveřejné rozhraní): přihlášení e-mailem → cookie, hledání, košík
+const EMAIL = 'jana.test@example.cz', HESLO = 'Heslo-Tajne-987';
+function falesnyWeb({ html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false } = {}) {
+  const log = [];
+  let prihlaseni = 0, volani = 0;
+  const odpovez = (status, telo, typ = 'application/json', cookie = null) => ({
+    status,
+    headers: { get: k => ({ 'content-type': typ, 'set-cookie': cookie })[k.toLowerCase()] || null },
+    text: async () => (typeof telo === 'string' ? telo : JSON.stringify(telo))
+  });
+  const fetch = async (url, opts = {}) => {
+    const u = new URL(String(url));
+    log.push({ cesta: u.pathname, query: Object.fromEntries(u.searchParams), metoda: opts.method || 'GET', hlavicky: opts.headers, telo: opts.body ? JSON.parse(opts.body) : null });
+    if (html) return odpovez(403, '<html><title>Just a moment...</title>cloudflare</html>', 'text/html');
+    if (u.pathname === '/services/frontend-service/login') {
+      const t = JSON.parse(opts.body);
+      if (spatneHeslo || t.email !== EMAIL || t.password !== HESLO) {
+        return odpovez(401, { status: 401, messages: [{ content: 'Neplatný e-mail ' + t.email + ' nebo heslo ' + t.password }] });
+      }
+      prihlaseni++;
+      return odpovez(200, { status: 200, data: { user: { id: 1 } } }, 'application/json', `PHPSESSIONID=sez${prihlaseni}; Path=/; HttpOnly`);
+    }
+    if (opts.headers.Cookie !== 'PHPSESSIONID=sez' + prihlaseni) return odpovez(401, { status: 401 });
+    volani++;
+    if (vyprsiPo && volani === vyprsiPo) { prihlaseni += 100; return odpovez(401, { status: 401 }); }
+    if (u.pathname === '/services/frontend-service/search-metadata') {
+      return odpovez(200, { status: 200, data: { productList: [
+        { productId: 1349777, productName: 'Kunín Mléko polotučné 1,5%', price: { full: 24.9, currency: 'CZK' }, textualAmount: '1 l', imageUrl: 'https://cdn.rohlik.cz/1.jpg' },
+        { productId: 1234, productName: 'Olma mléko', price: { full: 22.5, currency: 'CZK' } }] } });
+    }
+    if (u.pathname === '/services/frontend-service/v2/cart' && opts.method === 'POST') {
+      if (kosikChyba) return odpovez(400, { status: 400, messages: [{ content: 'Produkt není skladem' }] });
+      return odpovez(200, { status: 200, data: {} });
+    }
+    return odpovez(404, { status: 404 });
+  };
+  return { fetch, log };
 }
 
 const NASTROJE_A = [
@@ -309,6 +349,63 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     h.api.rohlikOauthObnov({ clientId: 'jiny', access: 'jiny-token-123456' });
     check('  přihlášené nepřepíše', h.state.rohlikOauth.access, 'A-zaloha-123456');
   }
+
+  nadpis('W) Přihlášení e-mailem přes web');
+  {
+    const f = falesnyWeb();
+    const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: ' "' + EMAIL + '" ', ROHLIK_HESLO: HESLO } });
+    check('s údaji v Renderu je přihlášeno', h.api.rohlikPayload().prihlaseno, true);
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
+    check('hledání vrátí výrobky', r.kod + ' ' + (r.out.vyrobky || []).length, '200 2');
+    check('  s cenou z price.full', JSON.stringify(r.out.vyrobky[0]),
+      JSON.stringify({ productId: 1349777, nazev: 'Kunín Mléko polotučné 1,5%', cena: 24.9, jednotka: '1 l', obrazek: 'https://cdn.rohlik.cz/1.jpg' }));
+    check('nejdřív přihlášení, pak hledání', f.log.map(x => x.metoda + ' ' + x.cesta).join(','),
+      'POST /services/frontend-service/login,GET /services/frontend-service/search-metadata');
+    check('  e-mail bez uvozovek a mezer, heslo', f.log[0].telo.email + ' ' + f.log[0].telo.password, EMAIL + ' ' + HESLO);
+    check('  cookie z přihlášení jde dál', f.log[1].hlavicky.Cookie, 'PHPSESSIONID=sez1');
+    check('  hledaný text', f.log[1].query.search, 'mléko');
+    check('  na MCP ani OAuth se nesahá', f.log.every(x => x.cesta.startsWith('/services/frontend-service/')), true);
+    await h.volej('GET /api/rohlik/hledat', { query: { q: 'chleba' } });
+    check('podruhé se nepřihlašuje znovu', f.log.filter(x => /login/.test(x.cesta)).length, 1);
+    const k = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nazev: 'mléko', productId: '1349777', mnozstvi: 2 }, { nazev: 'rohlík', productId: 55, mnozstvi: 1 }] } });
+    const kosik = f.log.filter(x => /v2\/cart/.test(x.cesta));
+    check('košík: každá položka zvlášť', k.kod + ' ' + kosik.length, '200 2');
+    check('  číslo výrobku a množství', JSON.stringify([kosik[0].telo.productId, kosik[0].telo.quantity, kosik[1].telo.productId]), '[1349777,2,55]');
+    check('  žádná objednávka', f.log.some(x => /checkout|order|submit/i.test(x.cesta)), false);
+  }
+  {
+    // Vypršelé přihlášení: jednou se přihlásí znovu a zkusí to zase
+    const f = falesnyWeb({ vyprsiPo: 2 });
+    const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    await h.volej('GET /api/rohlik/hledat', { query: { q: 'a' } });
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'b' } });
+    check('po vypršení se přihlásí znovu', r.kod + ' ' + f.log.filter(x => /login/.test(x.cesta)).length, '200 2');
+  }
+  {
+    const f = falesnyWeb({ spatneHeslo: true });
+    const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('špatné heslo: srozumitelná hláška', r.out.error, 'Rohlík: špatný e-mail nebo heslo (ROHLIK_EMAIL / ROHLIK_HESLO v Renderu).');
+    const d = JSON.stringify((await h.volej('GET /api/rohlik/diagnostika')).out);
+    check('  diagnostika má odpověď webu', /přihlášení/.test(d) && /"web"/.test(d), true);
+    check('  e-mail ani heslo v diagnostice nejsou', d.includes(EMAIL) || d.includes(HESLO), false);
+  }
+  {
+    const h = build(falesnyWeb({ html: true }), { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('Cloudflare stránka = blokace serveru', r.out.error, 'Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
+  }
+  {
+    const h = build(falesnyWeb({ kosikChyba: true }), { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nazev: 'mléko', productId: 1, mnozstvi: 1 }] } });
+    check('chyba košíku se ukáže', /Produkt není skladem/.test(r.out.error || ''), true);
+  }
+  {
+    const h = build(falesnyWeb(), { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL } });
+    check('bez hesla web vypnutý', h.api.rohlikPayload().prihlaseno, false);
+  }
+  check('heslo z env se nikam nepíše', /(addLog|console\.\w+)\([^)]*ROHLIK_(HESLO|EMAIL)/.test(SRC), false);
+
   check('tokeny se nikde nepíšou do logu', /addLog\([^)]*rohlikOauth|console\.\w+\([^)]*rohlikOauth/.test(SRC), false);
   check('objednávka (checkout/order) se v kódu nevolá', /tools\/call[^\n]*(checkout|submit|order)/i.test(CODE), false);
   konec();
