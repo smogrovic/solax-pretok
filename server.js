@@ -11945,6 +11945,13 @@ async function rohlikWebLogin() {
     throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo (ROHLIK_EMAIL / ROHLIK_HESLO v Renderu).');
   }
   if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'přihlášení');
+  // 202 = Rohlík přihlášení přijal, ale nedokončil (data: null) — košík by pak
+  // patřil anonymní relaci, kterou na svém účtu neuvidíš
+  const stav = r.j && typeof r.j.status === 'number' ? r.j.status : r.status;
+  if (stav !== 200 || r.status !== 200) {
+    rohlikWebChyba(r, 'přihlášení');
+    throw new RohlikChyba(`Rohlík přihlášení nedokončil (stav ${stav}) — nejspíš ho chce potvrdit; mrkni do pošty od Rohlíku (viz diagnostika).`);
+  }
   // Bez cookie by se košík plnil v anonymní relaci, kterou na webu neuvidíš
   if (!Object.keys(rohlikCookies).length) {
     rohlikWebChyba(r, 'přihlášení');

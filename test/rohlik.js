@@ -94,7 +94,7 @@ function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
 
 // Falešný web Rohlíku (neveřejné rozhraní): přihlášení e-mailem → cookie, hledání, košík
 const EMAIL = 'jana.test@example.cz', HESLO = 'Heslo-Tajne-987';
-function falesnyWeb({ html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false, neuklada = false, bezCookie = false,
+function falesnyWeb({ nedokonceno = false, html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false, neuklada = false, bezCookie = false,
     produkty = null, detaily = null } = {}) {
   const log = [];
   const kosik = {};
@@ -113,6 +113,7 @@ function falesnyWeb({ html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyb
       if (spatneHeslo || t.email !== EMAIL || t.password !== HESLO) {
         return odpovez(401, { status: 401, messages: [{ content: 'Neplatný e-mail ' + t.email + ' nebo heslo ' + t.password }] });
       }
+      if (nedokonceno) return odpovez(202, { status: 202, messages: [], data: null }, 'application/json', 'PHPSESSION=anon; Path=/');
       prihlaseni++;
       return odpovez(200, { status: 200, data: { user: { id: 1 } } }, 'application/json', bezCookie ? null : `PHPSESSIONID=sez${prihlaseni}; Path=/; HttpOnly`);
     }
@@ -398,6 +399,14 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nakupId: 'n1', nazev: 'Banány', productId: 777, mnozstvi: 1 }] } });
     check('nepotvrzené přidání = chyba', r.out.error, 'Rohlík přidání nepotvrdil — košík na webu je pořád bez: Banány (viz diagnostika).');
     check('  položka není označená v košíku', !!h.state.nakup[0].kosik, false);
+  }
+  {
+    // Skutečná odpověď Rohlíku: 202 bez dat → nepřihlášeno, košík se nesmí plnit anonymně
+    const f = falesnyWeb({ nedokonceno: true });
+    const h = build(f, { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nazev: 'x', productId: 1, mnozstvi: 1 }] } });
+    check('přihlášení 202 = chyba, košík se nevolá', r.out.error + ' ' + f.log.filter(x => /cart/.test(x.cesta)).length,
+      'Rohlík přihlášení nedokončil (stav 202) — nejspíš ho chce potvrdit; mrkni do pošty od Rohlíku (viz diagnostika). 0');
   }
   {
     const f = falesnyWeb({ bezCookie: true });
