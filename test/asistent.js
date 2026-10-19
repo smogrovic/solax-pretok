@@ -124,7 +124,7 @@ nadpis('2) Zapni saunu');
   const reply = await h.api.SCENA_FN.sauna();
   check('zapne jen kamna na 80 °C', h.akce.join(' | '), 'huum:start:80');
   check('  řekne, na kolik topí', /Sauna topí na 80 °C/.test(reply), true);
-  check('  a kdy přijde ložnice a světla', /Ložnice se vytáhne na 70 °C, světla na 75 °C/.test(reply), true);
+  check('  a kdy přijde ložnice a světla', /Ložnice se vytáhne na 65 °C, světla na 70 °C/.test(reply), true);
   check('a je to v logu', h.logy.some(t => /zapnuta na 80 °C \(tlačítko\)/.test(t)), true);
 }
 {
@@ -182,21 +182,21 @@ nadpis('2b) Příprava podle teploty v sauně');
 {
   const h = build({ poZapadu: true });
   const tik = t => h.api.saunaPripravaTik({ heating: true, temperature: t, targetTemperature: 80, light: 0 });
-  await tik(69);
-  check('69 °C (cíl 80): ještě nic', h.akce.length, 0);
-  await tik(70);
-  check('70 °C = cíl −10: ložnice nahoru', h.akce.join(' | '), 'zaluzie:ložnice:up');
-  await tik(72);
+  await tik(64);
+  check('64 °C (cíl 80): ještě nic', h.akce.length, 0);
+  await tik(65);
+  check('65 °C = cíl −15: ložnice nahoru', h.akce.join(' | '), 'zaluzie:ložnice:up');
+  await tik(67);
   check('  jen jednou', h.akce.length, 1);
-  await tik(75);
-  check('75 °C = cíl −5: světlo v sauně a po západu zahrada', h.akce.slice(1).join(' | '),
+  await tik(70);
+  check('70 °C = cíl −10: světlo v sauně a po západu zahrada', h.akce.slice(1).join(' | '),
     'huumsvetlo:on | lightDole:on (sauna se nahřívá)');
-  await tik(79);
+  await tik(74);
   check('  taky jen jednou', h.akce.length, 3);
-  check('v Logu teplota i co se stalo', h.logy.some(t => t === 'Sauna: 75 °C (cíl 80) — světlo v sauně, zahrada dole'), true);
+  check('v Logu teplota i co se stalo', h.logy.some(t => t === 'Sauna: 70 °C (cíl 80) — světlo v sauně, zahrada dole'), true);
   // Nové saunování (zapnutí po vypnutí) začne s čistým štítem
   h.state.saunaRelace = { od: 2, konec: 0, loznice: false, svetla: false };
-  await tik(76);
+  await tik(71);
   check('nové saunování: teplý start udělá obojí naráz', h.akce.slice(3).join(' | '),
     'zaluzie:ložnice:up | huumsvetlo:on | lightDole:on (sauna se nahřívá)');
 }

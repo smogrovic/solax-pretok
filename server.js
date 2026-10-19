@@ -78,8 +78,9 @@ const SAUNA_HOLD_MIN = 30;    // držet vypnuté po posledním nátopu
 // dlouho topila, a platí plné držení.
 const SAUNA_OMYL_MS = 2 * 60000;
 const SAUNA_OMYL_MEZERA_MS = 3 * 60000;
-const SAUNA_ALERT_MS = 2 * 60 * 60 * 1000;       // po dvou hodinách topení notifikace
-const SAUNA_ALERT_AGAIN_MS = 6 * 60 * 60 * 1000; // a pak připomínka po šesti hodinách
+const SAUNA_ALERT_MS = 3 * 60 * 60 * 1000;       // po třech hodinách topení notifikace
+const SAUNA_ALERT_AGAIN_MS = 30 * 60 * 1000;     // a pak připomínka každých 30 min
+const SAUNA_OZNAMENI_MS = 3.5 * 60 * 60 * 1000;  // po 3:30 červené upozornění přes iPad
 const SAUNA_DAYS_MAX = 7;
 const SITE_DNY_MAX = 7;
 
@@ -1241,12 +1242,14 @@ function updateSauna(powerW) {
     state.saunaBlockUntil = now;
     state.sauna.since = 0;
     state.sauna.alertAt = 0;
+    saunaOznameniZrus();
     addLog(`Sauna: jen krátce zapnutá (${s} s) — bazén a solinátor se nemusí držet vypnuté`);
     nahrevKonec(now);
   } else if (state.sauna.since && !saunaBlokuje()) {
     // Doběhlo okno po posledním nátopu → topení skončilo
     state.sauna.since = 0;
     state.sauna.alertAt = 0;
+    saunaOznameniZrus();
     addLog('Sauna: dotopeno — bazén a solinátor se můžou vrátit');
     nahrevKonec(now);
   }
@@ -1257,16 +1260,31 @@ function updateSauna(powerW) {
   if (saunaBlokuje()) enforceSaunaOff().catch(() => {});
 }
 
-// „Nezapomněls saunu vypnout?" — po dvou hodinách topení, pak připomínka po šesti
+// „Nezapomněls saunu vypnout?" — po třech hodinách topení push, pak každých 30 min.
+// Kamna sama topí nejvýš 6 h. Po 3:30 navíc červené upozornění přes celý iPad
+// (stejné jako ručně zadané zprávy); když sauna dotopí, zmizí samo.
 function checkSaunaForgotten() {
   const now = Date.now();
   if (!state.sauna.since) return;
   const bezi = now - state.sauna.since;
+  if (bezi >= SAUNA_OZNAMENI_MS && !state.sauna.oznameniId && !state.oznameni
+      && typeof oznameniNastav === 'function') {
+    const h = Math.floor(bezi / 3600000), m = Math.floor((bezi % 3600000) / 60000);
+    oznameniNastav(`🧖 Sauna topí už ${h}:${String(m).padStart(2, '0')} h — nezapomněli jste ji vypnout?`, now);
+    state.sauna.oznameniId = state.oznameni && state.oznameni.id;
+  }
   if (bezi < SAUNA_ALERT_MS) return;
   const posledni = state.sauna.alertAt || 0;
   if (posledni && now - posledni < SAUNA_ALERT_AGAIN_MS) return;
   state.sauna.alertAt = now;
   sendPushToAll('🧖 Sauna pořád topí', `Topí už ${fmtDur(bezi)} — nezapomněl jsi ji vypnout?`);
+}
+
+// Saunové upozornění na iPadu po dotopení zmizí — ale jen to naše, ruční zprávu nechá
+function saunaOznameniZrus() {
+  const id = state.sauna.oznameniId;
+  state.sauna.oznameniId = null;
+  if (id && typeof oznameniZrus === 'function') oznameniZrus(id);
 }
 
 function recordSaunaDay(w, dtH) {
@@ -10528,11 +10546,11 @@ async function scenaSauna() {
 }
 
 // Příchod do sauny podle teploty, ne podle hodin: když se sauna blíží cíli, vytáhne
-// se ložnice (cíl −10 °C) a pak se rozsvítí světlo v sauně a po západu slunce
-// zahrada dole (cíl −5 °C). Platí pro jakékoli zapnutí — tlačítko, časovač, appku
+// se ložnice (cíl −15 °C) a pak se rozsvítí světlo v sauně a po západu slunce
+// zahrada dole (cíl −10 °C). Platí pro jakékoli zapnutí — tlačítko, časovač, appku
 // i appku HUUM nebo panel. Každý krok jednou za saunování; teplý start je udělá hned.
-const SAUNA_LOZNICE_NAHORU_C = 10;
-const SAUNA_SVETLA_C = 5;
+const SAUNA_LOZNICE_NAHORU_C = 15;
+const SAUNA_SVETLA_C = 10;
 let saunaPripravaBezi = false;
 
 async function saunaPripravaTik(h, now = Date.now()) {

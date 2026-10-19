@@ -16,6 +16,7 @@ const CODE = KONST + '\n'
   + fn('function saunaOmyl(now) {') + '\n'
   + fn('function updateSauna(powerW) {') + '\n'
   + fn('function checkSaunaForgotten() {') + '\n'
+  + fn('function saunaOznameniZrus() {') + '\n'
   + fn('function recordSaunaDay(w, dtH) {') + '\n'
   // Měření nahřívání visí na týchž hranách odběru, takže patří do téže sady
   + between('// ---------- Měření nahřívání sauny ----------',
@@ -209,22 +210,40 @@ nadpis('2b) Omylem zapnutá sauna (do 2 min) bazén nedrží');
 
 nadpis('3) Hlídání zapomenuté sauny');
 {
+  // Upozornění pro všechny (červený box na iPadu) — stejné funkce jako na serveru
+  const oz = [];
+  globalThis.oznameniNastav = (text, now) => { h.state.oznameni = { id: 'o_' + oz.length, text, od: now }; oz.push(text); return { ok: true }; };
+  globalThis.oznameniZrus = id => { if (h.state.oznameni && h.state.oznameni.id === id) h.state.oznameni = null; };
   const h = build();
+  h.state.oznameni = null;
   h.api.updateSauna(6000);
-  h.posun(119); h.api.updateSauna(6000);
-  check('po 1:59 se ještě mlčí', h.pushes.length, 0);
+  h.posun(179); h.api.updateSauna(6000);
+  check('po 2:59 se ještě mlčí', h.pushes.length, 0);
   h.posun(2); h.api.updateSauna(6000);
-  check('po dvou hodinách přijde hláška', h.pushes.length, 1);
+  check('po třech hodinách přijde hláška', h.pushes.length, 1);
   check('  a je o saune', /Sauna pořád topí/.test(h.pushes[0]), 'true');
-  h.posun(60); h.api.updateSauna(6000);
-  check('za hodinu se neopakuje', h.pushes.length, 1);
-  h.posun(301); h.api.updateSauna(6000);
-  check('připomínka po šesti hodinách', h.pushes.length, 2);
+  h.posun(28); h.api.updateSauna(6000);
+  check('za 28 min se neopakuje', h.pushes.length, 1);
+  check('  ani červené upozornění (3:29)', h.state.oznameni, 'null');
+  h.posun(3); h.api.updateSauna(6000);
+  check('po 30 min znovu', h.pushes.length, 2);
+  check('po 3:30 červené upozornění pro iPad', /Sauna topí už 3:3\d h/.test(h.state.oznameni && h.state.oznameni.text), true);
+  h.posun(31); h.api.updateSauna(6000);
+  check('další po dalších 30 min', h.pushes.length, 3);
+  check('  upozornění jen jednou', oz.length, 1);
   h.posun(31); h.api.updateSauna(0);
   check('po dotopení je klid', h.state.sauna.alertAt, 0);
+  check('  a červené upozornění zmizí samo', h.state.oznameni, 'null');
   h.api.updateSauna(6000);
-  h.posun(121); h.api.updateSauna(6000);
-  check('další topení hlídá znovu od nuly', h.pushes.length, 3);
+  h.posun(181); h.api.updateSauna(6000);
+  check('další topení hlídá znovu od nuly', h.pushes.length, 4);
+  // Ruční zpráva, která už svítí, se nepřepíše ani nesmaže
+  h.state.oznameni = { id: 'o_rucni', text: 'Večeře', od: 1 };
+  h.posun(40); h.api.updateSauna(6000);
+  check('ruční zprávu sauna nepřepíše', h.state.oznameni.id, 'o_rucni');
+  h.posun(31); h.api.updateSauna(0);
+  check('  ani po dotopení nesmaže', h.state.oznameni && h.state.oznameni.id, 'o_rucni');
+  delete globalThis.oznameniNastav; delete globalThis.oznameniZrus;
 }
 
 nadpis('4) Denní spotřeba');
