@@ -11503,7 +11503,8 @@ async function rohlikOauthMetadata() {
     const r = await rohlikJson(u);
     if (r.status === 200 && r.j && r.j.authorization_endpoint && r.j.token_endpoint) {
       const meta = { authorization_endpoint: r.j.authorization_endpoint, token_endpoint: r.j.token_endpoint,
-        registration_endpoint: r.j.registration_endpoint || null, scopes: r.j.scopes_supported || null, resource };
+        registration_endpoint: r.j.registration_endpoint || null, scopes: r.j.scopes_supported || null, resource,
+        as, metadata: u };
       state.rohlikOauth = { ...o, meta };
       return meta;
     }
@@ -11922,6 +11923,11 @@ app.post('/api/rohlik/oauth/kod', async (req, res) => {
     const duvod = rohlikTajne(popis || error).slice(0, 200);
     rohlikDiag.prihlaseni = { error, popis: duvod, kdy: Date.now() };
     if (/scope/i.test(duvod) && state.rohlikOauth) state.rohlikOauth.bezScope = true;
+    // Neznámý klient: registrace u Rohlíku neplatí — příště načisto (metadata i registrace)
+    if (/client_id|client/i.test(duvod) && state.rohlikOauth) {
+      rohlikDiag.staraRegistrace = { clientId: state.rohlikOauth.clientId, meta: state.rohlikOauth.meta };
+      delete state.rohlikOauth.clientId; delete state.rohlikOauth.redirect; delete state.rohlikOauth.meta;
+    }
     return res.status(400).json({ error: 'Rohlík přihlášení odmítl: ' + duvod });
   }
   if (!code || !stav) return res.status(400).json({ error: 'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.' });
@@ -11947,8 +11953,8 @@ app.get('/api/rohlik/diagnostika', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const o = state.rohlikOauth || {};
   const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
-    oauth: { prihlaseno: rohlikPrihlasen(), klient: !!o.clientId, obnovovaciToken: !!o.refresh,
-      vyprsi: o.exp ? new Date(o.exp).toISOString() : null, autorizace: o.meta ? o.meta.authorization_endpoint : null },
+    oauth: { prihlaseno: rohlikPrihlasen(), klient: o.clientId || null, redirect: o.redirect || null, obnovovaciToken: !!o.refresh,
+      vyprsi: o.exp ? new Date(o.exp).toISOString() : null, meta: o.meta || null, staraRegistrace: rohlikDiag.staraRegistrace || null },
     prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null };
   if (rohlikPrihlasen()) {
     try {

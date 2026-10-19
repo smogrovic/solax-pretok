@@ -233,6 +233,15 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  odmítnutý rozsah', r2.out.error, 'Rohlík přihlášení odmítl: The requested scope is invalid');
     const s2 = new URL((await h.volej('POST /api/rohlik/prihlasit')).out.url);
     check('  další pokus bez scope', s2.searchParams.has('scope'), false);
+    // Neznámý klient: příští přihlášení se zaregistruje znovu
+    const reg = () => f.log.filter(x => x.url === 'https://auth.rohlik.cz/register').length;
+    const pred = reg();
+    await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?error=access_denied&error_description=OAuth+2.0+Parameter%3A+client_id' } });
+    check('neznámý client_id: registrace se zahodí', !!h.state.rohlikOauth.clientId, false);
+    const dd = (await h.volej('GET /api/rohlik/diagnostika')).out;
+    check('  diagnostika ukáže starou registraci a metadata', dd.oauth.staraRegistrace.clientId + ' ' + dd.oauth.staraRegistrace.meta.registration_endpoint, 'klient-1 https://auth.rohlik.cz/register');
+    await h.volej('POST /api/rohlik/prihlasit');
+    check('  příště se zaregistruje znovu', reg() > pred, true);
   }
   {
     // Rozběhnuté přihlášení platí jen 10 minut
