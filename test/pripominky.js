@@ -13,7 +13,7 @@ function build() {
     CODE + '\n; state.pripominky = pripominkyVychozi(); state.nakup = []; state.oznameni = null;'
          + ' return { pripominkaHotovo, pripominkaZapnuto, pripominkaInterval, pripominkyObnov, pripominkyVychozi, pripominkyZima,'
          + ' pripominkaVlastniVytvor, pripominkaVlastniSmaz, pripominkyUklid, PRIPOMINKY_VLASTNI_MAX,'
-         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, oznameniNastav, oznameniZrus, oznameniObnov, vSezone, pripominkySezona };'
+         + ' nakupPridej, nakupSmaz, nakupObnov, NAKUP_MAX, nakupKoupeno, nakupUklid, oznameniNastav, oznameniZrus, oznameniObnov, vSezone, pripominkySezona };'
   )(state, (e, d) => broadcasts.push({ e, d: JSON.parse(JSON.stringify(d)) }), app, t => logy.push(t));
   // Volání endpointu tak, jak by ho zavolal Express
   const zavolej = (vzor, params, body) => {
@@ -304,6 +304,46 @@ nadpis('N) Nákupní seznam');
   check('obnova do prázdného, jen platné', h2.state.nakup.map(x => x.text).join(','), 'chleba');
   h2.api.nakupObnov({ nakup: [{ id: 'n_cccc3333', text: 'máslo', t: 9 }] });
   check('  do neprázdného nic', h2.state.nakup.length, 1);
+}
+
+nadpis('N2) Koupené 24 h přeškrtnuté');
+{
+  const h = build();
+  const T = Date.UTC(2026, 9, 19, 10);
+  const H = 3600000;
+  h.api.nakupPridej({ text: 'mléko' }, T);
+  h.api.nakupPridej({ text: 'chleba' }, T + 1000);
+  const id = h.state.nakup[0].id;
+  check('koupeno přes endpoint', h.zavolej('/api/nakup/:id/koupeno', { id }, { koupeno: true }).status, 200);
+  check('  položka zůstává, s časem koupení', h.state.nakup.length + ' ' + (typeof h.state.nakup[0].koupeno), '2 number');
+  check('  bez true/false 400', h.zavolej('/api/nakup/:id/koupeno', { id }, {}).status, 400);
+  check('  neznámá 404', h.zavolej('/api/nakup/:id/koupeno', { id: 'n_xxxxxxxx' }, { koupeno: true }).status, 404);
+  h.api.nakupKoupeno(id, true, T);
+  h.api.nakupUklid(T + 23 * H);
+  check('po 23 h ještě je', h.state.nakup.some(x => x.id === id), true);
+  h.api.nakupUklid(T + 25 * H);
+  check('po 25 h zmizí', h.state.nakup.some(x => x.id === id), false);
+  check('  nekoupená zůstává', h.state.nakup.length, 1);
+  const id2 = h.state.nakup[0].id;
+  h.api.nakupKoupeno(id2, true, T);
+  h.api.nakupKoupeno(id2, false, T + H);
+  check('vrácení smaže koupeno', 'koupeno' in h.state.nakup[0], false);
+  h.api.nakupUklid(T + 48 * H);
+  check('  a vrácená po 24 h nezmizí', h.state.nakup.length, 1);
+
+  // Limit počítá jen nekoupené
+  const h2 = build();
+  for (let i = 0; i < h2.api.NAKUP_MAX; i++) h2.api.nakupPridej({ text: 'p' + i }, T);
+  check('50 nekoupených = plno', !!h2.api.nakupPridej({ text: 'navíc' }, T).chyba, true);
+  h2.api.nakupKoupeno(h2.state.nakup[0].id, true, T);
+  check('koupená místo uvolní', !!h2.api.nakupPridej({ text: 'navíc' }, T).chyba, false);
+
+  // Obnova přenese koupeno a staré hned uklidí
+  const h3 = build();
+  const ted = Date.now();
+  h3.api.nakupObnov({ nakup: [{ id: 'n_aaaa1111', text: 'a', t: 1, koupeno: ted - H },
+    { id: 'n_bbbb2222', text: 'b', t: 2, koupeno: ted - 30 * H }, { id: 'n_cccc3333', text: 'c', t: 3, koupeno: ted + H }] });
+  check('obnova: koupená drží, stará zmizí', h3.state.nakup.map(x => x.text + (x.koupeno ? '✓' : '')).join(','), 'a✓,c');
 }
 
 nadpis('O) Upozornění pro všechny');

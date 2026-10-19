@@ -1873,13 +1873,35 @@ if (typeof scheduleEvery === 'function') scheduleEvery(() => pripominkySezona(),
 // Odrážky „co koupit". Zámek se neuplatňuje (stránku Připomínky vidí i děti).
 // Odškrtnutím položka zmizí; „Zpět" ji pošle znovu se stejným id a časem, takže
 // se vrátí na své místo.
-const NAKUP_MAX = 50;
+const NAKUP_MAX = 50;              // nekoupených
+const NAKUP_CELKEM_MAX = 100;      // i s koupenými, ať se seznam nenafoukne
 const NAKUP_TEXT_MAX = 80;
+// Koupené zůstanou 24 h přeškrtnuté na konci seznamu — je vidět, co už se koupilo,
+// a omyl jde napravit; pak zmizí samy
+const NAKUP_KOUPENO_MS = 24 * 3600000;
+
+function nakupUklid(now = Date.now()) {
+  const pred = state.nakup.length;
+  state.nakup = state.nakup.filter(x => !x.koupeno || now - x.koupeno <= NAKUP_KOUPENO_MS);
+  return state.nakup.length !== pred;
+}
+
+function nakupKoupeno(id, koupeno, now = Date.now()) {
+  const x = state.nakup.find(y => y.id === id);
+  if (!x) return false;
+  if (koupeno) x.koupeno = now; else delete x.koupeno;
+  nakupUklid(now);
+  broadcast('nakup', { nakup: state.nakup });
+  return true;
+}
 
 function nakupPridej(b, now = Date.now()) {
   const text = b && typeof b.text === 'string' ? b.text.trim().replace(/\s+/g, ' ') : '';
   if (!text) return { chyba: 'Napiš, co koupit.' };
-  if (state.nakup.length >= NAKUP_MAX) return { chyba: `Na seznamu může být nejvýš ${NAKUP_MAX} položek.` };
+  nakupUklid(now);
+  if (state.nakup.filter(x => !x.koupeno).length >= NAKUP_MAX || state.nakup.length >= NAKUP_CELKEM_MAX) {
+    return { chyba: `Na seznamu může být nejvýš ${NAKUP_MAX} položek.` };
+  }
   const vraceni = b && typeof b.id === 'string' && /^n_[a-z0-9]{8}$/.test(b.id)
     && Number.isFinite(b.t) && b.t > 0 && b.t <= now;
   if (vraceni && state.nakup.some(x => x.id === b.id)) return { ok: true };
@@ -1903,15 +1925,18 @@ function nakupSmaz(id) {
 
 // Záloha po nasazení — jen do prázdného seznamu. Co se mezitím přidalo nebo
 // odškrtlo, je novější než záloha.
-function nakupObnov(b) {
+function nakupObnov(b, now = Date.now()) {
   if (!b || !Array.isArray(b.nakup)) return false;
   if (state.nakup.length) return true;
-  for (const x of b.nakup.slice(0, NAKUP_MAX)) {
+  for (const x of b.nakup.slice(0, NAKUP_CELKEM_MAX)) {
     if (!x || typeof x.id !== 'string' || !/^n_[a-z0-9]{8}$/.test(x.id) || typeof x.text !== 'string'
         || !x.text.trim() || !Number.isFinite(x.t) || state.nakup.some(y => y.id === x.id)) continue;
-    state.nakup.push({ id: x.id, text: x.text.trim().slice(0, NAKUP_TEXT_MAX), t: x.t });
+    const p = { id: x.id, text: x.text.trim().slice(0, NAKUP_TEXT_MAX), t: x.t };
+    if (Number.isFinite(x.koupeno) && x.koupeno > 0 && x.koupeno <= now) p.koupeno = x.koupeno;
+    state.nakup.push(p);
   }
   state.nakup.sort((a, c) => a.t - c.t);
+  nakupUklid(now);
   broadcast('nakup', { nakup: state.nakup });
   return true;
 }
@@ -1925,6 +1950,16 @@ app.post('/api/nakup/restore', (req, res) => {
   if (!nakupObnov(req.body)) return res.status(400).json({ error: 'Chybí nakup.' });
   res.json({ ok: true, polozek: state.nakup.length });
 });
+app.post('/api/nakup/:id/koupeno', (req, res) => {
+  const k = req.body && req.body.koupeno;
+  if (typeof k !== 'boolean') return res.status(400).json({ error: 'Chybí koupeno (true/false).' });
+  if (!nakupKoupeno(req.params.id, k)) return res.status(404).json({ error: 'Položka už na seznamu není.' });
+  res.json({ ok: true, nakup: state.nakup });
+});
+// Koupené mizí po 24 h samy, i když na seznam nikdo nesáhne
+if (typeof scheduleEvery === 'function') {
+  scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 3600000, 7 * 60000);
+}
 app.post('/api/nakup/:id/smazat', (req, res) => {
   if (!nakupSmaz(req.params.id)) return res.status(404).json({ error: 'Položka už na seznamu není.' });
   res.json({ ok: true, nakup: state.nakup });

@@ -136,7 +136,8 @@ setTimeout(() => {
   wrap.scrollTo = plynule;
 
   R.push('\\n8) Emoji připomínek jsou na iPadu 2× větší');
-  pripData = { kytky: { hotovo: 0 }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
+  // Svítí jen kytky — ostatní (popelnice podle dne v týdnu…) vypnuté, ať test nezávisí na dni
+  pripData = { ...Object.fromEntries(PRIPOMINKY.map(d => [d.id, { zapnuto: false, hotovo: Date.now() }])), kytky: { hotovo: 0 } };
   renderPripominky();
   const zv = () => document.querySelector('#pripEmoji .prip-emoji[data-id="kytky"]');
   check('na iPadu 2× větší než na telefonu (36 px)', getComputedStyle(zv()).fontSize, '36px');
@@ -147,7 +148,8 @@ setTimeout(() => {
   R.push('\\n9) Emoji jdou odtáhnout (celá skupina)');
   try { localStorage.removeItem('pripZvonekPozice'); } catch {}
   // Pes nakrmený, ať jsou ve skupině jen kytky (psy testuje browser-pripominky)
-  pripData = { kytky: { hotovo: 0 }, pesRano: { hotovo: Date.now() }, pesVecer: { hotovo: Date.now() } };
+  // Svítí jen kytky — ostatní (popelnice podle dne v týdnu…) vypnuté, ať test nezávisí na dni
+  pripData = { ...Object.fromEntries(PRIPOMINKY.map(d => [d.id, { zapnuto: false, hotovo: Date.now() }])), kytky: { hotovo: 0 } };
   kalOtevri(false); wrap.scrollLeft = 0; updateDots(); renderPripominky();
   check('emoji kytek je vidět', !!zv() && !document.getElementById('pripEmoji').hidden, true);
   let otevreno = 0;

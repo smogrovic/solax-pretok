@@ -1405,10 +1405,10 @@
   .nakup-seznam li + li{border-top:1px solid rgba(44,62,80,0.08);}
   .nakup-seznam li .nakup-text{flex:1;overflow-wrap:anywhere;}
   .nakup-seznam li.koupeno .nakup-text{text-decoration:line-through;color:var(--muted);}
+  .nakup-seznam li.prvni-koupena{border-top:1px solid rgba(44,62,80,0.25);}
   .nakup-odskrt{flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:2px solid #2e9d57;background:none;
-    padding:0;cursor:pointer;}
-  .nakup-zpet{flex:0 0 auto;border:none;border-radius:10px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;
-    background:rgba(44,62,80,0.08);color:var(--grey-text);cursor:pointer;}
+    padding:0;cursor:pointer;color:#fff;font-size:14px;font-weight:800;line-height:1;}
+  .nakup-seznam li.koupeno .nakup-odskrt{background:#2e9d57;opacity:0.6;}
   .nakup-prazdno{font-size:13px;color:var(--muted);text-align:center;padding:14px 0 4px;}
   .nakup-proklik{width:100%;display:flex;align-items:center;gap:8px;border:none;border-radius:14px;
     padding:12px 14px;margin-top:10px;background:rgba(46,157,87,0.10);color:#1f6e3c;font:inherit;
@@ -12404,7 +12404,7 @@ function pripZalozkaObnov(now = Date.now()) {
     pripZnameSvitici = svitiTed;
   }
   // Zelený košík: svítí, dokud je na nákupním seznamu aspoň jedna položka
-  const nakupu = (nakupData || []).length;
+  const nakupu = (nakupData || []).filter(p => !p.koupeno).length;
   if (nakupZalozkaEl) {
     nakupZalozkaEl.hidden = !nakupu;
     nakupZalozkaEl.textContent = '🛒 ' + nakupu;
@@ -12700,13 +12700,15 @@ if (vlastniOknoEl) {
 }
 
 // ---------- Nákupní seznam ----------
-// Odškrtnutím položka zmizí ze serveru hned; pět vteřin je místo ní „Zpět",
-// které ji pošle zpátky se stejným id a časem (vrátí se na své místo).
-const nakupZpet = new Map();   // id → { polozka, do }
+// Odškrtnutá (koupená) položka zůstane 24 h přeškrtnutá na konci seznamu, pak ji
+// server smaže sám. Klepnutí na koupenou ji vrátí mezi nekoupené (= i oprava omylu).
 const nakupOknoEl = document.getElementById('nakupOkno');
 const nakupSeznamEl = document.getElementById('nakupSeznam');
 const nakupVstupEl = document.getElementById('nakupVstup');
 const nakupChybaEl = document.getElementById('nakupChyba');
+
+// Co se ještě kupuje — jen to svítí na zelené záložce
+const nakupNekoupene = () => (nakupData || []).filter(p => !p.koupeno);
 
 function nakupOtevri(ano) {
   if (!nakupOknoEl) return;
@@ -12715,40 +12717,35 @@ function nakupOtevri(ano) {
 }
 
 function renderNakup(now = Date.now()) {
-  for (const [id, z] of nakupZpet) if (z.do <= now) nakupZpet.delete(id);
   bezpecne(() => pripZalozkaObnov(now));
   if (!nakupSeznamEl) return;
   nakupSeznamEl.textContent = '';
-  const radky = [...(nakupData || []).map(p => ({ p, zpet: false })),
-    ...[...nakupZpet.values()].filter(z => !(nakupData || []).some(p => p.id === z.polozka.id)).map(z => ({ p: z.polozka, zpet: true }))]
-    .sort((a, b) => a.p.t - b.p.t);
-  if (!radky.length) {
+  const vse = nakupData || [];
+  const nekoupene = vse.filter(p => !p.koupeno).sort((a, b) => a.t - b.t);
+  // Koupené na konci, naposledy koupené nahoře
+  const koupene = vse.filter(p => p.koupeno).sort((a, b) => b.koupeno - a.koupeno);
+  if (!vse.length) {
     const li = document.createElement('li');
     li.className = 'nakup-prazdno';
     li.textContent = 'Seznam je prázdný.';
     nakupSeznamEl.appendChild(li);
     return;
   }
-  for (const { p, zpet } of radky) {
+  for (const p of [...nekoupene, ...koupene]) {
     const li = document.createElement('li');
-    li.className = zpet ? 'koupeno' : '';
+    li.className = p.koupeno ? 'koupeno' : '';
+    if (p.koupeno && p === koupene[0] && nekoupene.length) li.classList.add('prvni-koupena');
     li.dataset.id = p.id;
     const text = document.createElement('span');
     text.className = 'nakup-text';
     text.textContent = p.text;
     const btn = document.createElement('button');
     btn.type = 'button';
-    if (zpet) {
-      btn.className = 'nakup-zpet';
-      btn.textContent = 'Zpět';
-      btn.addEventListener('click', () => nakupVrat(p));
-      li.append(text, btn);
-    } else {
-      btn.className = 'nakup-odskrt';
-      btn.setAttribute('aria-label', 'Koupeno: ' + p.text);
-      btn.addEventListener('click', () => nakupOdskrtni(p));
-      li.append(btn, text);
-    }
+    btn.className = 'nakup-odskrt';
+    btn.setAttribute('aria-label', (p.koupeno ? 'Vrátit na seznam: ' : 'Koupeno: ') + p.text);
+    btn.textContent = p.koupeno ? '✓' : '';
+    btn.addEventListener('click', () => nakupOdskrtni(p, !p.koupeno));
+    li.append(btn, text);
     nakupSeznamEl.appendChild(li);
   }
 }
@@ -12770,19 +12767,16 @@ async function nakupPost(adresa, telo) {
   }
 }
 
-function nakupOdskrtni(p) {
-  nakupData = nakupData.filter(x => x.id !== p.id);
-  nakupZpet.set(p.id, { polozka: p, do: Date.now() + 5000 });
-  setTimeout(() => bezpecne(renderNakup), 5100);
+// Hned v appce (přeškrtne a přesune), pak potvrdí server
+function nakupOdskrtni(p, koupeno) {
+  nakupData = (nakupData || []).map(x => {
+    if (x.id !== p.id) return x;
+    const y = { ...x };
+    if (koupeno) y.koupeno = Date.now(); else delete y.koupeno;
+    return y;
+  });
   renderNakup();
-  nakupPost('/api/nakup/' + encodeURIComponent(p.id) + '/smazat', {});
-}
-
-function nakupVrat(p) {
-  nakupZpet.delete(p.id);
-  if (!nakupData.some(x => x.id === p.id)) nakupData = [...nakupData, p].sort((a, b) => a.t - b.t);
-  renderNakup();
-  nakupPost('/api/nakup', { text: p.text, id: p.id, t: p.t });
+  nakupPost('/api/nakup/' + encodeURIComponent(p.id) + '/koupeno', { koupeno });
 }
 
 if (nakupOknoEl) {

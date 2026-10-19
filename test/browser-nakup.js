@@ -116,19 +116,32 @@ setTimeout(async () => {
   check('  a položka přibude', zal.textContent, '🛒 3');
 
   dotazy = [];
-  odpoved = url => /smazat/.test(url) ? { ok: true, nakup: nakupData } : { ok: true };
+  odpoved = () => ({ ok: true, nakup: nakupData });
   document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-odskrt').click();
   await pockej(20);
-  check('odškrtnutí smaže na serveru', dotazy[0] && dotazy[0].url, '/api/nakup/n_aaaa1111/smazat');
+  check('odškrtnutí pošle koupeno', dotazy[0] && dotazy[0].url + ' ' + JSON.stringify(dotazy[0].telo), '/api/nakup/n_aaaa1111/koupeno {"koupeno":true}');
+  const poradi = () => [...document.querySelectorAll('#nakupSeznam li')].map(li => li.querySelector('.nakup-text').textContent + (li.classList.contains('koupeno') ? '✓' : '')).join(',');
+  check('  zůstane přeškrtnutá na konci', poradi(), 'chleba,máslo,mléko✓');
   const pr = document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"]');
-  check('  místo ní přeškrtnutá se Zpět', !!pr && pr.classList.contains('koupeno') && !!pr.querySelector('.nakup-zpet'), true);
-  check('  počet klesne', zal.textContent, '🛒 2');
-  dotazy = [];
-  odpoved = (url, telo) => ({ ok: true, nakup: [{ id: telo.id, text: telo.text, t: telo.t }, ...nakupData].sort((a, b) => a.t - b.t) });
-  pr.querySelector('.nakup-zpet').click();
+  check('  opravdu přeškrtnutá', getComputedStyle(pr.querySelector('.nakup-text')).textDecorationLine, 'line-through');
+  check('  počet na záložce klesne', zal.textContent, '🛒 2');
+  check('  i u prokliku', document.getElementById('nakupProklikPocet').textContent, ' · 2');
+  // Další koupená jde nad předchozí koupenou (naposledy koupené nahoře)
+  await pockej(5);
+  document.querySelector('#nakupSeznam li[data-id="n_bbbb2222"] .nakup-odskrt').click();
   await pockej(20);
-  check('Zpět pošle stejné id a čas', dotazy[0] && JSON.stringify(dotazy[0].telo), JSON.stringify({ text: 'mléko', id: 'n_aaaa1111', t: 1 }));
-  check('  a je zpátky první', document.querySelector('#nakupSeznam li .nakup-text').textContent, 'mléko');
+  check('naposledy koupené nahoře mezi koupenými', poradi(), 'máslo,chleba✓,mléko✓');
+  // Klepnutí na koupenou ji vrátí (i jako oprava omylu)
+  dotazy = [];
+  document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-odskrt').click();
+  await pockej(20);
+  check('klepnutí na koupenou ji vrátí', dotazy[0] && JSON.stringify(dotazy[0].telo), '{"koupeno":false}');
+  check('  na své místo nahoru', poradi(), 'mléko,máslo,chleba✓');
+  // Jen koupené: záložka nesvítí, seznam je ukazuje
+  nakupData = [{ id: 'n_aaaa1111', text: 'mléko', t: 1, koupeno: Date.now() }];
+  renderNakup();
+  check('jen koupené = záložka nesvítí', vidi(zal), false);
+  check('  ale v seznamu jsou', poradi(), 'mléko✓');
   document.getElementById('nakupZavrit').click();
   check('Zavřít', nokno.hidden, true);
   nakupData = [];
