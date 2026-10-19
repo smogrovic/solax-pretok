@@ -212,7 +212,8 @@ setTimeout(async () => {
   odpoved = (url, telo) => {
     if (url === '/api/rohlik/vyber') return { ok: true, vyber: { mleko: { productId: 1349777, nazev: 'Kunín Mléko 1,5 %', cena: 24.9 } } };
     if (url.startsWith('/api/rohlik/hledat')) return { ok: true, vyrobky: /chleba/.test(decodeURIComponent(url))
-      ? [{ productId: 55, nazev: 'Chléb Šumava', cena: 39.9 }, { productId: 56, nazev: 'Chléb kmínový', cena: 35 }] : [] };
+      ? [{ productId: 55, nazev: 'Chléb Šumava', cena: 39.9, obrazek: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' },
+        { productId: 56, nazev: 'Chléb kmínový', cena: 35, obrazek: 'data:image/png;base64,AAAA' }] : [] };
     if (url === '/api/rohlik/kosik') return { ok: true, pridano: telo.polozky.length, nakup: nakupData.map(p => telo.polozky.some(x => x.nakupId === p.id) ? { ...p, kosik: 1 } : p) };
     return { ok: true };
   };
@@ -227,6 +228,9 @@ setTimeout(async () => {
   check('  a nehledá se', dotazy.some(d => /hledat\?q=Ml/.test(d.url)), false);
   check('nové se hledají', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).length, 2);
   check('  výsledky k výběru', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek').length, 2);
+  await pockej(150);
+  check('  fotky výrobků', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img') && box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img').getBoundingClientRect().width, 56);
+  check('  rozbitá fotka zmizí', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[1].querySelector('img'), null);
   check('  nic nenalezeno se řekne', /Nic se nenašlo/.test(box('n_cccc3333').textContent), true);
   check('tlačítko počítá vybrané', document.getElementById('rohlikPridat').textContent, 'Přidat do košíku (1)');
   box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[1].click();

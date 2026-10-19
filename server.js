@@ -1970,7 +1970,20 @@ function nakupObnov(b, now = Date.now()) {
 const NAKUP_OBLIBENE_MAX = 30;
 function nakupOblibeneVychozi() {
   return [{ text: 'Vajíčka', ikona: '🥚' }, { text: 'Banány', ikona: '🍌' }, { text: 'Šunka', ikona: '🥓' },
-    { text: 'Sýr', ikona: '🧀' }, { text: 'Mléko', ikona: '🥛' }, { text: 'Toaletní papír', ikona: '🧻' }];
+    { text: 'Sýr', ikona: '🧀' }, { text: 'Mléko', ikona: '🥛' }, { text: 'Toaletní papír', ikona: '🧻' },
+    ...NAKUP_OBLIBENE_NOVE];
+}
+// Přidané později — do už uloženého seznamu se doplní jednou (záloha si pamatuje „doplneno")
+const NAKUP_OBLIBENE_NOVE = [{ text: 'Jogurt', ikona: '🥣' }, { text: 'Maso', ikona: '🥩' },
+  { text: 'Rýže', ikona: '🍚' }, { text: 'Tvaroh', ikona: '🫙' }];
+const NAKUP_OBLIBENE_DOPLNENI = 2;
+function nakupOblibeneDopln(seznam) {
+  const out = [...seznam];
+  for (const n of NAKUP_OBLIBENE_NOVE) {
+    if (out.length >= NAKUP_OBLIBENE_MAX) break;
+    if (!out.some(x => x.text.toLowerCase() === n.text.toLowerCase())) out.push({ ...n });
+  }
+  return out;
 }
 // Ověří seznam z appky / ze zálohy → pole, nebo null
 function nakupOblibeneOver(vstup) {
@@ -2006,7 +2019,8 @@ app.post('/api/nakup/oblibene/restore', (req, res) => {
   const p = nakupOblibeneOver(req.body && req.body.polozky);
   if (!p) return res.status(400).json({ error: 'Chybí polozky.' });
   if (!state.nakupOblibeneUpraveno) {
-    state.nakupOblibene = p;
+    const doplneno = Number(req.body.doplneno) || 0;
+    state.nakupOblibene = doplneno < NAKUP_OBLIBENE_DOPLNENI ? nakupOblibeneDopln(p) : p;
     state.nakupOblibeneUpraveno = true;
     broadcast('nakupOblibene', { nakupOblibene: state.nakupOblibene });
   }
@@ -10991,7 +11005,7 @@ function storeSnapshot() {
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
     '/api/nakup/restore': { nakup: state.nakup },
-    '/api/nakup/oblibene/restore': { polozky: state.nakupOblibene || [] },
+    '/api/nakup/oblibene/restore': { polozky: state.nakupOblibene || [], doplneno: NAKUP_OBLIBENE_DOPLNENI },
     '/api/rohlik/vyber/restore': { vyber: state.rohlikVyber },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
@@ -11815,6 +11829,23 @@ function rohlikArgKosik(t, polozky) {
 
 // Výrobky z výsledku nástroje — z structuredContent i z JSON v textu. Projde
 // libovolně vnořená pole a vezme objekty, které mají id a název.
+// Fotka výrobku: řetězec nebo objekt {url|path|src}; relativní cesta je na CDN Rohlíku
+const ROHLIK_CDN = 'https://cdn.rohlik.cz';
+function rohlikObrazek(x) {
+  const kandidati = [x.image, x.imageUrl, x.img, x.imgPath, x.imagePath, x.mainImage,
+    Array.isArray(x.images) ? x.images[0] : null, Array.isArray(x.photos) ? x.photos[0] : null];
+  for (let u of kandidati) {
+    if (u && typeof u === 'object') u = u.url || u.path || u.src;
+    if (typeof u !== 'string' || !u.trim() || u.length > 500) continue;
+    u = u.trim();
+    if (/^https:\/\//.test(u)) return u;
+    if (/^\/\//.test(u)) return 'https:' + u;
+    if (/^[a-z]+:/i.test(u)) continue;   // http:, data: … ne
+    return ROHLIK_CDN + (u.startsWith('/') ? '' : '/') + u;
+  }
+  return null;
+}
+
 function rohlikVyrobky(result) {
   const zdroje = [];
   if (result && result.structuredContent) zdroje.push(result.structuredContent);
@@ -11838,8 +11869,7 @@ function rohlikVyrobky(result) {
         nazev: nazev.slice(0, 120),
         cena: cislo(x.price?.full ?? x.price ?? x.prices?.price ?? x.priceWithVat ?? x.actualPrice),
         jednotka: typeof (x.textualAmount ?? x.unit ?? x.amount) === 'string' ? String(x.textualAmount ?? x.unit ?? x.amount).slice(0, 30) : null,
-        obrazek: [x.image, x.imageUrl, x.img, Array.isArray(x.images) ? x.images[0] : null]
-          .find(u => typeof u === 'string' && /^https:\/\//.test(u)) || null
+        obrazek: rohlikObrazek(x)
       });
       return;
     }
@@ -11886,6 +11916,11 @@ async function rohlikWebFetch(cesta, opts = {}) {
   let j = null;
   try { j = JSON.parse(text); } catch {}
   const typ = res.headers && typeof res.headers.get === 'function' ? (res.headers.get('content-type') || '') : '';
+  // Stopa pro diagnostiku: jen názvy cookies, text bez e-mailu a hesla
+  const stopa = rohlikDiag.webStopa || (rohlikDiag.webStopa = []);
+  stopa.push({ metoda: opts.method || 'GET', cesta: cesta.split('?')[0], stav: res.status, typ: String(typ).slice(0, 60),
+    ukazka: rohlikTajne(text).slice(0, 300), cookies: Object.keys(rohlikCookies), kdy: Date.now() });
+  if (stopa.length > 10) stopa.splice(0, stopa.length - 10);
   return { status: res.status, j, text, typ };
 }
 
@@ -11910,6 +11945,11 @@ async function rohlikWebLogin() {
     throw new RohlikChyba('Rohlík: špatný e-mail nebo heslo (ROHLIK_EMAIL / ROHLIK_HESLO v Renderu).');
   }
   if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'přihlášení');
+  // Bez cookie by se košík plnil v anonymní relaci, kterou na webu neuvidíš
+  if (!Object.keys(rohlikCookies).length) {
+    rohlikWebChyba(r, 'přihlášení');
+    throw new RohlikChyba('Rohlík přihlášení nevrátilo relaci (viz diagnostika).');
+  }
   rohlikWebPrihlasen = true;
 }
 
@@ -11930,7 +11970,22 @@ async function rohlikWebHledej(dotaz) {
   if (r.status >= 300 || !r.j) throw rohlikWebChyba(r, 'hledání');
   const vyrobky = rohlikVyrobky({ structuredContent: r.j }).slice(0, 8);
   if (!vyrobky.length) rohlikDiag.ukazka = rohlikTajne(r.text).slice(0, 600);
+  else if (!vyrobky.some(v => v.obrazek)) await rohlikWebFotky(vyrobky);
   return vyrobky;
+}
+
+// Hledání nevrátilo fotky → jedno dávkové volání detailu výrobků; selhání nevadí
+async function rohlikWebFotky(vyrobky) {
+  try {
+    const q = vyrobky.map(v => 'products=' + encodeURIComponent(v.productId)).join('&');
+    const r = await rohlikWeb('/api/v1/products?' + q);
+    const detaily = r.status < 300 && r.j ? rohlikVyrobky({ structuredContent: r.j }) : [];
+    for (const v of vyrobky) {
+      const d = detaily.find(y => String(y.productId) === String(v.productId));
+      if (d && d.obrazek) v.obrazek = d.obrazek;
+    }
+    if (!vyrobky.some(v => v.obrazek)) rohlikDiag.ukazkaFotek = rohlikTajne(r.text || '').slice(0, 400);
+  } catch {}
 }
 
 async function rohlikWebKosik(polozky) {
@@ -11939,6 +11994,28 @@ async function rohlikWebKosik(polozky) {
       actionId: null, productId: Number(p.productId), quantity: p.mnozstvi, recipeId: null, source: 'true:Shopping Lists' }) });
     if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'košík');
   }
+  // Ověření: přidané výrobky musí v košíku na webu opravdu být
+  const k = await rohlikWeb('/services/frontend-service/v2/cart');
+  if (k.status >= 300 || !k.j) throw rohlikWebChyba(k, 'kontrola košíku');
+  const vKosiku = rohlikIdVKosiku(k.j);
+  const chybi = polozky.filter(p => !vKosiku.has(String(p.productId)));
+  if (chybi.length) {
+    rohlikWebChyba(k, 'kontrola košíku');
+    throw new RohlikChyba('Rohlík přidání nepotvrdil — košík na webu je pořád bez: '
+      + chybi.map(p => p.nazev || p.productId).join(', ').slice(0, 120) + ' (viz diagnostika).');
+  }
+}
+
+// Všechna čísla výrobků v odpovědi košíku (klíče i pole productId/id)
+function rohlikIdVKosiku(x, out = new Set(), hloubka = 0) {
+  if (!x || typeof x !== 'object' || hloubka > 8) return out;
+  if (Array.isArray(x)) { for (const y of x) rohlikIdVKosiku(y, out, hloubka + 1); return out; }
+  for (const [k, v] of Object.entries(x)) {
+    if (/^\d{3,}$/.test(k)) out.add(k);
+    if ((k === 'productId' || k === 'product_id') && (typeof v === 'number' || typeof v === 'string')) out.add(String(v));
+    rohlikIdVKosiku(v, out, hloubka + 1);
+  }
+  return out;
 }
 
 async function rohlikHledej(dotaz) {
@@ -12128,7 +12205,7 @@ app.get('/api/rohlik/diagnostika', async (req, res) => {
     oauth: { prihlaseno: rohlikPrihlasen(), klient: o.clientId || null, redirect: o.redirect || null, obnovovaciToken: !!o.refresh,
       vyprsi: o.exp ? new Date(o.exp).toISOString() : null, meta: o.meta || null, staraRegistrace: rohlikDiag.staraRegistrace || null },
     prihlaseni: rohlikDiag.prihlaseni, registrace: rohlikDiag.registrace || null, start: rohlikDiag.start || null,
-    web: { zapnuto: rohlikWebZapnuto, prihlasen: rohlikWebPrihlasen, posledni: rohlikDiag.web || null } };
+    web: { zapnuto: rohlikWebZapnuto, prihlasen: rohlikWebPrihlasen, posledni: rohlikDiag.web || null, stopa: rohlikDiag.webStopa || [], ukazkaFotek: rohlikDiag.ukazkaFotek || null } };
   if (rohlikPrihlasen()) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));

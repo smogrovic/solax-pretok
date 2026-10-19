@@ -350,7 +350,7 @@ nadpis('N2) Koupené 24 h přeškrtnuté');
 nadpis('N3) Pravidelně kupované');
 {
   const h = build();
-  check('výchozích šest s ikonami', h.state.nakupOblibene.map(o => o.ikona + o.text).join(','), '🥚Vajíčka,🍌Banány,🥓Šunka,🧀Sýr,🥛Mléko,🧻Toaletní papír');
+  check('výchozích deset s ikonami', h.state.nakupOblibene.map(o => o.ikona + o.text).join(','), '🥚Vajíčka,🍌Banány,🥓Šunka,🧀Sýr,🥛Mléko,🧻Toaletní papír,🥣Jogurt,🥩Maso,🍚Rýže,🫙Tvaroh');
   const r = h.zavolej('/api/nakup/oblibene', {}, { polozky: [{ text: '  Rohlíky ', ikona: '🍞' }, { text: 'rohlíky' }, { text: 'Kafe' }] });
   check('uložení', r.status, 200);
   check('  učesané, bez dvojic, výchozí ikona', JSON.stringify(h.state.nakupOblibene), JSON.stringify([{ text: 'Rohlíky', ikona: '🍞' }, { text: 'Kafe', ikona: '🛒' }]));
@@ -360,7 +360,14 @@ nadpis('N3) Pravidelně kupované');
   check('zamčená appka 401', build({ odemceno: false }).zavolej('/api/nakup/oblibene', {}, { polozky: [] }).status, 401);
   const h2 = build();
   h2.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'Ze zálohy', ikona: '🍺' }] });
-  check('obnova ze zálohy do výchozích', h2.state.nakupOblibene.map(o => o.text).join(), 'Ze zálohy');
+  check('obnova starší zálohy doplní nové čtyři', h2.state.nakupOblibene.map(o => o.text).join(), 'Ze zálohy,Jogurt,Maso,Rýže,Tvaroh');
+  const h4 = build();
+  h4.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'Ze zálohy', ikona: '🍺' }, { text: 'jogurt', ikona: '🍶' }], doplneno: 2 });
+  check('  už doplněná záloha zůstane, jak je', h4.state.nakupOblibene.map(o => o.text).join(), 'Ze zálohy,jogurt');
+  const h5 = build();
+  h5.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'MASO', ikona: '🍖' }] });
+  check('  co v seznamu je, se nezdvojí', h5.state.nakupOblibene.map(o => o.ikona + o.text).join(), '🍖MASO,🥣Jogurt,🍚Rýže,🫙Tvaroh');
+  check('  záloha si pamatuje doplnění', /'\/api\/nakup\/oblibene\/restore': \{ polozky: [^}]*doplneno: NAKUP_OBLIBENE_DOPLNENI/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8')), true);
   h.zavolej('/api/nakup/oblibene/restore', {}, { polozky: [{ text: 'Stará', ikona: '🍺' }] });
   check('  upravené nepřepíše', h.state.nakupOblibene.map(o => o.text).join(), 'Rohlíky,Kafe');
 }
