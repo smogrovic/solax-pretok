@@ -160,16 +160,24 @@ setTimeout(async () => {
 
   R.push('\\n3) Rohlík');
   const rbtn = document.getElementById('rohlikBtn');
+  const rtl = document.getElementById('rohlikTlacitka');
   rohlikData = null;
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
   renderNakup();
-  check('bez nastaveného Rohlíku tlačítko není', rbtn.hidden, true);
+  check('bez nastaveného Rohlíku tlačítka nejsou', vidi(rtl), false);
   rohlikData = { enabled: true };
   renderNakup();
-  check('s Rohlíkem a nekoupenými je', rbtn.hidden, false);
+  check('s Rohlíkem a nekoupenými jsou', vidi(rtl), true);
+  check('  dvě: jako naposled a s výběrem', [...rtl.querySelectorAll('button')].map(b => b.textContent).join(' | '), '🥐 Jako naposled | 🖼️ S výběrem');
+  check('  vedle sebe', rtl.querySelectorAll('button')[0].getBoundingClientRect().top === rbtn.getBoundingClientRect().top, true);
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
   renderNakup();
-  check('všechno v košíku nebo koupené = tlačítko není', rbtn.hidden, true);
+  check('všechno v košíku nebo koupené = tlačítka nejsou', vidi(rtl), false);
+  nakupData = [];
+  renderNakup();
+  check('  prázdný seznam taky ne', vidi(rtl), false);
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
+  renderNakup();
   check('štítek v košíku', document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik').textContent, '🛒 v košíku');
 
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }, { id: 'n_cccc3333', text: 'sýr', t: 3 }];
@@ -225,8 +233,7 @@ setTimeout(async () => {
   check('  s tokenem', dotazy.find(d => d.url === '/api/rohlik/vyber') && true, true);
   const box = id => document.querySelector('#rohlikSeznam .rohlik-polozka[data-id="' + id + '"]');
   check('zapamatovaný výběr je předvybraný', box('n_aaaa1111').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Kunín Mléko'), true);
-  check('  a nehledá se', dotazy.some(d => /hledat\?q=Ml/.test(d.url)), false);
-  check('nové se hledají', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).length, 2);
+  check('s výběrem se hledá všechno (fotky na výběr)', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).length, 3);
   check('  výsledky k výběru', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek').length, 2);
   await pockej(150);
   check('  fotky výrobků', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img') && box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img').getBoundingClientRect().width, 56);
@@ -249,6 +256,36 @@ setTimeout(async () => {
   check('  a v seznamu je štítek', !!document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik'), true);
   document.getElementById('rohlikZavrit').click();
   check('Zavřít', rok.hidden, true);
+
+  // Jako naposled: zapamatované rovnou do košíku, v okně jen to, co je potřeba vybrat
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }];
+  renderNakup();
+  dotazy = [];
+  document.getElementById('rohlikNaposledBtn').click();
+  await pockej(120);
+  const kos2 = dotazy.find(d => d.url === '/api/rohlik/kosik');
+  check('jako naposled: zapamatované hned do košíku', kos2 && kos2.telo.polozky.map(p => p.nakupId + ':' + p.productId + ':' + p.mnozstvi).join(), 'n_aaaa1111:1349777:1');
+  check('  zapamatované se nehledá', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).map(d => decodeURIComponent(d.url.split('q=')[1])).join(), 'chleba');
+  check('  v okně zbude jen nezapamatované', [...document.querySelectorAll('#rohlikSeznam .rohlik-polozka')].map(b => b.dataset.id).join(), 'n_bbbb2222');
+  check('  hláška', document.getElementById('rohlikStav').textContent, 'Přidáno 1 jako naposled. Zbytek vyber níž.');
+  document.getElementById('rohlikZavrit').click();
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
+  renderNakup();
+  dotazy = [];
+  document.getElementById('rohlikNaposledBtn').click();
+  await pockej(80);
+  check('  všechno zapamatované: hotovo bez hledání', dotazy.some(d => d.url.startsWith('/api/rohlik/hledat')) + ' | ' + document.getElementById('rohlikStav').textContent,
+    'false | Přidáno 1 jako naposled. Objednávku dokonči v appce Rohlík.');
+  document.getElementById('rohlikZavrit').click();
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
+  renderNakup();
+  odpoved = url => url === '/api/rohlik/vyber' ? { ok: true, vyber: { mleko: { productId: 1, nazev: 'M' } } } : url === '/api/rohlik/kosik' ? { error: 'Rohlík přihlášení nedokončil' } : { ok: true, vyrobky: [] };
+  dotazy = [];
+  document.getElementById('rohlikNaposledBtn').click();
+  await pockej(80);
+  check('  chyba košíku se ukáže a nic dál se nehledá', document.getElementById('rohlikStav').textContent + ' | ' + dotazy.some(d => d.url.startsWith('/api/rohlik/hledat')),
+    'Rohlík přihlášení nedokončil | false');
+  document.getElementById('rohlikZavrit').click();
 
   R.push('\\n4) Pravidelně kupované');
   const obl = document.getElementById('nakupOblibene');

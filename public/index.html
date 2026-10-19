@@ -1415,6 +1415,10 @@
   .rohlik-btn{width:100%;margin-top:10px;border:none;border-radius:14px;padding:11px 12px;font:inherit;font-size:14px;
     font-weight:800;background:#ffd23f;color:#3b2a00;cursor:pointer;}
   .rohlik-btn[hidden]{display:none;}
+  .rohlik-tlacitka{display:flex;gap:8px;margin-top:10px;}
+  .rohlik-tlacitka[hidden]{display:none;}
+  .rohlik-tlacitka .rohlik-btn{margin-top:0;flex:1 1 0;}
+  .rohlik-btn-vyber{background:#fff3c4;}
   .rohlik-prihlaseni[hidden]{display:none;}
   .rohlik-krok2[hidden]{display:none;}
   .rohlik-krok2 .pin-input{font-size:13px;}
@@ -1440,7 +1444,7 @@
   .rohlik-odkazy button{border:none;background:none;padding:0;font:inherit;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .rohlik-info{font-size:12px;color:var(--muted);margin-top:6px;}
   .nakup-karta{text-align:left;}
-  .nakup-karta .nakup-seznam, .nakup-karta .nakup-pridat, .nakup-karta .rohlik-btn{width:100%;align-self:stretch;box-sizing:border-box;}
+  .nakup-karta .nakup-seznam, .nakup-karta .nakup-pridat, .nakup-karta .rohlik-tlacitka{width:100%;align-self:stretch;box-sizing:border-box;}
   .nakup-karta .graph-title{text-align:center;}
   .nakup-oblibene{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
   .nakup-oblibene[hidden]{display:none;}
@@ -3431,7 +3435,11 @@
         <div class="nakup-oblibene" id="nakupOblibene" hidden></div>
         <ul class="nakup-seznam" id="nakupSeznam"></ul>
         <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
-        <button class="rohlik-btn" id="rohlikBtn" type="button" hidden>🥐 Do košíku na Rohlíku</button>
+        <!-- Do košíku na Rohlíku: rovnou podle minula, nebo s výběrem výrobků (fotky) -->
+        <div class="rohlik-tlacitka" id="rohlikTlacitka" hidden>
+          <button class="rohlik-btn" id="rohlikNaposledBtn" type="button">🥐 Jako naposled</button>
+          <button class="rohlik-btn rohlik-btn-vyber" id="rohlikBtn" type="button">🖼️ S výběrem</button>
+        </div>
       </div>
     </div>
   </div>
@@ -12791,6 +12799,8 @@ const nakupChybaEl = document.getElementById('nakupChyba');
 
 let rohlikData = null;
 const rohlikBtnEl = document.getElementById('rohlikBtn');
+const rohlikNaposledEl = document.getElementById('rohlikNaposledBtn');
+const rohlikTlacitkaEl = document.getElementById('rohlikTlacitka');
 // Co se ještě kupuje — jen to svítí na zelené záložce
 const nakupNekoupene = () => (nakupData || []).filter(p => !p.koupeno);
 
@@ -12814,6 +12824,7 @@ function renderNakup(now = Date.now()) {
   const nekoupene = vse.filter(p => !p.koupeno).sort((a, b) => a.t - b.t);
   // Koupené na konci, naposledy koupené nahoře
   const koupene = vse.filter(p => p.koupeno).sort((a, b) => b.koupeno - a.koupeno);
+  if (rohlikTlacitkaEl) rohlikTlacitkaEl.hidden = !(rohlikData && rohlikData.enabled && nekoupene.some(p => !p.kosik));
   if (!vse.length) {
     const li = document.createElement('li');
     li.className = 'nakup-prazdno';
@@ -12821,7 +12832,6 @@ function renderNakup(now = Date.now()) {
     nakupSeznamEl.appendChild(li);
     return;
   }
-  if (rohlikBtnEl) rohlikBtnEl.hidden = !(rohlikData && rohlikData.enabled && nekoupene.some(p => !p.kosik));
   for (const p of [...nekoupene, ...koupene]) {
     const li = document.createElement('li');
     li.className = p.koupeno ? 'koupeno' : '';
@@ -12939,7 +12949,9 @@ async function rohlikPrihlasit() {
   }
 }
 
-async function rohlikOtevri() {
+// naposled: zapamatované výrobky jdou rovnou do košíku, v okně zbude jen to, co je
+// potřeba vybrat. Jinak se hledá všechno — i zapamatované, ať jsou vidět fotky na výběr.
+async function rohlikOtevri({ naposled = false } = {}) {
   if (!rohlikOknoEl) return;
   if (!rohlikPrihlasenyStav()) {
     rohlikStavEl.textContent = '';
@@ -12957,8 +12969,18 @@ async function rohlikOtevri() {
   rohlikStavEl.textContent = '';
   for (const r of rohlikRadky) r.vyber = vyber[rohlikKlicJs(r.polozka.text)] || null;
   renderRohlik();
-  // Co nemá zapamatovaný výrobek, se hledá — po jednom, ať se Rohlík nezahltí
-  for (const r of rohlikRadky) if (!r.vyber) await rohlikHledej(r);
+  if (naposled) {
+    const n = rohlikRadky.filter(r => r.vyber).length;
+    if (n) {
+      const ok = await rohlikPridej();
+      if (!ok) return;
+      rohlikStavEl.textContent = rohlikRadky.length
+        ? 'Přidáno ' + n + ' jako naposled. Zbytek vyber níž.'
+        : 'Přidáno ' + n + ' jako naposled. Objednávku dokonči v appce Rohlík.';
+    }
+  }
+  // Hledá se po jednom, ať se Rohlík nezahltí
+  for (const r of rohlikRadky) if (!r.vyber || !naposled) await rohlikHledej(r);
 }
 
 async function rohlikHledej(r) {
@@ -13059,7 +13081,7 @@ async function rohlikPridej() {
   const polozky = rohlikRadky.filter(r => r.vyber && !r.preskocit).map(r => ({
     nakupId: r.polozka.id, productId: r.vyber.productId, nazev: r.vyber.nazev,
     obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, mnozstvi: r.mnozstvi }));
-  if (!polozky.length) return;
+  if (!polozky.length) return false;
   rohlikPridatEl.disabled = true;
   rohlikStavEl.textContent = 'Přidávám…';
   try {
@@ -13075,14 +13097,17 @@ async function rohlikPridej() {
     rohlikRadky = rohlikRadky.filter(r => !(r.vyber && !r.preskocit));
     renderRohlik();
     rohlikStavEl.textContent = 'Přidáno ' + data.pridano + ' položek. Objednávku dokonči v appce Rohlík.';
+    return true;
   } catch (err) {
     rohlikStavEl.textContent = err.message;
     renderRohlik();
+    return false;
   }
 }
 
 if (rohlikOknoEl) {
   rohlikBtnEl.addEventListener('click', () => rohlikOtevri());
+  rohlikNaposledEl.addEventListener('click', () => rohlikOtevri({ naposled: true }));
   document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
   rohlikPridatEl.addEventListener('click', rohlikPridej);
   document.getElementById('rohlikPrihlasitBtn').addEventListener('click', rohlikPrihlasit);
