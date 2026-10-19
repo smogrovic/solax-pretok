@@ -11511,26 +11511,37 @@ async function rohlikOauthMetadata() {
   throw new RohlikChyba('Rohlík: nepodařilo se zjistit, kde se přihlašuje (OAuth metadata).');
 }
 
-// Jednorázová registrace klienta (pro konkrétní adresu návratu)
-async function rohlikOauthKlient(meta, redirect) {
+// Jednorázová registrace klienta. Rohlík samoregistrovaným klientům povolí jen
+// určité adresy návratu (naši odmítl) — zkouší se localhost, jak to dělají počítačové
+// MCP klienty. Prohlížeč pak po přihlášení skončí na nefunkční stránce localhost
+// a uživatel její adresu (s kódem) vloží do appky.
+const ROHLIK_NAVRATY = ['http://localhost:3334/oauth/callback', 'http://127.0.0.1:3334/oauth/callback', 'http://localhost/callback'];
+async function rohlikOauthKlient(meta, redirectNas) {
   const o = state.rohlikOauth || {};
-  if (o.clientId && o.redirect === redirect) return o;
+  if (o.clientId && o.redirect) return o;
   if (!meta.registration_endpoint) throw new RohlikChyba('Rohlík: registrace klienta není k dispozici.');
-  const r = await rohlikJson(meta.registration_endpoint, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ client_name: 'SMG home', redirect_uris: [redirect],
-      grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
-      token_endpoint_auth_method: 'none' })
-  });
-  if (r.status >= 300 || !r.j || !r.j.client_id) {
+  const pokusy = [];
+  let posledniDuvod = '';
+  for (const redirect of [redirectNas, ...ROHLIK_NAVRATY].filter(Boolean)) {
+    const r = await rohlikJson(meta.registration_endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ client_name: 'SMG home', redirect_uris: [redirect],
+        grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
+        token_endpoint_auth_method: 'none' })
+    });
+    if (r.status < 300 && r.j && r.j.client_id) {
+      rohlikDiag.registrace = { prosla: redirect, pokusy, kdy: Date.now() };
+      state.rohlikOauth = { ...o, meta, clientId: r.j.client_id, clientSecret: r.j.client_secret || null, redirect };
+      return state.rohlikOauth;
+    }
     // Proč Rohlík registraci odmítl — bez toho se nedá nic opravit
-    const duvod = r.j ? (r.j.error_description || r.j.error || '') : String(r.text || '').replace(/<[^>]*>/g, ' ').trim();
-    rohlikDiag.registrace = { stav: r.status, odpoved: rohlikTajne(String(r.text || '')).slice(0, 400), redirect, kdy: Date.now() };
-    throw new RohlikChyba(`Rohlík: registrace klienta se nepovedla (HTTP ${r.status})`
-      + (duvod ? `: ${rohlikTajne(String(duvod)).slice(0, 160)}` : '.'));
+    posledniDuvod = r.j ? (r.j.error_description || r.j.error || '') : String(r.text || '').replace(/<[^>]*>/g, ' ').trim();
+    pokusy.push({ redirect, stav: r.status, odpoved: rohlikTajne(String(r.text || '')).slice(0, 300) });
   }
-  state.rohlikOauth = { ...o, meta, clientId: r.j.client_id, clientSecret: r.j.client_secret || null, redirect };
-  return state.rohlikOauth;
+  rohlikDiag.registrace = { prosla: null, pokusy, kdy: Date.now() };
+  const posledni = pokusy[pokusy.length - 1] || {};
+  throw new RohlikChyba(`Rohlík: registrace klienta se nepovedla (HTTP ${posledni.stav})`
+    + (posledniDuvod ? `: ${rohlikTajne(String(posledniDuvod)).slice(0, 160)}` : '.'));
 }
 
 const rohlikB64 = buf => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -11539,6 +11550,7 @@ const rohlikB64 = buf => Buffer.from(buf).toString('base64').replace(/\+/g, '-')
 async function rohlikOauthStart(redirect, now = Date.now()) {
   const meta = await rohlikOauthMetadata();
   const k = await rohlikOauthKlient(meta, redirect);
+  redirect = k.redirect;
   for (const [s, v] of rohlikPrihlaseni) if (v.do < now) rohlikPrihlaseni.delete(s);
   const stav = rohlikB64(crypto.randomBytes(24));
   const verifier = rohlikB64(crypto.randomBytes(32));
@@ -11580,7 +11592,7 @@ async function rohlikOauthToken(parametry) {
 async function rohlikOauthZpet(stav, code, now = Date.now()) {
   const p = rohlikPrihlaseni.get(stav);
   rohlikPrihlaseni.delete(stav);
-  if (!p || p.do < now) throw new RohlikChyba('Přihlášení vypršelo, zkus to znovu.');
+  if (!p || p.do < now) throw new RohlikChyba('Přihlášení vypršelo (platí 10 min), zkus to znovu.');
   if (typeof code !== 'string' || !code) throw new RohlikChyba('Rohlík nevrátil přihlašovací kód.');
   return rohlikOauthToken({ grant_type: 'authorization_code', code, redirect_uri: p.redirect, code_verifier: p.verifier });
 }
@@ -11878,6 +11890,32 @@ app.get('/api/rohlik/oauth/zpet', async (req, res) => {
     rohlikDiag.chyba = rohlikTajne(err.message).slice(0, 200);
     res.redirect('/?rohlik=chyba&duvod=' + encodeURIComponent(err instanceof RohlikChyba ? err.message : 'Přihlášení se nepovedlo.'));
   }
+});
+
+// Vložená adresa z nefunkční stránky localhost (nebo jen kód) → dokončit přihlášení
+function rohlikKodZAdresy(text) {
+  const t = String(text || '').trim();
+  let code = null, stav = null;
+  try {
+    const u = new URL(t);
+    code = u.searchParams.get('code');
+    stav = u.searchParams.get('state');
+  } catch {
+    const mc = /[?&]code=([^&#\s]+)/.exec(t), ms = /[?&]state=([^&#\s]+)/.exec(t);
+    code = mc ? decodeURIComponent(mc[1]) : null;
+    stav = ms ? decodeURIComponent(ms[1]) : null;
+  }
+  return { code, stav };
+}
+
+app.post('/api/rohlik/oauth/kod', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const { code, stav } = rohlikKodZAdresy(req.body && req.body.adresa);
+  if (!code || !stav) return res.status(400).json({ error: 'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.' });
+  try {
+    await rohlikOauthZpet(stav, code);
+    res.json({ ok: true, rohlik: rohlikPayload() });
+  } catch (err) { rohlikOdpovezChybou(res, err); }
 });
 
 app.post('/api/rohlik/odhlasit', (req, res) => {

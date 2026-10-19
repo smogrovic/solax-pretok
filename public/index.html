@@ -1416,6 +1416,8 @@
     font-weight:800;background:#ffd23f;color:#3b2a00;cursor:pointer;}
   .rohlik-btn[hidden]{display:none;}
   .rohlik-prihlaseni[hidden]{display:none;}
+  .rohlik-krok2[hidden]{display:none;}
+  .rohlik-krok2 .pin-input{font-size:13px;}
   .rohlik-odhlasit{border:none;background:none;font:inherit;font-size:11px;color:var(--muted);text-decoration:underline;
     cursor:pointer;margin-top:6px;align-self:center;}
   .rohlik-odhlasit[hidden]{display:none;}
@@ -3785,8 +3787,13 @@
     <div class="potvrz-nadpis">🥐 Do košíku na Rohlíku</div>
     <div class="potvrz-text">Vyber výrobek ke každé položce. Appka si ho zapamatuje a příště ho vybere sama. Objednávku dokončíš v appce Rohlík.</div>
     <div class="rohlik-prihlaseni" id="rohlikPrihlaseni" hidden>
-      <div class="potvrz-text">Rohlík vyžaduje jednorázové přihlášení. Otevře se jejich přihlašovací stránka; po přihlášení se vrátíš sem a appka si přístup pamatuje.</div>
-      <button class="rohlik-btn" id="rohlikPrihlasitBtn" type="button">Přihlásit se k Rohlíku</button>
+      <div class="potvrz-text">Rohlík vyžaduje jednorázové přihlášení. Pak si appka přístup pamatuje.</div>
+      <button class="rohlik-btn" id="rohlikPrihlasitBtn" type="button">1. Přihlásit se k Rohlíku</button>
+      <div class="rohlik-krok2" id="rohlikKrok2" hidden>
+        <div class="potvrz-text">Po přihlášení se otevře stránka, která <b>nejde načíst</b> (localhost) — to je v pořádku. Zkopíruj její <b>adresu z adresního řádku</b> a vlož ji sem:</div>
+        <input class="pin-input vlastni-pole" id="rohlikAdresa" type="url" autocomplete="off" placeholder="http://localhost:3334/oauth/callback?code=…">
+        <button class="rohlik-btn" id="rohlikDokoncitBtn" type="button">2. Dokončit přihlášení</button>
+      </div>
     </div>
     <div class="rohlik-seznam" id="rohlikSeznam"></div>
     <div class="potvrz-text" id="rohlikStav"></div>
@@ -12890,7 +12897,11 @@ async function rohlikPrihlasit() {
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
     if (!res.ok || !data.url) throw new Error(data.error || 'Přihlášení se nepodařilo spustit.');
-    window.location.href = data.url;
+    // Přihlášení v nové kartě, ať appka zůstane, kam se pak vloží adresa
+    document.getElementById('rohlikKrok2').hidden = false;
+    rohlikStavEl.textContent = '';
+    const okno = window.open(data.url, '_blank');
+    if (!okno) window.location.href = data.url;
   } catch (err) {
     rohlikStavEl.textContent = err.message;
   }
@@ -13037,6 +13048,26 @@ if (rohlikOknoEl) {
   document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
   rohlikPridatEl.addEventListener('click', rohlikPridej);
   document.getElementById('rohlikPrihlasitBtn').addEventListener('click', rohlikPrihlasit);
+  document.getElementById('rohlikDokoncitBtn').addEventListener('click', async () => {
+    const adresa = document.getElementById('rohlikAdresa').value.trim();
+    if (!adresa) { rohlikStavEl.textContent = 'Vlož adresu ze stránky po přihlášení.'; return; }
+    rohlikStavEl.textContent = 'Dokončuji přihlášení…';
+    try {
+      const res = await fetch('/api/rohlik/oauth/kod', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ adresa }) });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+      if (!res.ok) throw new Error(data.error || 'Přihlášení se nepovedlo.');
+      rohlikData = data.rohlik || { enabled: true, prihlaseno: true };
+      document.getElementById('rohlikAdresa').value = '';
+      document.getElementById('rohlikKrok2').hidden = true;
+      renderNakup();
+      await rohlikOtevri();
+      rohlikStavEl.textContent = 'Přihlášeno k Rohlíku ✓';
+    } catch (err) {
+      rohlikStavEl.textContent = err.message;
+    }
+  });
   rohlikOdhlasitEl.addEventListener('click', async () => {
     if (!(await zeptejSe('Odhlásit Rohlík?', 'Košík pak půjde plnit až po novém přihlášení.'))) return;
     try {

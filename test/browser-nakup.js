@@ -176,7 +176,22 @@ setTimeout(async () => {
   document.getElementById('rohlikPrihlasitBtn').click();
   await pockej(30);
   check('Přihlásit pošle požadavek se zámkem', dotazy[0] && dotazy[0].url, '/api/rohlik/prihlasit');
-  check('  a přesměruje na přihlášení', location.hash, '#rohlik-test-prihlaseni');
+  check('  ukáže krok 2 s polem na adresu', document.getElementById('rohlikKrok2').hidden, false);
+  // Dokončení vloženou adresou
+  dotazy = [];
+  odpoved = (url, telo) => url === '/api/rohlik/oauth/kod'
+    ? (/code=/.test(telo.adresa) ? { ok: true, rohlik: { enabled: true, prihlaseno: true } } : { error: 'V adrese chybí kód.' })
+    : (url === '/api/rohlik/vyber' ? { ok: true, vyber: {} } : (url.startsWith('/api/rohlik/hledat') ? { ok: true, vyrobky: [] } : { ok: true }));
+  document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback';
+  document.getElementById('rohlikDokoncitBtn').click();
+  await pockej(30);
+  check('adresa bez kódu: chyba', document.getElementById('rohlikStav').textContent, 'V adrese chybí kód.');
+  document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback?code=KOD&state=S';
+  document.getElementById('rohlikDokoncitBtn').click();
+  await pockej(120);
+  check('Dokončit pošle vloženou adresu', dotazy.filter(d => d.url === '/api/rohlik/oauth/kod').pop().telo.adresa, 'http://localhost:3334/oauth/callback?code=KOD&state=S');
+  check('  přihlášeno', document.getElementById('rohlikStav').textContent, 'Přihlášeno k Rohlíku ✓');
+  check('  a ukáže výběr výrobků', document.getElementById('rohlikPrihlaseni').hidden + ' ' + document.getElementById('rohlikSeznam').hidden, 'true false');
   document.getElementById('rohlikZavrit').click();
   rohlikData = { enabled: true, prihlaseno: true };
   renderNakup();

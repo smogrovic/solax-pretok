@@ -34,7 +34,12 @@ function falesny({ nastroje, hledani, kosik, sse = false, odmitni = null, vyprsi
         registration_endpoint: 'https://auth.rohlik.cz/register', scopes_supported: ['mcp'] });
     }
     if (u === 'https://auth.rohlik.cz/register') {
-      log.push({ url: u, telo: JSON.parse(opts.body) });
+      const t = JSON.parse(opts.body);
+      log.push({ url: u, telo: t });
+      // Jako skutečný Rohlík: samoregistrovaný klient smí jen localhost
+      if (!/^http:\/\/localhost:/.test(t.redirect_uris[0])) {
+        return odpovez(400, { error: 'invalid_request', error_description: 'Redirect URI is not allowed for dynamic client registration. Got: ' + t.redirect_uris[0] });
+      }
       return odpovez(201, { client_id: 'klient-1' });
     }
     if (u === 'https://auth.rohlik.cz/token') {
@@ -169,13 +174,22 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const u = new URL(s.out.url);
     check('start vrátí adresu přihlášení u Rohlíku', u.origin + u.pathname, 'https://auth.rohlik.cz/authorize');
     check('  s PKCE a stavem', u.searchParams.get('code_challenge_method') + ' ' + !!u.searchParams.get('code_challenge') + ' ' + !!u.searchParams.get('state'), 'S256 true true');
-    check('  návrat na appku', u.searchParams.get('redirect_uri'), 'https://app.test/api/rohlik/oauth/zpet');
+    check('  návrat na localhost (naši adresu Rohlík nepovolí)', u.searchParams.get('redirect_uri'), 'http://localhost:3334/oauth/callback');
+    check('  nejdřív zkusí naši adresu, pak localhost', f.log.filter(x => x.url === 'https://auth.rohlik.cz/register').map(x => x.telo.redirect_uris[0]).join(' | '),
+      'https://app.test/api/rohlik/oauth/zpet | http://localhost:3334/oauth/callback');
     check('  zdroj a rozsah', u.searchParams.get('resource') + ' ' + u.searchParams.get('scope'), 'https://mcp.rohlik.cz/mcp mcp');
-    check('  klient se zaregistroval', f.log.find(x => x.url === 'https://auth.rohlik.cz/register').telo.redirect_uris[0], 'https://app.test/api/rohlik/oauth/zpet');
-    const z = await h.volej('GET /api/rohlik/oauth/zpet', { query: { code: 'KOD', state: u.searchParams.get('state') } });
-    check('návrat s kódem: přesměruje do appky', z.kam, '/?rohlik=ok');
+    const dreg = (await h.volej('GET /api/rohlik/diagnostika')).out.registrace;
+    check('  diagnostika: která adresa prošla a pokusy', dreg.prosla + ' ' + dreg.pokusy.length, 'http://localhost:3334/oauth/callback 1');
+    // Vložená adresa z nefunkční stránky localhost
+    check('vložená adresa bez kódu', (await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback' } })).out.error,
+      'V adrese chybí kód — zkopíruj celou adresu z adresního řádku.');
+    check('  cizí stav', (await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'http://localhost:3334/oauth/callback?code=KOD&state=cizi' } })).out.error,
+      'Přihlášení vypršelo (platí 10 min), zkus to znovu.');
+    const z = await h.volej('POST /api/rohlik/oauth/kod', { body: { adresa: '  http://localhost:3334/oauth/callback?code=KOD&state=' + encodeURIComponent(u.searchParams.get('state')) + '&iss=x ' } });
+    check('vložená celá adresa přihlásí', JSON.stringify(z.out), '{"ok":true,"rohlik":{"enabled":true,"prihlaseno":true}}');
     const tok = f.log.filter(x => x.url === 'https://auth.rohlik.cz/token').pop().telo;
-    check('  výměna kódu s verifierem', tok.grant_type + ' ' + !!tok.code_verifier + ' ' + tok.client_id, 'authorization_code true klient-1');
+    check('  výměna kódu s verifierem a localhost návratem', tok.grant_type + ' ' + !!tok.code_verifier + ' ' + tok.client_id + ' ' + tok.redirect_uri,
+      'authorization_code true klient-1 http://localhost:3334/oauth/callback');
     check('  tokeny uložené', h.state.rohlikOauth.access + ' ' + h.state.rohlikOauth.refresh, ACCESS + ' ' + REFRESH);
     check('  appka se dozví', h.zpravy.some(m => m.u === 'rohlik' && m.d.rohlik.prihlaseno === true), true);
     check('  tokeny do appky nejdou', JSON.stringify(h.zpravy).includes(ACCESS), false);
@@ -183,6 +197,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('po přihlášení hledání funguje', r.kod + ' ' + r.out.vyrobky.length, '200 2');
     const z2 = await h.volej('GET /api/rohlik/oauth/zpet', { query: { code: 'KOD', state: u.searchParams.get('state') } });
     check('stav jde použít jen jednou', /rohlik=chyba/.test(z2.kam), true);
+    check('zamčená appka: vložení kódu 401', (await build(f, { odemceno: false }).volej('POST /api/rohlik/oauth/kod', { body: { adresa: 'x' } })).kod, 401);
     const z3 = await h.volej('GET /api/rohlik/oauth/zpet', { query: { error: 'access_denied' } });
     check('odmítnutí u Rohlíku se vrátí jako chyba', z3.kam, '/?rohlik=chyba&duvod=access_denied');
     const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
@@ -201,7 +216,9 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const r = await h.volej('POST /api/rohlik/prihlasit');
     check('odmítnutá registrace řekne proč', r.out.error, 'Rohlík: registrace klienta se nepovedla (HTTP 400): Redirect URI not allowed');
     const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
-    check('  diagnostika má celou odpověď', /invalid_redirect_uri/.test(d.registrace.odpoved) && d.registrace.redirect, 'https://app.test/api/rohlik/oauth/zpet');
+    check('  diagnostika: všechny pokusy', d.registrace.pokusy.map(x => x.redirect).join(' | '),
+      'https://app.test/api/rohlik/oauth/zpet | http://localhost:3334/oauth/callback | http://127.0.0.1:3334/oauth/callback | http://localhost/callback');
+    check('  s odpovědí', /invalid_redirect_uri/.test(d.registrace.pokusy[0].odpoved), true);
   }
   {
     // Rozběhnuté přihlášení platí jen 10 minut
@@ -210,7 +227,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const url = new URL(await h.api.rohlikOauthStart('https://app/zpet', Date.now() - 11 * 60000));
     let chyba = '';
     try { await h.api.rohlikOauthZpet(url.searchParams.get('state'), 'KOD'); } catch (e) { chyba = e.message; }
-    check('přihlášení po 10 minutách vyprší', chyba, 'Přihlášení vypršelo, zkus to znovu.');
+    check('přihlášení po 10 minutách vyprší', chyba, 'Přihlášení vypršelo (platí 10 min), zkus to znovu.');
   }
   {
     // Token, který by Rohlík zopakoval v chybě, se z hlášky vymaže
