@@ -284,7 +284,8 @@ const state = {
   pripominky: pripominkyVychozi(),
   nakup: [],         // nákupní seznam: { id, text, t }
   oznameni: null,    // upozornění přes celou appku: { id, text, od }
-  rohlikVyber: {},   // zapamatované výrobky z Rohlíku: „mléko" → { productId, nazev, … }  // kdy se co naposledy odťuklo + přepínače popelnic
+  rohlikVyber: {},   // zapamatované výrobky z Rohlíku: „mléko" → { productId, nazev, … }
+  rohlikOauth: null, // přihlášení k Rohlíku (OAuth): klient, tokeny — nikdy nejde do appky  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
   // hodnoty se dosud držely jen za dnešek a včerejšek, takže sedmidenní součet
@@ -549,7 +550,7 @@ function snapshot() {
     pripominky: state.pripominky,
     nakup: state.nakup,
     oznameni: state.oznameni,
-    rohlik: { enabled: rohlikEnabled },
+    rohlik: rohlikPayload(),
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
@@ -10968,6 +10969,8 @@ function storeSnapshot() {
     saunaPoMin: state.saunaPoMin || 15,
     // Neodkliknuté upozornění musí přežít nasazení
     oznameni: state.oznameni,
+    // Přihlášení k Rohlíku — bez něj by se po každém nasazení muselo přihlašovat znovu
+    rohlikOauth: state.rohlikOauth,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -11006,6 +11009,7 @@ function storeApplyPrimo(p) {
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
   if (p.oznameni && typeof oznameniObnov === 'function') oznameniObnov(p.oznameni, now);
+  if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
       && (!state.saunaRelace || !state.saunaRelace.od)) {
@@ -11407,37 +11411,32 @@ const server = app.listen(PORT, async () => {
 // ---------- Rohlík (košík) ----------
 // Položky z nákupního seznamu do košíku na Rohlíku přes jejich oficiální MCP server
 // (JSON-RPC přes HTTP). Objednávka se odsud NIKDY neodesílá — jen se plní košík,
-// objednává se v appce Rohlík. Přihlašovací údaje jsou jen v Render → Environment
-// (ROHLIK_EMAIL, ROHLIK_HESLO); nikam se nevypisují, do diagnostiky ani do logu.
+// objednává se v appce Rohlík. Přihlašuje se přes OAuth (níž).
 // Názvy a parametry nástrojů se zjišťují za běhu (tools/list) — v různých popisech
 // se liší a Rohlík je může měnit.
 const ROHLIK_URL = process.env.ROHLIK_MCP_URL || 'https://mcp.rohlik.cz/mcp';
 const ROHLIK_TIMEOUT_MS = 15000;
 const ROHLIK_VYBER_MAX = 300;
-// Údaje vložené do Renderu mívají navíc mezeru, nový řádek nebo uvozovky — na pohled
-// to není poznat a Rohlík pak hlásí špatné heslo. Učeše se to a diagnostika řekne co.
-const rohlikUpraveno = [];
-function rohlikUdaj(hodnota, co) {
-  let v = String(hodnota || '');
-  const pred = v;
-  v = v.replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '');
-  if (v !== pred) rohlikUpraveno.push(`${co}: mezera nebo nový řádek na kraji`);
-  const m = /^(["'„“])(.*)(["'“”])$/.exec(v);
-  if (m) { v = m[2]; rohlikUpraveno.push(`${co}: uvozovky kolem hodnoty`); }
-  return v;
-}
-const ROHLIK_EMAIL = rohlikUdaj(process.env.ROHLIK_EMAIL, 'e-mail');
-const ROHLIK_HESLO = rohlikUdaj(process.env.ROHLIK_HESLO, 'heslo');
-const rohlikEnabled = !!(ROHLIK_EMAIL && ROHLIK_HESLO);
+// Přihlášení: OAuth 2.1 podle specifikace MCP (přihlášení e-mailem a heslem
+// v hlavičkách Rohlík zrušil). Appka se u Rohlíku jednou sama zaregistruje jako
+// klient (dynamická registrace), uživatel se jednou přihlásí v prohlížeči a server
+// si drží přístupový a obnovovací token. Tokeny nikdy nejdou do appky ani do
+// diagnostiky; ukládají se jen do vlastní zálohy (Upstash).
+const ROHLIK_OAUTH_STAV_MS = 10 * 60000;   // jak dlouho platí rozběhnuté přihlášení
+const rohlikPrihlaseni = new Map();        // state → { verifier, redirect, do }
+let rohlikEnabled = true;                  // napojení je k dispozici vždy; přihlášený je až s tokenem
 let rohlikSezeni = null;          // Mcp-Session-Id
 let rohlikNastrojeCache = null;   // { seznam, ts }
 let rohlikRpcId = 1;
 const rohlikDiag = { chyba: null, kdy: 0, ukazka: null, prihlaseni: null };
 
+const rohlikPrihlasen = () => !!(state.rohlikOauth && state.rohlikOauth.access);
+
 function rohlikTajne(text) {
   let t = String(text || '');
-  for (const v of [ROHLIK_EMAIL, ROHLIK_HESLO]) {
-    if (v) t = t.split(v).join('…');
+  const o = state.rohlikOauth || {};
+  for (const v of [o.access, o.refresh, o.clientSecret]) {
+    if (v && v.length >= 6) t = t.split(v).join('…');
   }
   return t;
 }
@@ -11461,23 +11460,11 @@ function rohlikPrectiOdpoved(text, id) {
 
 class RohlikChyba extends Error {}
 
-async function rohlikPost(telo) {
-  const hlavicky = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json, text/event-stream',
-    'rhl-email': ROHLIK_EMAIL,
-    'rhl-pass': ROHLIK_HESLO
-  };
-  if (rohlikSezeni) hlavicky['Mcp-Session-Id'] = rohlikSezeni;
+async function rohlikFetch(url, opts = {}) {
   const ctrl = new AbortController();
   const stopka = setTimeout(() => ctrl.abort(), ROHLIK_TIMEOUT_MS);
   try {
-    const res = await fetch(ROHLIK_URL, { method: 'POST', headers: hlavicky, body: JSON.stringify(telo), signal: ctrl.signal });
-    const h = k => (res.headers && typeof res.headers.get === 'function' ? res.headers.get(k) : null);
-    const sid = h('mcp-session-id');
-    if (sid) rohlikSezeni = sid;
-    const text = await res.text();
-    return { status: res.status, text, typ: h('content-type') || '', wwwAuth: h('www-authenticate') || '' };
+    return await fetch(url, { ...opts, signal: ctrl.signal });
   } catch (err) {
     throw new RohlikChyba(err && err.name === 'AbortError' ? 'Rohlík neodpověděl včas.' : 'Rohlík není dostupný.');
   } finally {
@@ -11485,25 +11472,155 @@ async function rohlikPost(telo) {
   }
 }
 
-// 401/403 neznamená vždycky špatné heslo: může to být i ochrana proti robotům
-// (HTML stránka místo JSON), nebo požadavek na OAuth. Co přesně přišlo, jde do
-// diagnostiky (bez tajností) a hláška se podle toho řídí.
+async function rohlikJson(url, opts) {
+  const res = await rohlikFetch(url, opts);
+  const text = await res.text();
+  let j = null;
+  try { j = JSON.parse(text); } catch {}
+  return { status: res.status, j, text };
+}
+
+// Kde se u Rohlíku přihlašuje: metadata chráněného zdroje → autorizační server
+async function rohlikOauthMetadata() {
+  const o = state.rohlikOauth || {};
+  if (o.meta && o.meta.token_endpoint && o.meta.authorization_endpoint) return o.meta;
+  const zdroj = new URL(ROHLIK_URL);
+  const kandidati = [`${zdroj.origin}/.well-known/oauth-protected-resource${zdroj.pathname}`,
+    `${zdroj.origin}/.well-known/oauth-protected-resource`];
+  let as = null, resource = ROHLIK_URL;
+  for (const u of kandidati) {
+    const r = await rohlikJson(u);
+    if (r.status === 200 && r.j && Array.isArray(r.j.authorization_servers) && r.j.authorization_servers.length) {
+      as = r.j.authorization_servers[0];
+      if (typeof r.j.resource === 'string') resource = r.j.resource;
+      break;
+    }
+  }
+  if (!as) as = zdroj.origin;
+  const asu = new URL(as);
+  const cesta = asu.pathname === '/' ? '' : asu.pathname;
+  for (const u of [`${asu.origin}/.well-known/oauth-authorization-server${cesta}`, `${asu.origin}/.well-known/openid-configuration${cesta}`]) {
+    const r = await rohlikJson(u);
+    if (r.status === 200 && r.j && r.j.authorization_endpoint && r.j.token_endpoint) {
+      const meta = { authorization_endpoint: r.j.authorization_endpoint, token_endpoint: r.j.token_endpoint,
+        registration_endpoint: r.j.registration_endpoint || null, scopes: r.j.scopes_supported || null, resource };
+      state.rohlikOauth = { ...o, meta };
+      return meta;
+    }
+  }
+  throw new RohlikChyba('Rohlík: nepodařilo se zjistit, kde se přihlašuje (OAuth metadata).');
+}
+
+// Jednorázová registrace klienta (pro konkrétní adresu návratu)
+async function rohlikOauthKlient(meta, redirect) {
+  const o = state.rohlikOauth || {};
+  if (o.clientId && o.redirect === redirect) return o;
+  if (!meta.registration_endpoint) throw new RohlikChyba('Rohlík: registrace klienta není k dispozici.');
+  const r = await rohlikJson(meta.registration_endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ client_name: 'SMG home', redirect_uris: [redirect],
+      grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
+      token_endpoint_auth_method: 'none' })
+  });
+  if (r.status >= 300 || !r.j || !r.j.client_id) {
+    throw new RohlikChyba(`Rohlík: registrace klienta se nepovedla (HTTP ${r.status}).`);
+  }
+  state.rohlikOauth = { ...o, meta, clientId: r.j.client_id, clientSecret: r.j.client_secret || null, redirect };
+  return state.rohlikOauth;
+}
+
+const rohlikB64 = buf => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+// Začátek přihlášení: vrátí adresu, na kterou appka pošle prohlížeč
+async function rohlikOauthStart(redirect, now = Date.now()) {
+  const meta = await rohlikOauthMetadata();
+  const k = await rohlikOauthKlient(meta, redirect);
+  for (const [s, v] of rohlikPrihlaseni) if (v.do < now) rohlikPrihlaseni.delete(s);
+  const stav = rohlikB64(crypto.randomBytes(24));
+  const verifier = rohlikB64(crypto.randomBytes(32));
+  const challenge = rohlikB64(crypto.createHash('sha256').update(verifier).digest());
+  rohlikPrihlaseni.set(stav, { verifier, redirect, do: now + ROHLIK_OAUTH_STAV_MS });
+  const u = new URL(meta.authorization_endpoint);
+  u.searchParams.set('response_type', 'code');
+  u.searchParams.set('client_id', k.clientId);
+  u.searchParams.set('redirect_uri', redirect);
+  u.searchParams.set('state', stav);
+  u.searchParams.set('code_challenge', challenge);
+  u.searchParams.set('code_challenge_method', 'S256');
+  u.searchParams.set('resource', meta.resource || ROHLIK_URL);
+  if (Array.isArray(meta.scopes) && meta.scopes.length) u.searchParams.set('scope', meta.scopes.join(' '));
+  return u.toString();
+}
+
+async function rohlikOauthToken(parametry) {
+  const o = state.rohlikOauth || {};
+  const meta = o.meta || await rohlikOauthMetadata();
+  const telo = new URLSearchParams({ ...parametry, client_id: o.clientId, resource: meta.resource || ROHLIK_URL });
+  if (o.clientSecret) telo.set('client_secret', o.clientSecret);
+  const r = await rohlikJson(meta.token_endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: telo.toString()
+  });
+  if (r.status >= 300 || !r.j || !r.j.access_token) {
+    const duvod = r.j && (r.j.error_description || r.j.error);
+    throw new RohlikChyba('Rohlík: přihlášení se nepovedlo' + (duvod ? ` (${rohlikTajne(String(duvod)).slice(0, 120)})` : ` (HTTP ${r.status})`) + '.');
+  }
+  state.rohlikOauth = { ...state.rohlikOauth, access: r.j.access_token,
+    refresh: r.j.refresh_token || o.refresh || null,
+    exp: Number.isFinite(r.j.expires_in) ? Date.now() + r.j.expires_in * 1000 : null };
+  rohlikSezeni = null;
+  broadcast('rohlik', { rohlik: rohlikPayload() });
+  return true;
+}
+
+// Návrat z přihlášení: kód → tokeny
+async function rohlikOauthZpet(stav, code, now = Date.now()) {
+  const p = rohlikPrihlaseni.get(stav);
+  rohlikPrihlaseni.delete(stav);
+  if (!p || p.do < now) throw new RohlikChyba('Přihlášení vypršelo, zkus to znovu.');
+  if (typeof code !== 'string' || !code) throw new RohlikChyba('Rohlík nevrátil přihlašovací kód.');
+  return rohlikOauthToken({ grant_type: 'authorization_code', code, redirect_uri: p.redirect, code_verifier: p.verifier });
+}
+
+async function rohlikObnovToken() {
+  const o = state.rohlikOauth || {};
+  if (!o.refresh) return false;
+  try { return await rohlikOauthToken({ grant_type: 'refresh_token', refresh_token: o.refresh }); }
+  catch { return false; }
+}
+
+function rohlikOdhlas() {
+  if (state.rohlikOauth) { delete state.rohlikOauth.access; delete state.rohlikOauth.refresh; delete state.rohlikOauth.exp; }
+  rohlikSezeni = null;
+  broadcast('rohlik', { rohlik: rohlikPayload() });
+}
+
+function rohlikPayload() {
+  return { enabled: rohlikEnabled, prihlaseno: rohlikPrihlasen() };
+}
+
+async function rohlikPost(telo) {
+  const hlavicky = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+    Authorization: 'Bearer ' + ((state.rohlikOauth && state.rohlikOauth.access) || '')
+  };
+  if (rohlikSezeni) hlavicky['Mcp-Session-Id'] = rohlikSezeni;
+  const res = await rohlikFetch(ROHLIK_URL, { method: 'POST', headers: hlavicky, body: JSON.stringify(telo) });
+  const h = k => (res.headers && typeof res.headers.get === 'function' ? res.headers.get(k) : null);
+  const sid = h('mcp-session-id');
+  if (sid) rohlikSezeni = sid;
+  const text = await res.text();
+  return { status: res.status, text, typ: h('content-type') || '', wwwAuth: h('www-authenticate') || '' };
+}
+
+// 401/403: co přesně přišlo, jde do diagnostiky (bez tajností) a podle toho hláška
 function rohlikOdmitnuti(r) {
   const telo = rohlikTajne(r.text || '').slice(0, 300);
-  rohlikDiag.prihlaseni = { stav: r.status, typ: r.typ || '', wwwAuthenticate: rohlikTajne(r.wwwAuth || '').slice(0, 200), ukazka: telo, kdy: Date.now() };
+  rohlikDiag.prihlaseni = { stav: r.status, typ: r.typ || '', wwwAuthenticate: rohlikTajne(r.wwwAuth || '').slice(0, 300), ukazka: telo, kdy: Date.now() };
   if (/text\/html/i.test(r.typ || '') || /cloudflare|<html|captcha/i.test(telo)) {
     return new RohlikChyba('Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
   }
-  if (/bearer/i.test(r.wwwAuth || '') && !/rhl-/i.test(telo)) {
-    return new RohlikChyba('Rohlík chce přihlášení přes OAuth, ne heslem.');
-  }
-  let zprava = '';
-  try {
-    const j = JSON.parse(r.text);
-    zprava = (j && (j.error && (j.error.message || j.error) || j.message || j.detail)) || '';
-  } catch { zprava = /^[^<]{1,160}$/.test(telo) ? telo : ''; }
-  zprava = rohlikTajne(typeof zprava === 'string' ? zprava : JSON.stringify(zprava)).slice(0, 160);
-  return new RohlikChyba(`Rohlík odmítl přihlášení (HTTP ${r.status})` + (zprava ? `: ${zprava}` : '.'));
+  return new RohlikChyba('Rohlík: přihlášení vypršelo nebo chybí — přihlas se znovu.');
 }
 
 async function rohlikInit() {
@@ -11511,29 +11628,52 @@ async function rohlikInit() {
   const id = rohlikRpcId++;
   const r = await rohlikPost({ jsonrpc: '2.0', id, method: 'initialize', params: {
     protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'smg-home', version: '1' } } });
-  if (r.status === 401 || r.status === 403) throw rohlikOdmitnuti(r);
+  if (r.status === 401 || r.status === 403) return r;
   const o = rohlikPrectiOdpoved(r.text, id);
   if (r.status >= 400 || !o || o.error) {
-    throw new RohlikChyba('Rohlík: přihlášení se nepovedlo' + (o && o.error && o.error.message ? ` (${rohlikTajne(o.error.message).slice(0, 120)})` : ` (HTTP ${r.status})`) + '.');
+    throw new RohlikChyba('Rohlík: spojení se nepovedlo' + (o && o.error && o.error.message ? ` (${rohlikTajne(o.error.message).slice(0, 120)})` : ` (HTTP ${r.status})`) + '.');
   }
   await rohlikPost({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  return null;
 }
 
-// Jedno volání; bez sezení nebo po jeho vypršení (400/404) se jednou přihlásí znovu
+// Jedno volání. Bez sezení se naváže; vypršené sezení (400/404) se naváže znovu;
+// odmítnutý token (401) se jednou obnoví obnovovacím tokenem.
 async function rohlikRpc(method, params) {
-  if (!rohlikEnabled) throw new RohlikChyba('Rohlík není nastavený (ROHLIK_EMAIL, ROHLIK_HESLO).');
-  for (let pokus = 0; pokus < 2; pokus++) {
-    if (!rohlikSezeni) await rohlikInit();
-    const id = rohlikRpcId++;
-    const r = await rohlikPost({ jsonrpc: '2.0', id, method, params });
-    if ((r.status === 400 || r.status === 404) && pokus === 0) { rohlikSezeni = null; continue; }
-    if (r.status === 401 || r.status === 403) throw rohlikOdmitnuti(r);
-    const o = rohlikPrectiOdpoved(r.text, id);
-    if (!o) throw new RohlikChyba(`Rohlík: nečekaná odpověď (HTTP ${r.status}).`);
-    if (o.error) throw new RohlikChyba('Rohlík: ' + rohlikTajne(o.error.message || 'chyba').slice(0, 160));
-    return o.result;
+  if (!rohlikPrihlasen()) throw new RohlikChyba('Rohlík: nejdřív se přihlas (tlačítko v okně Rohlíku).');
+  let obnoveno = false;
+  for (let pokus = 0; pokus < 3; pokus++) {
+    let r = null;
+    if (!rohlikSezeni) r = await rohlikInit();
+    if (!r) {
+      const id = rohlikRpcId++;
+      r = await rohlikPost({ jsonrpc: '2.0', id, method, params });
+      if ((r.status === 400 || r.status === 404) && pokus === 0) { rohlikSezeni = null; continue; }
+      if (r.status !== 401 && r.status !== 403) {
+        const o = rohlikPrectiOdpoved(r.text, id);
+        if (!o) throw new RohlikChyba(`Rohlík: nečekaná odpověď (HTTP ${r.status}).`);
+        if (o.error) throw new RohlikChyba('Rohlík: ' + rohlikTajne(o.error.message || 'chyba').slice(0, 160));
+        return o.result;
+      }
+    }
+    if (r.status === 401 && !obnoveno && await rohlikObnovToken()) { obnoveno = true; rohlikSezeni = null; continue; }
+    const chyba = rohlikOdmitnuti(r);
+    if (r.status === 401) rohlikOdhlas();
+    throw chyba;
   }
-  throw new RohlikChyba('Rohlík: sezení se nepodařilo obnovit.');
+  throw new RohlikChyba('Rohlík: spojení se nepodařilo obnovit.');
+}
+
+// Obnova tokenů ze zálohy po nasazení (jen když server žádné nemá)
+function rohlikOauthObnov(o) {
+  if (!o || typeof o !== 'object' || (state.rohlikOauth && state.rohlikOauth.access)) return;
+  const str = v => (typeof v === 'string' && v.length <= 4096 ? v : null);
+  const meta = o.meta && typeof o.meta === 'object' && str(o.meta.token_endpoint) && str(o.meta.authorization_endpoint)
+    ? { authorization_endpoint: o.meta.authorization_endpoint, token_endpoint: o.meta.token_endpoint,
+        registration_endpoint: str(o.meta.registration_endpoint), scopes: Array.isArray(o.meta.scopes) ? o.meta.scopes.slice(0, 20) : null,
+        resource: str(o.meta.resource) } : null;
+  state.rohlikOauth = { meta, clientId: str(o.clientId), clientSecret: str(o.clientSecret), redirect: str(o.redirect),
+    access: str(o.access), refresh: str(o.refresh), exp: Number.isFinite(o.exp) ? o.exp : null };
 }
 
 async function rohlikNastroje(znovu = false) {
@@ -11710,6 +11850,38 @@ app.post('/api/rohlik/kosik', async (req, res) => {
   res.json({ ok: true, pridano: polozky.length, nakup: state.nakup });
 });
 
+// Adresa, kam se prohlížeč po přihlášení u Rohlíku vrátí
+function rohlikNavrat(req) {
+  const zaklad = process.env.RENDER_EXTERNAL_URL
+    || `${(req.get && req.get('x-forwarded-proto')) || req.protocol || 'https'}://${req.get ? req.get('host') : 'localhost'}`;
+  return zaklad.replace(/\/+$/, '') + '/api/rohlik/oauth/zpet';
+}
+
+app.post('/api/rohlik/prihlasit', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  try { res.json({ ok: true, url: await rohlikOauthStart(rohlikNavrat(req)) }); }
+  catch (err) { rohlikOdpovezChybou(res, err); }
+});
+
+// Sem Rohlík vrátí prohlížeč s kódem. Chráněno jednorázovým `state` z přihlášení.
+app.get('/api/rohlik/oauth/zpet', async (req, res) => {
+  const q = req.query || {};
+  if (q.error) return res.redirect('/?rohlik=chyba&duvod=' + encodeURIComponent(String(q.error_description || q.error).slice(0, 100)));
+  try {
+    await rohlikOauthZpet(String(q.state || ''), q.code);
+    res.redirect('/?rohlik=ok');
+  } catch (err) {
+    rohlikDiag.chyba = rohlikTajne(err.message).slice(0, 200);
+    res.redirect('/?rohlik=chyba&duvod=' + encodeURIComponent(err instanceof RohlikChyba ? err.message : 'Přihlášení se nepovedlo.'));
+  }
+});
+
+app.post('/api/rohlik/odhlasit', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  rohlikOdhlas();
+  res.json({ ok: true, rohlik: rohlikPayload() });
+});
+
 app.post('/api/rohlik/vyber/restore', (req, res) => {
   if (!rohlikVyberObnov(req.body)) return res.status(400).json({ error: 'Chybí vyber.' });
   res.json({ ok: true });
@@ -11718,12 +11890,12 @@ app.post('/api/rohlik/vyber/restore', (req, res) => {
 // Pro doladění po nasazení: jaké nástroje Rohlík nabízí a poslední chyba. Bez hesel.
 app.get('/api/rohlik/diagnostika', async (req, res) => {
   if (!requireAuth(req, res)) return;
-  const m = /^(.)(.*)(@.*)$/.exec(ROHLIK_EMAIL);
+  const o = state.rohlikOauth || {};
   const out = { enabled: rohlikEnabled, url: ROHLIK_URL, chyba: rohlikDiag.chyba, ukazka: rohlikDiag.ukazka,
-    udaje: { email: m ? m[1] + '•••' + m[3] : (ROHLIK_EMAIL ? '(bez @)' : '(prázdný)'), hesloVyplnene: !!ROHLIK_HESLO,
-      upraveno: rohlikUpraveno },
+    oauth: { prihlaseno: rohlikPrihlasen(), klient: !!o.clientId, obnovovaciToken: !!o.refresh,
+      vyprsi: o.exp ? new Date(o.exp).toISOString() : null, autorizace: o.meta ? o.meta.authorization_endpoint : null },
     prihlaseni: rohlikDiag.prihlaseni };
-  if (rohlikEnabled) {
+  if (rohlikPrihlasen()) {
     try {
       out.nastroje = (await rohlikNastroje(true)).map(t => ({ name: t.name, description: String(t.description || '').slice(0, 200), inputSchema: t.inputSchema }));
     } catch (err) { out.chyba = rohlikTajne(err.message); }

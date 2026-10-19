@@ -8,23 +8,49 @@ const { check, nadpis, konec } = suite('rohlík');
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 const CODE = SRC.slice(SRC.indexOf('// ---------- Rohlík (košík) ----------'));
 
-const EMAIL = 'tajny@email.cz', HESLO = 'SuperTajneHeslo123';
+const ACCESS = 'ACCESS-tok-123456', REFRESH = 'REFRESH-tok-654321';
 
-// Falešný MCP server: `nastroje` = co vrací tools/list, `hledani`/`kosik` = obsluha
-function falesny({ nastroje, hledani, kosik, sse = false, init401 = false, vyprsi = false } = {}) {
+// Falešný Rohlík: MCP server (chce Bearer token) + OAuth server (metadata,
+// registrace klienta, token). `nastroje` = co vrací tools/list.
+function falesny({ nastroje, hledani, kosik, sse = false, odmitni = null, vyprsi = false, platny = ACCESS } = {}) {
   const log = [];
   let sezeni = 0;
+  const st = { platny };
   const odpovez = (status, telo, hlavicky = {}) => ({
     status,
     headers: { get: k => hlavicky[k.toLowerCase()] || null },
     text: async () => (typeof telo === 'string' ? telo
       : (sse && telo ? `event: message\ndata: ${JSON.stringify(telo)}\n\n` : (telo ? JSON.stringify(telo) : '')))
   });
-  const fetch = async (url, opts) => {
+  const fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u === 'https://mcp.rohlik.cz/.well-known/oauth-protected-resource/mcp') {
+      log.push({ url: u });
+      return odpovez(200, { resource: 'https://mcp.rohlik.cz/mcp', authorization_servers: ['https://auth.rohlik.cz'] });
+    }
+    if (u === 'https://auth.rohlik.cz/.well-known/oauth-authorization-server') {
+      log.push({ url: u });
+      return odpovez(200, { authorization_endpoint: 'https://auth.rohlik.cz/authorize', token_endpoint: 'https://auth.rohlik.cz/token',
+        registration_endpoint: 'https://auth.rohlik.cz/register', scopes_supported: ['mcp'] });
+    }
+    if (u === 'https://auth.rohlik.cz/register') {
+      log.push({ url: u, telo: JSON.parse(opts.body) });
+      return odpovez(201, { client_id: 'klient-1' });
+    }
+    if (u === 'https://auth.rohlik.cz/token') {
+      const p = Object.fromEntries(new URLSearchParams(opts.body));
+      log.push({ url: u, telo: p });
+      if (p.grant_type === 'refresh_token' && p.refresh_token === REFRESH) { st.platny = 'NOVY-access-999999'; return odpovez(200, { access_token: 'NOVY-access-999999', expires_in: 3600 }); }
+      if (p.grant_type === 'authorization_code' && p.code === 'KOD') return odpovez(200, { access_token: ACCESS, refresh_token: REFRESH, expires_in: 3600 });
+      return odpovez(400, { error: 'invalid_grant' });
+    }
     const telo = JSON.parse(opts.body);
-    log.push({ url, hlavicky: opts.headers, telo });
+    log.push({ url: u, hlavicky: opts.headers, telo });
+    if (odmitni) return odpovez(odmitni.status, odmitni.telo, odmitni.hlavicky || {});
+    if (opts.headers.Authorization !== 'Bearer ' + st.platny) {
+      return odpovez(401, { error: 'invalid_token' }, { 'www-authenticate': 'Bearer error="invalid_token"' });
+    }
     if (telo.method === 'initialize') {
-      if (init401) return init401 === true ? odpovez(401, null) : odpovez(init401.status, init401.telo, init401.hlavicky || {});
       sezeni++;
       return odpovez(200, { jsonrpc: '2.0', id: telo.id, result: { protocolVersion: '2025-03-26' } }, { 'mcp-session-id': 'S' + sezeni });
     }
@@ -32,32 +58,30 @@ function falesny({ nastroje, hledani, kosik, sse = false, init401 = false, vyprs
     if (vyprsi && opts.headers['Mcp-Session-Id'] === 'S1') return odpovez(404, null);
     if (telo.method === 'tools/list') return odpovez(200, { jsonrpc: '2.0', id: telo.id, result: { tools: nastroje } });
     if (telo.method === 'tools/call') {
-      const r = /search/.test(telo.params.name) ? hledani(telo.params.arguments) : kosik(telo.params.arguments);
+      const r = /search/i.test(telo.params.name) ? hledani(telo.params.arguments) : kosik(telo.params.arguments);
       return odpovez(200, { jsonrpc: '2.0', id: telo.id, ...r });
     }
     return odpovez(400, null);
   };
-  return { fetch, log };
+  return { fetch, log, st };
 }
 
-function build(f, { env = { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO }, odemceno = true } = {}) {
-  const state = { nakup: [], rohlikVyber: {} };
+function build(f, { prihlasen = true, odemceno = true } = {}) {
+  const state = { nakup: [], rohlikVyber: {},
+    rohlikOauth: prihlasen ? { clientId: 'klient-1', access: ACCESS, refresh: REFRESH, redirect: 'https://app/api/rohlik/oauth/zpet' } : null };
   const routy = {}, zpravy = [];
-  const puvodni = { ...process.env };
-  delete process.env.ROHLIK_EMAIL; delete process.env.ROHLIK_HESLO;
-  Object.assign(process.env, env);
-  const api = new Function('state', 'app', 'requireAuth', 'broadcast', 'fetch', 'process',
+  const api = new Function('state', 'app', 'requireAuth', 'broadcast', 'fetch', 'process', 'crypto',
     CODE + '\n; return { rohlikHledej, rohlikDoKosiku, rohlikVyrobky, rohlikPrectiOdpoved, rohlikKlic, rohlikZapamatuj,'
-         + ' rohlikVyberObnov, rohlikArgKosik, rohlikArgHledani, ROHLIK_VYBER_MAX, rohlikEnabled };'
+         + ' rohlikVyberObnov, rohlikArgKosik, rohlikArgHledani, ROHLIK_VYBER_MAX, rohlikPayload, rohlikOauthStart,'
+         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni };'
   )(state, { get: (c, h) => { routy['GET ' + c] = h; }, post: (c, h) => { routy['POST ' + c] = h; } },
     (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
-    (u, d) => zpravy.push({ u, d }), f.fetch, process);
-  process.env = puvodni;
+    (u, d) => zpravy.push({ u, d }), f.fetch, process, require('crypto'));
   const volej = async (cesta, { query, body } = {}) => {
-    let out = null, kod = 200;
-    const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
-    await routy[cesta]({ query: query || {}, body: body || {} }, res);
-    return { out, kod };
+    let out = null, kod = 200, kam = null;
+    const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; }, redirect: u => { kam = u; return res; } };
+    await routy[cesta]({ query: query || {}, body: body || {}, protocol: 'https', get: k => ({ host: 'app.test' })[k] }, res);
+    return { out, kod, kam };
   };
   return { api, state, volej, zpravy };
 }
@@ -81,7 +105,8 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  s názvem, cenou, jednotkou a obrázkem', JSON.stringify(r.out.vyrobky[0]),
       JSON.stringify({ productId: 1349777, nazev: 'Kunín Mléko polotučné 1,5%', cena: 24.9, jednotka: '1 l', obrazek: 'https://cdn.rohlik.cz/1.jpg' }));
     check('nejdřív initialize, pak tools/list a volání', f.log.map(x => x.telo.method).join(','), 'initialize,notifications/initialized,tools/list,tools/call');
-    check('  přihlášení hlavičkami', f.log[0].hlavicky['rhl-email'] + ' ' + (f.log[0].hlavicky['rhl-pass'] === HESLO), EMAIL + ' true');
+    check('  s tokenem', f.log[0].hlavicky.Authorization, 'Bearer ' + ACCESS);
+    check('  a bez starých hlaviček', 'rhl-pass' in f.log[0].hlavicky, false);
     check('  sezení se posílá dál', f.log[3].hlavicky['Mcp-Session-Id'], 'S1');
     check('  textový parametr podle schématu', JSON.stringify(f.log[3].telo.params.arguments), '{"keyword":"mléko","limit":8}');
     await h.volej('GET /api/rohlik/hledat', { query: { q: 'chleba' } });
@@ -133,71 +158,102 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('obnova bere jen platné', Object.keys(h2.state.rohlikVyber).join(), 'mleko');
   }
 
-  nadpis('3) Chyby a zabezpečení');
+  nadpis('3) Přihlášení OAuth');
   {
-    const f = falesny({ init401: true, nastroje: NASTROJE_A });
-    const h = build(f);
-    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
-    check('odmítnutí bez důvodu: kód', r.kod + ' ' + r.out.error, '502 Rohlík odmítl přihlášení (HTTP 401).');
-    const d = await h.volej('GET /api/rohlik/diagnostika');
-    const vse = JSON.stringify(d.out);
-    check('diagnostika neobsahuje heslo ani e-mail', vse.includes(HESLO) || vse.includes(EMAIL), false);
-  }
-  {
-    // Rozlišení odmítnutí: ochrana proti robotům, OAuth, zpráva od Rohlíku
-    const zkus = async init401 => (await build(falesny({ init401, nastroje: NASTROJE_A })).volej('GET /api/rohlik/hledat', { query: { q: 'x' } })).out.error;
-    check('403 s HTML = blokace serveru', await zkus({ status: 403, telo: '<!DOCTYPE html><title>Just a moment...</title> cloudflare', hlavicky: { 'content-type': 'text/html' } }),
-      'Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
-    check('401 s Bearer = chce OAuth', await zkus({ status: 401, telo: '', hlavicky: { 'www-authenticate': 'Bearer resource_metadata="https://mcp.rohlik.cz/.well-known/oauth"' } }),
-      'Rohlík chce přihlášení přes OAuth, ne heslem.');
-    check('401 se zprávou ji ukáže', await zkus({ status: 401, telo: JSON.stringify({ error: { message: 'Invalid credentials' } }), hlavicky: { 'content-type': 'application/json' } }),
-      'Rohlík odmítl přihlášení (HTTP 401): Invalid credentials');
-    const h = build(falesny({ init401: { status: 401, telo: '{"message":"bad"}', hlavicky: { 'www-authenticate': 'Basic' } }, nastroje: NASTROJE_A }));
-    await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
-    const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
-    check('diagnostika: co přesně přišlo', d.prihlaseni.stav + ' ' + d.prihlaseni.wwwAuthenticate + ' ' + d.prihlaseni.ukazka, '401 Basic {"message":"bad"}');
-    check('  e-mail maskovaný', d.udaje.email, 't•••@email.cz');
-    check('  heslo jen vyplněné ano/ne', JSON.stringify(d.udaje).includes(String(HESLO.length)) || !d.udaje.hesloVyplnene, false);
-  }
-  {
-    // Údaje s mezerou, novým řádkem a uvozovkami se učešou
     const f = falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }) });
-    const h = build(f, { env: { ROHLIK_EMAIL: ' ' + EMAIL + '\n', ROHLIK_HESLO: '"' + HESLO + '" ' } });
-    await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
-    check('mezery a uvozovky se ořežou', f.log[0].hlavicky['rhl-email'] + '|' + (f.log[0].hlavicky['rhl-pass'] === HESLO), EMAIL + '|true');
+    const h = build(f, { prihlasen: false });
+    check('nepřihlášený: payload', JSON.stringify(h.api.rohlikPayload()), '{"enabled":true,"prihlaseno":false}');
+    const r0 = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('  hledání řekne, ať se přihlásí', /nejdřív se přihlas/.test(r0.out.error), true);
+    const s = await h.volej('POST /api/rohlik/prihlasit');
+    const u = new URL(s.out.url);
+    check('start vrátí adresu přihlášení u Rohlíku', u.origin + u.pathname, 'https://auth.rohlik.cz/authorize');
+    check('  s PKCE a stavem', u.searchParams.get('code_challenge_method') + ' ' + !!u.searchParams.get('code_challenge') + ' ' + !!u.searchParams.get('state'), 'S256 true true');
+    check('  návrat na appku', u.searchParams.get('redirect_uri'), 'https://app.test/api/rohlik/oauth/zpet');
+    check('  zdroj a rozsah', u.searchParams.get('resource') + ' ' + u.searchParams.get('scope'), 'https://mcp.rohlik.cz/mcp mcp');
+    check('  klient se zaregistroval', f.log.find(x => x.url === 'https://auth.rohlik.cz/register').telo.redirect_uris[0], 'https://app.test/api/rohlik/oauth/zpet');
+    const z = await h.volej('GET /api/rohlik/oauth/zpet', { query: { code: 'KOD', state: u.searchParams.get('state') } });
+    check('návrat s kódem: přesměruje do appky', z.kam, '/?rohlik=ok');
+    const tok = f.log.filter(x => x.url === 'https://auth.rohlik.cz/token').pop().telo;
+    check('  výměna kódu s verifierem', tok.grant_type + ' ' + !!tok.code_verifier + ' ' + tok.client_id, 'authorization_code true klient-1');
+    check('  tokeny uložené', h.state.rohlikOauth.access + ' ' + h.state.rohlikOauth.refresh, ACCESS + ' ' + REFRESH);
+    check('  appka se dozví', h.zpravy.some(m => m.u === 'rohlik' && m.d.rohlik.prihlaseno === true), true);
+    check('  tokeny do appky nejdou', JSON.stringify(h.zpravy).includes(ACCESS), false);
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
+    check('po přihlášení hledání funguje', r.kod + ' ' + r.out.vyrobky.length, '200 2');
+    const z2 = await h.volej('GET /api/rohlik/oauth/zpet', { query: { code: 'KOD', state: u.searchParams.get('state') } });
+    check('stav jde použít jen jednou', /rohlik=chyba/.test(z2.kam), true);
+    const z3 = await h.volej('GET /api/rohlik/oauth/zpet', { query: { error: 'access_denied' } });
+    check('odmítnutí u Rohlíku se vrátí jako chyba', z3.kam, '/?rohlik=chyba&duvod=access_denied');
     const d = (await h.volej('GET /api/rohlik/diagnostika')).out;
-    check('  diagnostika řekne co', d.udaje.upraveno.join('; '), 'e-mail: mezera nebo nový řádek na kraji; heslo: mezera nebo nový řádek na kraji; heslo: uvozovky kolem hodnoty');
-    check('  a heslo nevypíše', JSON.stringify(d).includes(HESLO), false);
+    const dj = JSON.stringify(d);
+    check('diagnostika bez tokenů', dj.includes(ACCESS) || dj.includes(REFRESH), false);
+    check('  ale řekne, že je přihlášeno', d.oauth.prihlaseno + ' ' + d.oauth.obnovovaciToken, 'true true');
   }
   {
-    // Chyba od Rohlíku, která by heslo zopakovala
-    const f = { log: [], fetch: async (url, opts) => ({ status: 200, headers: { get: () => null },
-      text: async () => JSON.stringify({ jsonrpc: '2.0', id: JSON.parse(opts.body).id, error: { message: 'bad login ' + EMAIL + '/' + HESLO } }) }) };
+    // Rozběhnuté přihlášení platí jen 10 minut
+    const f = falesny({ nastroje: NASTROJE_A });
+    const h = build(f, { prihlasen: false });
+    const url = new URL(await h.api.rohlikOauthStart('https://app/zpet', Date.now() - 11 * 60000));
+    let chyba = '';
+    try { await h.api.rohlikOauthZpet(url.searchParams.get('state'), 'KOD'); } catch (e) { chyba = e.message; }
+    check('přihlášení po 10 minutách vyprší', chyba, 'Přihlášení vypršelo, zkus to znovu.');
+  }
+  {
+    // Token, který by Rohlík zopakoval v chybě, se z hlášky vymaže
+    const f = falesny({ nastroje: NASTROJE_A, hledani: () => ({ error: { message: 'token ' + ACCESS + ' nepovolen' } }) });
     const h = build(f);
     const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
-    check('heslo z chybové hlášky se vymaže', r.out.error.includes(HESLO) || r.out.error.includes(EMAIL), false);
+    check('token z chybové hlášky se vymaže', r.out.error.includes(ACCESS), false);
+  }
+  {
+    // Vypršelý token se sám obnoví obnovovacím tokenem
+    const f = falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }), platny: 'NOVY-access-999999' });
+    const h = build(f);
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
+    check('vypršelý token se obnoví', r.kod + ' ' + h.state.rohlikOauth.access, '200 NOVY-access-999999');
+  }
+  {
+    // Neplatný token a obnova selže → odhlásit a říct, ať se přihlásí znovu
+    const f = falesny({ nastroje: NASTROJE_A, platny: 'jiny-token-xxxxxx' });
+    const h = build(f);
+    h.state.rohlikOauth.refresh = 'spatny-refresh-xxx';
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('neplatné přihlášení: přihlas se znovu', r.out.error, 'Rohlík: přihlášení vypršelo nebo chybí — přihlas se znovu.');
+    check('  a odhlásí', h.api.rohlikPayload().prihlaseno, false);
+    const d = JSON.stringify((await h.volej('GET /api/rohlik/diagnostika')).out);
+    check('  diagnostika zaznamená odpověď', /invalid_token/.test(d), true);
+  }
+  {
+    const f = falesny({ nastroje: NASTROJE_A, odmitni: { status: 403, telo: '<!DOCTYPE html> cloudflare', hlavicky: { 'content-type': 'text/html' } } });
+    const h = build(f);
+    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
+    check('403 s HTML = blokace serveru', r.out.error, 'Rohlík blokuje přístup ze serveru (ochrana proti robotům).');
   }
   {
     // Vypršelé sezení se jednou obnoví
     const f = falesny({ vyprsi: true, nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }) });
     const h = build(f);
     const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
-    check('po vypršení sezení se přihlásí znovu', r.kod + ' ' + f.log.filter(x => x.telo.method === 'initialize').length, '200 2');
+    check('po vypršení sezení se naváže znovu', r.kod + ' ' + f.log.filter(x => x.telo && x.telo.method === 'initialize').length, '200 2');
   }
   {
     const h = build(falesny({ nastroje: NASTROJE_A }), { odemceno: false });
     check('zamčená appka: hledání 401', (await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } })).kod, 401);
     check('  košík 401', (await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ productId: 1 }] } })).kod, 401);
     check('  výběry 401', (await h.volej('GET /api/rohlik/vyber')).kod, 401);
+    check('  přihlášení 401', (await h.volej('POST /api/rohlik/prihlasit')).kod, 401);
+    check('  odhlášení 401', (await h.volej('POST /api/rohlik/odhlasit')).kod, 401);
     check('  diagnostika 401', (await h.volej('GET /api/rohlik/diagnostika')).kod, 401);
   }
   {
-    const h = build(falesny({}), { env: {} });
-    check('bez údajů vypnuto', h.api.rohlikEnabled, false);
-    const r = await h.volej('GET /api/rohlik/hledat', { query: { q: 'x' } });
-    check('  a hledání to řekne', /není nastavený/.test(r.out.error), true);
+    const h = build(falesny({}), { prihlasen: false });
+    h.api.rohlikOauthObnov({ clientId: 'k', access: 'A-zaloha-123456', refresh: 'R-zaloha-123456', meta: { token_endpoint: 'https://t', authorization_endpoint: 'https://a' } });
+    check('obnova přihlášení ze zálohy', h.api.rohlikPayload().prihlaseno, true);
+    h.api.rohlikOauthObnov({ clientId: 'jiny', access: 'jiny-token-123456' });
+    check('  přihlášené nepřepíše', h.state.rohlikOauth.access, 'A-zaloha-123456');
   }
-  check('heslo se nikde nepíše do logu', /addLog\([^)]*ROHLIK_HESLO|console\.\w+\([^)]*ROHLIK_HESLO/.test(SRC), false);
+  check('tokeny se nikde nepíšou do logu', /addLog\([^)]*rohlikOauth|console\.\w+\([^)]*rohlikOauth/.test(SRC), false);
   check('objednávka (checkout/order) se v kódu nevolá', /tools\/call[^\n]*(checkout|submit|order)/i.test(CODE), false);
   konec();
 })();

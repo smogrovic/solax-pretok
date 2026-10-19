@@ -163,6 +163,22 @@ setTimeout(async () => {
   check('štítek v košíku', document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik').textContent, '🛒 v košíku');
 
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }, { id: 'n_cccc3333', text: 'sýr', t: 3 }];
+  // Nepřihlášený: okno ukáže jen přihlášení
+  rohlikData = { enabled: true, prihlaseno: false };
+  renderNakup();
+  dotazy = [];
+  odpoved = url => url === '/api/rohlik/prihlasit' ? { ok: true, url: '#rohlik-test-prihlaseni' } : { ok: true };
+  rbtn.click();
+  await pockej(30);
+  check('nepřihlášený: tlačítko přihlásit', document.getElementById('rohlikPrihlaseni').hidden, false);
+  check('  bez seznamu a bez Přidat', document.getElementById('rohlikSeznam').hidden + ' ' + document.getElementById('rohlikPridat').hidden, 'true true');
+  check('  nic se nehledá', dotazy.length, 0);
+  document.getElementById('rohlikPrihlasitBtn').click();
+  await pockej(30);
+  check('Přihlásit pošle požadavek se zámkem', dotazy[0] && dotazy[0].url, '/api/rohlik/prihlasit');
+  check('  a přesměruje na přihlášení', location.hash, '#rohlik-test-prihlaseni');
+  document.getElementById('rohlikZavrit').click();
+  rohlikData = { enabled: true, prihlaseno: true };
   renderNakup();
   dotazy = [];
   odpoved = (url, telo) => {
@@ -176,6 +192,7 @@ setTimeout(async () => {
   await pockej(80);
   const rok = document.getElementById('rohlikOkno');
   check('okno se otevře', rok.hidden, false);
+  check('  přihlášený: bez tlačítka přihlásit', document.getElementById('rohlikPrihlaseni').hidden, true);
   check('  s tokenem', dotazy.find(d => d.url === '/api/rohlik/vyber') && true, true);
   const box = id => document.querySelector('#rohlikSeznam .rohlik-polozka[data-id="' + id + '"]');
   check('zapamatovaný výběr je předvybraný', box('n_aaaa1111').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Kunín Mléko'), true);

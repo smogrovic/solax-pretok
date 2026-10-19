@@ -1415,6 +1415,10 @@
   .rohlik-btn{width:100%;margin-top:10px;border:none;border-radius:14px;padding:11px 12px;font:inherit;font-size:14px;
     font-weight:800;background:#ffd23f;color:#3b2a00;cursor:pointer;}
   .rohlik-btn[hidden]{display:none;}
+  .rohlik-prihlaseni[hidden]{display:none;}
+  .rohlik-odhlasit{border:none;background:none;font:inherit;font-size:11px;color:var(--muted);text-decoration:underline;
+    cursor:pointer;margin-top:6px;align-self:center;}
+  .rohlik-odhlasit[hidden]{display:none;}
   .rohlik-box{max-width:520px;max-height:90vh;display:flex;flex-direction:column;box-sizing:border-box;}
   .rohlik-seznam{overflow:auto;margin-top:10px;flex:1;min-height:0;}
   .rohlik-polozka{padding:10px 0;border-top:1px solid rgba(44,62,80,0.1);}
@@ -3780,8 +3784,13 @@
   <div class="potvrz-box rohlik-box">
     <div class="potvrz-nadpis">🥐 Do košíku na Rohlíku</div>
     <div class="potvrz-text">Vyber výrobek ke každé položce. Appka si ho zapamatuje a příště ho vybere sama. Objednávku dokončíš v appce Rohlík.</div>
+    <div class="rohlik-prihlaseni" id="rohlikPrihlaseni" hidden>
+      <div class="potvrz-text">Rohlík vyžaduje jednorázové přihlášení. Otevře se jejich přihlašovací stránka; po přihlášení se vrátíš sem a appka si přístup pamatuje.</div>
+      <button class="rohlik-btn" id="rohlikPrihlasitBtn" type="button">Přihlásit se k Rohlíku</button>
+    </div>
     <div class="rohlik-seznam" id="rohlikSeznam"></div>
     <div class="potvrz-text" id="rohlikStav"></div>
+    <button class="rohlik-odhlasit" id="rohlikOdhlasitBtn" type="button" hidden>odhlásit Rohlík</button>
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="rohlikZavrit" type="button">Zavřít</button>
       <button class="potvrz-ano rohlik-pridat" id="rohlikPridat" type="button">Přidat do košíku</button>
@@ -11681,6 +11690,10 @@ function connectStream() {
     renderMonths();
     saveMonthsLocal();
   });
+  es.addEventListener('rohlik', e => {
+    rohlikData = JSON.parse(e.data).rohlik || null;
+    bezpecne(renderNakup);
+  });
   es.addEventListener('nakup', e => {
     nakupData = JSON.parse(e.data).nakup || [];
     bezpecne(renderNakup);
@@ -12857,8 +12870,39 @@ async function rohlikGet(adresa) {
   return data;
 }
 
+const rohlikPrihlaseniEl = document.getElementById('rohlikPrihlaseni');
+const rohlikOdhlasitEl = document.getElementById('rohlikOdhlasitBtn');
+
+// Bez přihlášení je v okně jen tlačítko „Přihlásit se k Rohlíku"
+function rohlikPrihlasenyStav() {
+  const ano = !!(rohlikData && rohlikData.prihlaseno);
+  if (rohlikPrihlaseniEl) rohlikPrihlaseniEl.hidden = ano;
+  if (rohlikOdhlasitEl) rohlikOdhlasitEl.hidden = !ano;
+  if (rohlikSeznamEl) rohlikSeznamEl.hidden = !ano;
+  if (rohlikPridatEl) rohlikPridatEl.hidden = !ano;
+  return ano;
+}
+
+async function rohlikPrihlasit() {
+  rohlikStavEl.textContent = 'Otevírám přihlášení…';
+  try {
+    const res = await fetch('/api/rohlik/prihlasit', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: '{}' });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+    if (!res.ok || !data.url) throw new Error(data.error || 'Přihlášení se nepodařilo spustit.');
+    window.location.href = data.url;
+  } catch (err) {
+    rohlikStavEl.textContent = err.message;
+  }
+}
+
 async function rohlikOtevri() {
   if (!rohlikOknoEl) return;
+  if (!rohlikPrihlasenyStav()) {
+    rohlikStavEl.textContent = '';
+    rohlikOknoEl.hidden = false;
+    return;
+  }
   const polozky = (nakupData || []).filter(p => !p.koupeno && !p.kosik).sort((a, b) => a.t - b.t);
   rohlikRadky = polozky.map(p => ({ polozka: p, vyber: null, vysledky: null, hledam: false, chyba: '', preskocit: false, mnozstvi: 1 }));
   rohlikStavEl.textContent = 'Načítám…';
@@ -12992,7 +13036,34 @@ if (rohlikOknoEl) {
   rohlikBtnEl.addEventListener('click', () => { nakupOtevri(false); rohlikOtevri(); });
   document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
   rohlikPridatEl.addEventListener('click', rohlikPridej);
+  document.getElementById('rohlikPrihlasitBtn').addEventListener('click', rohlikPrihlasit);
+  rohlikOdhlasitEl.addEventListener('click', async () => {
+    if (!(await zeptejSe('Odhlásit Rohlík?', 'Košík pak půjde plnit až po novém přihlášení.'))) return;
+    try {
+      const res = await fetch('/api/rohlik/odhlasit', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: '{}' });
+      const data = await res.json().catch(() => ({}));
+      if (data.rohlik) rohlikData = data.rohlik;
+    } catch {}
+    rohlikPrihlasenyStav();
+    rohlikOtevri();
+  });
 }
+
+// Návrat z přihlášení u Rohlíku (?rohlik=ok / ?rohlik=chyba): okno Rohlíku znovu
+// a adresu uklidit, ať se po obnovení stránky neukazuje pořád dokola
+(function rohlikPoNavratu() {
+  let q;
+  try { q = new URLSearchParams(location.search); } catch { return; }
+  const v = q.get('rohlik');
+  if (!v || !rohlikOknoEl) return;
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch {}
+  setTimeout(() => {
+    if (v === 'ok') rohlikData = { ...(rohlikData || {}), enabled: true, prihlaseno: true };
+    rohlikOtevri().then(() => {
+      rohlikStavEl.textContent = v === 'ok' ? 'Přihlášeno k Rohlíku ✓' : 'Přihlášení se nepovedlo: ' + (q.get('duvod') || 'neznámá chyba');
+    });
+  }, 800);
+})();
 
 // ---------- Upozornění pro všechny ----------
 // Červený box přes celou appku (i přes kalendář) na všech zařízeních, dokud ho
