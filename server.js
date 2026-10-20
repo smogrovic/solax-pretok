@@ -6132,8 +6132,10 @@ function pccApiHeaders(includeClientId = true) {
   const hash = crypto.createHash('sha256')
     .update('Comfort Cloud' + '521325fb2dd486bf4831b47644317fca' + tsMs + 'Bearer ' + pcc.accessToken)
     .digest('hex');
+  // Stejné hlavičky jako aktuální knihovna pro Home Assistant (aio-panasonic-comfort-cloud)
   const headers = {
-    'content-type': 'application/json;charset=utf-8',
+    accept: 'application/json; charset=utf-8',
+    'content-type': 'application/json',
     'user-agent': 'G-RAC',
     'x-app-name': 'Comfort Cloud',
     'x-app-timestamp': ts,
@@ -6295,7 +6297,10 @@ async function pccAuthenticate() {
     });
   }
   if (!res.ok) throw new Error(`Panasonic ACC login selhal (HTTP ${res.status})`);
-  pcc.clientId = (await res.json()).clientId;
+  const clientId = (await res.json().catch(() => ({}))).clientId;
+  // Bez clientId by API odmítalo každý požadavek („Missing required header")
+  if (!clientId) throw new Error('Panasonic po přihlášení nevrátil clientId.');
+  pcc.clientId = clientId;
 }
 
 async function pccRefreshTokens() {
@@ -6347,9 +6352,22 @@ async function pccApiFetch(path, options = {}) {
       await pccEnsureToken();
     }
     res = await doFetch();
+  } else if (res.status === 400) {
+    // 4000 „Missing required header": hlavičky z relace (clientId, verze) už
+    // neplatí — jednou plné přihlášení načisto a pokus znovu
+    const text = await res.clone().text();
+    if (/4000|header/i.test(text)) {
+      pcc.accessToken = null;
+      pcc.refreshToken = null;
+      pcc.clientId = null;
+      await pccUpdateAppVersion(true);
+      await pccAuthenticate();
+      res = await doFetch();
+    }
   }
   if (!res.ok) {
-    throw new Error(`Panasonic API HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    throw new Error(`Panasonic API HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`
+      + ` (verze appky ${pcc.appVersion}, clientId ${pcc.clientId ? 'ano' : 'ne'})`);
   }
   return res.json();
 }
