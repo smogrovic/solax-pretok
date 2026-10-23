@@ -73,4 +73,11 @@ nadpis('Souhrn na dnešek');
   check('obnova pošle appce', b.zpravy[0].u + ' ' + b.state.pocasiDnes.ted.tempC, 'pocasiDnes 5');
   check('  bez slotů: srážky neznámé', JSON.stringify(b.state.pocasiDnes.srazky), '{"pop":null,"mm":0,"od":null}');
 }
+{
+  // Předpověď se stahuje v každém běhu automatiky, ne jen u solinátoru (ten v zimě,
+  // při sauně i s vypnutou automatikou skončí dřív a kalendář by zůstal bez hodin)
+  const run = fn('async function runAutomation(');
+  const i = run.indexOf('await refreshForecast();');
+  check('předpověď v každém běhu, před vypínačem', i > 0 && i < run.indexOf('if (!autoRunning()) return'), true);
+}
 konec();

@@ -4695,6 +4695,9 @@ async function runAutomation() {
     } else {
       weatherProblemLogged = false;
     }
+    // Předpověď i pro zobrazení (počasí na kalendáři) — nezávisle na zimě, sauně
+    // i hlavním vypínači; solinátor ji pak bere z cache (dotaz nejvýš jednou za hodinu)
+    await refreshForecast();
 
     // „Nejsme doma" jede i při vypnuté automatice — je to tvoje jednorázové rozhodnutí,
     // ne automatika na pozadí, a zamčený dům se nesmí ztratit kvůli poloze vypínače
