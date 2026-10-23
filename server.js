@@ -536,6 +536,7 @@ function snapshot() {
     autoEnabled: autoRunning(),   // starší klienti čtou jen tohle
     manualHold: state.manualHold,
     weather: state.weather,
+    pocasiDnes: state.pocasiDnes || null,
     runtime: runtimePayload(),
     pvDays: state.pvDays,
     wbDays: state.wbDays,
@@ -3835,7 +3836,7 @@ async function fetchWeather() {
     return weatherCache.data;
   }
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${WEATHER_LAT}&lon=${WEATHER_LON}&appid=${OWM_API_KEY}&units=metric`;
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${WEATHER_LAT}&lon=${WEATHER_LON}&appid=${OWM_API_KEY}&units=metric&lang=cz`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return weatherCache.data;
     const data = await res.json();
@@ -3853,9 +3854,12 @@ async function fetchWeather() {
       srazkyMm: pocasiSrazky(data),
       sunsetMs: data.sys.sunset * 1000,
       sunriseMs: typeof data.sys.sunrise === 'number' ? data.sys.sunrise * 1000 : null,
+      // Pro počasí na kalendáři (ráno na iPadu)
+      ...pocasiPopis(data),
       fetchedAt: new Date().toISOString()
     };
     broadcast('weather', { weather: state.weather });
+    pocasiDnesObnov();
 
     return data;
   } catch {
@@ -3915,9 +3919,83 @@ async function refreshForecast() {
       slots[d][String(hour)] = t;
     }
     forecastCache = { ts: Date.now(), slots };
+    pocasiSlotyUloz(data.list, dnes);
+    pocasiDnesObnov();
   } catch {
     // necháme starou hodnotu; když žádná není, jede se podle aktuální teploty
   }
+}
+
+// ---------- Počasí na dnešek (kalendář na iPadu) ----------
+// Pocitová teplota, oblačnost a kód počasí z odpovědi OWM (aktuální i slot předpovědi)
+function pocasiPopis(x) {
+  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const w = x && Array.isArray(x.weather) && x.weather[0] ? x.weather[0] : {};
+  return {
+    pocitC: cislo(x && x.main && x.main.feels_like),
+    oblacnost: cislo(x && x.clouds && x.clouds.all),
+    kod: cislo(w.id),
+    noc: typeof w.icon === 'string' ? w.icon.endsWith('n') : false,
+    popis: typeof w.description === 'string' ? w.description.slice(0, 60) : null
+  };
+}
+
+// Sloty po 3 h pro dnešek a zítřek. Stejná past jako u teplot solinátoru: uplynulé
+// sloty z odpovědi OWM mizí, tak se drží poslední známé — jinak by ráno minimum
+// i ranní hodiny „ujížděly".
+let pocasiSloty = {};   // 'YYYY-MM-DD' -> { '9': { t, tempC, pocitC, pop, mm, oblacnost, kod, noc } }
+function pocasiSlotyUloz(list, dnes = pragueDateString()) {
+  const zitra = pragueDateString(Date.parse(dnes + 'T12:00:00Z') + 24 * 3600000);
+  const nove = {};
+  for (const d of Object.keys(pocasiSloty)) if (d >= dnes) nove[d] = { ...pocasiSloty[d] };
+  for (const slot of list || []) {
+    if (!slot || typeof slot.dt !== 'number' || !slot.main || typeof slot.main.temp !== 'number') continue;
+    const t = slot.dt * 1000;
+    const d = pragueDateString(t);
+    if (d !== dnes && d !== zitra) continue;
+    const mm = ((slot.rain && slot.rain['3h']) || 0) + ((slot.snow && slot.snow['3h']) || 0);
+    const p = pocasiPopis(slot);
+    if (!nove[d]) nove[d] = {};
+    nove[d][String(pragueTime(t).hour)] = { t, tempC: slot.main.temp, pocitC: p.pocitC,
+      pop: typeof slot.pop === 'number' ? Math.round(slot.pop * 100) : null,
+      mm: Math.round(mm * 10) / 10, oblacnost: p.oblacnost, kod: p.kod, noc: p.noc };
+  }
+  pocasiSloty = nove;
+}
+
+// → souhrn na dnešek pro appku, nebo null, když nic nevíme
+function pocasiDnes(now = Date.now()) {
+  const w = state.weather;
+  const dnes = pragueDateString(now);
+  const sloty = Object.values(pocasiSloty[dnes] || {}).sort((a, b) => a.t - b.t);
+  const ted = w && typeof w.tempC === 'number'
+    ? { tempC: w.tempC, pocitC: w.pocitC ?? null, oblacnost: w.oblacnost ?? null, kod: w.kod ?? null, noc: !!w.noc, popis: w.popis || null }
+    : null;
+  if (!ted && !sloty.length) return null;
+  const teploty = sloty.map(s => s.tempC).concat(ted ? [ted.tempC] : []);
+  // Od teď: i slot, který právě běží (začal před méně než 3 h)
+  const dalsi = sloty.filter(s => s.t > now - 3 * 3600000);
+  const srazkove = dalsi.filter(s => typeof s.pop === 'number');
+  const prvni = srazkove.find(s => s.pop >= 30);
+  return {
+    ted,
+    minC: Math.min(...teploty),
+    maxC: Math.max(...teploty),
+    hodiny: dalsi.slice(0, 8).map(s => ({ t: s.t, tempC: s.tempC, pop: s.pop, mm: s.mm, kod: s.kod, noc: s.noc })),
+    srazky: {
+      pop: srazkove.length ? Math.max(...srazkove.map(s => s.pop)) : null,
+      mm: Math.round(dalsi.reduce((a, s) => a + (s.mm || 0), 0) * 10) / 10,
+      od: prvni ? prvni.t : null
+    },
+    vychodMs: w ? w.sunriseMs || null : null,
+    zapadMs: w ? w.sunsetMs || null : null,
+    fetchedAt: w ? w.fetchedAt || null : null
+  };
+}
+
+function pocasiDnesObnov() {
+  state.pocasiDnes = pocasiDnes();
+  broadcast('pocasiDnes', { pocasiDnes: state.pocasiDnes });
 }
 
 // Server na Renderu běží v UTC — všechny časové podmínky počítáme v Europe/Prague.

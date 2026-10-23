@@ -565,6 +565,77 @@ setTimeout(async () => {
   check('čas zelený (#2d651d)', getComputedStyle(bMiki.querySelector('.kal-blok-cas')).color, 'rgb(45, 101, 29)');
   const bZuz = [...document.querySelectorAll('#kalMrizka .kal-blok')].find(b => /Kadeřník/.test(b.textContent));
   check('ostatní kalendáře beze změny (Zuzka)', bZuz.style.color, (() => { const x = document.createElement('i'); x.style.color = kalCitelna(kalBarva({ nazev: 'Zuzka' }, 0), 0.14); return x.style.color; })());
+
+  R.push('\\n14) Dopoledne místo zítřka počasí');
+  {
+    const puvodniNow = Date.now;
+    const v7 = denMs(0) + 7 * 3600000;
+    const H = 3600000;
+    const POC = { ted: { tempC: 6.4, pocitC: 3.1, oblacnost: 75, kod: 803, noc: false, popis: 'oblačno' }, minC: 2.2, maxC: 13.6,
+      hodiny: [{ t: v7 - H, tempC: 5, pop: 0, mm: 0, kod: 803 }, { t: v7 + 2 * H, tempC: 9, pop: 10, mm: 0, kod: 801 },
+        { t: v7 + 5 * H, tempC: 13, pop: 70, mm: 1.6, kod: 500 }, { t: v7 + 8 * H, tempC: 11, pop: 40, mm: 0.8, kod: 500 },
+        { t: v7 + 11 * H, tempC: 7, pop: 0, mm: 0, kod: 800, noc: true }],
+      srazky: { pop: 70, mm: 2.4, od: v7 + 5 * H } };
+    const poc = document.getElementById('kalPocasi');
+    const nazvy = () => [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.textContent.replace(/ .*/, '')).join(',');
+    kalOtevri(true);
+    kalPrehledPrepni(false);
+    renderKalendar({ enabled: true, dnu: 14, days: d14, kalendare: KAL, fetchedAt: new Date().toISOString(), error: null });
+    Date.now = () => v7;
+    kalDenIndex = 0;
+    pocasiDnesData = null;
+    renderKalDen();
+    check('v 7:00 bez dat: dnes a zítra', nazvy() + ' ' + poc.hidden, 'Dnes,Zítra true');
+    pocasiDnesData = POC;
+    renderKalDen();
+    check('v 7:00 s počasím: místo zítřka počasí', nazvy() + ' ' + poc.hidden, 'Dnes,Počasí false');
+    check('  mřížka jen s dneškem', document.getElementById('kalMrizka').style.getPropertyValue('--sloupcu'), String(KAL.length));
+    // Rozjetá animace listování z dřívějška by mřížku posunula
+    kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
+    const rm = document.getElementById('kalMrizka').getBoundingClientRect(), rp = poc.getBoundingClientRect();
+    check('  počasí vpravo vedle mřížky, stejně vysoké', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && Math.abs(rp.height - rm.height) < 2, true);
+    const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());
+    check('  nadpis „Počasí dnes" nad panelem', Math.abs((hlavy[1].left + hlavy[1].right) / 2 - (rp.left + rp.right) / 2) < 12, true);
+    check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 80), '6° true');
+    check('  popis s velkým písmenem', poc.querySelector('.poc-popis').textContent, 'Oblačno');
+    check('  max a min', poc.querySelector('.poc-minmax').textContent.replace(/\\s+/g, ' '), 'Max 14° Min 2°');
+    const hod = [...poc.querySelectorAll('.poc-hod')];
+    check('během dne: od teď, s časy', hod.map(h => h.querySelector('.poc-hod-cas').textContent).join(','), 'Teď,9,12,15,18');
+    check('  první je aktuální teplota', hod[0].lastElementChild.textContent, '6°');
+    check('  pravděpodobnost deště od 20 %', hod.map(h => h.querySelector('.poc-hod-pop').textContent).join('|'), '||70 %|40 %|');
+    check('  ikona deště (kapky) u kódu 500', !!hod[2].querySelector('line[stroke], g[stroke="#5ac8fa"]'), true);
+    check('  měsíc v noci', hod[4].querySelector('svg path').getAttribute('fill'), '#fff');
+    const tecka = poc.querySelector('.poc-tecka');
+    check('rozpětí: tečka teď na správném místě', Math.round(parseFloat(tecka.style.left)), Math.round((6.4 - 2.2) / (13.6 - 2.2) * 100));
+    const karty = [...poc.querySelectorAll('.poc-male .poc-karta')].map(k => k.textContent);
+    check('pocitově', /^Pocitově3°Vítr ochlazuje\./.test(karty[0]), true);
+    check('oblačnost', /^Oblačnost75 %/.test(karty[1]), true);
+    check('srážky', karty[2].startsWith('Srážky2,4 mmPravděpodobnost 70 %, od '), true);
+    check('  sloupky pravděpodobnosti', poc.querySelectorAll('.poc-sloupky span').length, 5);
+    check('pozadí podle počasí (zataženo)', poc.style.getPropertyValue('--poc-a'), '#5f7a96');
+    check('nic nepřetéká do šířky', poc.scrollWidth <= poc.clientWidth + 1, true);
+    document.getElementById('kalNext').click();
+    check('šipka › → zítřek a pozítří', nazvy() + ' ' + poc.hidden, 'Zítra,' + KAL_DNY_CZ[new Date(denMs(2)).getDay()] + ' true');
+    document.getElementById('kalDenNazev').click();
+    check('zpátky na dnešek → zase počasí', nazvy(), 'Dnes,Počasí');
+    Date.now = () => denMs(0) + 12 * 3600000;
+    renderKalDen();
+    check('ve 12:00 zase zítřek', nazvy() + ' ' + poc.hidden, 'Dnes,Zítra true');
+    Date.now = () => denMs(0) + 6 * 3600000;
+    renderKalDen();
+    check('v 6:00 už počasí', nazvy(), 'Dnes,Počasí');
+    Date.now = () => denMs(0) + 5 * 3600000 + 59 * 60000;
+    renderKalDen();
+    check('v 5:59 ještě ne', nazvy(), 'Dnes,Zítra');
+    pocasiDnesData = { ...POC, ted: { ...POC.ted, kod: 800, oblacnost: 0, pocitC: 6 }, srazky: { pop: 0, mm: 0, od: null }, hodiny: [] };
+    Date.now = () => v7;
+    renderKalDen();
+    check('jasno: modré pozadí, bez srážek', poc.style.getPropertyValue('--poc-a') + ' ' + /Bez srážek/.test(poc.textContent), '#3f8fe0 true');
+    check('  bez hodin karta „Během dne" chybí', /Během dne/.test(poc.textContent), false);
+    pocasiDnesData = null;
+    Date.now = puvodniNow;
+    renderKalDen();
+  }
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

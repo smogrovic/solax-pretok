@@ -276,6 +276,42 @@
   /* Panel je na zdi — celých 24 h musí být vidět naráz, nikam se neroluje.
      Mřížka proto vyplní zbylou výšku a bloky se umisťují v PROCENTECH, ne v pixelech;
      odpadá tím dopočítávání výšky v JS i překreslování při otočení iPadu. */
+  /* Tělo denního pohledu: osa 54 px + dvě stejné půlky, ať nadpisy v liště sedí
+     i dopoledne, kdy pravou půlku zabere počasí */
+  .kal-den-telo{flex:1;min-height:0;display:grid;grid-template-columns:54px minmax(0,1fr) minmax(0,1fr);}
+  .kal-den-telo > .kal-mrizka{grid-column:1 / -1;min-width:0;}
+  .kal-den-telo.s-pocasim > .kal-mrizka{grid-column:1 / 3;}
+  .kal-pocasi{grid-column:3;margin-left:10px;min-height:0;min-width:0;overflow:hidden auto;scrollbar-width:none;border-radius:18px;padding:16px 18px;
+    color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',sans-serif;
+    background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;
+    display:flex;flex-direction:column;gap:10px;}
+  .kal-pocasi::-webkit-scrollbar{display:none;}
+  .kal-pocasi[hidden]{display:none;}
+  .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.12);}
+  .poc-misto{font-size:26px;font-weight:500;}
+  .poc-teplota{font-size:84px;font-weight:200;line-height:1;margin:2px 0 0 18px;}
+  .poc-popis{font-size:20px;font-weight:500;opacity:0.95;}
+  .poc-minmax{font-size:18px;font-weight:500;margin-top:2px;}
+  .poc-karta{background:rgba(255,255,255,0.16);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border-radius:18px;padding:10px 14px 12px;}
+  .poc-karta-h{font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.7;
+    padding-bottom:7px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.22);}
+  .poc-hodiny{display:flex;justify-content:space-between;gap:4px;}
+  .poc-hod{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;flex:1;font-size:16px;font-weight:500;}
+  .poc-hod-cas{font-size:14px;}
+  .poc-hod svg{width:30px;height:30px;}
+  .poc-hod-pop{font-size:12px;font-weight:700;color:#bfe3ff;min-height:14px;}
+  .poc-rozpeti{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:500;}
+  .poc-rozpeti .poc-min{opacity:0.7;}
+  .poc-pruh{flex:1;height:6px;border-radius:3px;background:linear-gradient(90deg,#5ac8fa,#a3e36b,#ffd60a,#ff9f0a);position:relative;}
+  .poc-tecka{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;
+    box-shadow:0 0 0 2px rgba(0,0,0,0.18);}
+  .poc-male{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  .poc-velke{font-size:34px;font-weight:400;line-height:1.1;}
+  .poc-pozn{font-size:13px;font-weight:500;opacity:0.85;margin-top:4px;line-height:1.3;}
+  .poc-kruh{display:block;width:50px;height:50px;margin:2px 0 0;}
+  .poc-sloupky{display:flex;align-items:flex-end;gap:3px;height:30px;margin-top:6px;}
+  .poc-sloupky span{flex:1;background:#7cc7ff;border-radius:2px 2px 0 0;min-height:2px;}
   .kal-mrizka{
     flex:1;
     min-height:0;
@@ -3747,7 +3783,11 @@
       <div class="kal-den-nazev" id="kalDenNazev" role="button" tabindex="0" title="Zpátky na dnešek"></div>
       <button class="kal-sipka" id="kalNext" aria-label="Další den">›</button>
     </div>
-    <div class="kal-mrizka" id="kalMrizka"></div>
+    <!-- Tělo: mřížka, dopoledne vedle ní místo zítřka dnešní počasí -->
+    <div class="kal-den-telo" id="kalDenTelo">
+      <div class="kal-mrizka" id="kalMrizka"></div>
+      <div class="kal-pocasi" id="kalPocasi" hidden></div>
+    </div>
   </div>
   <div class="kal-dny" id="kalDny"></div>
   <!-- Přehled: 14 dní naráz, kompaktně (na iPadu dva týdny po sedmi) -->
@@ -11231,6 +11271,7 @@ function applySnapshot(snap) {
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
   bezpecne(() => renderWeather(snap.weather));
+  if ('pocasiDnes' in snap) bezpecne(() => { pocasiDnesData = snap.pocasiDnes || null; renderKalDen(); });
   bezpecne(() => renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on')));
   maybeRestoreAutoMode();
   bezpecne(() => renderStore(snap.store));
@@ -11574,6 +11615,10 @@ function connectStream() {
   });
   es.addEventListener('weather', e => {
     renderWeather(JSON.parse(e.data).weather);
+  });
+  es.addEventListener('pocasiDnes', e => {
+    const p = JSON.parse(e.data).pocasiDnes || null;
+    bezpecne(() => { pocasiDnesData = p; renderKalDen(); });
   });
   es.addEventListener('assistantLog', e => {
     renderAssistantLog(JSON.parse(e.data).log || []);
@@ -13424,6 +13469,136 @@ function kalDoPruhu(udalosti) {
 
 // Na zdi jsou vidět DVA dny vedle sebe (vybraný a další), každý se sloupci
 // po kalendářích a se společnou časovou osou vlevo. Listuje se po jednom dni.
+// ---------- Dopoledne: místo zítřka dnešní počasí (jako Počasí na iOS) ----------
+// Zatím 6:00–12:00; jen když se díváme na dnešek a server počasí poslal
+const KAL_POCASI_OD = 6;
+const KAL_POCASI_DO = 12;
+const kalPocasiEl = document.getElementById('kalPocasi');
+const kalDenTeloEl = document.getElementById('kalDenTelo');
+let pocasiDnesData = null;
+
+function kalRanniPocasi(now = Date.now()) {
+  const h = new Date(now).getHours();
+  return kalDenIndex === 0 && h >= KAL_POCASI_OD && h < KAL_POCASI_DO
+    && !!(pocasiDnesData && pocasiDnesData.ted && typeof pocasiDnesData.ted.tempC === 'number');
+}
+
+// Ikony ve stylu iOS (SF Symbols barevně): slunce, měsíc, mraky, déšť, sníh, bouřka, mlha
+function pocasiIkona(kod, noc) {
+  const slunce = '<circle cx="12" cy="12" r="4.6" fill="#ffd60a"/><g stroke="#ffd60a" stroke-width="1.8" stroke-linecap="round">'
+    + [0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="12" y1="2.6" x2="12" y2="4.6" transform="rotate(${a} 12 12)"/>`).join('') + '</g>';
+  const mesic = '<path d="M15.5 3.5a8.5 8.5 0 1 0 5 13.6A7 7 0 0 1 15.5 3.5z" fill="#fff"/>';
+  const mrak = (x = 0, y = 0, barva = '#fff') => `<path transform="translate(${x} ${y})" d="M7 19h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.2A4.6 4.6 0 0 0 7 19z" fill="${barva}"/>`;
+  const kapky = '<g stroke="#5ac8fa" stroke-width="1.8" stroke-linecap="round"><line x1="8" y1="20.5" x2="7" y2="23"/><line x1="12" y1="20.5" x2="11" y2="23"/><line x1="16" y1="20.5" x2="15" y2="23"/></g>';
+  const vlocky = '<g fill="#fff"><circle cx="8" cy="21.5" r="1.1"/><circle cx="12" cy="22.5" r="1.1"/><circle cx="16" cy="21.5" r="1.1"/></g>';
+  const blesk = '<path d="M12.5 17l-2.5 4h2.2l-1.2 3.5 4-5h-2.3l1.3-2.5z" fill="#ffd60a"/>';
+  let obsah;
+  const k = Number(kod);
+  if (k >= 200 && k < 300) obsah = mrak(0, -3, '#e5e5ea') + blesk;
+  else if (k >= 300 && k < 600) obsah = mrak(0, -3) + kapky;
+  else if (k >= 600 && k < 700) obsah = mrak(0, -3) + vlocky;
+  else if (k >= 700 && k < 800) obsah = '<g stroke="#fff" stroke-width="2" stroke-linecap="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="3" y1="13" x2="21" y2="13"/><line x1="5" y1="17" x2="19" y2="17"/></g>';
+  else if (k === 800) obsah = noc ? mesic : slunce;
+  else if (k === 801 || k === 802) obsah = '<g transform="translate(-3 -4) scale(0.8)">' + (noc ? mesic : slunce) + '</g>' + mrak(1, 1);
+  else obsah = mrak(0, -1);
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${obsah}</svg>`;
+}
+
+// Pozadí podle počasí, jako v appce Počasí
+function pocasiPozadi(ted) {
+  const k = Number(ted.kod);
+  if (ted.noc) return ['#1c2a4a', '#3a5180'];
+  if (k >= 200 && k < 600) return ['#4b5563', '#7b8794'];
+  if (k >= 600 && k < 800) return ['#8fa3b8', '#c3d0dd'];
+  if (k >= 803) return ['#5f7a96', '#9fb4c9'];
+  return ['#3f8fe0', '#8cc4f5'];
+}
+
+function renderKalPocasi(p, now = Date.now()) {
+  if (!kalPocasiEl) return;
+  const st = v => (typeof v === 'number' ? Math.round(v) + '°' : '–');
+  const hm = t => { const d = new Date(t); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const ted = p.ted;
+  const [a, b] = pocasiPozadi(ted);
+  kalPocasiEl.style.setProperty('--poc-a', a);
+  kalPocasiEl.style.setProperty('--poc-b', b);
+  kalPocasiEl.textContent = '';
+  const el = (tag, trida, rodic, text) => {
+    const e = document.createElement(tag);
+    if (trida) e.className = trida;
+    if (text !== undefined) e.textContent = text;
+    (rodic || kalPocasiEl).appendChild(e);
+    return e;
+  };
+  // Hlavička
+  const hlava = el('div', 'poc-hlava');
+  el('div', 'poc-misto', hlava, 'Doma');
+  el('div', 'poc-teplota', hlava, st(ted.tempC));
+  const popis = ted.popis ? ted.popis.charAt(0).toUpperCase() + ted.popis.slice(1) : '';
+  el('div', 'poc-popis', hlava, popis);
+  el('div', 'poc-minmax', hlava, `Max ${st(p.maxC)}  Min ${st(p.minC)}`);
+  // Během dne: sloty po 3 h
+  const hodiny = (p.hodiny || []).filter(h => h.t + 3 * 3600000 > now);
+  if (hodiny.length) {
+    const k = el('div', 'poc-karta');
+    el('div', 'poc-karta-h', k, 'Během dne');
+    const rada = el('div', 'poc-hodiny', k);
+    hodiny.slice(0, 6).forEach((h, i) => {
+      const s = el('div', 'poc-hod', rada);
+      el('div', 'poc-hod-cas', s, i === 0 && h.t <= now ? 'Teď' : String(new Date(h.t).getHours()));
+      const ik = el('div', '', s);
+      ik.innerHTML = pocasiIkona(h.kod, h.noc);
+      el('div', 'poc-hod-pop', s, typeof h.pop === 'number' && h.pop >= 20 ? h.pop + ' %' : '');
+      el('div', '', s, st(i === 0 && h.t <= now ? ted.tempC : h.tempC));
+    });
+  }
+  // Rozpětí dne s tečkou „teď"
+  if (typeof p.minC === 'number' && typeof p.maxC === 'number') {
+    const k = el('div', 'poc-karta');
+    el('div', 'poc-karta-h', k, 'Dnes');
+    const r = el('div', 'poc-rozpeti', k);
+    el('span', 'poc-min', r, st(p.minC));
+    const pruh = el('div', 'poc-pruh', r);
+    const tecka = el('div', 'poc-tecka', pruh);
+    const rozsah = p.maxC - p.minC;
+    tecka.style.left = (rozsah > 0 ? Math.max(0, Math.min(1, (ted.tempC - p.minC) / rozsah)) * 100 : 50) + '%';
+    el('span', '', r, st(p.maxC));
+  }
+  // Tři malé karty: pocitově, oblačnost, srážky
+  const male = el('div', 'poc-male');
+  {
+    const k = el('div', 'poc-karta', male);
+    el('div', 'poc-karta-h', k, 'Pocitově');
+    el('div', 'poc-velke', k, st(ted.pocitC));
+    const rozdil = typeof ted.pocitC === 'number' ? ted.pocitC - ted.tempC : 0;
+    el('div', 'poc-pozn', k, rozdil <= -2 ? 'Vítr ochlazuje.' : rozdil >= 2 ? 'Vlhkost přidává.' : 'Podobně jako skutečná teplota.');
+  }
+  {
+    const k = el('div', 'poc-karta', male);
+    el('div', 'poc-karta-h', k, 'Oblačnost');
+    const o = typeof ted.oblacnost === 'number' ? Math.round(ted.oblacnost) : null;
+    el('div', 'poc-velke', k, o === null ? '–' : o + ' %');
+    const obvod = 2 * Math.PI * 22;
+    const kruh = el('div', '', k);
+    kruh.innerHTML = `<svg class="poc-kruh" viewBox="0 0 58 58"><circle cx="29" cy="29" r="22" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="7"/>`
+      + `<circle cx="29" cy="29" r="22" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" transform="rotate(-90 29 29)"`
+      + ` stroke-dasharray="${((o || 0) / 100 * obvod).toFixed(1)} ${obvod.toFixed(1)}"/></svg>`;
+  }
+  {
+    const k = el('div', 'poc-karta', male);
+    el('div', 'poc-karta-h', k, 'Srážky');
+    const sr = p.srazky || {};
+    const bez = !(sr.mm > 0) && !(sr.pop >= 20);
+    el('div', 'poc-velke', k, bez ? 'Bez srážek' : String(sr.mm || 0).replace('.', ',') + ' mm');
+    el('div', 'poc-pozn', k, typeof sr.pop !== 'number' ? 'Předpověď zatím chybí.'
+      : `Pravděpodobnost ${sr.pop} %` + (sr.od ? `, od ${hm(sr.od)}` : '') + '.');
+    if (hodiny.some(h => typeof h.pop === 'number')) {
+      const sl = el('div', 'poc-sloupky', k);
+      hodiny.forEach(h => { const b = el('span', '', sl); b.style.height = Math.max(4, h.pop || 0) + '%'; });
+    }
+  }
+}
+
 function renderKalDen() {
   if (!kalMrizkaEl) return;
   const d = kalData || {};
@@ -13435,7 +13610,14 @@ function renderKalDen() {
         .map(nazev => ({ nazev, barva: null }));
   // Poslední platný začátek je předposlední den — ať je vpravo pořád co ukázat
   kalDenIndex = Math.max(0, Math.min(kalDenIndex, dny.length - 2));
-  const vidim = dny.slice(kalDenIndex, kalDenIndex + 2);
+  // Dopoledne vpravo místo zítřka dnešní počasí
+  const pocasi = kalRanniPocasi();
+  const vidim = pocasi ? dny.slice(0, 1) : dny.slice(kalDenIndex, kalDenIndex + 2);
+  if (kalDenTeloEl) kalDenTeloEl.classList.toggle('s-pocasim', pocasi);
+  if (kalPocasiEl) {
+    kalPocasiEl.hidden = !pocasi;
+    if (pocasi) renderKalPocasi(pocasiDnesData);
+  }
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
   if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 2;
   kalMrizkaEl.textContent = '';
@@ -13446,15 +13628,21 @@ function renderKalDen() {
   // uprostřed nad svým dnem (prázdná buňka vlevo je nad časovou osou)
   if (kalDenNazevEl) {
     kalDenNazevEl.textContent = '';
-    kalDenNazevEl.style.setProperty('--sloupcu', sloupcu);
+    kalDenNazevEl.style.setProperty('--sloupcu', pocasi ? '2' : sloupcu);
     kalDenNazevEl.appendChild(document.createElement('span'));
     vidim.forEach((den, j) => {
       const h = document.createElement('div');
       h.className = 'kal-den-hlava' + (kalDenIndex + j === 0 ? ' dnes' : '');
       h.textContent = kalNadpisDne(den, kalDenIndex + j);
-      h.style.gridColumn = `span ${N}`;
+      h.style.gridColumn = `span ${pocasi ? 1 : N}`;
       kalDenNazevEl.appendChild(h);
     });
+    if (pocasi) {
+      const h = document.createElement('div');
+      h.className = 'kal-den-hlava';
+      h.textContent = 'Počasí dnes';
+      kalDenNazevEl.appendChild(h);
+    }
   }
   if (!vidim.length || !kalendare.length) return;
 
