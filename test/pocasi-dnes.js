@@ -11,7 +11,7 @@ const CODE = [
 function build(weather, { fetch = async () => { throw new Error('bez sítě'); } } = {}) {
   const state = { weather }, zpravy = [], routy = {};
   const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'fetch', 'WEATHER_LAT', 'WEATHER_LON',
-    CODE + '\n; return { pocasiPopis, pocasiSlotyUloz, pocasiDnes, pocasiDnesObnov, pocasiZOpenMeteo, refreshOpenMeteo, pocasiDnesVyber };')(
+    CODE + '\n; return { pocasiPopis, pocasiSlotyUloz, pocasiDnes, pocasiDnesObnov };')(
     state, (u, d) => zpravy.push({ u, d }), { get: (c, h) => { routy[c] = h; } }, () => true, fetch, 49.765, 14.688);
   const volej = async c => { let out; await routy[c]({}, { json: v => { out = v; } }); return out; };
   return { api, state, zpravy, volej };
@@ -81,60 +81,13 @@ nadpis('Souhrn na dnešek');
   const run = fn('async function runAutomation(');
   const i = run.indexOf('await refreshForecast();');
   check('předpověď v každém běhu, před vypínačem', i > 0 && i < run.indexOf('if (!autoRunning()) return'), true);
-  const w = run.indexOf('await refreshOpenMeteo();');
-  check('  Open-Meteo taky', w > 0 && w < run.indexOf('if (!autoRunning()) return'), true);
 }
 
-nadpis('Open-Meteo (hlavní zdroj, zdarma)');
 (async () => {
-  const ted = T(7) + 20 * 60000;
-  const s = t => Math.floor(t / 1000);
-  const hod = Array.from({ length: 48 }, (_, i) => T(0) + i * H);
-  const OMJ = {
-    current: { time: s(ted), temperature_2m: 6.2, apparent_temperature: 2.9, cloud_cover: 81, weather_code: 53, is_day: 1 },
-    daily: { time: [s(T(0)), s(T(24))], temperature_2m_max: [13.4, 20], temperature_2m_min: [1.8, -5],
-      sunrise: [s(T(7) - 600000), s(T(31))], sunset: [s(T(17) + 300000), s(T(41))] },
-    hourly: { time: hod.map(s), temperature_2m: hod.map((_, i) => i * 0.5), precipitation_probability: hod.map((_, i) => (i === 12 ? 65 : i === 13 ? 35 : 5)),
-      precipitation: hod.map((_, i) => (i === 12 ? 1.2 : 0)), weather_code: hod.map((_, i) => (i === 12 ? 63 : 3)), is_day: hod.map((_, i) => (i >= 7 && i < 17 ? 1 : 0)) }
-  };
-  const volani = [];
-  const f = async url => { volani.push(url); return { ok: true, status: 200, json: async () => OMJ }; };
-  const b = build({ tempC: 5 }, { fetch: f });
-  const p = b.api.pocasiZOpenMeteo(OMJ, ted);
-  check('teď: teplota, pocitová, oblačnost', [p.ted.tempC, p.ted.pocitC, p.ted.oblacnost].join(' '), '6.2 2.9 81');
-  check('  WMO kód → ikona a popis česky', p.ted.kod + ' ' + p.ted.popis + ' ' + p.ted.noc, '301 Mrholení false');
-  check('max/min z denní předpovědi dneška', p.maxC + ' / ' + p.minC, '13.4 / 1.8');
-  check('hodiny: 24 h od této hodiny, přes půlnoc', p.hodiny.length + ' ' + (p.hodiny[0].t === T(7)) + ' ' + (p.hodiny[23].t === T(30)), '24 true true');
-  check('  déšť ve 12:00', p.hodiny[5].kod + ' ' + p.hodiny[5].pop + ' ' + p.hodiny[5].mm, '501 65 1.2');
-  check('  noc z is_day', p.hodiny.map(x => x.noc ? 'n' : 'd').join(''), 'dddddddddd' + 'n'.repeat(14));
-  check('  max/min jen za dnešek (zítřek 20/−5 ne)', p.maxC + ' / ' + p.minC, '13.4 / 1.8');
-  const vecer = b.api.pocasiZOpenMeteo(OMJ, T(22) + 20 * 60000);
-  check('ve 22:20: od 22 h přes půlnoc do zítřka', vecer.hodiny.length + ' ' + (vecer.hodiny[0].t === T(22)) + ' ' + (vecer.hodiny[23].t === T(45)), '24 true true');
-  check('srážky', JSON.stringify([p.srazky.pop, p.srazky.mm, p.srazky.od === T(12)]), '[65,1.2,true]');
-  check('slunce a zdroj', (p.vychodMs === T(7) - 600000) + ' ' + (p.zapadMs === T(17) + 300000) + ' ' + p.zdroj, 'true true open-meteo');
-  check('neznámý kód → oblačno', b.api.pocasiZOpenMeteo({ current: { temperature_2m: 1, weather_code: 42 } }, ted).ted.popis, 'Oblačno');
-  check('v noci (is_day 0) noc', b.api.pocasiZOpenMeteo({ current: { temperature_2m: 1, weather_code: 0, is_day: 0 } }, ted).ted.noc, true);
-  check('bouřka s kroupami', b.api.pocasiZOpenMeteo({ current: { temperature_2m: 1, weather_code: 99 } }, ted).ted.kod, 202);
-  check('bez aktuálního počasí null', b.api.pocasiZOpenMeteo({}, ted), null);
-
-  await b.api.refreshOpenMeteo(ted);
-  const u = new URL(volani[0]);
-  check('dotaz: Open-Meteo, domov, Praha, unix čas', [u.host, u.searchParams.get('latitude'), u.searchParams.get('longitude'),
-    u.searchParams.get('timezone'), u.searchParams.get('timeformat')].join(' '), 'api.open-meteo.com 49.765 14.688 Europe/Prague unixtime');
-  check('  bez klíče', /key|appid/i.test(volani[0]), false);
-  check('  appka dostane data z Open-Meteo', b.state.pocasiDnes.zdroj + ' ' + b.zpravy.pop().u, 'open-meteo pocasiDnes');
-  await b.api.refreshOpenMeteo(ted + 5 * 60000);
-  check('  nejvýš jednou za 10 min', volani.length, 1);
-  check('staré (> 30 min) → zpátky OpenWeather', b.api.pocasiDnesVyber(ted + 31 * 60000).zdroj, 'owm');
+  const b = build({ tempC: 5 });
+  b.api.pocasiDnesObnov();
   const d = await b.volej('/api/pocasi/diagnostika');
-  check('diagnostika', d.zdroj + ' ' + d.openMeteo.data + ' ' + d.openMeteo.posledni.stav, 'open-meteo true 200');
-  const chyba = build({ tempC: 5 }, { fetch: async () => ({ ok: false, status: 429, json: async () => ({}), text: async () => '{"reason":"Too many requests"}' }) });
-  await chyba.api.refreshOpenMeteo(ted);
-  const dch = (await chyba.volej('/api/pocasi/diagnostika')).openMeteo.posledni;
-  check('výpadek → OpenWeather dál, stav a důvod v diagnostice', dch.stav + ' ' + chyba.api.pocasiDnesVyber(ted).zdroj + ' ' + dch.chyba, '429 owm {"reason":"Too many requests"}');
-  const sit = build({ tempC: 5 }, { fetch: async () => { throw new Error('getaddrinfo ENOTFOUND api.open-meteo.com'); } });
-  await sit.api.refreshOpenMeteo(ted);
-  check('  chyba sítě s textem', (await sit.volej('/api/pocasi/diagnostika')).openMeteo.posledni.chyba, 'getaddrinfo ENOTFOUND api.open-meteo.com');
+  check('diagnostika: zdroj zálohy', d.zdroj, 'owm');
   const dg = between("app.get('/api/pocasi/diagnostika'", '// Server na Renderu běží v UTC');
   check('diagnostika bez zámku, bez tajných údajů', /requireAuth/.test(dg) + ' ' + /OWM_API_KEY|UNLOCK|token/i.test(dg), 'false false');
   konec();

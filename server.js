@@ -537,6 +537,7 @@ function snapshot() {
     manualHold: state.manualHold,
     weather: state.weather,
     pocasiDnes: state.pocasiDnes || null,
+    pocasiPoloha: { lat: WEATHER_LAT, lon: WEATHER_LON },
     runtime: runtimePayload(),
     pvDays: state.pvDays,
     wbDays: state.wbDays,
@@ -3996,114 +3997,18 @@ function pocasiDnes(now = Date.now()) {
   };
 }
 
-// ---- Open-Meteo: hlavní zdroj počasí na kalendáři ----
-// Zdarma a bez klíče. Pro Česko bere model ICON-D2 německé DWD (mřížka 2 km), takže
-// je přesnější než OpenWeather. Když vypadne, platí OpenWeather jako dřív.
-const OM_INTERVAL_MS = 10 * 60000;
-const OM_PLATNOST_MS = 30 * 60000;
-let pocasiOm = { data: null, ts: 0, pokus: 0, posledni: null };
-
-async function refreshOpenMeteo(now = Date.now()) {
-  if (now - pocasiOm.pokus < OM_INTERVAL_MS) return;
-  pocasiOm.pokus = now;
-  try {
-    const q = new URLSearchParams({
-      latitude: String(WEATHER_LAT), longitude: String(WEATHER_LON),
-      current: 'temperature_2m,apparent_temperature,cloud_cover,weather_code,is_day',
-      hourly: 'temperature_2m,precipitation_probability,precipitation,weather_code,is_day',
-      daily: 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
-      timezone: 'Europe/Prague', forecast_days: '2', timeformat: 'unixtime'
-    });
-    const res = await fetch('https://api.open-meteo.com/v1/forecast?' + q.toString(), { signal: AbortSignal.timeout(15000) });
-    pocasiOm.posledni = { stav: res.status, kdy: now };
-    if (!res.ok) { pocasiOm.posledni.chyba = (await res.text().catch(() => '')).slice(0, 120); return; }
-    const j = await res.json();
-    if (!j || !j.current || typeof j.current.temperature_2m !== 'number') return;
-    pocasiOm.data = j;
-    pocasiOm.ts = now;
-    pocasiDnesObnov(now);
-  } catch (err) {
-    pocasiOm.posledni = { stav: 0, chyba: String(err && (err.message || err.name) || 'chyba').slice(0, 120), kdy: now };
-  }
-}
-
-// WMO kód počasí → kód ve stylu OpenWeather (ikony a scény v appce) + český popis
-const WMO_STAVY = {
-  0: [800, 'Jasno'], 1: [801, 'Skoro jasno'], 2: [802, 'Polojasno'], 3: [804, 'Zataženo'],
-  45: [741, 'Mlha'], 48: [741, 'Mlha s námrazou'],
-  51: [300, 'Slabé mrholení'], 53: [301, 'Mrholení'], 55: [302, 'Husté mrholení'],
-  56: [511, 'Mrznoucí mrholení'], 57: [511, 'Mrznoucí mrholení'],
-  61: [500, 'Slabý déšť'], 63: [501, 'Déšť'], 65: [502, 'Silný déšť'],
-  66: [511, 'Mrznoucí déšť'], 67: [511, 'Mrznoucí déšť'],
-  71: [600, 'Slabé sněžení'], 73: [601, 'Sněžení'], 75: [602, 'Silné sněžení'], 77: [600, 'Sněhová zrna'],
-  80: [520, 'Přeháňky'], 81: [521, 'Přeháňky'], 82: [522, 'Prudké přeháňky'],
-  85: [620, 'Sněhové přeháňky'], 86: [622, 'Sněhové přeháňky'],
-  95: [200, 'Bouřka'], 96: [202, 'Bouřka s kroupami'], 99: [202, 'Bouřka s kroupami']
-};
-function wmoStav(kod) { return WMO_STAVY[kod] || [803, 'Oblačno']; }
-
-// Odpověď Open-Meteo → stejný tvar jako pocasiDnes (OWM), ať appka neřeší zdroj
-function pocasiZOpenMeteo(j, now = Date.now()) {
-  const c = j && j.current;
-  if (!c || typeof c.temperature_2m !== 'number') return null;
-  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const dnes = pragueDateString(now);
-  const d = j.daily || {};
-  const di = (d.time || []).findIndex(t => pragueDateString(t * 1000) === dnes);
-  const den = k => (di >= 0 && Array.isArray(d[k]) ? cislo(d[k][di]) : null);
-  const h = j.hourly || {};
-  const hodina = Math.floor(now / 3600000) * 3600000;
-  const hodiny = [];
-  (h.time || []).forEach((t, i) => {
-    const ms = t * 1000;
-    // Následujících 24 h od této hodiny, přes půlnoc (večer by jinak karta zela prázdnotou)
-    if (ms < hodina || hodiny.length >= 24) return;
-    const temp = cislo((h.temperature_2m || [])[i]);
-    if (temp === null) return;
-    hodiny.push({ t: ms, tempC: temp, pop: cislo((h.precipitation_probability || [])[i]),
-      mm: Math.round((cislo((h.precipitation || [])[i]) || 0) * 10) / 10,
-      kod: wmoStav((h.weather_code || [])[i])[0], noc: (h.is_day || [])[i] === 0 });
-  });
-  const [kod, popis] = wmoStav(c.weather_code);
-  const teploty = hodiny.filter(x => pragueDateString(x.t) === dnes).map(x => x.tempC).concat([c.temperature_2m]);
-  const sPop = hodiny.filter(x => typeof x.pop === 'number');
-  const prvni = sPop.find(x => x.pop >= 30);
-  const max = den('temperature_2m_max'), min = den('temperature_2m_min');
-  return {
-    ted: { tempC: c.temperature_2m, pocitC: cislo(c.apparent_temperature), oblacnost: cislo(c.cloud_cover), kod, noc: c.is_day === 0, popis },
-    minC: min !== null ? Math.min(min, ...teploty) : Math.min(...teploty),
-    maxC: max !== null ? Math.max(max, ...teploty) : Math.max(...teploty),
-    hodiny,
-    srazky: {
-      pop: sPop.length ? Math.max(...sPop.map(x => x.pop)) : null,
-      mm: Math.round(hodiny.reduce((a, x) => a + (x.mm || 0), 0) * 10) / 10,
-      od: prvni ? prvni.t : null
-    },
-    vychodMs: den('sunrise') !== null ? den('sunrise') * 1000 : null,
-    zapadMs: den('sunset') !== null ? den('sunset') * 1000 : null,
-    fetchedAt: new Date((cislo(c.time) || 0) * 1000 || pocasiOm.ts || now).toISOString(),
-    zdroj: 'open-meteo'
-  };
-}
-
-// Open-Meteo (čerstvé) má přednost, jinak OpenWeather
-function pocasiDnesVyber(now = Date.now()) {
-  if (pocasiOm.data && now - pocasiOm.ts < OM_PLATNOST_MS) {
-    const p = pocasiZOpenMeteo(pocasiOm.data, now);
-    if (p) return p;
-  }
-  return pocasiDnes(now);
-}
-
+// Open-Meteo stahuje přímo appka (iPad, telefon) ze své adresy: limit zdarma je na IP
+// a sdílenou adresu Renderu vyčerpají cizí aplikace (429 „Daily API request limit").
+// Server dodává OpenWeather jako zálohu.
 function pocasiDnesObnov(now = Date.now()) {
-  state.pocasiDnes = pocasiDnesVyber(now);
+  state.pocasiDnes = pocasiDnes(now);
   broadcast('pocasiDnes', { pocasiDnes: state.pocasiDnes });
 }
 
 // Bez zámku: nic tajného tu není (zdroj, stav, text chyby) a otevře se rovnou v prohlížeči
 app.get('/api/pocasi/diagnostika', (req, res) => {
   res.json({ zdroj: state.pocasiDnes ? state.pocasiDnes.zdroj : null,
-    openMeteo: { data: !!pocasiOm.data, kdy: pocasiOm.ts || null, posledni: pocasiOm.posledni } });
+    pozn: 'Open-Meteo stahuje přímo iPad/telefon; tady je jen záloha z OpenWeather.' });
 });
 
 // Server na Renderu běží v UTC — všechny časové podmínky počítáme v Europe/Prague.
@@ -4806,7 +4711,6 @@ async function runAutomation() {
     // Předpověď i pro zobrazení (počasí na kalendáři) — nezávisle na zimě, sauně
     // i hlavním vypínači; solinátor ji pak bere z cache (dotaz nejvýš jednou za hodinu)
     await refreshForecast();
-    await refreshOpenMeteo();
 
     // „Nejsme doma" jede i při vypnuté automatice — je to tvoje jednorázové rozhodnutí,
     // ne automatika na pozadí, a zamčený dům se nesmí ztratit kvůli poloze vypínače

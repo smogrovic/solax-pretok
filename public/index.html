@@ -11323,6 +11323,7 @@ function applySnapshot(snap) {
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
   bezpecne(() => renderWeather(snap.weather));
+  if (snap.pocasiPoloha && Number.isFinite(snap.pocasiPoloha.lat)) bezpecne(() => { pocasiPoloha = snap.pocasiPoloha; });
   if ('pocasiDnes' in snap) bezpecne(() => { pocasiDnesData = snap.pocasiDnes || null; renderKalDen(); });
   bezpecne(() => renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on')));
   maybeRestoreAutoMode();
@@ -13527,12 +13528,112 @@ const KAL_POCASI_OD = 6;
 const KAL_POCASI_DO = 12;
 const kalPocasiEl = document.getElementById('kalPocasi');
 const kalDenTeloEl = document.getElementById('kalDenTelo');
-let pocasiDnesData = null;
+let pocasiDnesData = null;          // záloha ze serveru (OpenWeather)
+
+// Open-Meteo stahuje appka sama ze své adresy: limit zdarma je na IP a sdílenou
+// adresu serveru na Renderu vyčerpají cizí aplikace (429). Doma ho nikdo jiný nespotřebuje.
+const KAL_OM_INTERVAL_MS = 10 * 60000;
+const KAL_OM_PLATNOST_MS = 30 * 60000;
+let pocasiPoloha = { lat: 49.765, lon: 14.688 };
+let pocasiOm = { j: null, ts: 0, pokus: 0, chyba: null };
+
+// WMO kód počasí → kód ve stylu OpenWeather (ikony a scény) + český popis
+const WMO_STAVY = {
+  0: [800, 'Jasno'], 1: [801, 'Skoro jasno'], 2: [802, 'Polojasno'], 3: [804, 'Zataženo'],
+  45: [741, 'Mlha'], 48: [741, 'Mlha s námrazou'],
+  51: [300, 'Slabé mrholení'], 53: [301, 'Mrholení'], 55: [302, 'Husté mrholení'],
+  56: [511, 'Mrznoucí mrholení'], 57: [511, 'Mrznoucí mrholení'],
+  61: [500, 'Slabý déšť'], 63: [501, 'Déšť'], 65: [502, 'Silný déšť'],
+  66: [511, 'Mrznoucí déšť'], 67: [511, 'Mrznoucí déšť'],
+  71: [600, 'Slabé sněžení'], 73: [601, 'Sněžení'], 75: [602, 'Silné sněžení'], 77: [600, 'Sněhová zrna'],
+  80: [520, 'Přeháňky'], 81: [521, 'Přeháňky'], 82: [522, 'Prudké přeháňky'],
+  85: [620, 'Sněhové přeháňky'], 86: [622, 'Sněhové přeháňky'],
+  95: [200, 'Bouřka'], 96: [202, 'Bouřka s kroupami'], 99: [202, 'Bouřka s kroupami']
+};
+const wmoStav = kod => WMO_STAVY[kod] || [803, 'Oblačno'];
+
+// Odpověď Open-Meteo → stejný tvar jako záloha ze serveru
+function pocasiZOpenMeteo(j, now = Date.now()) {
+  const c = j && j.current;
+  if (!c || typeof c.temperature_2m !== 'number') return null;
+  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const dnes = new Date(now).toDateString();
+  const d = j.daily || {};
+  const di = (d.time || []).findIndex(t => new Date(t * 1000).toDateString() === dnes);
+  const den = k => (di >= 0 && Array.isArray(d[k]) ? cislo(d[k][di]) : null);
+  const h = j.hourly || {};
+  const hodina = Math.floor(now / 3600000) * 3600000;
+  const hodiny = [];
+  // Následujících 24 h od této hodiny, přes půlnoc
+  (h.time || []).forEach((t, i) => {
+    const ms = t * 1000;
+    if (ms < hodina || hodiny.length >= 24) return;
+    const temp = cislo((h.temperature_2m || [])[i]);
+    if (temp === null) return;
+    hodiny.push({ t: ms, tempC: temp, pop: cislo((h.precipitation_probability || [])[i]),
+      mm: Math.round((cislo((h.precipitation || [])[i]) || 0) * 10) / 10,
+      kod: wmoStav((h.weather_code || [])[i])[0], noc: (h.is_day || [])[i] === 0 });
+  });
+  const [kod, popis] = wmoStav(c.weather_code);
+  const teploty = hodiny.filter(x => new Date(x.t).toDateString() === dnes).map(x => x.tempC).concat([c.temperature_2m]);
+  const sPop = hodiny.filter(x => typeof x.pop === 'number');
+  const prvni = sPop.find(x => x.pop >= 30);
+  const max = den('temperature_2m_max'), min = den('temperature_2m_min');
+  return {
+    ted: { tempC: c.temperature_2m, pocitC: cislo(c.apparent_temperature), oblacnost: cislo(c.cloud_cover), kod, noc: c.is_day === 0, popis },
+    minC: min !== null ? Math.min(min, ...teploty) : Math.min(...teploty),
+    maxC: max !== null ? Math.max(max, ...teploty) : Math.max(...teploty),
+    hodiny,
+    srazky: {
+      pop: sPop.length ? Math.max(...sPop.map(x => x.pop)) : null,
+      mm: Math.round(hodiny.reduce((a, x) => a + (x.mm || 0), 0) * 10) / 10,
+      od: prvni ? prvni.t : null
+    },
+    vychodMs: den('sunrise') !== null ? den('sunrise') * 1000 : null,
+    zapadMs: den('sunset') !== null ? den('sunset') * 1000 : null,
+    zdroj: 'open-meteo'
+  };
+}
+
+function pocasiOmAdresa() {
+  const q = new URLSearchParams({
+    latitude: String(pocasiPoloha.lat), longitude: String(pocasiPoloha.lon),
+    current: 'temperature_2m,apparent_temperature,cloud_cover,weather_code,is_day',
+    hourly: 'temperature_2m,precipitation_probability,precipitation,weather_code,is_day',
+    daily: 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
+    timezone: 'Europe/Prague', forecast_days: '2', timeformat: 'unixtime'
+  });
+  return 'https://api.open-meteo.com/v1/forecast?' + q.toString();
+}
+
+async function pocasiOmStahni(now = Date.now()) {
+  if (now - pocasiOm.pokus < KAL_OM_INTERVAL_MS) return;
+  pocasiOm.pokus = now;
+  try {
+    const res = await fetch(pocasiOmAdresa());
+    if (!res.ok) { pocasiOm.chyba = 'HTTP ' + res.status; return; }
+    const j = await res.json();
+    if (!pocasiZOpenMeteo(j, now)) { pocasiOm.chyba = 'neúplná data'; return; }
+    pocasiOm = { ...pocasiOm, j, ts: now, chyba: null };
+    renderKalDen();
+  } catch (err) {
+    pocasiOm.chyba = err.message;
+  }
+}
+
+// Co se má ukázat: čerstvé Open-Meteo, jinak záloha ze serveru
+function pocasiAktualni(now = Date.now()) {
+  if (pocasiOm.j && now - pocasiOm.ts < KAL_OM_PLATNOST_MS) {
+    const p = pocasiZOpenMeteo(pocasiOm.j, now);
+    if (p) return p;
+  }
+  return pocasiDnesData;
+}
 
 // Ruční volba ze záložky Kalendář/WX: null = automaticky (na iPadu dopoledne),
 // true/false = ukázat/schovat. Návrat na výchozí stav (klid, zavření) ji smaže.
 let kalWx = null;
-const kalMamPocasi = () => !!(pocasiDnesData && pocasiDnesData.ted && typeof pocasiDnesData.ted.tempC === 'number');
+const kalMamPocasi = () => { const p = pocasiAktualni(); return !!(p && p.ted && typeof p.ted.tempC === 'number'); };
 
 function kalRanniPocasi(now = Date.now()) {
   const h = new Date(now).getHours();
@@ -13555,6 +13656,7 @@ function kalPrepniPocasi() {
   kalDenIndex = 0;
   kalWx = !ted;
   renderKalDen();
+  if (kalWx) bezpecne(pocasiOmStahni);
 }
 
 // Ikony ve stylu iOS (SF Symbols barevně): slunce, měsíc, mraky, déšť, sníh, bouřka, mlha
@@ -13782,7 +13884,7 @@ function renderKalDen() {
   if (zalozkaKal) zalozkaKal.classList.toggle('wx', pocasi);
   if (kalPocasiEl) {
     kalPocasiEl.hidden = !pocasi;
-    if (pocasi && kalMamPocasi()) renderKalPocasi(pocasiDnesData);
+    if (pocasi && kalMamPocasi()) renderKalPocasi(pocasiAktualni());
     else if (pocasi) { kalPocasiEl.textContent = ''; const t = document.createElement('div'); t.className = 'poc-obsah poc-cekam'; t.textContent = 'Počasí se načítá…'; kalPocasiEl.appendChild(t); }
   }
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
@@ -13808,8 +13910,11 @@ function renderKalDen() {
       const h = document.createElement('div');
       h.className = 'kal-den-hlava';
       // Odkud data jsou — ať je na první pohled vidět, když Open-Meteo vypadne
-      const zdroj = pocasiDnesData && { 'open-meteo': 'Open-Meteo', owm: 'OpenWeather' }[pocasiDnesData.zdroj];
+      const pa = pocasiAktualni();
+      const zdroj = pa && { 'open-meteo': 'Open-Meteo', owm: 'OpenWeather' }[pa.zdroj];
       h.textContent = 'Počasí dnes' + (zdroj ? ' · ' + zdroj : '');
+      // Proč není Open-Meteo, je vidět po podržení / najetí
+      h.title = pocasiOm.chyba ? 'Open-Meteo: ' + pocasiOm.chyba : '';
       kalDenNazevEl.appendChild(h);
     }
   }
@@ -13957,6 +14062,11 @@ if (kalObnovBtn) kalObnovBtn.addEventListener('click', async () => {
 setInterval(() => {
   if (kalPanelEl && !kalPanelEl.hidden) { renderKalDen(); if (kalPrehledZap) renderKalPrehled(); }
 }, 60000);
+// Open-Meteo: nejvýš jednou za 10 min, jen když je kalendář otevřený a appka vidět
+// (na iPadu je otevřený pořád; na telefonu až když se na něj člověk podívá)
+const pocasiOmKdyzTreba = () => { if (!document.hidden && kalPanelEl && !kalPanelEl.hidden) bezpecne(pocasiOmStahni); };
+setTimeout(pocasiOmKdyzTreba, 1500);
+setInterval(pocasiOmKdyzTreba, 60000);
 
 // ---------- Přehled: 14 dní na jedné obrazovce ----------
 const kalPrehledEl = document.getElementById('kalPrehled');

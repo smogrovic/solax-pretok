@@ -678,6 +678,56 @@ setTimeout(async () => {
     check('jasno: modré pozadí, bez srážek', poc.style.getPropertyValue('--poc-a') + ' ' + /Bez srážek/.test(poc.textContent), '#3f8fe0 true');
     check('  bez hodin karta „Během dne" chybí', /Během dne/.test(poc.textContent), false);
     // Ruční přepnutí záložkou Kalendář/WX
+    // Open-Meteo stahuje appka sama (limit zdarma je na IP, sdílenou adresu serveru vyčerpají cizí)
+    {
+      const s = t => Math.floor(t / 1000);
+      const t0 = denMs(0), ted = t0 + 7 * H + 20 * 60000;
+      const hod = Array.from({ length: 48 }, (_, i) => t0 + i * H);
+      const OMJ = {
+        current: { time: s(ted), temperature_2m: 6.2, apparent_temperature: 2.9, cloud_cover: 81, weather_code: 53, is_day: 1 },
+        daily: { time: [s(t0), s(t0 + 24 * H)], temperature_2m_max: [13.4, 20], temperature_2m_min: [1.8, -5],
+          sunrise: [s(t0 + 7 * H - 600000), s(t0 + 31 * H)], sunset: [s(t0 + 17 * H + 300000), s(t0 + 41 * H)] },
+        hourly: { time: hod.map(s), temperature_2m: hod.map((_, i) => i * 0.5), precipitation_probability: hod.map((_, i) => (i === 12 ? 65 : i === 13 ? 35 : 5)),
+          precipitation: hod.map((_, i) => (i === 12 ? 1.2 : 0)), weather_code: hod.map((_, i) => (i === 12 ? 63 : 3)), is_day: hod.map((_, i) => (i >= 7 && i < 17 ? 1 : 0)) }
+      };
+      const p = pocasiZOpenMeteo(OMJ, ted);
+      check('OM: teď, pocitová, oblačnost', [p.ted.tempC, p.ted.pocitC, p.ted.oblacnost].join(' '), '6.2 2.9 81');
+      check('  WMO kód → ikona a popis česky', p.ted.kod + ' ' + p.ted.popis + ' ' + p.ted.noc, '301 Mrholení false');
+      check('  max/min za dnešek (zítřek 20/−5 ne)', p.maxC + ' / ' + p.minC, '13.4 / 1.8');
+      check('  24 h od této hodiny přes půlnoc', p.hodiny.length + ' ' + (p.hodiny[0].t === t0 + 7 * H) + ' ' + (p.hodiny[23].t === t0 + 30 * H), '24 true true');
+      check('  déšť ve 12:00', p.hodiny[5].kod + ' ' + p.hodiny[5].pop + ' ' + p.hodiny[5].mm, '501 65 1.2');
+      check('  noc z is_day', p.hodiny.map(x => x.noc ? 'n' : 'd').join(''), 'dddddddddd' + 'n'.repeat(14));
+      check('  srážky', JSON.stringify([p.srazky.pop, p.srazky.mm, p.srazky.od === t0 + 12 * H]), '[65,1.2,true]');
+      check('  slunce', (p.vychodMs === t0 + 7 * H - 600000) + ' ' + (p.zapadMs === t0 + 17 * H + 300000), 'true true');
+      check('  neznámý kód → oblačno, bouřka s kroupami', pocasiZOpenMeteo({ current: { temperature_2m: 1, weather_code: 42 } }, ted).ted.popis + ' '
+        + pocasiZOpenMeteo({ current: { temperature_2m: 1, weather_code: 99 } }, ted).ted.kod, 'Oblačno 202');
+      check('  bez aktuálního null', pocasiZOpenMeteo({}, ted), null);
+
+      const puvodniFetch = window.fetch;
+      let adresy = [], odpoved = () => ({ ok: true, status: 200, json: async () => OMJ });
+      window.fetch = async url => { adresy.push(String(url)); return odpoved(); };
+      pocasiDnesData = POC;
+      pocasiOm = { j: null, ts: 0, pokus: 0, chyba: null };
+      Date.now = () => ted;
+      kalWx = null; kalDenIndex = 0;
+      await pocasiOmStahni(ted);
+      const u = new URL(adresy[0]);
+      check('stažení přímo z appky: Open-Meteo, domov, Praha', [u.host, u.searchParams.get('latitude'), u.searchParams.get('longitude'), u.searchParams.get('timezone')].join(' '),
+        'api.open-meteo.com 49.765 14.688 Europe/Prague');
+      check('  má přednost před zálohou ze serveru', pocasiAktualni(ted).zdroj + ' ' + poc.querySelector('.poc-teplota').textContent, 'open-meteo 6°');
+      check('  lišta: Open-Meteo', [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop().textContent, 'Počasí dnes · Open-Meteo');
+      await pocasiOmStahni(ted + 5 * 60000);
+      check('  nejvýš jednou za 10 min', adresy.length, 1);
+      check('  starší než 30 min → záloha', pocasiAktualni(ted + 31 * 60000).zdroj === undefined || pocasiAktualni(ted + 31 * 60000) === POC, true);
+      pocasiOm = { j: null, ts: 0, pokus: 0, chyba: null };
+      odpoved = () => ({ ok: false, status: 429, json: async () => ({}) });
+      await pocasiOmStahni(ted);
+      renderKalDen();
+      const lista = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop();
+      check('výpadek: záloha a důvod po podržení', pocasiAktualni(ted) === POC && lista.title, 'Open-Meteo: HTTP 429');
+      window.fetch = puvodniFetch;
+      pocasiOm = { j: null, ts: 0, pokus: Date.now(), chyba: null };
+    }
     pocasiDnesData = POC;
     Date.now = () => denMs(0) + 15 * 3600000;            // odpoledne: samo se neukáže
     kalDenIndex = 1;                                      // prolistováno na zítřek
