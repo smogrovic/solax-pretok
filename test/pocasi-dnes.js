@@ -1,5 +1,6 @@
 // Počasí na dnešek pro kalendář na iPadu: sloty po 3 h z předpovědi OWM,
 // které se drží i po vypadnutí z odpovědi, a souhrn min/max/srážky.
+const crypto = require('crypto');
 const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('počasí dnes');
 
@@ -8,12 +9,13 @@ const CODE = [
   fn('function pragueTime('), fn('function pragueDateString(')
 ].join('\n');
 
-function build(weather) {
-  const state = { weather }, zpravy = [];
-  const api = new Function('state', 'broadcast',
-    CODE + '\n; return { pocasiPopis, pocasiSlotyUloz, pocasiDnes, pocasiDnesObnov };')(
-    state, (u, d) => zpravy.push({ u, d }));
-  return { api, state, zpravy };
+function build(weather, { env = {}, fetch = async () => { throw new Error('bez sítě'); } } = {}) {
+  const state = { weather }, zpravy = [], routy = {};
+  const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'process', 'crypto', 'fetch', 'WEATHER_LAT', 'WEATHER_LON',
+    CODE + '\n; return { pocasiPopis, pocasiSlotyUloz, pocasiDnes, pocasiDnesObnov, pocasiZWeatherKit, weatherkitJwt, refreshWeatherKit, pocasiDnesVyber };')(
+    state, (u, d) => zpravy.push({ u, d }), { get: (c, h) => { routy[c] = h; } }, () => true, { env }, require('crypto'), fetch, 49.765, 14.688);
+  const volej = async c => { let out; await routy[c]({}, { json: v => { out = v; } }); return out; };
+  return { api, state, zpravy, volej };
 }
 
 // 23. 10. 2026 v Praze (UTC+2): sloty OWM jsou v UTC po 3 h
@@ -79,5 +81,67 @@ nadpis('Souhrn na dnešek');
   const run = fn('async function runAutomation(');
   const i = run.indexOf('await refreshForecast();');
   check('předpověď v každém běhu, před vypínačem', i > 0 && i < run.indexOf('if (!autoRunning()) return'), true);
+  const w = run.indexOf('await refreshWeatherKit();');
+  check('  Apple taky', w > 0 && w < run.indexOf('if (!autoRunning()) return'), true);
 }
-konec();
+
+nadpis('Apple WeatherKit (jako iPhone)');
+(async () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const ENV = { WEATHERKIT_TEAM_ID: 'TEAM123', WEATHERKIT_KEY_ID: 'KEY456', WEATHERKIT_SERVICE_ID: 'cz.domov.pocasi',
+    WEATHERKIT_KEY: pem.replace(/\n/g, '\\n') };   // v Renderu jako jeden řádek s \n
+  const iso = t => new Date(t).toISOString();
+  const ted = T(7) + 20 * 60000;
+  const WKJ = {
+    currentWeather: { asOf: iso(ted), temperature: 6.2, temperatureApparent: 2.9, cloudCover: 0.81, conditionCode: 'Drizzle', daylight: true },
+    forecastDaily: { days: [{ forecastStart: iso(T(0)), temperatureMax: 13.4, temperatureMin: 1.8, sunrise: iso(T(7) - 10 * 60000), sunset: iso(T(17) + 5 * 60000) },
+      { forecastStart: iso(T(24)), temperatureMax: 20, temperatureMin: -5 }] },
+    forecastHourly: { hours: Array.from({ length: 30 }, (_, i) => ({ forecastStart: iso(T(5) + i * H), temperature: 2 + i * 0.5,
+      precipitationChance: i === 7 ? 0.65 : i === 8 ? 0.35 : 0.05, precipitationAmount: i === 7 ? 1.2 : 0, conditionCode: i === 7 ? 'Rain' : 'Cloudy',
+      daylight: i >= 2 && i < 12 })) }
+  };
+  const volani = [];
+  const f = async (url, opts) => { volani.push({ url, opts }); return { ok: true, status: 200, json: async () => WKJ }; };
+  const b = build({ tempC: 5 }, { env: ENV, fetch: f });
+  const p = b.api.pocasiZWeatherKit(WKJ, ted);
+  check('teď: teplota, pocitová, oblačnost', [p.ted.tempC, p.ted.pocitC, p.ted.oblacnost].join(' '), '6.2 2.9 81');
+  check('  kód a popis česky', p.ted.kod + ' ' + p.ted.popis + ' ' + p.ted.noc, '300 Mrholení false');
+  check('max/min z denní předpovědi dneška', p.maxC + ' / ' + p.minC, '13.4 / 1.8');
+  check('hodiny od této hodiny, jen dnes, nejvýš 12', p.hodiny.length + ' ' + (p.hodiny[0].t === T(7)), '12 true');
+  check('  déšť v 12:00', p.hodiny[5].kod + ' ' + p.hodiny[5].pop + ' ' + p.hodiny[5].mm, '500 65 1.2');
+  check('  noc z daylight', p.hodiny.map(h => h.noc ? 'n' : 'd').join(''), 'ddddddddddnn');
+  check('srážky', JSON.stringify([p.srazky.pop, p.srazky.mm, p.srazky.od === T(12)]), '[65,1.2,true]');
+  check('slunce a zdroj', (p.vychodMs === T(7) - 600000) + ' ' + (p.zapadMs === T(17) + 300000) + ' ' + p.zdroj, 'true true apple');
+  check('neznámý kód → oblačno', b.api.pocasiZWeatherKit({ currentWeather: { temperature: 1, conditionCode: 'Nové' } }, ted).ted.popis, 'Oblačno');
+  check('bez aktuálního počasí null', b.api.pocasiZWeatherKit({}, ted), null);
+
+  // JWT podle Applu: ES256, kid, id = TEAM.SERVICE, ověřitelný veřejným klíčem
+  const jwt = b.api.weatherkitJwt(ted);
+  const [h64, p64, s64] = jwt.split('.');
+  const hl = JSON.parse(Buffer.from(h64, 'base64url')), pl = JSON.parse(Buffer.from(p64, 'base64url'));
+  check('JWT hlavička', JSON.stringify(hl), '{"alg":"ES256","kid":"KEY456","id":"TEAM123.cz.domov.pocasi"}');
+  check('  payload', [pl.iss, pl.sub, pl.exp - pl.iat].join(' '), 'TEAM123 cz.domov.pocasi 3600');
+  check('  podpis sedí', crypto.verify('sha256', Buffer.from(h64 + '.' + p64), { key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(s64, 'base64url')), true);
+  check('  znovu použitý', b.api.weatherkitJwt(ted + 60000) === jwt, true);
+
+  await b.api.refreshWeatherKit(ted);
+  check('stažení: adresa a token', /^https:\/\/weatherkit\.apple\.com\/api\/v1\/weather\/cs\/49\.765\/14\.688\?dataSets=currentWeather,forecastHourly,forecastDaily&timezone=Europe\/Prague$/.test(volani[0].url)
+    + ' ' + (volani[0].opts.headers.Authorization === 'Bearer ' + jwt), 'true true');
+  check('  appka dostane data z Applu', b.state.pocasiDnes.zdroj + ' ' + b.zpravy.pop().u, 'apple pocasiDnes');
+  await b.api.refreshWeatherKit(ted + 5 * 60000);
+  check('  nejvýš jednou za 10 min', volani.length, 1);
+  check('staré (> 30 min) → zpátky OpenWeather', b.api.pocasiDnesVyber(ted + 31 * 60000).zdroj, 'owm');
+  const d = await b.volej('/api/pocasi/diagnostika');
+  check('diagnostika', d.zdroj + ' ' + d.weatherkit.zapnuto + ' ' + d.weatherkit.posledni.stav, 'apple true 200');
+  const vse = JSON.stringify(d) + JSON.stringify(b.state);
+  check('  klíč ani token nikde', vse.includes('PRIVATE') || vse.includes(s64) || vse.includes('KEY456'), false);
+
+  const bez = build({ tempC: 5 }, { fetch: f });
+  await bez.api.refreshWeatherKit(ted);
+  check('bez klíčů se Apple nevolá', volani.length, 1);
+  const chyba = build({ tempC: 5 }, { env: ENV, fetch: async () => ({ ok: false, status: 401, json: async () => ({}) }) });
+  await chyba.api.refreshWeatherKit(ted);
+  check('401 → OpenWeather dál, stav v diagnostice', (await chyba.volej('/api/pocasi/diagnostika')).weatherkit.posledni.stav + ' ' + chyba.api.pocasiDnesVyber(ted).zdroj, '401 owm');
+  konec();
+})();

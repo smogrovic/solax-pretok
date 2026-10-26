@@ -3989,14 +3989,127 @@ function pocasiDnes(now = Date.now()) {
     },
     vychodMs: w ? w.sunriseMs || null : null,
     zapadMs: w ? w.sunsetMs || null : null,
-    fetchedAt: w ? w.fetchedAt || null : null
+    fetchedAt: w ? w.fetchedAt || null : null,
+    zdroj: 'owm'
   };
 }
 
-function pocasiDnesObnov() {
-  state.pocasiDnes = pocasiDnes();
+// ---- Apple WeatherKit: stejný zdroj jako Počasí na iPhonu ----
+// Jen s klíčem z Apple Developer Programu (Render → Environment): WEATHERKIT_TEAM_ID,
+// WEATHERKIT_KEY_ID, WEATHERKIT_SERVICE_ID a WEATHERKIT_KEY (obsah .p8). Bez nich
+// nebo při výpadku platí OpenWeather. Klíč se nikam nevypisuje.
+const WK = {
+  team: (process.env.WEATHERKIT_TEAM_ID || '').trim(),
+  kid: (process.env.WEATHERKIT_KEY_ID || '').trim(),
+  sluzba: (process.env.WEATHERKIT_SERVICE_ID || '').trim(),
+  klic: (process.env.WEATHERKIT_KEY || '').replace(/\\n/g, '\n').trim()
+};
+const weatherkitZapnuto = !!(WK.team && WK.kid && WK.sluzba && WK.klic);
+const WK_INTERVAL_MS = 10 * 60000;
+const WK_PLATNOST_MS = 30 * 60000;
+let pocasiWk = { data: null, ts: 0, pokus: 0, posledni: null, jwt: null, jwtDo: 0 };
+
+function weatherkitJwt(now = Date.now()) {
+  if (pocasiWk.jwt && now < pocasiWk.jwtDo - 60000) return pocasiWk.jwt;
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const iat = Math.floor(now / 1000);
+  const telo = b64({ alg: 'ES256', kid: WK.kid, id: `${WK.team}.${WK.sluzba}` }) + '.'
+    + b64({ iss: WK.team, iat, exp: iat + 3600, sub: WK.sluzba });
+  const podpis = crypto.sign('sha256', Buffer.from(telo), { key: WK.klic, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+  pocasiWk.jwt = telo + '.' + podpis;
+  pocasiWk.jwtDo = now + 3600000;
+  return pocasiWk.jwt;
+}
+
+async function refreshWeatherKit(now = Date.now()) {
+  if (!weatherkitZapnuto || now - pocasiWk.pokus < WK_INTERVAL_MS) return;
+  pocasiWk.pokus = now;
+  try {
+    const url = `https://weatherkit.apple.com/api/v1/weather/cs/${WEATHER_LAT}/${WEATHER_LON}`
+      + '?dataSets=currentWeather,forecastHourly,forecastDaily&timezone=Europe/Prague';
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + weatherkitJwt(now) }, signal: AbortSignal.timeout(15000) });
+    pocasiWk.posledni = { stav: res.status, kdy: now };
+    if (!res.ok) { if (res.status === 401) pocasiWk.jwt = null; return; }
+    const j = await res.json();
+    if (!j || !j.currentWeather) return;
+    pocasiWk.data = j;
+    pocasiWk.ts = now;
+    pocasiDnesObnov(now);
+  } catch (err) {
+    pocasiWk.posledni = { stav: 0, chyba: String(err && err.name || 'chyba'), kdy: now };
+  }
+}
+
+// conditionCode z WeatherKitu → kód ve stylu OpenWeather (ikony a scény v appce) + český popis
+const WK_STAVY = {
+  Clear: [800, 'Jasno'], MostlyClear: [801, 'Skoro jasno'], PartlyCloudy: [802, 'Polojasno'],
+  MostlyCloudy: [803, 'Oblačno'], Cloudy: [804, 'Zataženo'], Windy: [803, 'Větrno'], Breezy: [802, 'Větrno'],
+  Foggy: [741, 'Mlha'], Haze: [721, 'Opar'], Smoky: [711, 'Kouř'], BlowingDust: [761, 'Prach'],
+  Drizzle: [300, 'Mrholení'], Rain: [500, 'Déšť'], Showers: [521, 'Přeháňky'], ScatteredShowers: [520, 'Občasné přeháňky'],
+  HeavyRain: [502, 'Silný déšť'], SunShowers: [520, 'Přeháňky'], FreezingDrizzle: [511, 'Mrznoucí mrholení'],
+  FreezingRain: [511, 'Mrznoucí déšť'], Sleet: [611, 'Déšť se sněhem'], WintryMix: [616, 'Déšť se sněhem'],
+  Flurries: [600, 'Slabé sněžení'], Snow: [601, 'Sněžení'], SnowShowers: [621, 'Sněhové přeháňky'],
+  HeavySnow: [602, 'Silné sněžení'], BlowingSnow: [601, 'Zvířený sníh'], Blizzard: [602, 'Vánice'], Hail: [906, 'Kroupy'],
+  Thunderstorms: [200, 'Bouřky'], IsolatedThunderstorms: [210, 'Místy bouřky'], ScatteredThunderstorms: [210, 'Občasné bouřky'],
+  StrongStorms: [202, 'Silné bouřky'], TropicalStorm: [202, 'Bouře'], Hurricane: [202, 'Hurikán']
+};
+function wkStav(kod) { return WK_STAVY[kod] || [803, 'Oblačno']; }
+
+// Odpověď WeatherKitu → stejný tvar jako pocasiDnes (OWM), ať appka neřeší zdroj
+function pocasiZWeatherKit(j, now = Date.now()) {
+  const c = j && j.currentWeather;
+  if (!c || typeof c.temperature !== 'number') return null;
+  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const dnes = pragueDateString(now);
+  const den = ((j.forecastDaily && j.forecastDaily.days) || []).find(d => d && d.forecastStart && pragueDateString(Date.parse(d.forecastStart)) === dnes) || null;
+  const hodina = Math.floor(now / 3600000) * 3600000;
+  const hodiny = ((j.forecastHourly && j.forecastHourly.hours) || [])
+    .map(h => ({ ...h, t: Date.parse(h.forecastStart) }))
+    .filter(h => Number.isFinite(h.t) && h.t >= hodina && pragueDateString(h.t) === dnes && typeof h.temperature === 'number')
+    .slice(0, 12)
+    .map(h => ({ t: h.t, tempC: h.temperature, pop: cislo(h.precipitationChance) === null ? null : Math.round(h.precipitationChance * 100),
+      mm: Math.round((cislo(h.precipitationAmount) || 0) * 10) / 10, kod: wkStav(h.conditionCode)[0], noc: h.daylight === false }));
+  const [kod, popis] = wkStav(c.conditionCode);
+  const teploty = hodiny.map(h => h.tempC).concat([c.temperature]);
+  const sPop = hodiny.filter(h => typeof h.pop === 'number');
+  const prvni = sPop.find(h => h.pop >= 30);
+  return {
+    ted: { tempC: c.temperature, pocitC: cislo(c.temperatureApparent), oblacnost: cislo(c.cloudCover) === null ? null : Math.round(c.cloudCover * 100),
+      kod, noc: c.daylight === false, popis },
+    minC: den && typeof den.temperatureMin === 'number' ? Math.min(den.temperatureMin, ...teploty) : Math.min(...teploty),
+    maxC: den && typeof den.temperatureMax === 'number' ? Math.max(den.temperatureMax, ...teploty) : Math.max(...teploty),
+    hodiny,
+    srazky: {
+      pop: sPop.length ? Math.max(...sPop.map(h => h.pop)) : null,
+      mm: Math.round(hodiny.reduce((a, h) => a + (h.mm || 0), 0) * 10) / 10,
+      od: prvni ? prvni.t : null
+    },
+    vychodMs: den && den.sunrise ? Date.parse(den.sunrise) : null,
+    zapadMs: den && den.sunset ? Date.parse(den.sunset) : null,
+    fetchedAt: c.asOf || new Date(pocasiWk.ts || now).toISOString(),
+    zdroj: 'apple'
+  };
+}
+
+// WeatherKit (čerstvý) má přednost, jinak OpenWeather
+function pocasiDnesVyber(now = Date.now()) {
+  if (pocasiWk.data && now - pocasiWk.ts < WK_PLATNOST_MS) {
+    const p = pocasiZWeatherKit(pocasiWk.data, now);
+    if (p) return p;
+  }
+  return pocasiDnes(now);
+}
+
+function pocasiDnesObnov(now = Date.now()) {
+  state.pocasiDnes = pocasiDnesVyber(now);
   broadcast('pocasiDnes', { pocasiDnes: state.pocasiDnes });
 }
+
+app.get('/api/pocasi/diagnostika', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  res.json({ zdroj: state.pocasiDnes ? state.pocasiDnes.zdroj : null,
+    weatherkit: { zapnuto: weatherkitZapnuto, data: !!pocasiWk.data, kdy: pocasiWk.ts || null, posledni: pocasiWk.posledni } });
+});
 
 // Server na Renderu běží v UTC — všechny časové podmínky počítáme v Europe/Prague.
 // Bez argumentu platí pro teď, s časem v ms pro ten okamžik (předpověď po slotech).
@@ -4698,6 +4811,7 @@ async function runAutomation() {
     // Předpověď i pro zobrazení (počasí na kalendáři) — nezávisle na zimě, sauně
     // i hlavním vypínači; solinátor ji pak bere z cache (dotaz nejvýš jednou za hodinu)
     await refreshForecast();
+    await refreshWeatherKit();
 
     // „Nejsme doma" jede i při vypnuté automatice — je to tvoje jednorázové rozhodnutí,
     // ne automatika na pozadí, a zamčený dům se nesmí ztratit kvůli poloze vypínače

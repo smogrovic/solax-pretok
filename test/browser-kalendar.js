@@ -575,7 +575,7 @@ setTimeout(async () => {
       hodiny: [{ t: v7 - H, tempC: 5, pop: 0, mm: 0, kod: 803 }, { t: v7 + 2 * H, tempC: 9, pop: 10, mm: 0, kod: 801 },
         { t: v7 + 5 * H, tempC: 13, pop: 70, mm: 1.6, kod: 500 }, { t: v7 + 8 * H, tempC: 11, pop: 40, mm: 0.8, kod: 500 },
         { t: v7 + 11 * H, tempC: 7, pop: 0, mm: 0, kod: 800, noc: true }],
-      srazky: { pop: 70, mm: 2.4, od: v7 + 5 * H } };
+      srazky: { pop: 70, mm: 2.4, od: v7 + 5 * H }, vychodMs: denMs(0) + 7 * H + 12 * 60000, zapadMs: denMs(0) + 16 * H + 45 * 60000 };
     const poc = document.getElementById('kalPocasi');
     const nazvy = () => [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.textContent.replace(/ .*/, '')).join(',');
     kalOtevri(true);
@@ -608,7 +608,33 @@ setTimeout(async () => {
     const tecka = poc.querySelector('.poc-tecka');
     check('rozpětí: tečka teď na správném místě', Math.round(parseFloat(tecka.style.left)), Math.round((6.4 - 2.2) / (13.6 - 2.2) * 100));
     const karty = [...poc.querySelectorAll('.poc-male .poc-karta')].map(k => k.textContent);
-    check('pocitově', /^Pocitově3°Vítr ochlazuje\./.test(karty[0]), true);
+    check('karta slunce: východ a západ', karty[0], 'Slunce7:12Východ, západ 16:45.');
+    check('nahoře Benešov a dvě teploty', poc.querySelector('.poc-misto').textContent + ' | '
+      + [...poc.querySelectorAll('.poc-t')].map(t => t.textContent).join(' | '), 'Benešov | 6°Skutečná | 3°Pocitová');
+    const ts = [...poc.querySelectorAll('.poc-t')].map(t => t.getBoundingClientRect());
+    check('  vedle sebe, stejně velké', Math.abs(ts[0].top - ts[1].top) < 2 && ts[1].left > ts[0].right
+      && getComputedStyle(poc.querySelectorAll('.poc-teplota')[1]).fontSize === getComputedStyle(poc.querySelectorAll('.poc-teplota')[0]).fontSize, true);
+    const scena = poc.querySelector('.poc-scena');
+    check('scéna za teplotami: zataženo → mraky', scena.dataset.klic + ' ' + (scena.querySelectorAll('.sc-mrak').length > 2) + ' ' + getComputedStyle(scena).position, 'mraky true absolute');
+    check('  mraky plují (animace)', getComputedStyle(scena.querySelector('.sc-mrak')).animationName, 'sc-plyn');
+    check('  scéna je pod textem', +getComputedStyle(poc.querySelector('.poc-obsah')).zIndex > +getComputedStyle(scena).zIndex, true);
+    renderKalPocasi(POC, v7 + 60000);
+    check('  stejný stav: scéna se nepřekresluje', poc.querySelector('.poc-scena') === scena, true);
+    const scenaPro = (kod, noc) => { renderKalPocasi({ ...POC, ted: { ...POC.ted, kod, noc } }, v7); return poc.querySelector('.poc-scena'); };
+    check('  déšť → kapky', scenaPro(500).dataset.klic + ' ' + (scenaPro(500).querySelectorAll('.sc-kapka').length >= 40), 'dest true');
+    check('  bouřka → kapky a blesk', !!scenaPro(201).querySelector('.sc-blesk') + ' ' + (scenaPro(201).querySelectorAll('.sc-kapka').length > 0), 'true true');
+    check('  jasno ve dne → slunce', !!scenaPro(800).querySelector('.sc-slunce') + ' ' + scenaPro(800).querySelectorAll('.sc-hvezda').length, 'true 0');
+    check('  jasno v noci → měsíc a hvězdy', !!scenaPro(800, true).querySelector('.sc-mesic') + ' ' + (scenaPro(800, true).querySelectorAll('.sc-hvezda').length > 10), 'true true');
+    check('  sníh → vločky', scenaPro(601).querySelectorAll('.sc-vlocka').length > 20, true);
+    check('  mlha → pásy', scenaPro(741).querySelectorAll('.sc-mlha').length, 4);
+    check('  polojasno → slunce a mraky', !!scenaPro(802).querySelector('.sc-slunce') + ' ' + scenaPro(802).querySelectorAll('.sc-mrak').length, 'true 2');
+    // Z Applu po hodinách: 12 hodin, vidět 6, zbytek prstem
+    const hod12 = Array.from({ length: 12 }, (_, i) => ({ t: v7 + i * H, tempC: 6 + i, pop: 0, kod: 803 }));
+    renderKalPocasi({ ...POC, zdroj: 'apple', hodiny: hod12 }, v7 + 10 * 60000);
+    const rada = poc.querySelector('.poc-hodiny');
+    check('Apple: 12 hodin po hodině, od Teď', [...rada.children].map(x => x.firstChild.textContent).slice(0, 3).join(',') + ' ' + rada.children.length, 'Teď,8,9 12');
+    check('  vidět šest, zbytek se posouvá', Math.round(rada.clientWidth / rada.children[0].getBoundingClientRect().width) + ' ' + (rada.scrollWidth > rada.clientWidth + 10), '6 true');
+    renderKalPocasi(POC, v7);
     check('oblačnost', /^Oblačnost75 %/.test(karty[1]), true);
     check('srážky', karty[2].startsWith('Srážky2,4 mmPravděpodobnost 70 %, od '), true);
     check('  sloupky pravděpodobnosti', poc.querySelectorAll('.poc-sloupky span').length, 5);

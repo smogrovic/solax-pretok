@@ -283,21 +283,56 @@
   .kal-den-telo.s-pocasim > .kal-mrizka{grid-column:1 / 3;}
   .kal-pocasi{grid-column:3;margin-left:10px;min-height:0;min-width:0;overflow:hidden auto;scrollbar-width:none;border-radius:18px;padding:16px 18px;
     color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',sans-serif;
-    background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;
-    display:flex;flex-direction:column;gap:10px;}
+    background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;}
   .kal-pocasi::-webkit-scrollbar{display:none;}
   .kal-pocasi[hidden]{display:none;}
-  .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.12);}
+  .kal-pocasi{position:relative;}
+  .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;}
+  .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.18);}
   .poc-misto{font-size:26px;font-weight:500;}
-  .poc-teplota{font-size:84px;font-weight:200;line-height:1;margin:2px 0 0 18px;}
+  .poc-teploty{display:flex;justify-content:center;gap:34px;margin-top:2px;}
+  .poc-t{display:flex;flex-direction:column;align-items:center;}
+  .poc-teplota{font-size:84px;font-weight:200;line-height:1;margin-left:18px;}
+  .poc-t-pop{font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.8;margin-top:2px;}
+  /* Animovaná scéna za teplotami — jako pozadí v Počasí na iPhonu. Jen transform
+     a opacity, ať to na iPadu jede plynule. */
+  .poc-scena{position:absolute;left:0;right:0;top:0;height:300px;overflow:hidden;pointer-events:none;z-index:0;
+    -webkit-mask-image:linear-gradient(180deg,#000 60%,transparent);mask-image:linear-gradient(180deg,#000 60%,transparent);}
+  .poc-scena > *{position:absolute;}
+  .sc-slunce{right:8%;top:22px;width:120px;height:120px;}
+  .sc-slunce .sc-zare{position:absolute;inset:-30px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,236,150,0.75) 0%,rgba(255,214,10,0.25) 45%,transparent 70%);animation:sc-pulz 6s ease-in-out infinite;}
+  .sc-slunce svg{position:absolute;inset:0;width:100%;height:100%;animation:sc-toc 60s linear infinite;}
+  .sc-mesic{right:10%;top:26px;width:80px;height:80px;filter:drop-shadow(0 0 18px rgba(255,255,255,0.45));}
+  .sc-hvezda{width:3px;height:3px;border-radius:50%;background:#fff;animation:sc-blik 3s ease-in-out infinite;}
+  .sc-mrak{width:220px;height:90px;animation:sc-plyn linear infinite;will-change:transform;}
+  .sc-mrak svg{width:100%;height:100%;}
+  .sc-kapka{top:-30px;width:2px;height:18px;border-radius:1px;background:linear-gradient(rgba(255,255,255,0),rgba(200,230,255,0.85));
+    animation:sc-pad linear infinite;will-change:transform;}
+  .sc-vlocka{top:-12px;width:6px;height:6px;border-radius:50%;background:#fff;opacity:0.9;animation:sc-snih linear infinite;will-change:transform;}
+  .sc-blesk{inset:0;background:#fff;opacity:0;animation:sc-blesk 7s infinite;}
+  .sc-mlha{left:-40%;width:180%;height:46px;border-radius:50%;background:rgba(255,255,255,0.35);filter:blur(14px);
+    animation:sc-mlha ease-in-out infinite alternate;}
+  @keyframes sc-toc{to{transform:rotate(360deg);}}
+  @keyframes sc-pulz{0%,100%{transform:scale(1);opacity:0.85;}50%{transform:scale(1.12);opacity:1;}}
+  @keyframes sc-blik{0%,100%{opacity:0.2;}50%{opacity:1;}}
+  @keyframes sc-plyn{from{transform:translateX(-260px);}to{transform:translateX(700px);}}
+  @keyframes sc-pad{from{transform:translate(0,0);}to{transform:translate(-30px,340px);}}
+  @keyframes sc-snih{0%{transform:translate(0,0);}25%{transform:translate(12px,85px);}50%{transform:translate(-6px,170px);}
+    75%{transform:translate(10px,255px);}100%{transform:translate(0,340px);}}
+  @keyframes sc-blesk{0%,90%,100%{opacity:0;}91%{opacity:0.55;}92%{opacity:0;}94%{opacity:0.35;}95%{opacity:0;}}
+  @keyframes sc-mlha{from{transform:translateX(-12%);}to{transform:translateX(12%);}}
+  @media (prefers-reduced-motion: reduce){.poc-scena *{animation:none !important;}}
   .poc-popis{font-size:20px;font-weight:500;opacity:0.95;}
   .poc-minmax{font-size:18px;font-weight:500;margin-top:2px;}
   .poc-karta{background:rgba(255,255,255,0.16);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
     border-radius:18px;padding:10px 14px 12px;}
   .poc-karta-h{font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.7;
     padding-bottom:7px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.22);}
-  .poc-hodiny{display:flex;justify-content:space-between;gap:4px;}
-  .poc-hod{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;flex:1;font-size:16px;font-weight:500;}
+  /* Šest hodin naráz, další se dají dojet prstem (jako na iPhonu) */
+  .poc-hodiny{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;}
+  .poc-hodiny::-webkit-scrollbar{display:none;}
+  .poc-hod{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;flex:0 0 calc((100% - 20px) / 6);font-size:16px;font-weight:500;}
   .poc-hod-cas{font-size:14px;}
   .poc-hod svg{width:30px;height:30px;}
   .poc-hod-pop{font-size:12px;font-weight:700;color:#bfe3ff;min-height:14px;}
@@ -13514,6 +13549,73 @@ function pocasiPozadi(ted) {
   return ['#3f8fe0', '#8cc4f5'];
 }
 
+// Scéna za teplotami podle stavu — jako animované pozadí v Počasí na iPhonu
+function pocasiScenaKlic(ted) {
+  const k = Number(ted.kod);
+  if (k >= 200 && k < 300) return 'bourka';
+  if (k >= 300 && k < 400) return 'mrholeni';
+  if (k >= 500 && k < 600) return k === 502 || k === 503 || k === 504 || k === 522 ? 'liják' : 'dest';
+  if (k >= 600 && k < 700) return 'snih';
+  if (k >= 700 && k < 800) return 'mlha';
+  if (k === 800) return ted.noc ? 'jasno-noc' : 'jasno-den';
+  if (k === 801 || k === 802) return ted.noc ? 'polo-noc' : 'polo-den';
+  return 'mraky';
+}
+
+function pocasiScena(klic) {
+  const sc = document.createElement('div');
+  sc.className = 'poc-scena';
+  sc.dataset.klic = klic;
+  // Pevné „náhodné" rozmístění — při každém vykreslení stejné, bez blikání
+  let semeno = 7;
+  const nah = () => { semeno = (semeno * 9301 + 49297) % 233280; return semeno / 233280; };
+  const pridej = (trida, styl, html) => {
+    const e = document.createElement('div');
+    e.className = trida;
+    Object.assign(e.style, styl || {});
+    if (html) e.innerHTML = html;
+    sc.appendChild(e);
+    return e;
+  };
+  const MRAK = '<svg viewBox="0 0 220 90"><path d="M52 84h128a34 34 0 0 0 4-68 46 46 0 0 0-86-6 36 36 0 0 0-46 74z" fill="#fff"/></svg>';
+  const slunce = () => pridej('sc-slunce', {}, '<div class="sc-zare"></div><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="24" fill="#ffd60a"/>'
+    + '<g stroke="#ffe066" stroke-width="5" stroke-linecap="round">'
+    + Array.from({ length: 12 }, (_, i) => `<line x1="60" y1="10" x2="60" y2="24" transform="rotate(${i * 30} 60 60)"/>`).join('') + '</g></svg>');
+  const mesic = () => pridej('sc-mesic', {}, '<svg viewBox="0 0 80 80"><path d="M52 8a32 32 0 1 0 20 50A26 26 0 0 1 52 8z" fill="#f5f3e7"/></svg>');
+  const hvezdy = n => { for (let i = 0; i < n; i++) pridej('sc-hvezda', { left: (nah() * 96 + 2) + '%', top: (nah() * 220 + 8) + 'px', animationDelay: (-nah() * 3).toFixed(2) + 's' }); };
+  const mraky = (n, pruhl) => {
+    for (let i = 0; i < n; i++) {
+      const doba = 70 + nah() * 50;
+      pridej('sc-mrak', { top: (nah() * 140 - 10) + 'px', opacity: (pruhl - nah() * 0.25).toFixed(2), animationDuration: doba.toFixed(0) + 's',
+        animationDelay: (-nah() * doba).toFixed(1) + 's', scale: (0.7 + nah() * 0.7).toFixed(2) }, MRAK);
+    }
+  };
+  const kapky = (n, rychle) => {
+    for (let i = 0; i < n; i++) pridej('sc-kapka', { left: (nah() * 104 - 2) + '%', animationDuration: ((rychle ? 0.55 : 1.1) + nah() * 0.4).toFixed(2) + 's',
+      animationDelay: (-nah() * 1.5).toFixed(2) + 's', opacity: (0.5 + nah() * 0.5).toFixed(2) });
+  };
+  switch (klic) {
+    case 'jasno-den': slunce(); break;
+    case 'jasno-noc': hvezdy(28); mesic(); break;
+    case 'polo-den': slunce(); mraky(2, 0.85); break;
+    case 'polo-noc': hvezdy(16); mesic(); mraky(2, 0.5); break;
+    case 'mrholeni': mraky(3, 0.6); kapky(26, false); break;
+    case 'dest': mraky(4, 0.55); kapky(60, true); break;
+    case 'liják': mraky(4, 0.5); kapky(110, true); break;
+    case 'bourka': mraky(4, 0.45); kapky(80, true); pridej('sc-blesk'); break;
+    case 'snih': mraky(3, 0.6);
+      for (let i = 0; i < 45; i++) {
+        const v = 3 + nah() * 5;
+        pridej('sc-vlocka', { left: (nah() * 100) + '%', width: v + 'px', height: v + 'px',
+          animationDuration: (6 + nah() * 5).toFixed(1) + 's', animationDelay: (-nah() * 10).toFixed(1) + 's' });
+      }
+      break;
+    case 'mlha': for (let i = 0; i < 4; i++) pridej('sc-mlha', { top: (30 + i * 55) + 'px', animationDuration: (18 + nah() * 14).toFixed(0) + 's', animationDelay: (-nah() * 20).toFixed(0) + 's' }); break;
+    default: mraky(5, 0.7);
+  }
+  return sc;
+}
+
 function renderKalPocasi(p, now = Date.now()) {
   if (!kalPocasiEl) return;
   const st = v => (typeof v === 'number' ? Math.round(v) + '°' : '–');
@@ -13522,28 +13624,44 @@ function renderKalPocasi(p, now = Date.now()) {
   const [a, b] = pocasiPozadi(ted);
   kalPocasiEl.style.setProperty('--poc-a', a);
   kalPocasiEl.style.setProperty('--poc-b', b);
-  kalPocasiEl.textContent = '';
+  // Scéna se mění jen se stavem počasí — jinak by animace každou minutu začínala znovu
+  const klic = pocasiScenaKlic(ted);
+  let scena = kalPocasiEl.querySelector(':scope > .poc-scena');
+  if (!scena || scena.dataset.klic !== klic) {
+    if (scena) scena.remove();
+    scena = pocasiScena(klic);
+    kalPocasiEl.prepend(scena);
+  }
+  let obsah = kalPocasiEl.querySelector(':scope > .poc-obsah');
+  if (!obsah) { obsah = document.createElement('div'); obsah.className = 'poc-obsah'; kalPocasiEl.appendChild(obsah); }
+  obsah.textContent = '';
   const el = (tag, trida, rodic, text) => {
     const e = document.createElement(tag);
     if (trida) e.className = trida;
     if (text !== undefined) e.textContent = text;
-    (rodic || kalPocasiEl).appendChild(e);
+    (rodic || obsah).appendChild(e);
     return e;
   };
-  // Hlavička
+  // Hlavička: skutečná a pocitová teplota vedle sebe
   const hlava = el('div', 'poc-hlava');
-  el('div', 'poc-misto', hlava, 'Doma');
-  el('div', 'poc-teplota', hlava, st(ted.tempC));
+  el('div', 'poc-misto', hlava, 'Benešov');
+  const teploty = el('div', 'poc-teploty', hlava);
+  for (const [hodnota, popisek, trida] of [[ted.tempC, 'Skutečná', 'poc-skutecna'], [ted.pocitC, 'Pocitová', 'poc-pocitova']]) {
+    const t = el('div', 'poc-t ' + trida, teploty);
+    el('div', 'poc-teplota', t, st(hodnota));
+    el('div', 'poc-t-pop', t, popisek);
+  }
   const popis = ted.popis ? ted.popis.charAt(0).toUpperCase() + ted.popis.slice(1) : '';
   el('div', 'poc-popis', hlava, popis);
   el('div', 'poc-minmax', hlava, `Max ${st(p.maxC)}  Min ${st(p.minC)}`);
-  // Během dne: sloty po 3 h
-  const hodiny = (p.hodiny || []).filter(h => h.t + 3 * 3600000 > now);
+  // Během dne: z Applu po hodinách, z OpenWeather po 3 h
+  const delka = (p.zdroj === 'apple' ? 1 : 3) * 3600000;
+  const hodiny = (p.hodiny || []).filter(h => h.t + delka > now);
   if (hodiny.length) {
     const k = el('div', 'poc-karta');
     el('div', 'poc-karta-h', k, 'Během dne');
     const rada = el('div', 'poc-hodiny', k);
-    hodiny.slice(0, 6).forEach((h, i) => {
+    hodiny.slice(0, 12).forEach((h, i) => {
       const s = el('div', 'poc-hod', rada);
       el('div', 'poc-hod-cas', s, i === 0 && h.t <= now ? 'Teď' : String(new Date(h.t).getHours()));
       const ik = el('div', '', s);
@@ -13568,10 +13686,10 @@ function renderKalPocasi(p, now = Date.now()) {
   const male = el('div', 'poc-male');
   {
     const k = el('div', 'poc-karta', male);
-    el('div', 'poc-karta-h', k, 'Pocitově');
-    el('div', 'poc-velke', k, st(ted.pocitC));
-    const rozdil = typeof ted.pocitC === 'number' ? ted.pocitC - ted.tempC : 0;
-    el('div', 'poc-pozn', k, rozdil <= -2 ? 'Vítr ochlazuje.' : rozdil >= 2 ? 'Vlhkost přidává.' : 'Podobně jako skutečná teplota.');
+    // Pocitová je nahoře vedle skutečné — tady místo ní slunce
+    el('div', 'poc-karta-h', k, 'Slunce');
+    el('div', 'poc-velke', k, p.vychodMs ? hm(p.vychodMs) : '–');
+    el('div', 'poc-pozn', k, 'Východ' + (p.zapadMs ? `, západ ${hm(p.zapadMs)}.` : '.'));
   }
   {
     const k = el('div', 'poc-karta', male);
