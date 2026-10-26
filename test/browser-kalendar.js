@@ -599,7 +599,7 @@ setTimeout(async () => {
     check('  počasí vpravo vedle mřížky, stejně vysoké', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && Math.abs(rp.height - rm.height) < 2, true);
     const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());
     check('  nadpis „Počasí dnes" nad panelem', Math.abs((hlavy[1].left + hlavy[1].right) / 2 - (rp.left + rp.right) / 2) < 12, true);
-    check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 80), '6° true');
+    check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 60), '6° true');
     check('  popis s velkým písmenem', poc.querySelector('.poc-popis').textContent, 'Oblačno');
     check('  max a min', poc.querySelector('.poc-minmax').textContent.replace(/\\s+/g, ' '), 'Max 14° Min 2°');
     const hod = [...poc.querySelectorAll('.poc-hod')];
@@ -631,12 +631,28 @@ setTimeout(async () => {
     check('  sníh → vločky', scenaPro(601).querySelectorAll('.sc-vlocka').length > 20, true);
     check('  mlha → pásy', scenaPro(741).querySelectorAll('.sc-mlha').length, 4);
     check('  polojasno → slunce a mraky', !!scenaPro(802).querySelector('.sc-slunce') + ' ' + scenaPro(802).querySelectorAll('.sc-mrak').length, 'true 2');
-    // Z Applu po hodinách: 12 hodin, vidět 6, zbytek prstem
-    const hod12 = Array.from({ length: 12 }, (_, i) => ({ t: v7 + i * H, tempC: 6 + i, pop: 0, kod: 803 }));
-    renderKalPocasi({ ...POC, zdroj: 'apple', hodiny: hod12 }, v7 + 10 * 60000);
+    // Z Open-Meteo po hodinách na 24 h: vidět 8, zbytek prstem, „zítra" po půlnoci
+    const hod24 = Array.from({ length: 24 }, (_, i) => ({ t: denMs(0) + (22 + i) * H, tempC: 6 - i / 4, pop: i === 5 ? 60 : 0, mm: i === 5 ? 1.4 : 0, kod: i === 5 ? 500 : 803, noc: i < 9 }));
+    const pVecer = { ...POC, zdroj: 'open-meteo', hodiny: hod24, srazky: { pop: 60, mm: 1.4, od: denMs(0) + 27 * H } };
+    pocasiDnesData = pVecer;
+    renderKalPocasi(pVecer, denMs(0) + 22 * H + 20 * 60000);
     const rada = poc.querySelector('.poc-hodiny');
-    check('Apple: 12 hodin po hodině, od Teď', [...rada.children].map(x => x.firstChild.textContent).slice(0, 3).join(',') + ' ' + rada.children.length, 'Teď,8,9 12');
-    check('  vidět šest, zbytek se posouvá', Math.round(rada.clientWidth / rada.children[0].getBoundingClientRect().width) + ' ' + (rada.scrollWidth > rada.clientWidth + 10), '6 true');
+    check('Open-Meteo ve 22:20: 24 hodin po hodině, od Teď', [...rada.children].map(x => x.querySelector('.poc-hod-cas').textContent).slice(0, 4).join(',') + ' ' + rada.children.length, 'Teď,23,0,1 24');
+    check('  „zítra" jen u první hodiny po půlnoci', [...rada.children].map((x, i) => x.querySelector('.poc-hod-zitra') ? i : '').join(''), '2');
+    const sirka = rada.children[0].getBoundingClientRect().width;
+    check('  vidět osm, zbytek se posouvá', Math.round((rada.clientWidth + 4) / (sirka + 4)) + ' ' + (rada.scrollWidth > rada.clientWidth + 10), '8 true');
+    check('  srážky zítra', /od zítra 3:00/.test(poc.textContent), true);
+    // Celé se to vejde na výšku iPadu bez posouvání
+    kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
+    check('vejde se bez posouvání', poc.scrollHeight <= poc.clientHeight + 1, true);
+    check('  stejně vysoké jako kalendář', Math.abs(poc.getBoundingClientRect().height - document.getElementById('kalMrizka').getBoundingClientRect().height) < 2, true);
+    renderKalDen();
+    check('lišta ukazuje zdroj', [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop().textContent, 'Počasí dnes · Open-Meteo');
+    // Mrak nemá rovný vršek: celá cesta je uvnitř viewBoxu
+    const mrak = poc.querySelector('.sc-mrak svg') || scenaPro(803).querySelector('.sc-mrak svg');
+    const bb = mrak.querySelector('path').getBBox(), vb = mrak.viewBox.baseVal;
+    check('mrak celý (nic neořízne)', bb.y >= vb.y && bb.x >= vb.x && bb.x + bb.width <= vb.x + vb.width && bb.y + bb.height <= vb.y + vb.height, true);
+    pocasiDnesData = POC;
     renderKalPocasi(POC, v7);
     check('oblačnost', /^Oblačnost75 %/.test(karty[1]), true);
     check('srážky', karty[2].startsWith('Srážky2,4 mmPravděpodobnost 70 %, od '), true);

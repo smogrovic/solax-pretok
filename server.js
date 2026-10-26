@@ -3968,13 +3968,15 @@ function pocasiDnes(now = Date.now()) {
   const w = state.weather;
   const dnes = pragueDateString(now);
   const sloty = Object.values(pocasiSloty[dnes] || {}).sort((a, b) => a.t - b.t);
+  // Během dne: následujících 24 h, přes půlnoc i ze zítřka
+  const vse = Object.values(pocasiSloty).flatMap(d => Object.values(d)).sort((a, b) => a.t - b.t);
   const ted = w && typeof w.tempC === 'number'
     ? { tempC: w.tempC, pocitC: w.pocitC ?? null, oblacnost: w.oblacnost ?? null, kod: w.kod ?? null, noc: !!w.noc, popis: w.popis || null }
     : null;
   if (!ted && !sloty.length) return null;
   const teploty = sloty.map(s => s.tempC).concat(ted ? [ted.tempC] : []);
-  // Od teď: i slot, který právě běží (začal před méně než 3 h)
-  const dalsi = sloty.filter(s => s.t > now - 3 * 3600000);
+  // Od teď: i slot, který právě běží (začal před méně než 3 h), na 24 h dopředu
+  const dalsi = vse.filter(s => s.t > now - 3 * 3600000 && s.t < now + 24 * 3600000);
   const srazkove = dalsi.filter(s => typeof s.pop === 'number');
   const prvni = srazkove.find(s => s.pop >= 30);
   return {
@@ -4014,14 +4016,14 @@ async function refreshOpenMeteo(now = Date.now()) {
     });
     const res = await fetch('https://api.open-meteo.com/v1/forecast?' + q.toString(), { signal: AbortSignal.timeout(15000) });
     pocasiOm.posledni = { stav: res.status, kdy: now };
-    if (!res.ok) return;
+    if (!res.ok) { pocasiOm.posledni.chyba = (await res.text().catch(() => '')).slice(0, 120); return; }
     const j = await res.json();
     if (!j || !j.current || typeof j.current.temperature_2m !== 'number') return;
     pocasiOm.data = j;
     pocasiOm.ts = now;
     pocasiDnesObnov(now);
   } catch (err) {
-    pocasiOm.posledni = { stav: 0, chyba: String(err && err.name || 'chyba'), kdy: now };
+    pocasiOm.posledni = { stav: 0, chyba: String(err && (err.message || err.name) || 'chyba').slice(0, 120), kdy: now };
   }
 }
 
@@ -4054,7 +4056,8 @@ function pocasiZOpenMeteo(j, now = Date.now()) {
   const hodiny = [];
   (h.time || []).forEach((t, i) => {
     const ms = t * 1000;
-    if (ms < hodina || pragueDateString(ms) !== dnes || hodiny.length >= 12) return;
+    // Následujících 24 h od této hodiny, přes půlnoc (večer by jinak karta zela prázdnotou)
+    if (ms < hodina || hodiny.length >= 24) return;
     const temp = cislo((h.temperature_2m || [])[i]);
     if (temp === null) return;
     hodiny.push({ t: ms, tempC: temp, pop: cislo((h.precipitation_probability || [])[i]),
@@ -4062,7 +4065,7 @@ function pocasiZOpenMeteo(j, now = Date.now()) {
       kod: wmoStav((h.weather_code || [])[i])[0], noc: (h.is_day || [])[i] === 0 });
   });
   const [kod, popis] = wmoStav(c.weather_code);
-  const teploty = hodiny.map(x => x.tempC).concat([c.temperature_2m]);
+  const teploty = hodiny.filter(x => pragueDateString(x.t) === dnes).map(x => x.tempC).concat([c.temperature_2m]);
   const sPop = hodiny.filter(x => typeof x.pop === 'number');
   const prvni = sPop.find(x => x.pop >= 30);
   const max = den('temperature_2m_max'), min = den('temperature_2m_min');

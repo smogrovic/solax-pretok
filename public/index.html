@@ -281,7 +281,7 @@
   .kal-den-telo{flex:1;min-height:0;display:grid;grid-template-columns:54px minmax(0,1fr) minmax(0,1fr);}
   .kal-den-telo > .kal-mrizka{grid-column:1 / -1;min-width:0;}
   .kal-den-telo.s-pocasim > .kal-mrizka{grid-column:1 / 3;}
-  .kal-pocasi{grid-column:3;margin-left:10px;min-height:0;min-width:0;overflow:hidden auto;scrollbar-width:none;border-radius:18px;padding:16px 18px;
+  .kal-pocasi{grid-column:3;margin-left:10px;min-height:0;min-width:0;overflow:hidden auto;scrollbar-width:none;border-radius:18px;padding:12px 14px;
     color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',sans-serif;
     background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;}
   .kal-pocasi::-webkit-scrollbar{display:none;}
@@ -295,7 +295,7 @@
     .kal-panel.kal-wx .kal-den-lista, .kal-panel.kal-wx .kal-mrizka{display:none;}
     .kal-panel.kal-wx .kal-den-telo{display:block;}
     .kal-panel.kal-wx .kal-pocasi{margin-left:0;overflow:hidden;padding:14px 12px;}
-    .kal-wx .poc-teplota{font-size:66px;}
+    .kal-wx .poc-teplota{font-size:58px;}
     .kal-wx .poc-male{gap:8px;}
     .kal-wx .poc-karta{padding:9px 10px 10px;}
     .kal-wx .poc-velke{font-size:24px;}
@@ -303,16 +303,16 @@
     .kal-wx .poc-hod{font-size:15px;}
   }
   .kal-pocasi{position:relative;}
-  .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;}
+  .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:8px;}
   .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.18);}
-  .poc-misto{font-size:26px;font-weight:500;}
+  .poc-misto{font-size:22px;font-weight:500;}
   .poc-teploty{display:flex;justify-content:center;gap:34px;margin-top:2px;}
   .poc-t{display:flex;flex-direction:column;align-items:center;}
-  .poc-teplota{font-size:84px;font-weight:200;line-height:1;margin-left:18px;}
+  .poc-teplota{font-size:66px;font-weight:200;line-height:1;margin-left:14px;}
   .poc-t-pop{font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.8;margin-top:2px;}
   /* Animovaná scéna za teplotami — jako pozadí v Počasí na iPhonu. Jen transform
      a opacity, ať to na iPadu jede plynule. */
-  .poc-scena{position:absolute;left:0;right:0;top:0;height:300px;overflow:hidden;pointer-events:none;z-index:0;
+  .poc-scena{position:absolute;left:0;right:0;top:0;height:230px;overflow:hidden;pointer-events:none;z-index:0;
     -webkit-mask-image:linear-gradient(180deg,#000 60%,transparent);mask-image:linear-gradient(180deg,#000 60%,transparent);}
   .poc-scena > *{position:absolute;}
   .sc-slunce{right:8%;top:22px;width:120px;height:120px;}
@@ -321,8 +321,8 @@
   .sc-slunce svg{position:absolute;inset:0;width:100%;height:100%;animation:sc-toc 60s linear infinite;}
   .sc-mesic{right:10%;top:26px;width:80px;height:80px;filter:drop-shadow(0 0 18px rgba(255,255,255,0.45));}
   .sc-hvezda{width:3px;height:3px;border-radius:50%;background:#fff;animation:sc-blik 3s ease-in-out infinite;}
-  .sc-mrak{width:220px;height:90px;animation:sc-plyn linear infinite;will-change:transform;}
-  .sc-mrak svg{width:100%;height:100%;}
+  .sc-mrak{width:225px;height:120px;animation:sc-plyn linear infinite;will-change:transform;}
+  .sc-mrak svg{width:100%;height:100%;overflow:visible;}
   .sc-kapka{top:-30px;width:2px;height:18px;border-radius:1px;background:linear-gradient(rgba(255,255,255,0),rgba(200,230,255,0.85));
     animation:sc-pad linear infinite;will-change:transform;}
   .sc-vlocka{top:-12px;width:6px;height:6px;border-radius:50%;background:#fff;opacity:0.9;animation:sc-snih linear infinite;will-change:transform;}
@@ -339,18 +339,19 @@
   @keyframes sc-blesk{0%,90%,100%{opacity:0;}91%{opacity:0.55;}92%{opacity:0;}94%{opacity:0.35;}95%{opacity:0;}}
   @keyframes sc-mlha{from{transform:translateX(-12%);}to{transform:translateX(12%);}}
   @media (prefers-reduced-motion: reduce){.poc-scena *{animation:none !important;}}
-  .poc-popis{font-size:20px;font-weight:500;opacity:0.95;}
-  .poc-minmax{font-size:18px;font-weight:500;margin-top:2px;}
+  .poc-popis{font-size:18px;font-weight:500;opacity:0.95;}
+  .poc-minmax{font-size:16px;font-weight:500;margin-top:1px;}
   .poc-karta{background:rgba(255,255,255,0.16);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-    border-radius:18px;padding:10px 14px 12px;}
+    border-radius:16px;padding:8px 12px 9px;}
   .poc-karta-h{font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.7;
-    padding-bottom:7px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.22);}
-  /* Šest hodin naráz, další se dají dojet prstem (jako na iPhonu) */
+    padding-bottom:5px;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.22);}
+  /* Osm položek naráz (3h sloty = 24 h), hodinové se dají dojet prstem jako na iPhonu */
   .poc-hodiny{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;}
   .poc-hodiny::-webkit-scrollbar{display:none;}
-  .poc-hod{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;flex:0 0 calc((100% - 20px) / 6);font-size:16px;font-weight:500;}
-  .poc-hod-cas{font-size:14px;}
-  .poc-hod svg{width:30px;height:30px;}
+  .poc-hod{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;flex:0 0 calc((100% - 28px) / 8);font-size:15px;font-weight:500;position:relative;}
+  .poc-hod-zitra{position:absolute;top:-1px;left:0;font-size:9px;font-weight:700;text-transform:uppercase;opacity:0.75;}
+  .poc-hod-cas{font-size:13px;padding-top:9px;}
+  .poc-hod svg{width:24px;height:24px;}
   .poc-hod-pop{font-size:12px;font-weight:700;color:#bfe3ff;min-height:14px;}
   .poc-rozpeti{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:500;}
   .poc-rozpeti .poc-min{opacity:0.7;}
@@ -358,10 +359,10 @@
   .poc-tecka{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#fff;
     box-shadow:0 0 0 2px rgba(0,0,0,0.18);}
   .poc-male{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
-  .poc-velke{font-size:34px;font-weight:400;line-height:1.1;}
-  .poc-pozn{font-size:13px;font-weight:500;opacity:0.85;margin-top:4px;line-height:1.3;}
-  .poc-kruh{display:block;width:50px;height:50px;margin:2px 0 0;}
-  .poc-sloupky{display:flex;align-items:flex-end;gap:3px;height:30px;margin-top:6px;}
+  .poc-velke{font-size:26px;font-weight:400;line-height:1.1;}
+  .poc-pozn{font-size:12px;font-weight:500;opacity:0.85;margin-top:3px;line-height:1.3;}
+  .poc-kruh{display:block;width:36px;height:36px;margin:2px 0 0;}
+  .poc-sloupky{display:flex;align-items:flex-end;gap:2px;height:18px;margin-top:4px;}
   .poc-sloupky span{flex:1;background:#7cc7ff;border-radius:2px 2px 0 0;min-height:2px;}
   .kal-mrizka{
     flex:1;
@@ -13615,7 +13616,8 @@ function pocasiScena(klic) {
     sc.appendChild(e);
     return e;
   };
-  const MRAK = '<svg viewBox="0 0 220 90"><path d="M52 84h128a34 34 0 0 0 4-68 46 46 0 0 0-86-6 36 36 0 0 0-46 74z" fill="#fff"/></svg>';
+  // viewBox s rezervou nahoře: oblouky mraku sahají nad y = 0 (jinak má rovný vršek)
+  const MRAK = '<svg viewBox="0 -30 225 120"><path d="M52 84h128a34 34 0 0 0 4-68 46 46 0 0 0-86-6 36 36 0 0 0-46 74z" fill="#fff"/></svg>';
   const slunce = () => pridej('sc-slunce', {}, '<div class="sc-zare"></div><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="24" fill="#ffd60a"/>'
     + '<g stroke="#ffe066" stroke-width="5" stroke-linecap="round">'
     + Array.from({ length: 12 }, (_, i) => `<line x1="60" y1="10" x2="60" y2="24" transform="rotate(${i * 30} 60 60)"/>`).join('') + '</g></svg>');
@@ -13653,6 +13655,8 @@ function pocasiScena(klic) {
   }
   return sc;
 }
+
+const kalJinyDen = (t, now) => new Date(t).toDateString() !== new Date(now).toDateString();
 
 function renderKalPocasi(p, now = Date.now()) {
   if (!kalPocasiEl) return;
@@ -13692,16 +13696,18 @@ function renderKalPocasi(p, now = Date.now()) {
   const popis = ted.popis ? ted.popis.charAt(0).toUpperCase() + ted.popis.slice(1) : '';
   el('div', 'poc-popis', hlava, popis);
   el('div', 'poc-minmax', hlava, `Max ${st(p.maxC)}  Min ${st(p.minC)}`);
-  // Během dne: z Applu po hodinách, z OpenWeather po 3 h
-  const delka = (p.zdroj === 'apple' ? 1 : 3) * 3600000;
+  // Během dne: z Open-Meteo po hodinách, z OpenWeather po 3 h
+  const delka = (p.zdroj === 'open-meteo' ? 1 : 3) * 3600000;
   const hodiny = (p.hodiny || []).filter(h => h.t + delka > now);
   if (hodiny.length) {
     const k = el('div', 'poc-karta');
     el('div', 'poc-karta-h', k, 'Během dne');
     const rada = el('div', 'poc-hodiny', k);
-    hodiny.slice(0, 12).forEach((h, i) => {
+    hodiny.slice(0, 24).forEach((h, i) => {
       const s = el('div', 'poc-hod', rada);
       el('div', 'poc-hod-cas', s, i === 0 && h.t <= now ? 'Teď' : String(new Date(h.t).getHours()));
+      // První hodina po půlnoci dostane „zítra"
+      if (i > 0 && kalJinyDen(h.t, now) && !kalJinyDen(hodiny[i - 1].t, now)) el('div', 'poc-hod-zitra', s, 'zítra');
       const ik = el('div', '', s);
       ik.innerHTML = pocasiIkona(h.kod, h.noc);
       el('div', 'poc-hod-pop', s, typeof h.pop === 'number' && h.pop >= 20 ? h.pop + ' %' : '');
@@ -13747,7 +13753,7 @@ function renderKalPocasi(p, now = Date.now()) {
     const bez = !(sr.mm > 0) && !(sr.pop >= 20);
     el('div', 'poc-velke', k, bez ? 'Bez srážek' : String(sr.mm || 0).replace('.', ',') + ' mm');
     el('div', 'poc-pozn', k, typeof sr.pop !== 'number' ? 'Předpověď zatím chybí.'
-      : `Pravděpodobnost ${sr.pop} %` + (sr.od ? `, od ${hm(sr.od)}` : '') + '.');
+      : `Pravděpodobnost ${sr.pop} %` + (sr.od ? `, od ${kalJinyDen(sr.od, now) ? 'zítra ' : ''}${hm(sr.od)}` : '') + '.');
     if (hodiny.some(h => typeof h.pop === 'number')) {
       const sl = el('div', 'poc-sloupky', k);
       hodiny.forEach(h => { const b = el('span', '', sl); b.style.height = Math.max(4, h.pop || 0) + '%'; });
@@ -13801,7 +13807,9 @@ function renderKalDen() {
     if (pocasi) {
       const h = document.createElement('div');
       h.className = 'kal-den-hlava';
-      h.textContent = 'Počasí dnes';
+      // Odkud data jsou — ať je na první pohled vidět, když Open-Meteo vypadne
+      const zdroj = pocasiDnesData && { 'open-meteo': 'Open-Meteo', owm: 'OpenWeather' }[pocasiDnesData.zdroj];
+      h.textContent = 'Počasí dnes' + (zdroj ? ' · ' + zdroj : '');
       kalDenNazevEl.appendChild(h);
     }
   }
