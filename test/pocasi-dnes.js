@@ -135,5 +135,7 @@ nadpis('Open-Meteo (hlavní zdroj, zdarma)');
   const sit = build({ tempC: 5 }, { fetch: async () => { throw new Error('getaddrinfo ENOTFOUND api.open-meteo.com'); } });
   await sit.api.refreshOpenMeteo(ted);
   check('  chyba sítě s textem', (await sit.volej('/api/pocasi/diagnostika')).openMeteo.posledni.chyba, 'getaddrinfo ENOTFOUND api.open-meteo.com');
+  const dg = between("app.get('/api/pocasi/diagnostika'", '// Server na Renderu běží v UTC');
+  check('diagnostika bez zámku, bez tajných údajů', /requireAuth/.test(dg) + ' ' + /OWM_API_KEY|UNLOCK|token/i.test(dg), 'false false');
   konec();
 })();

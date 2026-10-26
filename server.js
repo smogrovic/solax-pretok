@@ -4100,8 +4100,8 @@ function pocasiDnesObnov(now = Date.now()) {
   broadcast('pocasiDnes', { pocasiDnes: state.pocasiDnes });
 }
 
+// Bez zámku: nic tajného tu není (zdroj, stav, text chyby) a otevře se rovnou v prohlížeči
 app.get('/api/pocasi/diagnostika', (req, res) => {
-  if (!requireAuth(req, res)) return;
   res.json({ zdroj: state.pocasiDnes ? state.pocasiDnes.zdroj : null,
     openMeteo: { data: !!pocasiOm.data, kdy: pocasiOm.ts || null, posledni: pocasiOm.posledni } });
 });
