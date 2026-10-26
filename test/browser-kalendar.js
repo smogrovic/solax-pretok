@@ -35,15 +35,18 @@ setTimeout(async () => {
   R.push('1) Vlastní tlačítko, ne stránka v pásu');
   check('kalendář není mezi stránkami', panel.classList.contains('slide'), false);
   check('  a stojí mimo pás', document.getElementById('sliderWrap').contains(panel), false);
-  check('záložka existuje', zalozka.textContent, 'Kalendář');
+  check('záložka existuje', zalozka.textContent, 'Kalendář/WX');
   // iPad visí na zdi: to, co má být vidět, když kolem nikdo nestojí, je kalendář
   check('na širokém displeji je hned otevřený', panel.hidden, false);
   check('  a pás stránek je schovaný', document.getElementById('sliderWrap').style.display, 'none');
   check('  a jeho záložka svítí', zalozka.classList.contains('active'), true);
+  // Otevřený: další klepnutí přepíná kalendář ↔ počasí (WX), nezavírá
   zalozka.click();
-  check('klik ho zavře', panel.hidden, true);
+  check('klik na otevřený: počasí, panel zůstává', panel.hidden + ' ' + document.getElementById('kalPocasi').hidden, 'false false');
+  check('  záložka ukazuje WX', zalozka.classList.contains('wx'), true);
   zalozka.click();
-  check('  a znovu otevře', panel.hidden, false);
+  check('  další klik: zpátky kalendář', panel.hidden + ' ' + document.getElementById('kalPocasi').hidden + ' ' + zalozka.classList.contains('wx'), 'false true false');
+  kalWx = null;
   // Tady je celá pointa: přes celou šířku, ne třetina jako ostatní stránky
   const sirkaStr = document.querySelector('.slide').getBoundingClientRect().width;
   check('zabírá celou šířku', panel.getBoundingClientRect().width > 2.5 * sirkaStr, true);
@@ -195,7 +198,7 @@ setTimeout(async () => {
   check('a zpátky na dnešek', /^Dnes /.test(document.getElementById('kalDenNazev').textContent), true);
 
   check('s otevřeným kalendářem svítí jen jeho záložka',
-    [...document.querySelectorAll('#pageTabs .page-tab.active')].map(t => t.textContent).join(','), 'Kalendář');
+    [...document.querySelectorAll('#pageTabs .page-tab.active')].map(t => t.textContent).join(','), 'Kalendář/WX');
   R.push('\\n3d) Nadpis pryč, „načteno" dolů');
   // Nadpis „Kalendář" nad kalendářem jen bral výšku — v liště svítí záložka téhož
   // jména. „Načteno v…" je poznámka pod čarou a patří pod kalendář, ne nad něj.
@@ -658,7 +661,25 @@ setTimeout(async () => {
     renderKalDen();
     check('jasno: modré pozadí, bez srážek', poc.style.getPropertyValue('--poc-a') + ' ' + /Bez srážek/.test(poc.textContent), '#3f8fe0 true');
     check('  bez hodin karta „Během dne" chybí', /Během dne/.test(poc.textContent), false);
+    // Ruční přepnutí záložkou Kalendář/WX
+    pocasiDnesData = POC;
+    Date.now = () => denMs(0) + 15 * 3600000;            // odpoledne: samo se neukáže
+    kalDenIndex = 1;                                      // prolistováno na zítřek
+    renderKalDen();
+    check('odpoledne prolistováno: zítra a pozítří', nazvy(), 'Zítra,' + KAL_DNY_CZ[new Date(denMs(2)).getDay()]);
+    zalozka.click();
+    check('klik na záložku: dnešek a počasí vpravo', nazvy() + ' ' + poc.hidden, 'Dnes,Počasí false');
+    zalozka.click();
+    check('  další klik: zítřek zpátky', nazvy() + ' ' + poc.hidden, 'Dnes,Zítra true');
+    Date.now = () => v7;
+    renderKalDen();
+    check('  i dopoledne jde počasí schovat', nazvy(), 'Dnes,Zítra');
+    check('  není to výchozí stav (vrátí se po klidu)', kalJeNaDnesku(), false);
+    kalNaDnesek();
+    renderKalDen();
+    check('po klidu zase samo počasí', nazvy(), 'Dnes,Počasí');
     pocasiDnesData = null;
+    kalWx = null;
     Date.now = puvodniNow;
     renderKalDen();
   }

@@ -147,6 +147,19 @@ setTimeout(() => {
   kal.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 400, bubbles: true }));
   kal.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 400, bubbles: true }));
   check('tah prstem na telefonu nelistuje', kal.hidden, false);
+  // Telefon: další klepnutí na Kalendář/WX ukáže počasí místo celého kalendáře
+  pocasiDnesData = { ted: { tempC: 4, pocitC: 1, oblacnost: 90, kod: 500, noc: false, popis: 'Déšť' }, minC: 2, maxC: 9,
+    hodiny: [], srazky: { pop: 80, mm: 3, od: null }, zdroj: 'open-meteo' };
+  document.querySelector('.page-tab-kal').click();
+  const poc = document.getElementById('kalPocasi');
+  const vid = e => !!e && e.getClientRects().length > 0;
+  check('telefon: počasí místo kalendáře', vid(poc) + ' ' + vid(document.getElementById('kalDny')) + ' ' + vid(document.getElementById('kalMrizka')), 'true false false');
+  check('  přes celou šířku panelu', Math.abs(poc.getBoundingClientRect().width - document.getElementById('kalDenPohled').getBoundingClientRect().width) < 2, true);
+  check('  s teplotami', [...poc.querySelectorAll('.poc-teplota')].map(t => t.textContent).join(' '), '4° 1°');
+  // (celá stránka se teď měřit nedá — panel zrovna přijíždí animací zprava)
+  check('  nic nepřetéká z panelu', poc.scrollWidth <= poc.clientWidth + 1 && [...poc.querySelectorAll('.poc-karta')].every(k => k.scrollWidth <= k.clientWidth + 1), true);
+  document.querySelector('.page-tab-kal').click();
+  check('  další klik: zpátky kalendář', vid(poc) + ' ' + vid(document.getElementById('kalDny')), 'false true');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

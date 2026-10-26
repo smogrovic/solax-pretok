@@ -29,7 +29,7 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
   // Kalendář není stránka v pásu, jeho záložka stojí hned za Připomínkami
   const vsechny = Array.from(document.querySelectorAll('#pageTabs .page-tab')).map(t => t.textContent);
-  check('  a kalendář je hned za Připomínkami', vsechny[vsechny.indexOf('Připomínky') + 1], 'Kalendář');
+  check('  a kalendář je hned za Připomínkami', vsechny[vsechny.indexOf('Připomínky') + 1], 'Kalendář/WX');
 
   // Pořadí panelů v grafu FVE hlídá test/browser-fve.js (má tam blíž k ostatním
   // kontrolám grafu), tady zůstává jen to, že wallbox v tom grafu vůbec je

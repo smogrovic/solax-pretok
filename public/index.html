@@ -286,6 +286,22 @@
     background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;}
   .kal-pocasi::-webkit-scrollbar{display:none;}
   .kal-pocasi[hidden]{display:none;}
+  .poc-cekam{text-align:center;font-size:18px;padding:40px 0;}
+  .page-tab-kal.wx{color:#2f80d1;}
+  /* Telefon: počasí místo celého kalendáře (denní pohled je tu jinak schovaný) */
+  @media (max-width: 999px) {
+    .kal-panel.kal-wx .kal-dny, .kal-panel.kal-wx .kal-prehled{display:none;}
+    .kal-panel.kal-wx .kal-den-pohled{display:flex;flex:0 0 auto;}
+    .kal-panel.kal-wx .kal-den-lista, .kal-panel.kal-wx .kal-mrizka{display:none;}
+    .kal-panel.kal-wx .kal-den-telo{display:block;}
+    .kal-panel.kal-wx .kal-pocasi{margin-left:0;overflow:hidden;padding:14px 12px;}
+    .kal-wx .poc-teplota{font-size:66px;}
+    .kal-wx .poc-male{gap:8px;}
+    .kal-wx .poc-karta{padding:9px 10px 10px;}
+    .kal-wx .poc-velke{font-size:24px;}
+    .kal-wx .poc-pozn{font-size:12px;}
+    .kal-wx .poc-hod{font-size:15px;}
+  }
   .kal-pocasi{position:relative;}
   .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;}
   .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.18);}
@@ -13512,10 +13528,32 @@ const kalPocasiEl = document.getElementById('kalPocasi');
 const kalDenTeloEl = document.getElementById('kalDenTelo');
 let pocasiDnesData = null;
 
+// Ruční volba ze záložky Kalendář/WX: null = automaticky (na iPadu dopoledne),
+// true/false = ukázat/schovat. Návrat na výchozí stav (klid, zavření) ji smaže.
+let kalWx = null;
+const kalMamPocasi = () => !!(pocasiDnesData && pocasiDnesData.ted && typeof pocasiDnesData.ted.tempC === 'number');
+
 function kalRanniPocasi(now = Date.now()) {
   const h = new Date(now).getHours();
-  return kalDenIndex === 0 && h >= KAL_POCASI_OD && h < KAL_POCASI_DO
-    && !!(pocasiDnesData && pocasiDnesData.ted && typeof pocasiDnesData.ted.tempC === 'number');
+  return kalDenIndex === 0 && h >= KAL_POCASI_OD && h < KAL_POCASI_DO && kalMamPocasi();
+}
+
+// Má se teď ukázat počasí? Na iPadu jen u dneška (vpravo místo zítřka), na
+// telefonu jen na přání (místo celého kalendáře).
+function kalPocasiVidet(now = Date.now()) {
+  if (kalPrehledZap) return false;
+  if (!window.matchMedia('(min-width: 1000px)').matches) return kalWx === true;
+  if (kalDenIndex !== 0) return false;
+  return kalWx !== null ? kalWx : kalRanniPocasi(now);
+}
+
+function kalPrepniPocasi() {
+  const ted = kalPocasiVidet();
+  if (kalPrehledZap) kalPrehledPrepni(false);
+  kalDetailZavri();
+  kalDenIndex = 0;
+  kalWx = !ted;
+  renderKalDen();
 }
 
 // Ikony ve stylu iOS (SF Symbols barevně): slunce, měsíc, mraky, déšť, sníh, bouřka, mlha
@@ -13728,13 +13766,18 @@ function renderKalDen() {
         .map(nazev => ({ nazev, barva: null }));
   // Poslední platný začátek je předposlední den — ať je vpravo pořád co ukázat
   kalDenIndex = Math.max(0, Math.min(kalDenIndex, dny.length - 2));
-  // Dopoledne vpravo místo zítřka dnešní počasí
-  const pocasi = kalRanniPocasi();
+  // Počasí: na iPadu vpravo místo zítřka (dopoledne samo, jinak ze záložky),
+  // na telefonu místo celého kalendáře
+  const pocasi = kalPocasiVidet();
   const vidim = pocasi ? dny.slice(0, 1) : dny.slice(kalDenIndex, kalDenIndex + 2);
   if (kalDenTeloEl) kalDenTeloEl.classList.toggle('s-pocasim', pocasi);
+  if (kalPanelEl) kalPanelEl.classList.toggle('kal-wx', pocasi);
+  const zalozkaKal = pageTabsEl && pageTabsEl.querySelector('.page-tab-kal');
+  if (zalozkaKal) zalozkaKal.classList.toggle('wx', pocasi);
   if (kalPocasiEl) {
     kalPocasiEl.hidden = !pocasi;
-    if (pocasi) renderKalPocasi(pocasiDnesData);
+    if (pocasi && kalMamPocasi()) renderKalPocasi(pocasiDnesData);
+    else if (pocasi) { kalPocasiEl.textContent = ''; const t = document.createElement('div'); t.className = 'poc-obsah poc-cekam'; t.textContent = 'Počasí se načítá…'; kalPocasiEl.appendChild(t); }
   }
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
   if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 2;
@@ -14109,7 +14152,7 @@ if (kalDiagBtn) {
 
 function kalOtevri(otevrit) {
   if (!kalPanelEl) return;
-  if (!otevrit) kalDetailZavri();
+  if (!otevrit) { kalDetailZavri(); kalWx = null; }
   const zmena = kalPanelEl.hidden === otevrit;
   kalPanelEl.hidden = !otevrit;
   if (otevrit && zmena) {
@@ -14234,8 +14277,9 @@ function rebuildDots() {
   if (kalPanelEl) {
     const kal = document.createElement('button');
     kal.className = 'page-tab page-tab-kal';
-    kal.textContent = 'Kalendář';
-    kal.addEventListener('click', () => kalOtevri(kalPanelEl.hidden));
+    kal.textContent = 'Kalendář/WX';
+    // Zavřený → kalendář; otevřený → další klepnutí přepíná kalendář a počasí (WX)
+    kal.addEventListener('click', () => { if (kalPanelEl.hidden) kalOtevri(true); else kalPrepniPocasi(); });
     const za = [...pageTabsEl.querySelectorAll('.page-tab')].find(t => t.textContent === 'Připomínky');
     if (za) za.after(kal); else pageTabsEl.appendChild(kal);
   }
@@ -14276,12 +14320,13 @@ function ipadSaunaIndex() {
 
 // Výchozí kalendář = dnes a zítra: bez Přehledu, bez otevřeného detailu
 function kalNaDnesek() {
+  kalWx = null;
   if (kalPrehledZap) kalPrehledPrepni(false);
   kalDetailZavri();
   if (kalDenIndex !== 0) { kalDenIndex = 0; renderKalDen(); }
 }
 function kalJeNaDnesku() {
-  return kalDenIndex === 0 && !kalPrehledZap && !(kalDetailEl && !kalDetailEl.hidden);
+  return kalDenIndex === 0 && kalWx === null && !kalPrehledZap && !(kalDetailEl && !kalDetailEl.hidden);
 }
 
 function ipadVychozi(now = Date.now()) {
