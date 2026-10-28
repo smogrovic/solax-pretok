@@ -551,11 +551,11 @@ nadpis('Model náběhu');
   const T = Date.UTC(2026, 8, 24, 16, 0, 0);
   const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
   const blizko = (x, y) => x !== null && Math.abs(x - y) <= 0.5;
-  // Zadání modelu: rozjezd 5,4 + τ 102,2 · ln(…), T_max = 128,6 + 0,3 · venku
-  check('venku 14,94, start 27, cíl 60 → ~44 min', blizko(o(14.94, 27, 60).minut, 43.5), 'true');
-  check('venku 14,94, start 27, cíl 80 → ~76 min', blizko(o(14.94, 27, 80).minut, 76.2), 'true');
-  check('venku −20, start 10, cíl 85 → ~118 min', blizko(o(-20, 10, 85).minut, 117.5), 'true');
-  check('venku −20, start −20, cíl 85 → ~142 min', blizko(o(-20, -20, 85).minut, 141.6), 'true');
+  // Zadání modelu: rozjezd 5,4 + τ 108,6 · ln(…), T_max = 133,9 + 0,3 · venku
+  check('venku 14,94, start 27, cíl 60 → ~44 min', blizko(o(14.94, 27, 60).minut, 43.6), 'true');
+  check('venku 14,94, start 27, cíl 80 → ~76 min', blizko(o(14.94, 27, 80).minut, 75.6), 'true');
+  check('venku −20, start 10, cíl 85 → ~115 min', blizko(o(-20, 10, 85).minut, 115.2), 'true');
+  check('venku −20, start −20, cíl 85 → ~140 min', blizko(o(-20, -20, 85).minut, 139.8), 'true');
   check('rozjezd se připočítá (cíl těsně nad startem ≈ 5,4 min)', blizko(o(10, 20, 20.01).minut, 5.4), 'true');
   check('cíl 90 je nedosažitelný (termostat)', JSON.stringify(o(10, 20, 90)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
   check('cíl nad stropem taky, bez výjimky', o(-600, 20, 80).dosazitelne, 'false');
@@ -574,7 +574,7 @@ nadpis('Model náběhu');
     bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
   const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
   const n = netopi.api.saunaOdhad(netopi.now);
-  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd, '0 20 10 102.2 5.4');
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd, '0 20 10 108.6 5.4');
   // Kamna už hřejí: z rozjezdu zbývá jen to, co ještě neuběhlo
   const hreje = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
     fetchedAt: new Date(h.now).toISOString() } });

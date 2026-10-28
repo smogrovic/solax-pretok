@@ -1322,7 +1322,7 @@ const NAHREV_STROP_MS = 4 * 3600000;
 // ---- Model náběhu sauny ----
 // Přefitováno z měření: po zapnutí chvíli trvá, než kamna začnou hřát (rozjezd),
 // pak se teplota exponenciálně blíží stropu, který závisí na venkovní teplotě.
-// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 21. 10. 2026;
+// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 28. 10. 2026;
 // B je zatím odhad, upřesní zimní data.
 //   T_max = A + B · venkuC
 //   t     = rozjezd + τ · ln((T_max − T_start) / (T_max − T_cíl))
@@ -1331,8 +1331,8 @@ const saunaEnvNum = (klic, vychozi) => {
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
 };
 const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.4);
-const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 102.2);
-const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 128.6);
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 108.6);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 133.9);
 const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.3);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
