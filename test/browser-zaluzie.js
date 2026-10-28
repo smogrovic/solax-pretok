@@ -229,7 +229,7 @@ setTimeout(async () => {
   R.push('\\nX) Všechny žaluzie stránky najednou');
   {
     const kryt = (label, room, x = {}) => ({ deviceURL: 'io://' + label, label, room, type: 'cover', position: 0,
-      hasOrientation: true, orientation: 40, hasStop: true, ...x });
+      hasOrientation: true, orientation: 40, hasStop: true, hasClosure: true, closure: 30, ...x });
     blinds = [
       kryt('Obývák Okno', 'Obývák', { orientation: 20 }), kryt('Kuchyň', 'Obývák', { orientation: 60 }), kryt('Obývák Dveře', 'Obývák', { orientation: 40 }),
       kryt('Pergola', 'Terasa'), { deviceURL: 'io://svetlo', label: 'Světlo terasa', room: 'Terasa', type: 'switch' },
@@ -241,8 +241,7 @@ setTimeout(async () => {
     check('strana 1: hned pod Kuchyní', poradi('blindsList1').join(' | '), 'Obývák | Kuchyň | Všechny žaluzie | Terasa | Garáž');
     check('strana 2: hned pod Hosty', poradi('blindsList2').join(' | '), 'Ložnice | Miky | Elenka | Hosté | Všechny žaluzie');
     const box = n => document.querySelector('#' + n + ' .blind-room-vse');
-    check('  počet ovládaných (bez pergoly, garáže a světla)', box('blindsList1').querySelector('.blind-label').textContent + ' / '
-      + box('blindsList2').querySelector('.blind-label').textContent, 'Celá stránka (3) / Celá stránka (5)');
+    check('bez popisku „Celá stránka"', !!box('blindsList1').querySelector('.blind-label') + ' ' + /Celá stránka/.test(box('blindsList1').textContent), 'false false');
     const jezdec = box('blindsList1').querySelector('input[type=range]');
     check('jezdec: průměr naklopení', jezdec.value, 40);
     const prvni = r => r.querySelector('.blind-btn').getBoundingClientRect().left;
@@ -272,6 +271,38 @@ setTimeout(async () => {
     j2.dispatchEvent(new Event('change'));
     await new Promise(r => setTimeout(r, 30));
     check('jezdec po puštění: naklopení všem na stránce', poslano.map(p => p.action + ':' + p.value).join(','), 'orientation:10,'.repeat(5).slice(0, -1));
+    for (const t of blindsReloadTimers) clearTimeout(t);
+
+    // Vytažení všem najednou: ukazatel = průměr, podržet a táhnout
+    blinds = blinds.map(b => ({ ...b, closure: b.label === 'Obývák Okno' ? 10 : b.label === 'Kuchyň' ? 50 : 30 }));
+    renderBlinds();
+    const m = box('blindsList1').querySelector('.blind-meter-col');
+    check('ukazatel zatažení: průměr stránky', m.querySelector('.blind-meter-pct').textContent + ' ' + m.classList.contains('holdable') + ' ' + getComputedStyle(m).visibility, '30 % true visible');
+    const radek = document.querySelector('#blindsList1 .blind-room .blind-meter-col').getBoundingClientRect();
+    check('  lícuje s ukazateli nad ním', Math.abs(m.getBoundingClientRect().left - radek.left) < 1, true);
+    box('blindsList1').querySelector('input[type=range]').value = 70;
+    poslano = [];
+    const r = m.getBoundingClientRect();
+    const ptr = (typ, y) => m.dispatchEvent(new PointerEvent(typ, { pointerId: 7, clientX: r.left + 5, clientY: y, bubbles: true }));
+    ptr('pointerdown', r.top + 5);
+    await new Promise(z => setTimeout(z, 500));
+    check('  podržení otevře okénko Zatažení', !!document.querySelector('.blind-drag'), true);
+    ptr('pointermove', r.top + 5 + 0.2 * DRAG_TRACK_PX);
+    ptr('pointerup', r.top + 5 + 0.2 * DRAG_TRACK_PX);
+    await new Promise(z => setTimeout(z, 30));
+    check('  po puštění closure 50 % všem třem, s naklopením', poslano.map(p => p.action + ':' + p.value + ':' + p.tilt + ':' + p.deviceURL.slice(5)).sort().join(', '),
+      'closure:50:70:Kuchyň, closure:50:70:Obývák Dveře, closure:50:70:Obývák Okno');
+    for (const t of blindsReloadTimers) clearTimeout(t);
+    // Jedna žaluzie se táhne dál sama
+    poslano = [];
+    const m1 = document.querySelector('#blindsList1 .blind-room .blind-meter-col'), r1 = m1.getBoundingClientRect();
+    const ptr1 = (typ, y) => m1.dispatchEvent(new PointerEvent(typ, { pointerId: 8, clientX: r1.left + 5, clientY: y, bubbles: true }));
+    ptr1('pointerdown', r1.top + 5);
+    await new Promise(z => setTimeout(z, 500));
+    ptr1('pointermove', r1.top + 5 + 0.3 * DRAG_TRACK_PX);
+    ptr1('pointerup', r1.top + 5 + 0.3 * DRAG_TRACK_PX);
+    await new Promise(z => setTimeout(z, 30));
+    check('  jednotlivá žaluzie dál jen sama', poslano.map(p => p.action + ':' + p.deviceURL.slice(5)).join(','), 'closure:Obývák Okno');
     for (const t of blindsReloadTimers) clearTimeout(t);
     // Méně než dvě žaluzie → box nemá smysl
     blinds = [kryt('Ložnice', 'Ložnice'), kryt('Pergola', 'Terasa')];

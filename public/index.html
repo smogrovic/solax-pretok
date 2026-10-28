@@ -6136,7 +6136,9 @@ let blindRenderPending = false;
 
 // anchorEl: u čeho okénko vyskočí — dává se prostřední tlačítko (stop), aby jezdec
 // zůstal vlevo od prstu, který drží ukazatel u pravého okraje
-function attachClosureDrag(meterCol, b, tiltValue, anchorEl) {
+// `odeslat(value, tilt)`: vlastní odeslání (box „Všechny žaluzie" pošle všem);
+// bez něj jde povel jen téhle žaluzii
+function attachClosureDrag(meterCol, b, tiltValue, anchorEl, odeslat) {
   let holdTimer = null, pointerId = null;
   let startY = 0, startX = 0, startVal = 0, value = 0;
   let els = null;
@@ -6228,7 +6230,8 @@ function attachClosureDrag(meterCol, b, tiltValue, anchorEl) {
     document.removeEventListener('keydown', onKey);
     // Podržet a pustit bez pohybu je jen omyl — s roletou se nehýbe
     if (send && value !== startVal) {
-      blindCommand(b.deviceURL, 'closure', value, null, tiltValue());
+      if (odeslat) odeslat(value, tiltValue());
+      else blindCommand(b.deviceURL, 'closure', value, null, tiltValue());
     }
     if (blindRenderPending) {
       blindRenderPending = false;
@@ -6520,10 +6523,7 @@ function renderBlindsVseBox(items) {
   row.className = 'blind-row';
   const info = document.createElement('div');
   info.className = 'blind-info';
-  const label = document.createElement('span');
-  label.className = 'blind-label';
-  label.textContent = `Celá stránka (${items.length})`;
-  info.appendChild(label);
+  // Bez popisku — nadpis boxu říká dost; prázdné místo drží zarovnání sloupců
   const btns = document.createElement('div');
   btns.className = 'blind-btns';
 
@@ -6555,11 +6555,32 @@ function renderBlindsVseBox(items) {
   btns.appendChild(makeBlindBtn('blind-btn', '▼', () => vsem(items, 'down', tiltValue())()));
   row.appendChild(info);
   row.appendChild(btns);
-  // Prázdný sloupec místo ukazatele polohy — ať tlačítka lícují s řádky nad ním
-  const misto = document.createElement('div');
-  misto.className = 'blind-meter-col';
-  misto.style.visibility = 'hidden';
-  row.appendChild(misto);
+  // Ukazatel zatažení = průměr stránky; podržením a tažením se nastaví všem.
+  // Když polohu nehlásí žádná, zůstane neviditelný (drží zarovnání tlačítek).
+  const sPolohou = items.filter(b => b.hasClosure && typeof b.closure === 'number');
+  const meterCol = document.createElement('div');
+  meterCol.className = 'blind-meter-col';
+  const meter = document.createElement('div');
+  meter.className = 'blind-meter';
+  const meterPct = document.createElement('span');
+  meterPct.className = 'blind-meter-pct';
+  meterCol.appendChild(meter);
+  meterCol.appendChild(meterPct);
+  if (sPolohou.length) {
+    const prumer = Math.round(sPolohou.reduce((a, b) => a + Math.min(100, Math.max(0, b.closure)), 0) / sPolohou.length);
+    const fill = document.createElement('div');
+    fill.className = 'blind-meter-fill';
+    fill.style.height = prumer + '%';
+    meter.appendChild(fill);
+    meterPct.textContent = prumer + ' %';
+    meterCol.classList.add('holdable');
+    attachClosureDrag(meterCol, { closure: prumer }, tiltValue, btns.children[1], (hodnota, naklon) =>
+      Promise.all(items.filter(b => b.hasClosure).map(b =>
+        blindCommand(b.deviceURL, 'closure', hodnota, null, b.hasOrientation ? naklon : null))));
+  } else {
+    meterCol.style.visibility = 'hidden';
+  }
+  row.appendChild(meterCol);
   wrap.appendChild(row);
 
   if (tiltSlider) {
