@@ -1123,6 +1123,8 @@
     margin-bottom:10px;
   }
   .blind-room:last-child{margin-bottom:0;}
+  /* Všechny žaluzie stránky najednou — jemně odlišený, jinak jako ostatní boxy */
+  .blind-room-vse{background:rgba(245,147,61,0.09);}
   .blind-room-title{
     font-size:11px;
     font-weight:700;
@@ -6492,6 +6494,94 @@ function renderTahomaSvetla() {
   }
 }
 
+// ---------- Všechny žaluzie stránky najednou ----------
+// Jen okenní žaluzie: garáž (vrata se hromadně otevírat nesmí), pergolu (jezdí
+// obráceně) a spínače (světla) box neovládá.
+function blindsVseNaStrance(items) {
+  return items.filter(b => {
+    const n = normalizeName(b.label) + ' ' + normalizeName(b.room);
+    return b.type === 'cover' && b.uiClass !== 'GarageDoor' && !/garaz|pergol|teras/.test(n);
+  });
+}
+
+// Box za Kuchyní (strana 1) a za Hosty (strana 2)
+const BLINDS_VSE_ZA = { 1: 'kuchyn', 2: 'hoste' };
+
+function renderBlindsVseBox(items) {
+  const block = document.createElement('div');
+  block.className = 'blind-room blind-room-vse';
+  const title = document.createElement('div');
+  title.className = 'blind-room-title';
+  title.textContent = 'Všechny žaluzie';
+  block.appendChild(title);
+  const wrap = document.createElement('div');
+  wrap.className = 'blind-item';
+  const row = document.createElement('div');
+  row.className = 'blind-row';
+  const info = document.createElement('div');
+  info.className = 'blind-info';
+  const label = document.createElement('span');
+  label.className = 'blind-label';
+  label.textContent = `Celá stránka (${items.length})`;
+  info.appendChild(label);
+  const btns = document.createElement('div');
+  btns.className = 'blind-btns';
+
+  const sNaklonem = items.filter(b => b.hasOrientation);
+  let tiltSlider = null;
+  if (sNaklonem.length) {
+    tiltSlider = document.createElement('input');
+    tiltSlider.type = 'range';
+    tiltSlider.min = '0';
+    tiltSlider.max = '100';
+    const zname = sNaklonem.map(b => b.orientation).filter(v => typeof v === 'number');
+    tiltSlider.value = zname.length ? Math.round(zname.reduce((a, v) => a + v, 0) / zname.length) : 50;
+  }
+  const tiltValue = () => (tiltSlider ? Number(tiltSlider.value) : null);
+  // Každá žaluzie svým povelem, paralelně; tlačítka se mezitím vypnou
+  const vsem = (komu, akce, hodnota) => async () => {
+    const tl = [...btns.querySelectorAll('button')];
+    tl.forEach(t => { t.disabled = true; });
+    try {
+      return await Promise.all(komu.map(b => blindCommand(b.deviceURL, akce, b.hasOrientation ? hodnota : null, null)));
+    } finally {
+      tl.forEach(t => { t.disabled = false; });
+    }
+  };
+  btns.appendChild(makeBlindBtn('blind-btn', '▲', () => vsem(items, 'up', tiltValue())()));
+  const sStopem = items.filter(b => b.hasStop);
+  if (sStopem.length) btns.appendChild(makeBlindBtn('blind-btn', '■', () => vsem(sStopem, 'stop', tiltValue())()));
+  else { const sp = document.createElement('span'); sp.className = 'blind-btn-spacer'; btns.appendChild(sp); }
+  btns.appendChild(makeBlindBtn('blind-btn', '▼', () => vsem(items, 'down', tiltValue())()));
+  row.appendChild(info);
+  row.appendChild(btns);
+  wrap.appendChild(row);
+
+  if (tiltSlider) {
+    const tilt = document.createElement('div');
+    tilt.className = 'blind-tilt stred';
+    const val = document.createElement('span');
+    val.className = 'blind-tilt-val';
+    val.textContent = tiltSlider.value + ' %';
+    tiltSlider.addEventListener('input', () => { val.textContent = tiltSlider.value + ' %'; });
+    const ceka = document.createElement('div');
+    ceka.className = 'blind-tilt-ceka';
+    ceka.hidden = true;
+    ceka.textContent = 'Naklopí se po dojetí';
+    tiltSlider.addEventListener('change', async () => {
+      const r = await vsem(sNaklonem, 'orientation', Number(tiltSlider.value))();
+      ceka.hidden = !(r || []).some(x => x && x.ceka);
+    });
+    tilt.appendChild(val);
+    tilt.appendChild(tiltSlider);
+    tilt.appendChild(document.createElement('span'));
+    wrap.appendChild(tilt);
+    wrap.appendChild(ceka);
+  }
+  block.appendChild(wrap);
+  return block;
+}
+
 function renderBlinds() {
   // Uprostřed tažení by se řádek pod prstem postavil znovu a gesto by se přetrhlo
   if (blindDragActive) { blindRenderPending = true; return; }
@@ -6525,10 +6615,13 @@ function renderBlinds() {
   }
 
   const slide2Exists = !!document.getElementById('blindsSlide2');
+  const naStrane = p => (p === 2 && slide2Exists && blindsList2El) ? blindsList2El : blindsList1El;
+  const kresli = new Map();   // listEl -> žaluzie, které ovládá box „Všechny"
   for (const group of rooms) {
-    const listEl = (group.page === 2 && slide2Exists && blindsList2El) ? blindsList2El : blindsList1El;
+    const listEl = naStrane(group.page);
     const block = document.createElement('div');
     block.className = 'blind-room';
+    block.dataset.mistnost = normalizeName(group.room);
     const title = document.createElement('div');
     title.className = 'blind-room-title';
     title.textContent = group.room;
@@ -6537,6 +6630,18 @@ function renderBlinds() {
       block.appendChild(renderBlindRow(b));
     }
     listEl.appendChild(block);
+    if (!kresli.has(listEl)) kresli.set(listEl, { strana: listEl === blindsList2El ? 2 : 1, items: [] });
+    kresli.get(listEl).items.push(...group.items);
+  }
+  // Box „Všechny žaluzie" pro každou stránku — dítě má jen svůj pokoj, tam ne
+  if (!jenPokoj) {
+    for (const [listEl, { strana, items }] of kresli) {
+      const vse = blindsVseNaStrance(items);
+      if (vse.length < 2) continue;
+      const box = renderBlindsVseBox(vse);
+      const za = [...listEl.children].find(el => (el.dataset.mistnost || '').includes(BLINDS_VSE_ZA[strana]));
+      if (za) za.after(box); else listEl.appendChild(box);
+    }
   }
 
   // V dětském režimu zůstává druhá stránka schovaná bez ohledu na obsah —

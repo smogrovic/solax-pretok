@@ -34,7 +34,8 @@ setTimeout(async () => {
   renderBlinds();
 
   R.push('1) Kuchyň má vlastní šedý box');
-  const boxy = n => [...document.getElementById(n).querySelectorAll('.blind-room')]
+  // Boxy místností (box „Všechny žaluzie" má vlastní sekci níž)
+  const boxy = n => [...document.getElementById(n).querySelectorAll('.blind-room:not(.blind-room-vse)')]
     .map(b => b.querySelector('.blind-room-title').textContent);
   check('na první stránce jsou dva boxy', boxy('blindsList1').join(' | '), 'Obývák | Kuchyň');
   check('  a kuchyň je hned pod obývákem', boxy('blindsList1')[1], 'Kuchyň');
@@ -224,6 +225,57 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 30));
   check('„Potvrdit" pošle povel', poslanoG.filter(x => /command/.test(x)).length, 1);
   for (const t of blindsReloadTimers) clearTimeout(t);
+
+  R.push('\\nX) Všechny žaluzie stránky najednou');
+  {
+    const kryt = (label, room, x = {}) => ({ deviceURL: 'io://' + label, label, room, type: 'cover', position: 0,
+      hasOrientation: true, orientation: 40, hasStop: true, ...x });
+    blinds = [
+      kryt('Obývák Okno', 'Obývák', { orientation: 20 }), kryt('Kuchyň', 'Obývák', { orientation: 60 }), kryt('Obývák Dveře', 'Obývák', { orientation: 40 }),
+      kryt('Pergola', 'Terasa'), { deviceURL: 'io://svetlo', label: 'Světlo terasa', room: 'Terasa', type: 'switch' },
+      kryt('Garáž', 'Garáž', { uiClass: 'GarageDoor', hasOrientation: false, hasStop: false }),
+      kryt('Ložnice', 'Ložnice'), kryt('Miky 1', 'Miky', { hasStop: false }), kryt('Miky 2', 'Miky'), kryt('Hosté', 'Hosté'), kryt('Elenka 1', 'Elenka')
+    ];
+    renderBlinds();
+    const poradi = n => [...document.getElementById(n).querySelectorAll('.blind-room')].map(b => b.querySelector('.blind-room-title').textContent);
+    check('strana 1: hned pod Kuchyní', poradi('blindsList1').join(' | '), 'Obývák | Kuchyň | Všechny žaluzie | Terasa | Garáž');
+    check('strana 2: hned pod Hosty', poradi('blindsList2').join(' | '), 'Ložnice | Miky | Elenka | Hosté | Všechny žaluzie');
+    const box = n => document.querySelector('#' + n + ' .blind-room-vse');
+    check('  počet ovládaných (bez pergoly, garáže a světla)', box('blindsList1').querySelector('.blind-label').textContent + ' / '
+      + box('blindsList2').querySelector('.blind-label').textContent, 'Celá stránka (3) / Celá stránka (5)');
+    const jezdec = box('blindsList1').querySelector('input[type=range]');
+    check('jezdec: průměr naklopení', jezdec.value, 40);
+    let poslano = [];
+    window.fetch = async (url, init) => { if (/command/.test(url)) poslano.push(JSON.parse(init.body));
+      return { ok: true, status: 200, json: async () => ({ ok: true, success: true, blinds: [] }) }; };
+    const tl = n => box(n).querySelectorAll('.blind-btn');
+    tl('blindsList1')[0].click();
+    await new Promise(r => setTimeout(r, 30));
+    check('▲ strana 1: up všem třem, nic jiného', poslano.map(p => p.action + ':' + p.deviceURL.slice(5) + ':' + p.value).sort().join(', '),
+      'up:Kuchyň:40, up:Obývák Dveře:40, up:Obývák Okno:40');
+    poslano = [];
+    // Po povelu se box překreslí (ukazatele cílů) — jezdec se bere znovu
+    box('blindsList1').querySelector('input[type=range]').value = 75;
+    tl('blindsList1')[2].click();
+    await new Promise(r => setTimeout(r, 30));
+    check('▼ s naklopením z jezdce', poslano.map(p => p.action + ':' + p.value).join(','), 'down:75,down:75,down:75');
+    poslano = [];
+    tl('blindsList2')[1].click();
+    await new Promise(r => setTimeout(r, 30));
+    check('■ strana 2: jen ty se stopem, strana 1 ne', poslano.map(p => p.action + ':' + p.deviceURL.slice(5)).sort().join(', '),
+      'stop:Elenka 1, stop:Hosté, stop:Ložnice, stop:Miky 2');
+    poslano = [];
+    const j2 = box('blindsList2').querySelector('input[type=range]');
+    j2.value = 10;
+    j2.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 30));
+    check('jezdec po puštění: naklopení všem na stránce', poslano.map(p => p.action + ':' + p.value).join(','), 'orientation:10,'.repeat(5).slice(0, -1));
+    for (const t of blindsReloadTimers) clearTimeout(t);
+    // Méně než dvě žaluzie → box nemá smysl
+    blinds = [kryt('Ložnice', 'Ložnice'), kryt('Pergola', 'Terasa')];
+    renderBlinds();
+    check('jedna žaluzie: box není', document.querySelectorAll('.blind-room-vse').length, 0);
+  }
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
