@@ -245,6 +245,8 @@ setTimeout(async () => {
       + box('blindsList2').querySelector('.blind-label').textContent, 'Celá stránka (3) / Celá stránka (5)');
     const jezdec = box('blindsList1').querySelector('input[type=range]');
     check('jezdec: průměr naklopení', jezdec.value, 40);
+    const prvni = r => r.querySelector('.blind-btn').getBoundingClientRect().left;
+    check('  tlačítka lícují s řádky nad ním', Math.abs(prvni(box('blindsList1')) - prvni(document.querySelector('#blindsList1 .blind-room'))) < 1, true);
     let poslano = [];
     window.fetch = async (url, init) => { if (/command/.test(url)) poslano.push(JSON.parse(init.body));
       return { ok: true, status: 200, json: async () => ({ ok: true, success: true, blinds: [] }) }; };

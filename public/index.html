@@ -6555,6 +6555,11 @@ function renderBlindsVseBox(items) {
   btns.appendChild(makeBlindBtn('blind-btn', '▼', () => vsem(items, 'down', tiltValue())()));
   row.appendChild(info);
   row.appendChild(btns);
+  // Prázdný sloupec místo ukazatele polohy — ať tlačítka lícují s řádky nad ním
+  const misto = document.createElement('div');
+  misto.className = 'blind-meter-col';
+  misto.style.visibility = 'hidden';
+  row.appendChild(misto);
   wrap.appendChild(row);
 
   if (tiltSlider) {
