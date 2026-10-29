@@ -16,7 +16,7 @@ const bezVyjimky = (jmeno, fn) => {
   try { fn(); check(jmeno, 'bez chyby', 'bez chyby'); }
   catch (e) { R.push('CHYBA  ' + jmeno + ' → ' + e.message); }
 };
-setTimeout(() => {
+setTimeout(async () => {
  try {
   const klima = Array.from(document.querySelectorAll('.slide')).find(s => s.dataset.title === 'Klima');
   check('stránka Klima existuje', !!klima, true);
@@ -127,7 +127,58 @@ setTimeout(() => {
     .querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
   const nazev = c => (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
   check('pořadí karet sedí', karty.map(nazev).join(' | '),
-    'seznam klimatizací | Teplota v pokojích (12 h) | Časovač');
+    'seznam klimatizací | Tepelné čerpadlo | Teplota v pokojích (12 h) | Časovač');
+
+  R.push('\\nTepelné čerpadlo');
+  const box = document.getElementById('aquareaBox');
+  check('bez Aquarey box není', box.hidden, true);
+  const AQ = { guid: 'GW-1', name: 'Aquarea', zapnuto: true, ohrevVody: false, tankTemp: 48.2, tankTarget: 50, tankOn: false, tankMin: 40, tankMax: 60,
+    zones: [{ zoneId: 1, name: 'House', temp: 34, target: 2, on: true, min: -5, max: 5, relativni: true }] };
+  airconData = { devices: airconData.devices, aquarea: [JSON.parse(JSON.stringify(AQ))], error: null };
+  renderAircon();
+  check('s Aquareou je vidět pod klimatizacemi', !box.hidden && box.previousElementSibling.querySelector('#airconList') !== null, true);
+  const rezimy = () => [...box.querySelectorAll('.aq-rezimy button')];
+  check('režimy, svítí Topení', rezimy().map(b => b.textContent + (b.classList.contains('active') ? '*' : '')).join(' '), 'Topení* Voda Obojí Vyp.');
+  const zona1 = box.querySelector('[data-zona="1"]');
+  check('topení: posun křivky +2 °C', zona1.querySelector('.temp-val').textContent + ' | ' + zona1.querySelector('.aq-pozn').textContent, '+2 °C | 34,0 °C · posun křivky');
+  check('voda: nádrž a cíl', box.querySelector('.aq-voda .aq-pozn').textContent + ' | ' + box.querySelector('.aq-voda .temp-val').textContent, 'v nádrži 48,2 °C | 50 °C');
+  let poslano = [];
+  window.fetch = async (url, init) => {
+    if (url === '/api/aquarea') poslano.push(JSON.parse(init.body));
+    return { ok: true, status: 200, json: async () => ({ success: true }) };
+  };
+  const pockej = ms => new Promise(r => setTimeout(r, ms));
+  const zona = () => box.querySelector('[data-zona="1"]');
+  const [minus, , plus] = zona().querySelector('.temp-stepper').children;
+  plus.click(); plus.click(); plus.click();
+  check('+ + +: hodnota hned, povel ještě ne', zona().querySelector('.temp-val').textContent + ' ' + poslano.length, '+5 °C 0');
+  check('  na +5 se + vypne', plus.disabled, true);
+  await pockej(300);
+  check('  za 0,3 s pořád čeká na další klepnutí', poslano.length, 0);
+  await pockej(1400);
+  check('  po chvíli jeden povel +5', JSON.stringify(poslano), JSON.stringify([{ guid: 'GW-1', zona: { zoneId: 1, heatSet: 5 } }]));
+  poslano = [];
+  const [m2, , p2] = zona().querySelector('.temp-stepper').children;
+  m2.click(); p2.click();
+  await pockej(1700);
+  check('tam a zpátky = žádný povel', poslano.length, 0);
+  box.querySelectorAll('.aq-rezimy button')[2].click();
+  await pockej(50);
+  check('Obojí → povel režimu', JSON.stringify(poslano.pop()), JSON.stringify({ guid: 'GW-1', rezim: 'oboji' }));
+  box.querySelectorAll('.aq-rezimy button')[3].click();
+  await pockej(50);
+  check('Vyp. se nejdřív zeptá', document.getElementById('potvrzOkno').hidden + ' ' + poslano.length, 'false 0');
+  document.getElementById('potvrzZpet').click();
+  await pockej(50);
+  check('  Zpět nic nepošle', poslano.length, 0);
+  box.querySelector('.aq-hned').click();
+  await pockej(50);
+  check('Ohřát hned', JSON.stringify(poslano.pop()), JSON.stringify({ guid: 'GW-1', ohrevVody: true }));
+  window.fetch = async () => ({ ok: false, status: 502, json: async () => ({ error: 'Panasonic API HTTP 500' }) });
+  box.querySelectorAll('.aq-rezimy button')[1].click();
+  await pockej(50);
+  check('chyba se ukáže v boxu', document.getElementById('aquareaChyba').hidden + ' ' + document.getElementById('aquareaChyba').textContent, 'false Tepelné čerpadlo: Panasonic API HTTP 500');
+  check('nic nepřetéká', box.scrollWidth <= box.clientWidth + 1, true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

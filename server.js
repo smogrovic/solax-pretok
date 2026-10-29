@@ -6499,19 +6499,125 @@ function pccAquareaFromGroup(d) {
   const tankRaw = Array.isArray(d.tankStatus) ? d.tankStatus[0] : d.tankStatus;
   const zonesRaw = Array.isArray(d.zoneStatus) ? d.zoneStatus : [];
   const t = tankRaw || {};
+  const cislo = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   return {
     online: d.connectionStatus === undefined ? null : d.connectionStatus === 1 || d.connectionStatus === '1',
+    // Celé zařízení (kvůli režimu v boxu na Klimě)
+    zapnuto: d.operationStatus === undefined ? null : d.operationStatus === 1,
+    rezimKod: cislo(d.operationMode),
+    ohrevVody: d.forceDHW === undefined ? null : d.forceDHW === 1,
     tankTemp: aquaNum(t.temperatureNow !== undefined ? t.temperatureNow : t.temparatureNow),
     tankTarget: aquaNum(t.heatSet),
     tankOn: t.operationStatus === 1,
-    zones: zonesRaw.map(z => ({
-      name: z.zoneName || ('Zóna ' + (z.zoneId !== undefined ? z.zoneId : '')),
-      temp: aquaNum(z.temperatureNow !== undefined ? z.temperatureNow : z.temparatureNow),
-      target: aquaNum(z.heatSet),
-      on: z.operationStatus === 1
-    }))
+    tankMin: cislo(t.heatMin),
+    tankMax: cislo(t.heatMax),
+    zones: zonesRaw.map((z, i) => {
+      const target = aquaNum(z.heatSet);
+      const min = cislo(z.heatMin), max = cislo(z.heatMax);
+      // Ekvitermní křivka: heatSet je posun −5…+5. Když rozsah nepřijde, pozná se
+      // to podle hodnoty — absolutní cíl topné vody v tomhle rozsahu nebývá.
+      const relativni = min !== null && max !== null ? min >= -10 && max <= 10 : (target !== null && target >= -5 && target <= 5);
+      return {
+        zoneId: cislo(z.zoneId) ?? i + 1,
+        name: z.zoneName || ('Zóna ' + (z.zoneId !== undefined ? z.zoneId : '')),
+        temp: aquaNum(z.temperatureNow !== undefined ? z.temperatureNow : z.temparatureNow),
+        target,
+        on: z.operationStatus === 1,
+        min, max, relativni
+      };
+    })
   };
 }
+
+// ---------- Ovládání tepelného čerpadla (Aquarea) z boxu na Klimě ----------
+// Stejné povely jako integrace pro Home Assistant (aio-panasonic-comfort-cloud):
+// vše jde přes common/transfer na /remote/v1/api/devices.
+const AQ_REZIMY = {
+  topeni: { zona: true, nadrz: false, popis: 'topení' },
+  voda: { zona: false, nadrz: true, popis: 'ohřev vody' },
+  oboji: { zona: true, nadrz: true, popis: 'topení + voda' },
+  vypnuto: { zona: false, nadrz: false, popis: 'vypnuto' }
+};
+const AQ_MODE_HEAT = 2;   // AquareaUpdateOperationMode.Heat
+
+// Režim podle toho, co je zapnuté (pro zobrazení v appce)
+function aquareaRezim(aq) {
+  if (!aq) return null;
+  const zona = (aq.zones || []).some(z => z.on);
+  if (aq.zapnuto === false || (!zona && !aq.tankOn)) return 'vypnuto';
+  return zona && aq.tankOn ? 'oboji' : zona ? 'topeni' : 'voda';
+}
+
+// Režim = jeden povel s CELÝM stavem: zóny i nádrž se v Comfort Cloudu nahrazují,
+// co se nepošle, samo se přepne zpátky (tak to popisuje i knihovna pro HA)
+function aquareaTeloRezimu(aq, rezim) {
+  const r = AQ_REZIMY[rezim];
+  const cokoli = r.zona || r.nadrz;
+  const telo = {
+    operationStatus: cokoli ? 1 : 0,
+    zoneStatus: (aq.zones || []).map(z => ({ zoneId: z.zoneId, operationStatus: r.zona ? 1 : 0 })),
+    tankStatus: { operationStatus: r.nadrz ? 1 : 0 }
+  };
+  if (cokoli) telo.operationMode = AQ_MODE_HEAT;
+  return telo;
+}
+
+async function aquareaPovel(guid, bodyParam) {
+  await pccQueued(() => pccApiFetch('/remote/v1/app/common/transfer', {
+    method: 'POST',
+    body: JSON.stringify({ apiName: '/remote/v1/api/devices', requestMethod: 'POST', bodyParam: { gwid: guid, ...bodyParam } })
+  }));
+  pccDevCache.ts = 0;   // příští načtení vezme čerstvý stav
+}
+
+app.post('/api/aquarea', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const b = req.body || {};
+  const seznam = (state.aircon && state.aircon.aquarea) || [];
+  const aq = seznam.find(x => x.guid === b.guid);
+  if (!aq) return res.status(400).json({ error: 'Neznámé tepelné čerpadlo.' });
+  const cele = v => (Number.isInteger(Number(v)) && v !== '' && v !== null ? Number(v) : null);
+  let telo, uprav, log = null;
+  if (b.rezim !== undefined) {
+    if (!AQ_REZIMY[b.rezim]) return res.status(400).json({ error: 'Neznámý režim.' });
+    const r = AQ_REZIMY[b.rezim];
+    telo = aquareaTeloRezimu(aq, b.rezim);
+    uprav = () => { for (const z of aq.zones || []) z.on = r.zona; aq.tankOn = r.nadrz; aq.zapnuto = r.zona || r.nadrz; };
+    log = `Tepelné čerpadlo: ${r.popis}`;
+  } else if (b.zona !== undefined) {
+    const z = (aq.zones || []).find(x => x.zoneId === Number(b.zona && b.zona.zoneId));
+    if (!z) return res.status(400).json({ error: 'Neznámá zóna.' });
+    const v = cele(b.zona.heatSet);
+    const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
+    if (v === null || v < min || v > max) {
+      return res.status(400).json({ error: z.relativni ? `Posun musí být ${min} až +${max} °C.` : `Teplota musí být ${min}–${max} °C.` });
+    }
+    telo = { zoneStatus: [{ zoneId: z.zoneId, heatSet: v }] };
+    uprav = () => { z.target = v; };
+  } else if (b.nadrz !== undefined) {
+    const v = cele(b.nadrz);
+    const min = aq.tankMin ?? 40, max = aq.tankMax ?? 65;
+    if (v === null || v < min || v > max) return res.status(400).json({ error: `Teplota vody musí být ${min}–${max} °C.` });
+    telo = { tankStatus: { heatSet: v } };
+    uprav = () => { aq.tankTarget = v; };
+  } else if (b.ohrevVody !== undefined) {
+    const zap = b.ohrevVody === true;
+    telo = { forceDHW: zap ? 1 : 0 };
+    uprav = () => { aq.ohrevVody = zap; };
+    log = zap ? 'Tepelné čerpadlo: ohřát vodu hned' : 'Tepelné čerpadlo: ohřev vody hned zrušen';
+  } else {
+    return res.status(400).json({ error: 'Žádná změna.' });
+  }
+  try {
+    await aquareaPovel(aq.guid, telo);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  uprav();
+  broadcast('aircon', { aircon: state.aircon });
+  if (log) addLog(log);
+  res.json({ success: true, aquarea: aq });
+});
 
 // Diagnostika: struktura skupin a zařízení z Comfort Cloudu (bez parametrů a celých GUID)
 // + surové odpovědi Aquarea stavu pro ladění Tepelka
@@ -6527,7 +6633,10 @@ app.get('/api/aircon/debug', async (req, res) => {
         guidPrefix: String(d.deviceGuid || '').slice(0, 10) + '…',
         deviceType: d.deviceType,
         hasParameters: !!d.parameters,
-        keys: Object.keys(d)
+        keys: Object.keys(d),
+        // Aquarea: surové zóny a nádrž (kvůli heatMin/heatMax a režimům)
+        ...(d.parameters ? {} : { operationStatus: d.operationStatus, operationMode: d.operationMode, forceDHW: d.forceDHW,
+          zoneStatus: d.zoneStatus, tankStatus: d.tankStatus })
       }))
     }));
 

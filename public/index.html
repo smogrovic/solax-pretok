@@ -1346,6 +1346,18 @@
   }
   .mode-btn:disabled{opacity:0.5;}
   .mode-btn.active{background:var(--orange);color:#fff;}
+  .aq-card[hidden]{display:none;}
+  .aq-card #aquareaObsah, .aq-card .aq-chyba{align-self:stretch;width:100%;box-sizing:border-box;}
+  .aq-rezimy{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:4px 0 10px;}
+  .aq-rezimy .mode-btn{padding:9px 4px;font-size:13px;}
+  .aq-radek{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid rgba(44,62,80,0.06);}
+  .aq-info{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .aq-nazev{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;}
+  .aq-pozn{font-size:12px;color:var(--grey-text);white-space:nowrap;}
+  .aq-hned-radek{display:flex;justify-content:flex-end;padding-bottom:2px;}
+  .aq-prave{display:flex;align-items:center;gap:8px;}
+  .aq-prave .temp-val{min-width:58px;text-align:center;}
+  .aq-chyba{font-size:12px;color:#c0392b;margin-top:6px;}
   .asszistant-card{align-items:stretch;}
   .asst-reply{
     font-size:14px;
@@ -2803,6 +2815,13 @@
         <div class="blinds-list" id="airconList">
           <div class="log-empty">Načítám klimatizace…</div>
         </div>
+      </div>
+
+      <!-- Tepelné čerpadlo (Panasonic Aquarea): režim, posun topení, voda -->
+      <div class="card lockable aq-card" id="aquareaBox" data-emoji="♨️" hidden>
+        <div class="graph-title">Tepelné čerpadlo</div>
+        <div id="aquareaObsah"></div>
+        <div class="aq-chyba" id="aquareaChyba" hidden></div>
       </div>
 
       <button class="sbal-btn" data-sbal="klima" type="button" aria-expanded="false">Teplota v pokojích<i>▾</i></button>
@@ -7566,7 +7585,141 @@ airconListEl.addEventListener('focusout', () => {
   }, 0);
 });
 
+// ---------- Tepelné čerpadlo (Aquarea) ----------
+// Klepání na −/+ se sčítá a povel odejde až chvíli po posledním klepnutí —
+// Comfort Cloud nemá rád salvu povelů a stejně je zpracovává po jednom.
+const AQ_ODKLAD_MS = 1500;
+const aquareaBoxEl = document.getElementById('aquareaBox');
+const aquareaObsahEl = document.getElementById('aquareaObsah');
+const aquareaChybaEl = document.getElementById('aquareaChyba');
+const aqCeka = {};   // klíč (zona-1 / nadrz) -> { hodnota, timer }
+const AQ_REZIMY_UI = [['topeni', 'Topení'], ['voda', 'Voda'], ['oboji', 'Obojí'], ['vypnuto', 'Vyp.']];
+
+function aquareaRezimUi(aq) {
+  const zona = (aq.zones || []).some(z => z.on);
+  if (aq.zapnuto === false || (!zona && !aq.tankOn)) return 'vypnuto';
+  return zona && aq.tankOn ? 'oboji' : zona ? 'topeni' : 'voda';
+}
+
+async function aquareaPost(aq, telo) {
+  if (aquareaChybaEl) aquareaChybaEl.hidden = true;
+  try {
+    const res = await fetch('/api/aquarea', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ guid: aq.guid, ...telo })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Povel se nepodařilo odeslat.');
+    if (data.aquarea) Object.assign(aq, data.aquarea);
+    return true;
+  } catch (err) {
+    if (aquareaChybaEl) { aquareaChybaEl.textContent = 'Tepelné čerpadlo: ' + err.message; aquareaChybaEl.hidden = false; }
+    return false;
+  } finally {
+    renderAquarea();
+  }
+}
+
+// Stepper: hodnota, rozsah, formát; povel odchází s odkladem
+function aquareaKrokovac(klic, hodnota, min, max, format, odeslat) {
+  const box = document.createElement('div');
+  box.className = 'temp-stepper';
+  const ceka = aqCeka[klic];
+  const ted = ceka ? ceka.hodnota : hodnota;
+  const minus = document.createElement('button');
+  minus.className = 'temp-btn';
+  minus.textContent = '−';
+  const val = document.createElement('span');
+  val.className = 'temp-val';
+  val.textContent = typeof ted === 'number' ? format(ted) : '–';
+  const plus = document.createElement('button');
+  plus.className = 'temp-btn';
+  plus.textContent = '+';
+  minus.disabled = typeof ted !== 'number' || ted <= min;
+  plus.disabled = typeof ted !== 'number' || ted >= max;
+  const krok = smer => {
+    const c = aqCeka[klic] || { hodnota: ted };
+    const nova = Math.min(max, Math.max(min, c.hodnota + smer));
+    if (nova === c.hodnota) return;
+    clearTimeout(c.timer);
+    c.hodnota = nova;
+    c.timer = setTimeout(() => {
+      delete aqCeka[klic];
+      if (nova !== hodnota) odeslat(nova); else renderAquarea();
+    }, AQ_ODKLAD_MS);
+    aqCeka[klic] = c;
+    val.textContent = format(nova);
+    minus.disabled = nova <= min;
+    plus.disabled = nova >= max;
+  };
+  minus.addEventListener('click', () => krok(-1));
+  plus.addEventListener('click', () => krok(1));
+  box.append(minus, val, plus);
+  return box;
+}
+
+function renderAquarea() {
+  if (!aquareaBoxEl) return;
+  const aq = (airconData && airconData.aquarea || [])[0];
+  aquareaBoxEl.hidden = !aq;
+  if (!aq) return;
+  aquareaObsahEl.textContent = '';
+  const el = (tag, cls, rodic, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    rodic.appendChild(e);
+    return e;
+  };
+  // Režim
+  const rezim = aquareaRezimUi(aq);
+  const rezimy = el('div', 'aq-rezimy', aquareaObsahEl);
+  for (const [klic, popis] of AQ_REZIMY_UI) {
+    const b = el('button', 'mode-btn' + (rezim === klic ? ' active' : ''), rezimy, popis);
+    b.type = 'button';
+    b.dataset.rezim = klic;
+    b.addEventListener('click', async () => {
+      if (klic === rezim) return;
+      if (klic === 'vypnuto' && !(await zeptejSe('Vypnout tepelné čerpadlo?', 'Přestane topit i ohřívat vodu.'))) return;
+      rezimy.querySelectorAll('button').forEach(x => { x.disabled = true; });
+      aquareaPost(aq, { rezim: klic });
+    });
+  }
+  // Topení: zóny s posunem křivky (nebo cílovou teplotou)
+  for (const z of aq.zones || []) {
+    const r = el('div', 'aq-radek', aquareaObsahEl);
+    r.dataset.zona = z.zoneId;
+    const info = el('div', 'aq-info', r);
+    const n = el('div', 'aq-nazev', info);
+    el('div', 'traffic-light' + (z.on ? ' on' : ' off'), n);
+    el('span', '', n, 'Topení' + (aq.zones.length > 1 ? ' · ' + z.name : ''));
+    el('div', 'aq-pozn', info, (typeof z.temp === 'number' ? fmtTemp(z.temp) + ' · ' : '') + (z.relativni ? 'posun křivky' : 'cílová teplota'));
+    const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
+    const format = z.relativni ? v => (v > 0 ? '+' : '') + v + ' °C' : v => v + ' °C';
+    el('div', 'aq-prave', r).appendChild(aquareaKrokovac('zona-' + z.zoneId, z.target, min, max, format,
+      v => aquareaPost(aq, { zona: { zoneId: z.zoneId, heatSet: v } })));
+  }
+  // Voda v nádrži
+  if (typeof aq.tankTemp === 'number' || typeof aq.tankTarget === 'number') {
+    const r = el('div', 'aq-radek aq-voda', aquareaObsahEl);
+    const info = el('div', 'aq-info', r);
+    const n = el('div', 'aq-nazev', info);
+    el('div', 'traffic-light' + (aq.tankOn ? ' on' : ' off'), n);
+    el('span', '', n, 'Voda');
+    el('div', 'aq-pozn', info, (typeof aq.tankTemp === 'number' ? 'v nádrži ' + fmtTemp(aq.tankTemp) : 'nádrž'));
+    const prave = el('div', 'aq-prave', r);
+    prave.appendChild(aquareaKrokovac('nadrz', aq.tankTarget, aq.tankMin ?? 40, aq.tankMax ?? 65, v => v + ' °C',
+      v => aquareaPost(aq, { nadrz: v })));
+    // Na vlastním řádku — vedle krokovače by se na telefonu nevešlo
+    const hned = el('button', 'mode-btn aq-hned' + (aq.ohrevVody ? ' active' : ''), el('div', 'aq-hned-radek', aquareaObsahEl), 'Ohřát vodu hned');
+    hned.type = 'button';
+    hned.addEventListener('click', () => { hned.disabled = true; aquareaPost(aq, { ohrevVody: !aq.ohrevVody }); });
+  }
+}
+
 function renderAircon() {
+  bezpecne(renderAquarea);
   const busySelect = document.activeElement && document.activeElement.tagName === 'SELECT'
     && airconListEl.contains(document.activeElement);
   if (busySelect || tempWheelOpen) {
@@ -7724,8 +7877,8 @@ function renderAircon() {
     airconListEl.appendChild(wrap);
   }
 
-  // Tepelné čerpadlo (Aquarea) se na stránce Klima nezobrazuje —
-  // teplota nádrže bojleru je na stránce FVE jako „Bojler 1 (TČ)".
+  // Teplota nádrže je i na stránce FVE jako „Bojler 1 (TČ)"; ovládání je v boxu
+  // Tepelné čerpadlo pod klimatizacemi (renderAquarea)
   renderBoilers();
 
   renderTimerDeviceOptions();
