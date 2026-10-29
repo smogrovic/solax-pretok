@@ -538,6 +538,7 @@ function snapshot() {
     weather: state.weather,
     pocasiDnes: state.pocasiDnes || null,
     pocasiPoloha: { lat: WEATHER_LAT, lon: WEATHER_LON },
+    aquareaProgram: state.aquareaProgram,
     runtime: runtimePayload(),
     pvDays: state.pvDays,
     wbDays: state.wbDays,
@@ -4711,6 +4712,8 @@ async function runAutomation() {
     // Předpověď i pro zobrazení (počasí na kalendáři) — nezávisle na zimě, sauně
     // i hlavním vypínači; solinátor ji pak bere z cache (dotaz nejvýš jednou za hodinu)
     await refreshForecast();
+    // Program tepelného čerpadla je jeho vlastní plán — běží i s vypnutou automatikou
+    try { await runAquareaProgram(); } catch (err) { addLog(`Tepelné čerpadlo (program): ${err.message}`, 'error'); }
 
     // „Nejsme doma" jede i při vypnuté automatice — je to tvoje jednorázové rozhodnutí,
     // ne automatika na pozadí, a zamčený dům se nesmí ztratit kvůli poloze vypínače
@@ -6595,54 +6598,223 @@ async function aquareaPovel(guid, bodyParam) {
   pccDevCache.ts = 0;   // příští načtení vezme čerstvý stav
 }
 
+// Jedna akce (režim, posun zóny, voda, ohřát hned) → { telo, uprav, log } nebo { chyba }.
+// Stejné pro box na Klimě, program i „Nejsme doma".
+function aquareaAkce(aq, b) {
+  const cele = v => (Number.isInteger(Number(v)) && v !== '' && v !== null ? Number(v) : null);
+  if (b.rezim !== undefined) {
+    if (!AQ_REZIMY[b.rezim]) return { chyba: 'Neznámý režim.' };
+    const r = AQ_REZIMY[b.rezim];
+    return {
+      telo: aquareaTeloRezimu(aq, b.rezim),
+      uprav: () => { for (const z of aq.zones || []) if (z.pouzita !== false) z.on = r.zona; aq.tankOn = r.nadrz; aq.zapnuto = r.zona || r.nadrz; },
+      log: `Tepelné čerpadlo: ${r.popis}`
+    };
+  }
+  if (b.zona !== undefined) {
+    const z = (aq.zones || []).find(x => x.zoneId === Number(b.zona && b.zona.zoneId) && x.pouzita !== false);
+    if (!z) return { chyba: 'Neznámá zóna.' };
+    const v = cele(b.zona.heatSet);
+    const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
+    if (v === null || v < min || v > max) {
+      return { chyba: z.relativni ? `Posun musí být ${min} až +${max} °C.` : `Teplota musí být ${min}–${max} °C.` };
+    }
+    return { telo: { zoneStatus: [{ zoneId: z.zoneId, heatSet: v }] }, uprav: () => { z.target = v; }, log: null };
+  }
+  if (b.nadrz !== undefined) {
+    const v = cele(b.nadrz);
+    const min = aq.tankMin ?? 40, max = aq.tankMax ?? 65;
+    if (v === null || v < min || v > max) return { chyba: `Teplota vody musí být ${min}–${max} °C.` };
+    return { telo: { tankStatus: { heatSet: v } }, uprav: () => { aq.tankTarget = v; }, log: null };
+  }
+  if (b.ohrevVody !== undefined) {
+    const zap = b.ohrevVody === true;
+    return { telo: { forceDHW: zap ? 1 : 0 }, uprav: () => { aq.ohrevVody = zap; },
+      log: zap ? 'Tepelné čerpadlo: ohřát vodu hned' : 'Tepelné čerpadlo: ohřev vody hned zrušen' };
+  }
+  return { chyba: 'Žádná změna.' };
+}
+
+// Provede akci: povel, úprava stavu, appka, log. `log: false` = log píše volající.
+async function aquareaProvest(aq, b, { log = true } = {}) {
+  const a = aquareaAkce(aq, b);
+  if (a.chyba) throw Object.assign(new Error(a.chyba), { status: 400 });
+  await aquareaPovel(aq.guid, a.telo);
+  a.uprav();
+  broadcast('aircon', { aircon: state.aircon });
+  if (log && a.log) addLog(a.log);
+}
+
+const aquareaPrvni = () => ((state.aircon && state.aircon.aquarea) || [])[0] || null;
+const aquareaZona = aq => (aq && (aq.zones || []).find(z => z.pouzita !== false)) || null;
+
 app.post('/api/aquarea', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const b = req.body || {};
   const seznam = (state.aircon && state.aircon.aquarea) || [];
   const aq = seznam.find(x => x.guid === b.guid);
   if (!aq) return res.status(400).json({ error: 'Neznámé tepelné čerpadlo.' });
-  const cele = v => (Number.isInteger(Number(v)) && v !== '' && v !== null ? Number(v) : null);
-  let telo, uprav, log = null;
-  if (b.rezim !== undefined) {
-    if (!AQ_REZIMY[b.rezim]) return res.status(400).json({ error: 'Neznámý režim.' });
-    const r = AQ_REZIMY[b.rezim];
-    telo = aquareaTeloRezimu(aq, b.rezim);
-    uprav = () => { for (const z of aq.zones || []) if (z.pouzita !== false) z.on = r.zona; aq.tankOn = r.nadrz; aq.zapnuto = r.zona || r.nadrz; };
-    log = `Tepelné čerpadlo: ${r.popis}`;
-  } else if (b.zona !== undefined) {
-    const z = (aq.zones || []).find(x => x.zoneId === Number(b.zona && b.zona.zoneId) && x.pouzita !== false);
-    if (!z) return res.status(400).json({ error: 'Neznámá zóna.' });
-    const v = cele(b.zona.heatSet);
-    const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
-    if (v === null || v < min || v > max) {
-      return res.status(400).json({ error: z.relativni ? `Posun musí být ${min} až +${max} °C.` : `Teplota musí být ${min}–${max} °C.` });
-    }
-    telo = { zoneStatus: [{ zoneId: z.zoneId, heatSet: v }] };
-    uprav = () => { z.target = v; };
-  } else if (b.nadrz !== undefined) {
-    const v = cele(b.nadrz);
-    const min = aq.tankMin ?? 40, max = aq.tankMax ?? 65;
-    if (v === null || v < min || v > max) return res.status(400).json({ error: `Teplota vody musí být ${min}–${max} °C.` });
-    telo = { tankStatus: { heatSet: v } };
-    uprav = () => { aq.tankTarget = v; };
-  } else if (b.ohrevVody !== undefined) {
-    const zap = b.ohrevVody === true;
-    telo = { forceDHW: zap ? 1 : 0 };
-    uprav = () => { aq.ohrevVody = zap; };
-    log = zap ? 'Tepelné čerpadlo: ohřát vodu hned' : 'Tepelné čerpadlo: ohřev vody hned zrušen';
-  } else {
-    return res.status(400).json({ error: 'Žádná změna.' });
-  }
   try {
-    await aquareaPovel(aq.guid, telo);
+    await aquareaProvest(aq, b);
   } catch (err) {
-    return res.status(502).json({ error: err.message });
+    return res.status(err.status || 502).json({ error: err.message });
   }
-  uprav();
-  broadcast('aircon', { aircon: state.aircon });
-  if (log) addLog(log);
   res.json({ success: true, aquarea: aq });
 });
+
+// ---------- Program tepelného čerpadla (místo plánu v appce Panasonic) ----------
+// Stejný každý den. Úsek platí od svého času do začátku dalšího. Povel jde jen
+// při přechodu do nového úseku — ruční změna v boxu tak platí do dalšího úseku
+// a s programem se nic nepere. Výchozí podle plánu, který byl v Panasonicu.
+// Po nasazení vypnutý: plán v Panasonicu se musí nejdřív vypnout.
+const AQ_PROGRAM_MAX = 12;
+function aquareaProgramVychozi() {
+  return {
+    zapnuto: false,
+    topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }, { od: '17:00', posun: 0 }],
+    voda: [{ od: '00:00', teplota: 43 }, { od: '06:00', teplota: null }, { od: '09:00', teplota: 43 }]
+  };
+}
+if (!state.aquareaProgram) state.aquareaProgram = aquareaProgramVychozi();
+let aquareaProgramKlic = '';   // den + úseky, které už se provedly
+
+// Ověří program z appky/zálohy → { program } nebo { chyba }
+function aquareaProgramOver(p) {
+  if (!p || typeof p !== 'object') return { chyba: 'Chybí program.' };
+  const seznam = (rady, hodnota, nazev) => {
+    if (!Array.isArray(rady) || !rady.length || rady.length > AQ_PROGRAM_MAX) return { chyba: `${nazev}: 1–${AQ_PROGRAM_MAX} úseků.` };
+    const out = [];
+    for (const r of rady) {
+      const m = /^([01]\d|2[0-3]):(00|15|30|45)$/.exec(String(r && r.od || ''));
+      if (!m) return { chyba: `${nazev}: čas musí být po čtvrthodinách (HH:MM).` };
+      const v = hodnota(r);
+      if (v === undefined) return { chyba: `${nazev}: neplatná hodnota v ${r.od}.` };
+      out.push({ od: r.od, v });
+    }
+    out.sort((a, b) => a.od.localeCompare(b.od));
+    if (out[0].od !== '00:00') return { chyba: `${nazev}: první úsek musí začínat v 00:00.` };
+    if (out.some((r, i) => i && r.od === out[i - 1].od)) return { chyba: `${nazev}: dva úseky ve stejný čas.` };
+    return { out };
+  };
+  const t = seznam(p.topeni, r => (Number.isInteger(r.posun) && r.posun >= -5 && r.posun <= 5 ? r.posun : undefined), 'Topení');
+  if (t.chyba) return t;
+  const v = seznam(p.voda, r => (r.teplota === null ? null : Number.isInteger(r.teplota) && r.teplota >= 40 && r.teplota <= 60 ? r.teplota : undefined), 'Voda');
+  if (v.chyba) return v;
+  return { program: { zapnuto: p.zapnuto === true,
+    topeni: t.out.map(r => ({ od: r.od, posun: r.v })), voda: v.out.map(r => ({ od: r.od, teplota: r.v })) } };
+}
+
+// Aktuální úsek obou seznamů (pražský čas) → { topeni, voda, klic }
+function aquareaProgramUsek(program, now = Date.now()) {
+  const pt = pragueTime(now);
+  const ted = String(pt.hour).padStart(2, '0') + ':' + String(pt.minute).padStart(2, '0');
+  const najdi = rady => rady.filter(r => r.od <= ted).pop() || rady[0];
+  const topeni = najdi(program.topeni), voda = najdi(program.voda);
+  return { topeni, voda, klic: `${pragueDateString(now)} ${topeni.od} ${voda.od}` };
+}
+
+// Co udělat, aby čerpadlo odpovídalo úseku → seznam akcí pro aquareaProvest
+function aquareaProgramKroky(aq, usek) {
+  const kroky = [];
+  const zona = aquareaZona(aq);
+  const topi = !!(zona && zona.on);
+  const vodaChci = usek.voda.teplota !== null;
+  // Voda: zapnout/vypnout nádrž jde přes režim (zóny a nádrž se posílají spolu)
+  if (vodaChci !== !!aq.tankOn) {
+    kroky.push({ rezim: vodaChci ? (topi ? 'oboji' : 'voda') : (topi ? 'topeni' : 'vypnuto') });
+  }
+  if (vodaChci && aq.tankTarget !== usek.voda.teplota) kroky.push({ nadrz: usek.voda.teplota });
+  // Topení jen když topí — v létě je vypnuté a program na něj nesahá
+  if (topi && zona.target !== usek.topeni.posun) kroky.push({ zona: { zoneId: zona.zoneId, heatSet: usek.topeni.posun } });
+  return kroky;
+}
+
+async function runAquareaProgram(now = Date.now()) {
+  const program = state.aquareaProgram;
+  const aq = aquareaPrvni();
+  if (!program || !program.zapnuto || !aq || awayActive(now)) return;
+  const usek = aquareaProgramUsek(program, now);
+  if (usek.klic === aquareaProgramKlic) return;
+  aquareaProgramKlic = usek.klic;
+  const kroky = aquareaProgramKroky(aq, usek);
+  if (!kroky.length) return;
+  const hotovo = [];
+  for (const k of kroky) {
+    try {
+      await aquareaProvest(aq, k, { log: false });
+      hotovo.push(k.rezim ? AQ_REZIMY[k.rezim].popis : k.nadrz !== undefined ? `voda ${k.nadrz} °C`
+        : `topení ${k.zona.heatSet > 0 ? '+' : ''}${k.zona.heatSet} °C`);
+    } catch (err) {
+      hotovo.push(`chyba (${String(err.message).slice(0, 60)})`);
+      aquareaProgramKlic = '';   // zkusí se znovu při dalším běhu
+      break;
+    }
+  }
+  addLog(`Tepelné čerpadlo (program): ${hotovo.join(', ')}`);
+}
+
+app.post('/api/aquarea/program', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const o = aquareaProgramOver(req.body && req.body.program);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  const zapnul = o.program.zapnuto && !(state.aquareaProgram && state.aquareaProgram.zapnuto);
+  state.aquareaProgram = o.program;
+  state.aquareaProgramUpraveno = true;
+  aquareaProgramKlic = '';   // nový program se hned dorovná
+  broadcast('aquareaProgram', { aquareaProgram: state.aquareaProgram });
+  if (zapnul) addLog('Tepelné čerpadlo: program zapnut');
+  try { await runAquareaProgram(); } catch {}
+  res.json({ ok: true, aquareaProgram: state.aquareaProgram });
+});
+
+app.post('/api/aquarea/program/restore', (req, res) => {
+  const o = aquareaProgramOver(req.body && req.body.program);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  if (!state.aquareaProgramUpraveno) {
+    state.aquareaProgram = o.program;
+    broadcast('aquareaProgram', { aquareaProgram: state.aquareaProgram });
+  }
+  res.json({ ok: true });
+});
+
+// ---- „Nejsme doma" a tepelné čerpadlo ----
+// Odchod: voda vypnutá; topí-li se, posun křivky na minimum (−5). Netopí-li se
+// (léto), zůstane vypnuté. Návrat: zpátky, jak bylo.
+function aquareaOdchodPlan(aq) {
+  const zona = aquareaZona(aq);
+  const pred = { guid: aq.guid, rezim: aquareaRezim(aq), posun: zona && typeof zona.target === 'number' ? zona.target : null };
+  const kroky = [];
+  if (pred.rezim === 'oboji' || pred.rezim === 'topeni') {
+    if (pred.rezim === 'oboji') kroky.push({ rezim: 'topeni' });
+    const min = zona ? (zona.min ?? -5) : -5;
+    if (zona && zona.target !== min) kroky.push({ zona: { zoneId: zona.zoneId, heatSet: min } });
+  } else if (pred.rezim === 'voda') {
+    kroky.push({ rezim: 'vypnuto' });
+  }
+  return { pred, kroky };
+}
+
+function aquareaNavratPlan(pred, aq) {
+  const kroky = [];
+  if (!pred || !AQ_REZIMY[pred.rezim]) return kroky;
+  if (aquareaRezim(aq) !== pred.rezim) kroky.push({ rezim: pred.rezim });
+  const zona = aquareaZona(aq);
+  if (zona && typeof pred.posun === 'number' && (pred.rezim === 'oboji' || pred.rezim === 'topeni') && zona.target !== pred.posun) {
+    kroky.push({ zona: { zoneId: zona.zoneId, heatSet: pred.posun } });
+  }
+  return kroky;
+}
+
+// Provede kroky jeden po druhém → popis pro log, nebo null když nebylo co dělat
+async function aquareaKrokyProvest(aq, kroky) {
+  if (!kroky.length) return null;
+  const hotovo = [];
+  for (const k of kroky) {
+    await aquareaProvest(aq, k, { log: false });
+    hotovo.push(k.rezim ? AQ_REZIMY[k.rezim].popis : `topení ${k.zona.heatSet > 0 ? '+' : ''}${k.zona.heatSet} °C`);
+  }
+  return `tepelné čerpadlo: ${hotovo.join(', ')}`;
+}
 
 // Diagnostika: struktura skupin a zařízení z Comfort Cloudu (bez parametrů a celých GUID)
 // + surové odpovědi Aquarea stavu pro ladění Tepelka
@@ -11058,6 +11230,13 @@ async function awayOdchod() {
   for (const dev of (state.aircon.devices || [])) {
     if (dev.power) await zkus(`${dev.name} vypnuta`, async () => { await assistantSetAircon({ room: dev.name, power: 'off' }); return `${dev.name} vypnuta`; });
   }
+  // Tepelné čerpadlo: voda vypnout, topení (když topí) na −5; po návratu zpátky
+  const aqOd = aquareaPrvni();
+  if (aqOd) {
+    const plan = aquareaOdchodPlan(aqOd);
+    state.away.aquareaPred = plan.pred;
+    if (plan.kroky.length) await zkus('tepelné čerpadlo', () => aquareaKrokyProvest(aqOd, plan.kroky));
+  }
   // Zatáhnout a zaklopit do zavřeno jde jedním povelem — blindCommand to u žaluzií
   // pošle atomicky, zřetězené povely by si pohyb přerušily
   if (tahomaEnabled) await zkus('žaluzie zataženy', async () => { await assistantControlBlinds({ target: 'vše', action: 'down', orientation: ZALUZIE_ZAVRENO }); return 'žaluzie zataženy a zaklopeny'; });
@@ -11110,11 +11289,26 @@ const AWAY_NAVRAT_CEKANI_MS = 5000;
 async function awayNavrat(pred) {
   // Jezdec posílá „doma" a režim dvěma povely — na Vypnuto se nic obnovovat nemá
   await delay(AWAY_NAVRAT_CEKANI_MS);
-  if (awayOn() || !autoRunning()) return;
+  if (awayOn()) return;
   const kroky = [];
   const zkus = async (popis, fn) => {
     try { const r = await fn(); if (r) kroky.push(r); } catch (err) { kroky.push(`${popis} selhalo (${String(err.message).slice(0, 60)})`); }
   };
+  // Tepelné čerpadlo zpátky i s vypnutou automatikou — je to tvoje nastavení,
+  // ne automatika. Program pak hned dorovná aktuální úsek.
+  const aqZpet = aquareaPrvni();
+  if (aqZpet && pred.aquareaPred && pred.aquareaPred.guid === aqZpet.guid) {
+    await zkus('tepelné čerpadlo', async () => {
+      const r = await aquareaKrokyProvest(aqZpet, aquareaNavratPlan(pred.aquareaPred, aqZpet));
+      aquareaProgramKlic = '';
+      await runAquareaProgram();
+      return r ? r.replace('tepelné čerpadlo:', 'tepelné čerpadlo zpátky:') : null;
+    });
+  }
+  if (!autoRunning()) {
+    if (kroky.length) addLog(`Jsme doma: ${kroky.join(', ')}`);
+    return;
+  }
   const vratit = (pred.tempAutoPred || []).filter(k => state.tempAuto && state.tempAuto[k] === false);
   if (vratit.length) {
     await zkus('klima', async () => {
@@ -11160,6 +11354,11 @@ app.post('/api/away/restore', (req, res) => {
       ? req.body.tempAutoPred.filter(k => typeof k === 'string' && Object.prototype.hasOwnProperty.call(state.tempAuto || {}, k))
       : undefined;
     state.away = pred ? { since, tempAutoPred: pred } : { since };
+    const aqp = req.body.aquareaPred;
+    if (aqp && typeof aqp === 'object' && typeof aqp.guid === 'string' && AQ_REZIMY[aqp.rezim]) {
+      state.away.aquareaPred = { guid: aqp.guid.slice(0, 100), rezim: aqp.rezim,
+        posun: Number.isInteger(aqp.posun) && aqp.posun >= -10 && aqp.posun <= 60 ? aqp.posun : null };
+    }
     broadcast('away', awayPayload());
   }
   res.json(awayPayload());
@@ -11184,6 +11383,7 @@ const STORE_TIMEOUT_MS = 8000;
 // mít pod sebou hotová data.
 const STORE_POSTS = [
   '/api/automation/restore',
+  '/api/aquarea/program/restore',
   '/api/tempauto/restore',
   '/api/pool/force/restore',
   '/api/pool/temp/restore',
@@ -11234,7 +11434,9 @@ function storeSnapshot() {
     },
     '/api/pool/force/restore': { until: state.poolForce.until },
     '/api/pool/temp/restore': { c: state.poolTemp.c, at: state.poolTemp.at },
-    '/api/away/restore': { since: (state.away && state.away.since) || 0, tempAutoPred: (state.away && state.away.tempAutoPred) || [] },
+    '/api/away/restore': { since: (state.away && state.away.since) || 0, tempAutoPred: (state.away && state.away.tempAutoPred) || [],
+      aquareaPred: (state.away && state.away.aquareaPred) || null },
+    '/api/aquarea/program/restore': { program: state.aquareaProgram },
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },
     '/api/boiler-history/restore': { points: state.boilerHistory },

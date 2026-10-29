@@ -127,7 +127,7 @@ setTimeout(async () => {
     .querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
   const nazev = c => (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
   check('pořadí karet sedí', karty.map(nazev).join(' | '),
-    'seznam klimatizací | Tepelné čerpadlo | Teplota v pokojích (12 h) | Časovač');
+    'seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Časovač');
 
   R.push('\\nTepelné čerpadlo');
   const box = document.getElementById('aquareaBox');
@@ -188,6 +188,58 @@ setTimeout(async () => {
   check('bez cíle: „cíl se načítá“ a −/+ vypnuté', box.querySelector('[data-zona="1"] .aq-pozn').textContent + ' | '
     + box.querySelector('.aq-voda .aq-pozn').textContent + ' | ' + [...box.querySelectorAll('.temp-btn')].every(b => b.disabled),
     '34,0 °C · cíl se načítá | v nádrži 48,2 °C · cíl se načítá | true');
+
+  R.push('\\nProgram tepelného čerpadla');
+  const pbox = document.getElementById('aqProgramBox');
+  check('bez programu ze serveru box není', pbox.hidden, true);
+  const PROG = { zapnuto: false, topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }, { od: '17:00', posun: 0 }],
+    voda: [{ od: '00:00', teplota: 43 }, { od: '06:00', teplota: null }, { od: '09:00', teplota: 43 }] };
+  const puvodniNow = Date.now;
+  const dnes = new Date(); dnes.setHours(12, 30, 0, 0);
+  Date.now = () => dnes.getTime();
+  aqProgramData = JSON.parse(JSON.stringify(PROG));
+  renderAqProgram();
+  check('s programem je vidět pod tepelným čerpadlem', !pbox.hidden && pbox.previousElementSibling.id === 'aquareaBox', true);
+  check('vypnutý: svítí Vyp.', [...pbox.querySelectorAll('.aqp-prepinac button')].map(b => b.textContent + (b.classList.contains('active') ? '*' : '')).join(' '), 'Vyp.* Zap.');
+  check('teď (12:30)', pbox.querySelector('.aqp-ted').textContent, 'Teď: topení +1 °C (do 17:00), voda 43 °C (do 24:00)');
+  const pruhy = [...pbox.querySelectorAll('.aqp-pruh')].map(p => [...p.children].map(u => u.textContent + '@' + u.style.flexGrow).join(','));
+  check('pruh topení jako v Panasonicu', pruhy[0], '0@660,+1@360,0@420');
+  check('pruh vody', pruhy[1], '43@360,vyp.@180,43@900');
+  poslano = [];
+  window.fetch = async (url, init) => { if (url === '/api/aquarea/program') poslano.push(JSON.parse(init.body).program);
+    return { ok: true, status: 200, json: async () => ({ ok: true, aquareaProgram: JSON.parse(init.body).program }) }; };
+  pbox.querySelectorAll('.aqp-prepinac button')[1].click();
+  await pockej(50);
+  check('Zap. se nejdřív zeptá (plán v Panasonicu)', document.getElementById('potvrzOkno').hidden + ' ' + poslano.length, 'false 0');
+  document.getElementById('potvrzAno').click();
+  await pockej(80);
+  check('  po potvrzení uloží zapnuto', poslano.length + ' ' + poslano[0].zapnuto, '1 true');
+  // Úpravy
+  pbox.querySelector('.aqp-upravit').click();
+  const prRadky = k => [...pbox.querySelectorAll('.aqp-radek[data-seznam="' + k + '"]')];
+  check('editor: úseky topení a vody', prRadky('topeni').length + ' ' + prRadky('voda').length, '3 3');
+  check('  první úsek 00:00 nejde smazat ani posunout', prRadky('topeni')[0].querySelector('.aqp-smazat').disabled + ' ' + prRadky('topeni')[0].querySelector('input').disabled, 'true true');
+  pbox.querySelector('.aqp-pridat[data-seznam="topeni"]').click();
+  const novy = prRadky('topeni')[3];
+  check('+ úsek: o hodinu později, stejná hodnota', novy.querySelector('input').value + ' ' + novy.querySelector('select').value, '18:00 0');
+  novy.querySelector('input').value = '20:00'; novy.querySelector('input').dispatchEvent(new Event('change'));
+  novy.querySelector('select').value = '-2'; novy.querySelector('select').dispatchEvent(new Event('change'));
+  prRadky('voda')[1].querySelector('.aqp-smazat').click();
+  prRadky('voda')[0].querySelector('select').value = '45'; prRadky('voda')[0].querySelector('select').dispatchEvent(new Event('change'));
+  poslano = [];
+  pbox.querySelector('.aqp-ulozit').click();
+  await pockej(80);
+  check('Uložit pošle celý program', JSON.stringify(poslano[0]), JSON.stringify({ zapnuto: true,
+    topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }, { od: '17:00', posun: 0 }, { od: '20:00', posun: -2 }],
+    voda: [{ od: '00:00', teplota: 45 }, { od: '09:00', teplota: 43 }] }));
+  check('  editor se zavře, pruh ukáže nový program', !!pbox.querySelector('.aqp-editor') + ' ' + pbox.querySelectorAll('.aqp-pruh')[0].children.length, 'false 4');
+  window.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: 'Topení: dva úseky ve stejný čas.' }) });
+  pbox.querySelector('.aqp-upravit').click();
+  pbox.querySelector('.aqp-ulozit').click();
+  await pockej(80);
+  check('chyba ze serveru v boxu', document.getElementById('aqProgramChyba').textContent, 'Program: Topení: dva úseky ve stejný čas.');
+  check('nic nepřetéká', pbox.scrollWidth <= pbox.clientWidth + 1, true);
+  Date.now = puvodniNow;
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

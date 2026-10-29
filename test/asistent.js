@@ -44,6 +44,7 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     'huumEnabled', 'huumPovel', 'huumOverStav', 'huumSvetlo',
     'assistantSetTerasaLight', 'DEVICE_LABELS', 'getBlinds', 'cz',
     'delay', 'autoRunning', 'rozvrhStavTed', 'runObehSchedule', 'runAutomation', 'HUUM_NAHRATA_C',
+    'aquareaPrvni', 'aquareaOdchodPlan', 'aquareaNavratPlan', 'aquareaKrokyProvest', 'runAquareaProgram', 'aquareaProgramKlic',
     CODE + '\n; return { SCENY, SCENA_FN, poZapaduSlunce, awayOn, awayActive, awayPayload, saunaPripravaTik,'
          + ' enforceAway, AWAY_DELAY_MS };'
   )(
@@ -94,7 +95,9 @@ function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetl
     async () => { akce.push('rozvrh:obnova'); return { ok: 3, celkem: 3, chyby: [] }; },
     async () => { akce.push('obeh:rozvrh'); },
     async () => { akce.push('automatika'); },
-    5
+    5,
+    // Tepelné čerpadlo: v těchhle testech žádné není (vlastní testy v test/aquarea.js)
+    () => null, () => ({ pred: null, kroky: [] }), () => [], async () => null, async () => {}, ''
   );
   return { api, state, akce, logy, routy };
 }

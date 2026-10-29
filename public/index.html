@@ -1358,6 +1358,30 @@
   .aq-prave{display:flex;align-items:center;gap:8px;}
   .aq-prave .temp-val{min-width:58px;text-align:center;}
   .aq-chyba{font-size:12px;color:#c0392b;margin-top:6px;}
+  .aq-card #aqProgramObsah{align-self:stretch;width:100%;box-sizing:border-box;}
+  .aqp-hlava{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px;}
+  .aqp-prepinac{display:flex;gap:6px;}
+  .aqp-ted{font-size:13px;color:var(--grey-text);margin-bottom:8px;}
+  .aqp-pruh-radek{display:flex;align-items:center;gap:8px;margin:4px 0;}
+  .aqp-pruh-nazev{width:52px;font-size:12px;font-weight:700;color:var(--grey-text);flex:0 0 auto;}
+  .aqp-pruh{flex:1;display:flex;height:22px;border-radius:6px;overflow:hidden;background:rgba(44,62,80,0.06);}
+  .aqp-usek{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#5a3b1c;
+    border-right:1px solid #fff;min-width:0;overflow:hidden;white-space:nowrap;}
+  .aqp-usek.topeni{background:#f0c4a5;}
+  .aqp-usek.voda{background:#e8847c;color:#fff;}
+  .aqp-usek.vyp{background:rgba(44,62,80,0.08);color:var(--grey-text);}
+  .aqp-osa{display:flex;justify-content:space-between;font-size:10px;color:var(--grey-text);margin:2px 0 6px 60px;}
+  .aqp-upravit{width:100%;margin-top:4px;}
+  .aqp-editor{margin-top:8px;}
+  .aqp-editor[hidden]{display:none;}
+  .aqp-sek{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--grey-text);margin:8px 0 4px;}
+  .aqp-radek{display:flex;align-items:center;gap:6px;margin:4px 0;}
+  .aqp-radek .timer-time{flex:1 1 0;min-width:0;}
+  .aqp-radek .timer-select{flex:1 1 0;min-width:0;margin:0;}
+  .aqp-smazat{flex:0 0 auto;width:30px;height:30px;border:none;border-radius:50%;background:rgba(44,62,80,0.08);color:var(--navy);font-weight:700;}
+  .aqp-smazat:disabled{visibility:hidden;}
+  .aqp-pridat{margin:2px 0 4px;}
+  .aqp-ulozit{width:100%;margin-top:8px;}
   .asszistant-card{align-items:stretch;}
   .asst-reply{
     font-size:14px;
@@ -2824,6 +2848,13 @@
         <div class="aq-chyba" id="aquareaChyba" hidden></div>
       </div>
 
+      <!-- Program tepelného čerpadla: řídí ho appka místo plánu v Panasonicu -->
+      <div class="card lockable aq-card" id="aqProgramBox" data-emoji="🗓️" hidden>
+        <div class="graph-title">Program tepelného čerpadla</div>
+        <div id="aqProgramObsah"></div>
+        <div class="aq-chyba" id="aqProgramChyba" hidden></div>
+      </div>
+
       <button class="sbal-btn" data-sbal="klima" type="button" aria-expanded="false">Teplota v pokojích<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="klima">
         <div class="graph-title">Teplota v pokojích (12 h)</div>
@@ -3668,24 +3699,30 @@
         <div class="rezim-hint" id="oznameniHint"></div>
       </div>
 
-      <!-- Pravidelně kupované: nabízí se po klepnutí do pole na stránce Nákup -->
-      <div class="card" data-rezim="full">
-        <div class="asst-log-title">Nákup — pravidelné položky</div>
-        <div class="oblibene-seznam" id="oblibeneSeznam"></div>
-        <div class="oblibene-pridat">
-          <select class="timer-select" id="oblibeneIkona"></select>
-          <input class="pin-input vlastni-pole" id="oblibeneText" type="text" maxlength="40" placeholder="Název (např. Rohlíky)" autocomplete="off">
-          <button class="sek-btn" id="oblibenePridat" type="button">Přidat</button>
-        </div>
-        <div class="rezim-hint" id="oblibeneHint"></div>
-      </div>
-
       <div class="card logic-card">
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
             <li>Hlavní přepínač (Asistent): <b>vypnuto · zapnuto · zima</b>.</li>
             <li>Přebytek = <b>přetok do sítě + nabíjení baterie</b>.</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec" data-rezim="full">
+          <div class="logic-h">Nejsme doma</div>
+          <ul class="logic-list">
+            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
+            <li><b>Tepelné čerpadlo</b>: vypne ohřev vody; když topí, sníží posun křivky na <b>−5 °C</b>, jinak zůstane vypnuté.</li>
+            <li>Po návratu: <b>žaluzie podle rozvrhu</b>, klima a relé do automatiky, <b>čerpadlo jak bylo</b> (i bez automatiky).</li>
+          </ul>
+        </div>
+
+        <div class="logic-sec" data-rezim="full">
+          <div class="logic-h">Tepelné čerpadlo (program)</div>
+          <ul class="logic-list">
+            <li>Program na Klimě řídí <b>posun topení</b> a <b>vodu</b> místo plánu v Panasonicu (ten vypnout).</li>
+            <li>Každý den stejný. Mění jen při <b>přechodu úseku</b> — ruční změna platí do dalšího.</li>
+            <li>Topení mění, jen když <b>topí</b>. Běží i bez automatiky, při <b>Nejsme doma</b> stojí.</li>
           </ul>
         </div>
 
@@ -3797,13 +3834,6 @@
           </ul>
         </div>
 
-        <div class="logic-sec" data-rezim="full">
-          <div class="logic-h">Nejsme doma</div>
-          <ul class="logic-list">
-            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
-            <li>Po přepnutí zpátky se <b>žaluzie nastaví podle rozvrhu</b>, klima a relé se vrátí do automatiky.</li>
-          </ul>
-        </div>
 
         <div class="logic-sec" data-rezim="full miky elenka">
           <div class="logic-h">Rozvrh žaluzií</div>
@@ -3834,6 +3864,18 @@
             <li>Sauna po <b>3:30</b> červeně přes iPad. Log si pamatuje <b>týden</b>. Časovače přežijí nasazení. Popelnice <b>BIO</b> se připomíná jen <b>1. 4. – 31. 10.</b></li>
           </ul>
         </div>
+      </div>
+
+      <!-- Pravidelně kupované: nabízí se po klepnutí do pole na stránce Nákup -->
+      <div class="card" data-rezim="full">
+        <div class="asst-log-title">Nákup — pravidelné položky</div>
+        <div class="oblibene-seznam" id="oblibeneSeznam"></div>
+        <div class="oblibene-pridat">
+          <select class="timer-select" id="oblibeneIkona"></select>
+          <input class="pin-input vlastni-pole" id="oblibeneText" type="text" maxlength="40" placeholder="Název (např. Rohlíky)" autocomplete="off">
+          <button class="sek-btn" id="oblibenePridat" type="button">Přidat</button>
+        </div>
+        <div class="rezim-hint" id="oblibeneHint"></div>
       </div>
     </div>
   </div>
@@ -7721,8 +7763,158 @@ function renderAquarea() {
   }
 }
 
+// ---------- Program tepelného čerpadla ----------
+// Program je stejný každý den: úsek platí od svého času do začátku dalšího.
+// Úpravy se dělají v konceptu a odejdou až tlačítkem Uložit.
+const aqProgramBoxEl = document.getElementById('aqProgramBox');
+const aqProgramObsahEl = document.getElementById('aqProgramObsah');
+const aqProgramChybaEl = document.getElementById('aqProgramChyba');
+let aqProgramData = null;        // ze serveru
+let aqProgramKoncept = null;     // rozpracovaná úprava (null = není)
+let aqProgramEditor = false;
+const AQ_POSUNY = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+const AQ_VODA = [null, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 55, 58, 60];
+const aqPosunText = v => (v > 0 ? '+' : '') + v + ' °C';
+const aqVodaText = v => (v === null ? 'Vyp.' : v + ' °C');
+const aqMin = od => Number(od.slice(0, 2)) * 60 + Number(od.slice(3));
+
+function aqProgramUsek(rady, now = new Date(Date.now())) {
+  const ted = now.getHours() * 60 + now.getMinutes();
+  let i = 0;
+  rady.forEach((r, j) => { if (aqMin(r.od) <= ted) i = j; });
+  return { r: rady[i], do: rady[i + 1] ? rady[i + 1].od : '24:00' };
+}
+
+async function aqProgramUloz(program) {
+  if (aqProgramChybaEl) aqProgramChybaEl.hidden = true;
+  try {
+    const res = await fetch('/api/aquarea/program', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ program })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(data.error || 'Program se nepodařilo uložit.');
+    aqProgramData = data.aquareaProgram || program;
+    aqProgramKoncept = null;
+    aqProgramEditor = false;
+    return true;
+  } catch (err) {
+    if (aqProgramChybaEl) { aqProgramChybaEl.textContent = 'Program: ' + err.message; aqProgramChybaEl.hidden = false; }
+    return false;
+  } finally {
+    renderAqProgram();
+  }
+}
+
+function renderAqProgram() {
+  if (!aqProgramBoxEl) return;
+  const maAq = !!(airconData && (airconData.aquarea || []).length);
+  aqProgramBoxEl.hidden = !(maAq && aqProgramData);
+  if (aqProgramBoxEl.hidden) return;
+  const p = aqProgramData;
+  aqProgramObsahEl.textContent = '';
+  const el = (tag, cls, rodic, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    rodic.appendChild(e);
+    return e;
+  };
+  // Zapnuto / vypnuto
+  const hlava = el('div', 'aqp-hlava', aqProgramObsahEl);
+  el('span', 'aq-nazev', hlava, p.zapnuto ? 'Program řídí čerpadlo' : 'Program je vypnutý');
+  const prep = el('div', 'aqp-prepinac', hlava);
+  for (const [zap, text] of [[false, 'Vyp.'], [true, 'Zap.']]) {
+    const b = el('button', 'mode-btn' + (p.zapnuto === zap ? ' active' : ''), prep, text);
+    b.type = 'button';
+    b.dataset.zapnuto = String(zap);
+    b.addEventListener('click', async () => {
+      if (p.zapnuto === zap) return;
+      if (zap && !(await zeptejSe('Zapnout program?', 'Nejdřív vypni Plán u Tepelka v appce Panasonic, jinak se budou přetahovat.'))) return;
+      aqProgramUloz({ ...p, zapnuto: zap });
+    });
+  }
+  // Teď
+  const t = aqProgramUsek(p.topeni), v = aqProgramUsek(p.voda);
+  el('div', 'aqp-ted', aqProgramObsahEl, `Teď: topení ${aqPosunText(t.r.posun)} (do ${t.do}), voda ${aqVodaText(v.r.teplota)} (do ${v.do})`);
+  // Pruh přes celý den, jako plán v Panasonicu
+  const pruh = (nazev, rady, text, trida) => {
+    const radek = el('div', 'aqp-pruh-radek', aqProgramObsahEl);
+    el('span', 'aqp-pruh-nazev', radek, nazev);
+    const pr = el('div', 'aqp-pruh', radek);
+    rady.forEach((r, i) => {
+      const od = aqMin(r.od), doo = rady[i + 1] ? aqMin(rady[i + 1].od) : 1440;
+      const hodnota = r.posun !== undefined ? r.posun : r.teplota;
+      const u = el('div', 'aqp-usek ' + (hodnota === null ? 'vyp' : trida), pr, (doo - od) >= 120 ? text(hodnota) : '');
+      u.style.flex = String(doo - od);
+      u.title = `${r.od}–${rady[i + 1] ? rady[i + 1].od : '24:00'}: ${text(hodnota)}`;
+    });
+  };
+  pruh('Topení', p.topeni, v => aqPosunText(v).replace(' °C', ''), 'topeni');
+  pruh('Voda', p.voda, v => (v === null ? 'vyp.' : String(v)), 'voda');
+  const osa = el('div', 'aqp-osa', aqProgramObsahEl);
+  for (const h of ['0', '6', '12', '18', '24']) el('span', '', osa, h);
+  // Úprava
+  const upravit = el('button', 'sek-btn aqp-upravit', aqProgramObsahEl, aqProgramEditor ? 'Zavřít úpravy' : 'Upravit program');
+  upravit.type = 'button';
+  upravit.addEventListener('click', () => {
+    aqProgramEditor = !aqProgramEditor;
+    if (!aqProgramEditor) aqProgramKoncept = null;
+    renderAqProgram();
+  });
+  if (!aqProgramEditor) return;
+  if (!aqProgramKoncept) aqProgramKoncept = JSON.parse(JSON.stringify({ topeni: p.topeni, voda: p.voda }));
+  const k = aqProgramKoncept;
+  const ed = el('div', 'aqp-editor', aqProgramObsahEl);
+  const seznam = (nazev, klic, pole, moznosti, text) => {
+    el('div', 'aqp-sek', ed, nazev);
+    k[klic].forEach((r, i) => {
+      const radek = el('div', 'aqp-radek', ed);
+      radek.dataset.seznam = klic;
+      const cas = el('input', 'timer-time', radek);
+      cas.type = 'time';
+      cas.step = '900';
+      cas.value = r.od;
+      cas.disabled = i === 0;           // první úsek začíná vždy o půlnoci
+      cas.addEventListener('change', () => { r.od = cas.value; });
+      const sel = el('select', 'timer-select', radek);
+      for (const m of moznosti) {
+        const o = el('option', '', sel, text(m));
+        o.value = m === null ? '' : String(m);
+      }
+      sel.value = r[pole] === null ? '' : String(r[pole]);
+      sel.addEventListener('change', () => { r[pole] = sel.value === '' ? null : Number(sel.value); });
+      const x = el('button', 'aqp-smazat', radek, '✕');
+      x.type = 'button';
+      x.disabled = i === 0;
+      x.addEventListener('click', () => { k[klic].splice(i, 1); renderAqProgram(); });
+    });
+    const plus = el('button', 'mode-btn aqp-pridat', ed, '+ úsek');
+    plus.type = 'button';
+    plus.dataset.seznam = klic;
+    plus.disabled = k[klic].length >= 12;
+    plus.addEventListener('click', () => {
+      const posl = k[klic][k[klic].length - 1];
+      const m = Math.min(23 * 60 + 45, aqMin(posl.od) + 60);
+      const od = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+      k[klic].push({ od, [pole]: posl[pole] });
+      renderAqProgram();
+    });
+  };
+  seznam('Topení — posun křivky', 'topeni', 'posun', AQ_POSUNY, aqPosunText);
+  seznam('Voda v nádrži', 'voda', 'teplota', AQ_VODA, aqVodaText);
+  const ulozit = el('button', 'timer-add-btn aqp-ulozit', ed, 'Uložit program');
+  ulozit.type = 'button';
+  ulozit.addEventListener('click', () => {
+    const serad = a => a.slice().sort((x, y) => x.od.localeCompare(y.od));
+    aqProgramUloz({ zapnuto: p.zapnuto, topeni: serad(k.topeni), voda: serad(k.voda) });
+  });
+}
+
 function renderAircon() {
   bezpecne(renderAquarea);
+  bezpecne(renderAqProgram);
   const busySelect = document.activeElement && document.activeElement.tagName === 'SELECT'
     && airconListEl.contains(document.activeElement);
   if (busySelect || tempWheelOpen) {
@@ -11610,6 +11802,7 @@ function applySnapshot(snap) {
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
   bezpecne(() => renderWeather(snap.weather));
+  if (snap.aquareaProgram) bezpecne(() => { aqProgramData = snap.aquareaProgram; renderAqProgram(); });
   if (snap.pocasiPoloha && Number.isFinite(snap.pocasiPoloha.lat)) bezpecne(() => { pocasiPoloha = snap.pocasiPoloha; });
   if ('pocasiDnes' in snap) bezpecne(() => { pocasiDnesData = snap.pocasiDnes || null; renderKalDen(); });
   bezpecne(() => renderAutomation(snap.autoMode || (snap.autoEnabled === false ? 'off' : 'on')));
@@ -11955,6 +12148,10 @@ function connectStream() {
   });
   es.addEventListener('weather', e => {
     renderWeather(JSON.parse(e.data).weather);
+  });
+  es.addEventListener('aquareaProgram', e => {
+    const p = JSON.parse(e.data).aquareaProgram;
+    bezpecne(() => { aqProgramData = p || null; renderAqProgram(); });
   });
   es.addEventListener('pocasiDnes', e => {
     const p = JSON.parse(e.data).pocasiDnes || null;

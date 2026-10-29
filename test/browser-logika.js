@@ -28,15 +28,20 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const li = [...page.querySelectorAll('.logic-list li')];
 
   OUT.push('\\n1) Obsah a délka');
-  // Patnáctá sekce je „Nejsme doma". Rozpočet se zvedá vědomě — stránka se dřív
-  // rozrostla do nečitelna, tak ať se to nestane znovu potichu.
-  check('sekcí je patnáct', sekce.length, 15);
+  // Patnáctá sekce je „Nejsme doma", šestnáctá program tepelného čerpadla. Rozpočet
+  // se zvedá vědomě — stránka se dřív rozrostla do nečitelna, tak ať se to nestane znovu potichu.
+  check('sekcí je šestnáct', sekce.length, 16);
   for (const s of ['Obecné', 'Zima', 'Bazén (filtrace)', 'Sauna', 'Bojler 1 (TČ)', 'Wallbox',
                    'Ruční zásah vs. automatika', 'Priorita auta', 'Korekce podle předpovědi',
                    'Data, notifikace, časovače', 'Oběhové čerpadlo', 'Rozvrh žaluzií', 'Nejsme doma'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
   // Po zjednodušení jen to, jak se to chová — žádné zdůvodňování na pozadí
-  check('odrážek je nejvýš 53', li.length <= 53, 'true');   // po zjednodušení jich je 53
+  check('odrážek je nejvýš 57', li.length <= 57, 'true');   // 53 + čerpadlo (1 v Nejsme doma, 3 v programu)
+  // Přepínač automatiky a Nejsme doma nahoře, nákupní seznam až úplně dole
+  check('nahoře Obecné, Nejsme doma, čerpadlo, Zima', sekce.slice(0, 4).join(' | '), 'Obecné | Nejsme doma | Tepelné čerpadlo (program) | Zima');
+  const karty = [...page.querySelectorAll(':scope > .page > .card')];
+  check('nákup je poslední karta', karty[karty.length - 1].contains(document.getElementById('oblibeneSeznam')), 'true');
+  check('Nejsme doma zmiňuje čerpadlo a −5', ((t) => t.includes('Tepelné čerpadlo') && t.includes('−5 °C'))(page.querySelectorAll('.logic-sec')[1].textContent), 'true');
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
   check('žádná odrážka není delší než tři řádky', dlouhe.length, 0);
@@ -46,7 +51,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('sauna má natvrdo práh a dobu', /nad 500 W/.test(txt) && /30 min po posledním nátopu/.test(txt), 'true');
   check('nastavení sauny už na stránce není', !!document.getElementById('saunaLimitInput'), 'false');
   check('nejsme doma drží vypnutou saunu i čerpadlo', /drží vypnutá světla/.test(txt) && /čerpadlo/.test(txt), 'true');
-  check('  a po návratu nastaví žaluzie podle rozvrhu', /žaluzie nastaví podle rozvrhu/.test(txt), 'true');
+  check('  a po návratu nastaví žaluzie podle rozvrhu', /žaluzie podle rozvrhu/.test(txt), 'true');
   check('ložnice po sauně: 15 min po jejím konci', /15 min po jejím konci/.test(txt), 'true');
   check('sauna běží i se světlem při ≥ 60 °C', /svítí světlo při ≥ 60 °C/.test(txt), 'true');
   check('příprava podle teploty (cíl −15 / −10 °C)', /cíl −15 °C/.test(txt) && /cíl −10 °C/.test(txt), 'true');
