@@ -198,8 +198,14 @@ setTimeout(async () => {
   const dnes = new Date(); dnes.setHours(12, 30, 0, 0);
   Date.now = () => dnes.getTime();
   aqProgramData = JSON.parse(JSON.stringify(PROG));
+  sbalNastav('aqprogram', true);
   renderAqProgram();
-  check('s programem je vidět pod tepelným čerpadlem', !pbox.hidden && pbox.previousElementSibling.id === 'aquareaBox', true);
+  const pbtn = document.getElementById('aqProgramBtn');
+  check('rozbalovací: tlačítko pod čerpadlem, obsah sbalený', !pbtn.hidden && pbtn.previousElementSibling.id === 'aquareaBox' && pbox.hidden, true);
+  pbtn.click();
+  check('  klepnutím se rozbalí', pbox.hidden + ' ' + pbtn.getAttribute('aria-expanded'), 'false true');
+  renderAqProgram();
+  check('  překreslení ho nechá rozbalený', pbox.hidden, false);
   check('vypnutý: svítí Vyp.', [...pbox.querySelectorAll('.aqp-prepinac button')].map(b => b.textContent + (b.classList.contains('active') ? '*' : '')).join(' '), 'Vyp.* Zap.');
   check('teď (12:30)', pbox.querySelector('.aqp-ted').textContent, 'Teď: topení +1 °C (do 17:00), voda 43 °C (do 24:00)');
   const pruhy = [...pbox.querySelectorAll('.aqp-pruh')].map(p => [...p.children].map(u => u.textContent + '@' + u.style.flexGrow).join(','));

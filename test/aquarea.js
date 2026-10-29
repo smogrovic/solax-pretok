@@ -201,7 +201,7 @@ function build(o = {}) {
   nadpis('Nejsme doma');
   {
     const h = build();
-    const aqz = (topi, voda, posun) => ({ guid: 'GW-1', tankOn: voda, zapnuto: topi || voda,
+    const aqz = (topi, voda, posun, tank = 43) => ({ guid: 'GW-1', tankOn: voda, tankTarget: tank, zapnuto: topi || voda,
       zones: [{ zoneId: 1, on: topi, target: posun, min: -5, max: 5, pouzita: true }] });
     const od = aq => JSON.stringify(h.api.aquareaOdchodPlan(aq));
     check('obojí → topení a −5, uloží obojí/+2', od(aqz(true, true, 2)), JSON.stringify({ pred: { guid: 'GW-1', rezim: 'oboji', posun: 2 }, kroky: [{ rezim: 'topeni' }, { zona: { zoneId: 1, heatSet: -5 } }] }));
@@ -211,7 +211,10 @@ function build(o = {}) {
     const nv = (pred, aq) => JSON.stringify(h.api.aquareaNavratPlan(pred, aq));
     check('návrat: obojí a posun zpátky', nv({ guid: 'GW-1', rezim: 'oboji', posun: 2 }, aqz(true, false, -5)), '[{"rezim":"oboji"},{"zona":{"zoneId":1,"heatSet":2}}]');
     check('návrat: voda', nv({ guid: 'GW-1', rezim: 'voda', posun: 0 }, aqz(false, false, 0)), '[{"rezim":"voda"}]');
-    check('návrat: nic se nezměnilo → nic', nv({ guid: 'GW-1', rezim: 'topeni', posun: 0 }, aqz(true, false, 0)), '[]');
+    check('návrat: topení bez vody (6–9) → voda zapnutá', nv({ guid: 'GW-1', rezim: 'topeni', posun: 0 }, aqz(true, false, 0)), '[{"rezim":"oboji"}]');
+    check('návrat: vypnuto (léto) → jen voda', nv({ guid: 'GW-1', rezim: 'vypnuto', posun: 0 }, aqz(false, false, 0)), '[{"rezim":"voda"}]');
+    check('návrat: voda vždy na 43 °C', nv({ guid: 'GW-1', rezim: 'oboji', posun: 0 }, aqz(true, true, 0, 50)), '[{"nadrz":43}]');
+    check('návrat: vše sedí → nic', nv({ guid: 'GW-1', rezim: 'oboji', posun: 1 }, aqz(true, true, 1)), '[]');
     // Provedení odchodu přes povely
     const p = build({ state: { aircon: { aquarea: [aqz(true, true, 2)] } } });
     const log = await p.api.aquareaKrokyProvest(p.state.aircon.aquarea[0], p.api.aquareaOdchodPlan(p.state.aircon.aquarea[0]).kroky);
@@ -223,6 +226,7 @@ function build(o = {}) {
   check('program běží v každém běhu, před vypínačem automatiky', runA.indexOf('await runAquareaProgram();') > 0 && runA.indexOf('await runAquareaProgram();') < runA.indexOf('if (!autoRunning()) return'), true);
   const nav = SRC.slice(SRC.indexOf('async function awayNavrat('), SRC.indexOf("app.post('/api/away'"));
   check('návrat čerpadla před vypínačem automatiky', nav.indexOf('aquareaNavratPlan') > 0 && nav.indexOf('aquareaNavratPlan') < nav.indexOf('if (!autoRunning())'), true);
+  check('  program po návratu čeká na další úsek (vodu hned nevypne)', /aquareaProgramKlic = aquareaProgramUsek\(state\.aquareaProgram\)\.klic/.test(nav), true);
   check('odchod plánuje čerpadlo', /aquareaOdchodPlan\(aqOd\)[\s\S]{0,200}zkus\('tepelné čerpadlo'/.test(SRC), true);
   check('záloha: program a aquareaPred', SRC.includes("'/api/aquarea/program/restore',") && SRC.includes("'/api/aquarea/program/restore': { program: state.aquareaProgram }") && SRC.includes('aquareaPred: (state.away && state.away.aquareaPred) || null'), true);
   check('seznam zařízení bere u Aquarey detail', /const detail = await pccAquareaDetail\(d\.deviceGuid\);[\s\S]{0,200}pccAquareaFromGroup\(\{ \.\.\.d, \.\.\.\(detail \|\| \{\}\) \}\)/.test(SRC), true);

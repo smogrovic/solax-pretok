@@ -6794,12 +6794,18 @@ function aquareaOdchodPlan(aq) {
   return { pred, kroky };
 }
 
+// Návrat: topení jak bylo (i s posunem), voda VŽDY zapnutá na 43 °C — i když byla
+// při odchodu zrovna vypnutá (např. v programovém okně 6–9), po návratu se má mýt
+const AQ_NAVRAT_VODA = 43;
 function aquareaNavratPlan(pred, aq) {
   const kroky = [];
   if (!pred || !AQ_REZIMY[pred.rezim]) return kroky;
-  if (aquareaRezim(aq) !== pred.rezim) kroky.push({ rezim: pred.rezim });
+  const topi = pred.rezim === 'oboji' || pred.rezim === 'topeni';
+  const rezim = topi ? 'oboji' : 'voda';
+  if (aquareaRezim(aq) !== rezim) kroky.push({ rezim });
+  if (aq.tankTarget !== AQ_NAVRAT_VODA) kroky.push({ nadrz: AQ_NAVRAT_VODA });
   const zona = aquareaZona(aq);
-  if (zona && typeof pred.posun === 'number' && (pred.rezim === 'oboji' || pred.rezim === 'topeni') && zona.target !== pred.posun) {
+  if (zona && topi && typeof pred.posun === 'number' && zona.target !== pred.posun) {
     kroky.push({ zona: { zoneId: zona.zoneId, heatSet: pred.posun } });
   }
   return kroky;
@@ -6811,7 +6817,8 @@ async function aquareaKrokyProvest(aq, kroky) {
   const hotovo = [];
   for (const k of kroky) {
     await aquareaProvest(aq, k, { log: false });
-    hotovo.push(k.rezim ? AQ_REZIMY[k.rezim].popis : `topení ${k.zona.heatSet > 0 ? '+' : ''}${k.zona.heatSet} °C`);
+    hotovo.push(k.rezim ? AQ_REZIMY[k.rezim].popis : k.nadrz !== undefined ? `voda ${k.nadrz} °C`
+      : `topení ${k.zona.heatSet > 0 ? '+' : ''}${k.zona.heatSet} °C`);
   }
   return `tepelné čerpadlo: ${hotovo.join(', ')}`;
 }
@@ -11295,13 +11302,13 @@ async function awayNavrat(pred) {
     try { const r = await fn(); if (r) kroky.push(r); } catch (err) { kroky.push(`${popis} selhalo (${String(err.message).slice(0, 60)})`); }
   };
   // Tepelné čerpadlo zpátky i s vypnutou automatikou — je to tvoje nastavení,
-  // ne automatika. Program pak hned dorovná aktuální úsek.
+  // ne automatika. Voda se zapne na 43 °C; program to v běžícím úseku nepřebije
+  // a ozve se až při přechodu do dalšího.
   const aqZpet = aquareaPrvni();
   if (aqZpet && pred.aquareaPred && pred.aquareaPred.guid === aqZpet.guid) {
     await zkus('tepelné čerpadlo', async () => {
       const r = await aquareaKrokyProvest(aqZpet, aquareaNavratPlan(pred.aquareaPred, aqZpet));
-      aquareaProgramKlic = '';
-      await runAquareaProgram();
+      if (state.aquareaProgram) aquareaProgramKlic = aquareaProgramUsek(state.aquareaProgram).klic;
       return r ? r.replace('tepelné čerpadlo:', 'tepelné čerpadlo zpátky:') : null;
     });
   }

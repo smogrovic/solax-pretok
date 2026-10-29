@@ -1358,6 +1358,7 @@
   .aq-prave{display:flex;align-items:center;gap:8px;}
   .aq-prave .temp-val{min-width:58px;text-align:center;}
   .aq-chyba{font-size:12px;color:#c0392b;margin-top:6px;}
+  .sbal-btn[hidden]{display:none;}
   .aq-card #aqProgramObsah{align-self:stretch;width:100%;box-sizing:border-box;}
   .aqp-hlava{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px;}
   .aqp-prepinac{display:flex;gap:6px;}
@@ -2849,7 +2850,8 @@
       </div>
 
       <!-- Program tepelného čerpadla: řídí ho appka místo plánu v Panasonicu -->
-      <div class="card lockable aq-card" id="aqProgramBox" data-emoji="🗓️" hidden>
+      <button class="sbal-btn" data-sbal="aqprogram" id="aqProgramBtn" type="button" aria-expanded="false" hidden>Program tepelného čerpadla<i>▾</i></button>
+      <div class="card lockable aq-card" id="aqProgramBox" data-emoji="🗓️" data-sbal-obsah="aqprogram" hidden>
         <div class="graph-title">Program tepelného čerpadla</div>
         <div id="aqProgramObsah"></div>
         <div class="aq-chyba" id="aqProgramChyba" hidden></div>
@@ -3713,7 +3715,7 @@
           <ul class="logic-list">
             <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
             <li><b>Tepelné čerpadlo</b>: vypne ohřev vody; když topí, sníží posun křivky na <b>−5 °C</b>, jinak zůstane vypnuté.</li>
-            <li>Po návratu: <b>žaluzie podle rozvrhu</b>, klima a relé do automatiky, <b>čerpadlo jak bylo</b> (i bez automatiky).</li>
+            <li>Po návratu: <b>žaluzie podle rozvrhu</b>, klima a relé do automatiky, topení jak bylo, <b>voda zapnutá na 43 °C</b>.</li>
           </ul>
         </div>
 
@@ -7809,9 +7811,13 @@ async function aqProgramUloz(program) {
 
 function renderAqProgram() {
   if (!aqProgramBoxEl) return;
-  const maAq = !!(airconData && (airconData.aquarea || []).length);
-  aqProgramBoxEl.hidden = !(maAq && aqProgramData);
-  if (aqProgramBoxEl.hidden) return;
+  // Rozbalovací jako ostatní sbalené karty: tlačítko je vidět s čerpadlem, obsah
+  // se kreslí vždy a jen se schová podle uloženého sbalení
+  const ma = !!(airconData && (airconData.aquarea || []).length && aqProgramData);
+  const btn = document.getElementById('aqProgramBtn');
+  if (btn) btn.hidden = !ma;
+  aqProgramBoxEl.hidden = !ma || sbalStav('aqprogram');
+  if (!ma) return;
   const p = aqProgramData;
   aqProgramObsahEl.textContent = '';
   const el = (tag, cls, rodic, text) => {

@@ -86,7 +86,7 @@ setTimeout(() => {
     // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Přehled
     klice.join(', '),
     // a k tomu každý časovač (casovac-…), ten ukazuje nastavené i sbalený
-    'fve, topeni, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
+    'fve, topeni, aqprogram, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
     + 'wallbox, bazen, solinator, casovac-huumTimerCard, nahrev, sauna, zavlaha, prehled, odhad');
   // Na Přehledu jdou pod jedno tlačítko oba boxy — dnešek i týden
   check('Přehled sbalí oba boxy',
