@@ -4,11 +4,12 @@ const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('aquarea');
 
 const CODE = ['const PCC_INVALID_TEMP = 126;', fn('function aquaNum('),
-  between('function pccAquareaFromGroup(', '// Diagnostika: struktura skupin')].join('\n');
+  between('// Detail Aquarey jako integrace', '// Diagnostika: struktura skupin')].join('\n');
 
 const GROUP = {
   deviceGuid: 'GW-1', deviceName: 'Aquarea', connectionStatus: 1, operationStatus: 1, operationMode: 1, forceDHW: 0,
-  zoneStatus: [{ zoneId: 1, zoneName: 'House', temperatureNow: 34, heatSet: 2, heatMin: -5, heatMax: 5, operationStatus: 1 }],
+  zoneStatus: [{ zoneId: 1, zoneName: 'House', temperatureNow: 34, heatSet: 2, heatMin: -5, heatMax: 5, operationStatus: 1 },
+    { zoneId: 2, zoneName: 'Zone2', temperatureNow: 126, heatSet: 0, heatMin: -5, heatMax: 5, operationStatus: 1 }],
   tankStatus: { temperatureNow: 48, heatSet: 50, heatMin: 40, heatMax: 60, operationStatus: 0 }
 };
 
@@ -16,7 +17,7 @@ function build({ odemceno = true, chyba = null } = {}) {
   const routy = {}, zpravy = [], logy = [], povely = [];
   const pccDevCache = { ts: 123 };
   const api = new Function('app', 'requireAuth', 'broadcast', 'addLog', 'pccQueued', 'pccApiFetch', 'pccDevCache', 'state',
-    CODE + '\n; return { pccAquareaFromGroup, aquareaRezim, aquareaTeloRezimu };')(
+    CODE + '\n; return { pccAquareaFromGroup, aquareaRezim, aquareaTeloRezimu, pccAquareaDetail };')(
     { post: (c, h) => { routy[c] = h; } },
     (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push(u), t => logy.push(t), f => f(),
@@ -38,6 +39,23 @@ function build({ odemceno = true, chyba = null } = {}) {
   check('bez rozsahu: 35 °C = absolutní cíl', abs.zones[0].relativni, false);
   check('  bez rozsahu: +3 = posun křivky', h0.api.pccAquareaFromGroup({ zoneStatus: [{ zoneId: 1, heatSet: 3 }] }).zones[0].relativni, true);
   check('  zóna bez id dostane pořadí', h0.api.pccAquareaFromGroup({ zoneStatus: [{ heatSet: 3 }] }).zones[0].zoneId, 1);
+
+  check('zóna 2 se nepoužívá', aq.zones.map(z => z.zoneId + ':' + z.pouzita).join(' '), '1:true 2:false');
+  {
+    // Detail zařízení: deviceDirect=1, při chybě 0; status (objekt i pole)
+    const volani = [];
+    let odpovedi = [new Error('live nejde'), { status: [{ zoneStatus: [{ zoneId: 1, heatSet: 3 }] }] }];
+    const h = build();
+    const det = new Function('pccApiFetch', 'app', CODE + '\n; return pccAquareaDetail;')(async (c, o) => {
+      volani.push(JSON.parse(o.body).apiName); const r = odpovedi.shift(); if (r instanceof Error) throw r; return r; }, { post() {} });
+    const st = await det('GW-1');
+    check('detail: živý, při chybě uložený', volani.join(' | '), '/remote/v1/api/devices?gwid=GW-1&deviceDirect=1 | /remote/v1/api/devices?gwid=GW-1&deviceDirect=0');
+    check('  status z pole', JSON.stringify(st), '{"zoneStatus":[{"zoneId":1,"heatSet":3}]}');
+    const slouceno = h.api.pccAquareaFromGroup({ connectionStatus: 1, zoneStatus: [{ zoneId: 1 }], ...st });
+    check('  sloučení: cíl z detailu, spojení ze skupiny', slouceno.zones[0].target + ' ' + slouceno.online, '3 true');
+    odpovedi = [new Error('x'), new Error('y')];
+    check('  obojí selže → null', await det('GW-1'), null);
+  }
 
   nadpis('Povely');
   const pripravit = (o = {}) => {
@@ -67,15 +85,17 @@ function build({ odemceno = true, chyba = null } = {}) {
     check('  transfer na /remote/v1/api/devices', h.povely[0].cesta + ' ' + h.povely[0].telo.apiName + ' ' + h.povely[0].telo.requestMethod,
       '/remote/v1/app/common/transfer /remote/v1/api/devices POST');
     check('  kompletní stav: zóny, nádrž, zapnuto, topení', JSON.stringify(h.povely[0].telo.bodyParam),
-      JSON.stringify({ gwid: 'GW-1', operationStatus: 1, zoneStatus: [{ zoneId: 1, operationStatus: 1 }], tankStatus: { operationStatus: 1 }, operationMode: 2 }));
+      JSON.stringify({ gwid: 'GW-1', operationStatus: 1, zoneStatus: [{ zoneId: 1, operationStatus: 1 }, { zoneId: 2, operationStatus: 1 }], tankStatus: { operationStatus: 1 }, operationMode: 2 }));
     check('  stav hned upravený a poslaný appce', h.api.aquareaRezim(h.aq) + ' ' + h.zpravy.join(), 'oboji aircon');
     check('  log', h.logy.join(), 'Tepelné čerpadlo: topení + voda');
     check('  cache zneplatněná', h.pccDevCache.ts, 0);
     await h.volej({ rezim: 'voda' });
-    check('režim voda: zóna 0, nádrž 1', JSON.stringify([h.povely[1].telo.bodyParam.zoneStatus, h.povely[1].telo.bodyParam.tankStatus]), '[[{"zoneId":1,"operationStatus":0}],{"operationStatus":1}]');
+    check('režim voda: zóna 1 vyp., zóna 2 beze změny, nádrž 1', JSON.stringify([h.povely[1].telo.bodyParam.zoneStatus, h.povely[1].telo.bodyParam.tankStatus]),
+      '[[{"zoneId":1,"operationStatus":0},{"zoneId":2,"operationStatus":1}],{"operationStatus":1}]');
+    check('  zóna 2 ve stavu nezměněná', h.aq.zones[1].on, true);
     await h.volej({ rezim: 'vypnuto' });
     check('vypnuto: vše 0, bez režimu', JSON.stringify(h.povely[2].telo.bodyParam),
-      JSON.stringify({ gwid: 'GW-1', operationStatus: 0, zoneStatus: [{ zoneId: 1, operationStatus: 0 }], tankStatus: { operationStatus: 0 } }));
+      JSON.stringify({ gwid: 'GW-1', operationStatus: 0, zoneStatus: [{ zoneId: 1, operationStatus: 0 }, { zoneId: 2, operationStatus: 1 }], tankStatus: { operationStatus: 0 } }));
     check('  appka ukáže vypnuto', h.api.aquareaRezim(h.aq), 'vypnuto');
     check('neznámý režim 400', (await h.volej({ rezim: 'turbo' })).kod, 400);
   }
@@ -87,6 +107,7 @@ function build({ odemceno = true, chyba = null } = {}) {
     check('  +6 mimo rozsah', (await h.volej({ zona: { zoneId: 1, heatSet: 6 } })).out.error, 'Posun musí být -5 až +5 °C.');
     check('  půlstupně ne', (await h.volej({ zona: { zoneId: 1, heatSet: 1.5 } })).kod, 400);
     check('  neznámá zóna', (await h.volej({ zona: { zoneId: 9, heatSet: 1 } })).kod, 400);
+    check('  zóna 2 se neovládá', (await h.volej({ zona: { zoneId: 2, heatSet: 1 } })).kod, 400);
     check('  nic dalšího neodešlo', h.povely.length, 1);
   }
   {
@@ -105,5 +126,7 @@ function build({ odemceno = true, chyba = null } = {}) {
     check('zamčená appka 401', (await z.volej({ rezim: 'voda' })).kod + ' ' + z.povely.length, '401 0');
     check('neznámé čerpadlo 400', (await h.volej({ guid: 'JINE', rezim: 'voda' })).kod, 400);
   }
+  const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  check('seznam zařízení bere u Aquarey detail', /const detail = await pccAquareaDetail\(d\.deviceGuid\);[\s\S]{0,200}pccAquareaFromGroup\(\{ \.\.\.d, \.\.\.\(detail \|\| \{\}\) \}\)/.test(SRC), true);
   konec();
 })();

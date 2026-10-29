@@ -133,12 +133,14 @@ setTimeout(async () => {
   const box = document.getElementById('aquareaBox');
   check('bez Aquarey box není', box.hidden, true);
   const AQ = { guid: 'GW-1', name: 'Aquarea', zapnuto: true, ohrevVody: false, tankTemp: 48.2, tankTarget: 50, tankOn: false, tankMin: 40, tankMax: 60,
-    zones: [{ zoneId: 1, name: 'House', temp: 34, target: 2, on: true, min: -5, max: 5, relativni: true }] };
+    zones: [{ zoneId: 1, name: 'House', temp: 34, target: 2, on: true, min: -5, max: 5, relativni: true, pouzita: true },
+      { zoneId: 2, name: 'Zone2', temp: null, target: 0, on: true, min: -5, max: 5, relativni: true, pouzita: false }] };
   airconData = { devices: airconData.devices, aquarea: [JSON.parse(JSON.stringify(AQ))], error: null };
   renderAircon();
   check('s Aquareou je vidět pod klimatizacemi', !box.hidden && box.previousElementSibling.querySelector('#airconList') !== null, true);
   const rezimy = () => [...box.querySelectorAll('.aq-rezimy button')];
   check('režimy, svítí Topení', rezimy().map(b => b.textContent + (b.classList.contains('active') ? '*' : '')).join(' '), 'Topení* Voda Obojí Vyp.');
+  check('jen zóna 1, bez názvu zóny', [...box.querySelectorAll('[data-zona]')].map(r => r.dataset.zona + ':' + r.querySelector('.aq-nazev').textContent).join(), '1:Topení');
   const zona1 = box.querySelector('[data-zona="1"]');
   check('topení: posun křivky +2 °C', zona1.querySelector('.temp-val').textContent + ' | ' + zona1.querySelector('.aq-pozn').textContent, '+2 °C | 34,0 °C · posun křivky');
   check('voda: nádrž a cíl', box.querySelector('.aq-voda .aq-pozn').textContent + ' | ' + box.querySelector('.aq-voda .temp-val').textContent, 'v nádrži 48,2 °C | 50 °C');
@@ -179,6 +181,13 @@ setTimeout(async () => {
   await pockej(50);
   check('chyba se ukáže v boxu', document.getElementById('aquareaChyba').hidden + ' ' + document.getElementById('aquareaChyba').textContent, 'false Tepelné čerpadlo: Panasonic API HTTP 500');
   check('nic nepřetéká', box.scrollWidth <= box.clientWidth + 1, true);
+  // Bez cíle (detail nedorazil): poznámka místo ticha
+  airconData.aquarea[0].zones[0].target = null;
+  airconData.aquarea[0].tankTarget = null;
+  renderAquarea();
+  check('bez cíle: „cíl se načítá“ a −/+ vypnuté', box.querySelector('[data-zona="1"] .aq-pozn').textContent + ' | '
+    + box.querySelector('.aq-voda .aq-pozn').textContent + ' | ' + [...box.querySelectorAll('.temp-btn')].every(b => b.disabled),
+    '34,0 °C · cíl se načítá | v nádrži 48,2 °C · cíl se načítá | true');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

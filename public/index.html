@@ -7596,7 +7596,7 @@ const aqCeka = {};   // klíč (zona-1 / nadrz) -> { hodnota, timer }
 const AQ_REZIMY_UI = [['topeni', 'Topení'], ['voda', 'Voda'], ['oboji', 'Obojí'], ['vypnuto', 'Vyp.']];
 
 function aquareaRezimUi(aq) {
-  const zona = (aq.zones || []).some(z => z.on);
+  const zona = (aq.zones || []).some(z => z.pouzita !== false && z.on);
   if (aq.zapnuto === false || (!zona && !aq.tankOn)) return 'vypnuto';
   return zona && aq.tankOn ? 'oboji' : zona ? 'topeni' : 'voda';
 }
@@ -7687,14 +7687,16 @@ function renderAquarea() {
     });
   }
   // Topení: zóny s posunem křivky (nebo cílovou teplotou)
-  for (const z of aq.zones || []) {
+  const zony = (aq.zones || []).filter(z => z.pouzita !== false);
+  for (const z of zony) {
     const r = el('div', 'aq-radek', aquareaObsahEl);
     r.dataset.zona = z.zoneId;
     const info = el('div', 'aq-info', r);
     const n = el('div', 'aq-nazev', info);
     el('div', 'traffic-light' + (z.on ? ' on' : ' off'), n);
-    el('span', '', n, 'Topení' + (aq.zones.length > 1 ? ' · ' + z.name : ''));
-    el('div', 'aq-pozn', info, (typeof z.temp === 'number' ? fmtTemp(z.temp) + ' · ' : '') + (z.relativni ? 'posun křivky' : 'cílová teplota'));
+    el('span', '', n, 'Topení' + (zony.length > 1 ? ' · ' + z.name : ''));
+    el('div', 'aq-pozn', info, (typeof z.temp === 'number' ? fmtTemp(z.temp) + ' · ' : '')
+      + (typeof z.target !== 'number' ? 'cíl se načítá' : z.relativni ? 'posun křivky' : 'cílová teplota'));
     const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
     const format = z.relativni ? v => (v > 0 ? '+' : '') + v + ' °C' : v => v + ' °C';
     el('div', 'aq-prave', r).appendChild(aquareaKrokovac('zona-' + z.zoneId, z.target, min, max, format,
@@ -7707,7 +7709,8 @@ function renderAquarea() {
     const n = el('div', 'aq-nazev', info);
     el('div', 'traffic-light' + (aq.tankOn ? ' on' : ' off'), n);
     el('span', '', n, 'Voda');
-    el('div', 'aq-pozn', info, (typeof aq.tankTemp === 'number' ? 'v nádrži ' + fmtTemp(aq.tankTemp) : 'nádrž'));
+    el('div', 'aq-pozn', info, (typeof aq.tankTemp === 'number' ? 'v nádrži ' + fmtTemp(aq.tankTemp) : 'nádrž')
+      + (typeof aq.tankTarget !== 'number' ? ' · cíl se načítá' : ''));
     const prave = el('div', 'aq-prave', r);
     prave.appendChild(aquareaKrokovac('nadrz', aq.tankTarget, aq.tankMin ?? 40, aq.tankMax ?? 65, v => v + ' °C',
       v => aquareaPost(aq, { nadrz: v })));

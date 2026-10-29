@@ -6482,8 +6482,10 @@ async function pccGetDevices() {
       if (d.parameters) {
         list.push({ guid: d.deviceGuid, name: d.deviceName || d.deviceGuid });
       } else {
-        // Stav Aquarey (nádrž, zóny) je rovnou v záznamu skupiny
-        aquarea.push({ guid: d.deviceGuid, name: d.deviceName || 'Tepelné čerpadlo', ...pccAquareaFromGroup(d) });
+        // Stav Aquarey (nádrž, zóny) je v záznamu skupiny jen zčásti — cíle a rozsahy
+        // (heatSet, heatMin, heatMax) přijdou až z detailu zařízení
+        const detail = await pccAquareaDetail(d.deviceGuid);
+        aquarea.push({ guid: d.deviceGuid, name: d.deviceName || 'Tepelné čerpadlo', ...pccAquareaFromGroup({ ...d, ...(detail || {}) }) });
       }
     }
   }
@@ -6494,6 +6496,27 @@ async function pccGetDevices() {
 function aquaNum(v) {
   return typeof v === 'number' && v !== PCC_INVALID_TEMP && v !== 255 ? v : null;
 }
+
+// Detail Aquarey jako integrace pro Home Assistant: živý stav (deviceDirect=1),
+// při chybě uložený (0). Volá se uvnitř fronty (pccGetDevices), proto bez pccQueued.
+// Selže-li obojí, zůstanou data ze skupiny.
+async function pccAquareaDetail(guid) {
+  for (const direct of [1, 0]) {
+    try {
+      const j = await pccApiFetch('/remote/v1/app/common/transfer', {
+        method: 'POST',
+        body: JSON.stringify({ apiName: `/remote/v1/api/devices?gwid=${guid}&deviceDirect=${direct}`, requestMethod: 'GET' })
+      });
+      const st = j && (Array.isArray(j.status) ? j.status[0] : j.status);
+      if (st && typeof st === 'object') return st;
+    } catch {}
+  }
+  return null;
+}
+
+// Dům má jedinou topnou zónu. Comfort Cloud hlásí i zónu 2, která nic netopí —
+// v appce se neukazuje a povely režimu ji nechávají, jak je.
+const AQ_ZONY = [1];
 
 function pccAquareaFromGroup(d) {
   const tankRaw = Array.isArray(d.tankStatus) ? d.tankStatus[0] : d.tankStatus;
@@ -6523,7 +6546,8 @@ function pccAquareaFromGroup(d) {
         temp: aquaNum(z.temperatureNow !== undefined ? z.temperatureNow : z.temparatureNow),
         target,
         on: z.operationStatus === 1,
-        min, max, relativni
+        min, max, relativni,
+        pouzita: AQ_ZONY.includes(cislo(z.zoneId) ?? i + 1)
       };
     })
   };
@@ -6543,7 +6567,7 @@ const AQ_MODE_HEAT = 2;   // AquareaUpdateOperationMode.Heat
 // Režim podle toho, co je zapnuté (pro zobrazení v appce)
 function aquareaRezim(aq) {
   if (!aq) return null;
-  const zona = (aq.zones || []).some(z => z.on);
+  const zona = (aq.zones || []).some(z => z.pouzita !== false && z.on);
   if (aq.zapnuto === false || (!zona && !aq.tankOn)) return 'vypnuto';
   return zona && aq.tankOn ? 'oboji' : zona ? 'topeni' : 'voda';
 }
@@ -6555,7 +6579,8 @@ function aquareaTeloRezimu(aq, rezim) {
   const cokoli = r.zona || r.nadrz;
   const telo = {
     operationStatus: cokoli ? 1 : 0,
-    zoneStatus: (aq.zones || []).map(z => ({ zoneId: z.zoneId, operationStatus: r.zona ? 1 : 0 })),
+    // Nepoužitá zóna dostane svůj dosavadní stav — posílat se musí, ale měnit ne
+    zoneStatus: (aq.zones || []).map(z => ({ zoneId: z.zoneId, operationStatus: z.pouzita === false ? (z.on ? 1 : 0) : (r.zona ? 1 : 0) })),
     tankStatus: { operationStatus: r.nadrz ? 1 : 0 }
   };
   if (cokoli) telo.operationMode = AQ_MODE_HEAT;
@@ -6582,10 +6607,10 @@ app.post('/api/aquarea', async (req, res) => {
     if (!AQ_REZIMY[b.rezim]) return res.status(400).json({ error: 'Neznámý režim.' });
     const r = AQ_REZIMY[b.rezim];
     telo = aquareaTeloRezimu(aq, b.rezim);
-    uprav = () => { for (const z of aq.zones || []) z.on = r.zona; aq.tankOn = r.nadrz; aq.zapnuto = r.zona || r.nadrz; };
+    uprav = () => { for (const z of aq.zones || []) if (z.pouzita !== false) z.on = r.zona; aq.tankOn = r.nadrz; aq.zapnuto = r.zona || r.nadrz; };
     log = `Tepelné čerpadlo: ${r.popis}`;
   } else if (b.zona !== undefined) {
-    const z = (aq.zones || []).find(x => x.zoneId === Number(b.zona && b.zona.zoneId));
+    const z = (aq.zones || []).find(x => x.zoneId === Number(b.zona && b.zona.zoneId) && x.pouzita !== false);
     if (!z) return res.status(400).json({ error: 'Neznámá zóna.' });
     const v = cele(b.zona.heatSet);
     const min = z.min ?? (z.relativni ? -5 : 20), max = z.max ?? (z.relativni ? 5 : 55);
