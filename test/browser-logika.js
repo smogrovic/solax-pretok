@@ -115,7 +115,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   OUT.push('\\n3) Pokyny ze zkratek iPhonu');
   const zkK = document.getElementById('zkratkyKarta');
   const zkKarty = [...page.querySelectorAll(':scope > .page > .card')];
-  check('karta hned pod Upozorněním', zkKarty[zkKarty.indexOf(zkK) - 1].contains(document.getElementById('oznameniHint')), 'true');
+  check('karta zkratek dole, hned nad nákupem', zkKarty.indexOf(zkK) === zkKarty.length - 2 && zkKarty[zkKarty.length - 1].contains(document.getElementById('oblibeneSeznam')), 'true');
   applySnapshot({ zkratky: { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true }, klic: true, obehDo: 0,
     posledni: { probuzeni: { kdy: Date.now(), kdo: 'Lukáš', vysledek: 'noční světla rozsvícena' }, spanek: null } } });
   const zkTxt = zkK.textContent;

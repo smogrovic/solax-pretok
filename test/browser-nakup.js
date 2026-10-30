@@ -315,6 +315,10 @@ setTimeout(async () => {
   check('nastavení je v Logice automatiky', !!ns.closest('.slide[data-title="Logika automatiky"]'), true);
   renderOblibeneNastaveni();
   check('  ukazuje seznam', [...ns.querySelectorAll('.nazev')].map(n => n.textContent).join(' | '), '🥚 Vajíčka | 🥛 Mléko | 🧻 Toaletní papír');
+  {
+    const [r1, r2, r3] = [...ns.children].map(r => r.getBoundingClientRect());
+    check('  ve dvou sloupcích', [Math.abs(r1.top - r2.top) < 2, r2.left > r1.left + 50, r3.top > r1.top + 10, Math.abs(r3.left - r1.left) < 2].join(), 'true,true,true,true');
+  }
   dotazy = [];
   odpoved = (url, telo) => url === '/api/nakup/oblibene' ? { ok: true, nakupOblibene: telo.polozky } : { ok: true };
   ns.querySelectorAll('button')[1].click();
