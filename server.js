@@ -3504,6 +3504,14 @@ function obehOknoNyni(at = Date.now()) {
 
 let obehOkno = null;          // okno, ve kterém jsme byli minulý tik (kvůli hranám)
 let obehKeepaliveAt = 0;      // kdy naposledy odešlo připomenutí ON
+let obehOknoPreskoc = null;   // okno zrušené zamčením domu — do jeho konce se nezapíná
+
+// Zamčení domu (zkratka iPhonu): běžící okno rozvrhu se dnes už nedojede.
+// Další okno jede normálně — mezi okny se přeskočení samo zapomene.
+function obehOknoPreskocit(now = Date.now()) {
+  obehOknoPreskoc = obehOknoNyni(now);
+  return obehOknoPreskoc;
+}
 
 // Připomenutí ON jde NÍZKOU CESTOU, ne přes autoSet: logAutoSet počítá opakování
 // a po pár cyklech by začal hlásit „opakovaně" a plnil log. Stav relé se schválně
@@ -3559,7 +3567,9 @@ async function runObehSchedule(now = Date.now()) {
     obehOkno = null;
     return;
   }
-  const okno = obehOknoNyni(now);
+  const oknoRozvrh = obehOknoNyni(now);
+  if (oknoRozvrh !== obehOknoPreskoc) obehOknoPreskoc = null;
+  const okno = obehOknoPreskoc ? null : oknoRozvrh;
   // Okno rozvrhu má přednost; protáčení kvůli sauně jede mimo něj
   const sauna = okno ? null : obehSaunaChce(now);
   if (okno && okno !== obehOkno) {
@@ -11382,10 +11392,14 @@ const ZKRATKY_KLIC = (process.env.ZKRATKY_KLIC || '').trim();
 const ZKRATKY_OPAKOVANI_MS = 30 * 60000;
 const ZKRATKY_TIK_MS = 30000;
 const ZKRATKY_OBEH_MINUTY = [0, 5, 10, 15, 20, 30, 45, 60];
-const ZKRATKY_UDALOSTI = { probuzeni: 'Probuzení', spanek: 'Jdu spát' };
+const ZKRATKY_UDALOSTI = { probuzeni: 'Probuzení', spanek: 'Jdu spát', zamceni: 'Zamčení', odemceni: 'Odemčení' };
+// Zamyká a odemyká se víckrát denně — tam jen pojistka proti dvojímu spuštění
+const ZKRATKY_OPAKOVANI_KRATCE_MS = 2 * 60000;
+const ZKRATKY_KRATCE = new Set(['zamceni', 'odemceni']);
 function zkratkyVychozi() {
   return { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true },
-    posledni: { probuzeni: null, spanek: null }, obehDo: 0 };
+    zamceni: { obeh: true, zaluzie: true }, odemceni: { nocniSvetla: true },
+    posledni: { probuzeni: null, spanek: null, zamceni: null, odemceni: null }, obehDo: 0 };
 }
 if (!state.zkratky) state.zkratky = zkratkyVychozi();
 
@@ -11395,7 +11409,10 @@ function zkratkyOver(n) {
   const p = n.probuzeni || {}, sp = n.spanek || {};
   const min = Number(p.obehMin);
   if (!ZKRATKY_OBEH_MINUTY.includes(min)) return { chyba: 'Oběhové čerpadlo: neplatný počet minut.' };
-  return { nastaveni: { probuzeni: { nocniSvetla: p.nocniSvetla === true, obehMin: min }, spanek: { nocniSvetla: sp.nocniSvetla === true } } };
+  // Záloha z doby před zamčením/odemčením je nemá — pak platí výchozí
+  const v = zkratkyVychozi(), za = n.zamceni || v.zamceni, od = n.odemceni || v.odemceni;
+  return { nastaveni: { probuzeni: { nocniSvetla: p.nocniSvetla === true, obehMin: min }, spanek: { nocniSvetla: sp.nocniSvetla === true },
+    zamceni: { obeh: za.obeh === true, zaluzie: za.zaluzie === true }, odemceni: { nocniSvetla: od.nocniSvetla === true } } };
 }
 
 const zkratkyPayload = () => ({ ...state.zkratky, klic: !!ZKRATKY_KLIC });
@@ -11409,13 +11426,28 @@ async function zkratkaProvest(udalost, kdo, now = Date.now(), { zkouska = false 
     return 'Nejsme doma — pokyn se ignoruje.';
   }
   const pred = z.posledni && z.posledni[udalost];
-  if (!zkouska && pred && now - pred.kdy < ZKRATKY_OPAKOVANI_MS) return `Už proběhlo v ${fmtPragueTime(pred.kdy)}.`;
+  const opakovani = ZKRATKY_KRATCE.has(udalost) ? ZKRATKY_OPAKOVANI_KRATCE_MS : ZKRATKY_OPAKOVANI_MS;
+  if (!zkouska && pred && now - pred.kdy < opakovani) return `Už proběhlo v ${fmtPragueTime(pred.kdy)}.`;
   const kroky = [];
   const zkus = async (popis, fn) => {
     try { await fn(); kroky.push(popis); } catch (err) { kroky.push(`${popis} — chyba (${String(err.message).slice(0, 60)})`); }
   };
   if (udalost === 'spanek') {
     if (z.spanek.nocniSvetla) await zkus('noční světla zhasnuta', () => actuateRelay('lightNocni', false, 'jdu spát'));
+  } else if (udalost === 'zamceni') {
+    // Bez ručního podržení a bez „Nejsme doma": automatika jede dál, jen běžící okno rozvrhu se nedojede
+    if (z.zamceni.obeh) {
+      await zkus('oběhové čerpadlo vypnuto', async () => {
+        z.obehDo = 0;
+        obehOknoPreskocit(now);
+        if (!(await autoSet('obeh', 'off', 'zamčení', { force: true }))) throw new Error('relé neodpovídá');
+      });
+    }
+    if (z.zamceni.zaluzie) {
+      await zkus('žaluzie zataženy', () => { if (!tahomaEnabled) throw new Error('nejsou nastavené'); return scenaZaluzie(); });
+    }
+  } else if (udalost === 'odemceni') {
+    if (z.odemceni.nocniSvetla) await zkus('noční světla rozsvícena', () => actuateRelay('lightNocni', true, 'odemčení'));
   } else {
     if (z.probuzeni.nocniSvetla) await zkus('noční světla rozsvícena', () => actuateRelay('lightNocni', true, 'probuzení'));
     if (z.probuzeni.obehMin > 0) {
@@ -11438,7 +11470,7 @@ app.post('/api/zkratka', async (req, res) => {
     if (typeof k !== 'string' || !k || !safeEqual(k, ZKRATKY_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
   }
   const b = req.body || {};
-  if (!ZKRATKY_UDALOSTI[b.udalost]) return res.status(400).json({ error: 'Neznámá událost (probuzeni / spanek).' });
+  if (!ZKRATKY_UDALOSTI[b.udalost]) return res.status(400).json({ error: 'Neznámá událost (' + Object.keys(ZKRATKY_UDALOSTI).join(' / ') + ').' });
   const kdo = typeof b.kdo === 'string' ? b.kdo.trim().slice(0, 30) : '';
   try {
     res.json({ reply: await zkratkaProvest(b.udalost, kdo) });
@@ -11567,7 +11599,7 @@ function storeSnapshot() {
     '/api/away/restore': { since: (state.away && state.away.since) || 0, tempAutoPred: (state.away && state.away.tempAutoPred) || [],
       aquareaPred: (state.away && state.away.aquareaPred) || null },
     '/api/aquarea/program/restore': { program: state.aquareaProgram },
-    '/api/zkratky/restore': (z => ({ nastaveni: { probuzeni: z.probuzeni, spanek: z.spanek },
+    '/api/zkratky/restore': (z => ({ nastaveni: { probuzeni: z.probuzeni, spanek: z.spanek, zamceni: z.zamceni, odemceni: z.odemceni },
       obehDo: z.obehDo || 0, posledni: z.posledni }))(state.zkratky || {}),
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },

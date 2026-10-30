@@ -30,7 +30,7 @@ function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc =
     'pragueTime', 'Intl', 'DEVICES', 'setShellyState', 'noteCmd', 'autoSet',
     'manualHeld', 'autoRunning', 'scheduleEvery', 'RELAY_AUTO_OFF_MS', 'awayActive',
     'state', 'saunaAktivni', 'SAUNA_LOZNICE_MIN',
-    CODE + '\n; return { obehOknoNyni, obehPracovniDen, runObehSchedule, OBEH_ROZVRH,'
+    CODE + '\n; return { obehOknoNyni, obehPracovniDen, runObehSchedule, obehOknoPreskocit, OBEH_ROZVRH,'
          + ' OBEH_TICK_MS, OBEH_KEEPALIVE_MS };'
   )(
     () => ({ hour: Number(hodiny.slice(0, 2)), minute: Number(hodiny.slice(3, 5)) }),
@@ -270,6 +270,24 @@ nadpis('7b) Protáčení při sauně: 10 min zapnuto, 10 min vypnuto');
   check('v okně rozvrhu jede rozvrh', h.povely[0], 'obeh:on (rozvrh 18:45–19:30)');
   await h.tik(10 * MIN, '19:30');   // fáze: 10 min od nahřátí = OFF
   check('po okně převezme sauna (pauza)', h.povely.slice(1).join(' | '), 'obeh:off (sauna — pauza)');
+}
+
+nadpis('7b) Zamčení domu zruší běžící okno');
+{
+  const h = build({ den: 'Mon', cas: '06:15' });
+  await h.tik(0);
+  check('okno se rozjede', h.povely.join(), 'obeh:on (rozvrh 06:15–07:15)');
+  check('zamčení si pamatuje běžící okno', h.api.obehOknoPreskocit(h.now), '06:15–07:15');
+  const primo = h.primo.length;
+  for (let i = 0; i < 40; i++) await h.tik(MIN);
+  check('do konce okna nic nezapne (ani připomenutí)', h.povely.filter(p => p.includes(':on')).length + ' ' + (h.primo.length - primo), '1 0');
+  await h.tik(0, '07:15');
+  await h.tik(MIN, '18:45');
+  check('večerní okno jede normálně', h.povely.filter(p => p.includes(':on')).pop(), 'obeh:on (rozvrh 18:45–19:30)');
+  const m = build({ den: 'Mon', cas: '10:00' });
+  check('mimo okno se nic nepřeskakuje', m.api.obehOknoPreskocit(m.now), null);
+  await m.tik(0, '18:45');
+  check('  a večer okno jede', m.povely.join(), 'obeh:on (rozvrh 18:45–19:30)');
 }
 
 nadpis('8) Rozvrh sám');

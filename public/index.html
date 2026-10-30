@@ -7804,7 +7804,7 @@ function zkratkyKdy(t) {
 
 function renderZkratky() {
   if (!zkratkyObsahEl || !zkratkyData) return;
-  const z = zkratkyData;
+  const z = { zamceni: {}, odemceni: {}, ...zkratkyData };
   zkratkyObsahEl.textContent = '';
   const el = (tag, cls, rodic, text) => {
     const e = document.createElement(tag);
@@ -7822,7 +7822,7 @@ function renderZkratky() {
     } catch (err) { zkratkyHintEl.textContent = err.message; }
     renderZkratky();
   };
-  const nastaveni = () => ({ probuzeni: { ...z.probuzeni }, spanek: { ...z.spanek } });
+  const nastaveni = () => ({ probuzeni: { ...z.probuzeni }, spanek: { ...z.spanek }, zamceni: { ...z.zamceni }, odemceni: { ...z.odemceni } });
   const zaskrtnout = (rodic, text, hodnota, zmena) => {
     const l = el('label', 'zk-volba', rodic);
     const c = el('input', '', l);
@@ -7862,11 +7862,19 @@ function renderZkratky() {
     sel.value = String(z.probuzeni.obehMin);
     sel.addEventListener('change', () => { const n = nastaveni(); n.probuzeni.obehMin = Number(sel.value); uloz(n); });
   });
+  sekce('zamceni', 'Zamčení (lockdown)', s => {
+    zaskrtnout(s, 'vypnout oběhové čerpadlo', z.zamceni.obeh, v => { const n = nastaveni(); n.zamceni.obeh = v; uloz(n); });
+    zaskrtnout(s, 'zatáhnout všechny žaluzie', z.zamceni.zaluzie, v => { const n = nastaveni(); n.zamceni.zaluzie = v; uloz(n); });
+  });
+  sekce('odemceni', 'Odemčení', s => {
+    zaskrtnout(s, 'rozsvítit noční světla', z.odemceni.nocniSvetla, v => { const n = nastaveni(); n.odemceni.nocniSvetla = v; uloz(n); });
+  });
   const navod = el('div', 'zk-navod', zkratkyObsahEl);
   navod.innerHTML = 'Zkratka: <b>Načíst obsah URL</b> → <code>' + location.origin + '/api/zkratka</code>, metoda POST, '
-    + 'tělo JSON <code>udalost</code> = <code>spanek</code> nebo <code>probuzeni</code>, <code>kdo</code> = jméno. '
+    + 'tělo JSON <code>udalost</code> = <code>spanek</code>, <code>probuzeni</code>, <code>zamceni</code> nebo <code>odemceni</code>, <code>kdo</code> = jméno. '
     + (z.klic ? 'Klíč je nastaven — patří do hlavičky <code>X-Klic</code>.' : 'Klíč (ZKRATKY_KLIC v Renderu) není nastaven.')
-    + ' Při <b>Nejsme doma</b> se pokyn ignoruje. Stejný pokyn do 30 min se neopakuje.';
+    + ' Při <b>Nejsme doma</b> se pokyn ignoruje. Stejný pokyn se neopakuje do 30 min (zamčení a odemčení do 2 min).'
+    + ' Zamčení nepřepíná Nejsme doma — automatika jede dál, jen běžící okno rozvrhu čerpadla se nedojede.';
 }
 
 // ---------- Program tepelného čerpadla ----------

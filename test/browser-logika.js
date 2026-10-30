@@ -133,6 +133,16 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   zkCb.checked = false; zkCb.dispatchEvent(new Event('change'));
   await wait(50);
   check('zaškrtávátko spánku', JSON.stringify(poslano.body.nastaveni.spanek), '{"nocniSvetla":false}');
+  check('čtyři události', [...zkK.querySelectorAll('[data-udalost]')].map(e => e.dataset.udalost).join(','), 'spanek,probuzeni,zamceni,odemceni');
+  const zkZal = zkK.querySelectorAll('[data-udalost="zamceni"] input[type=checkbox]')[1];
+  check('  stará data bez zamčení: nezaškrtnuto, nespadne', zkZal.checked, 'false');
+  zkZal.checked = true; zkZal.dispatchEvent(new Event('change'));
+  await wait(50);
+  check('zamčení: žaluzie se uloží, ostatní zůstane', JSON.stringify(poslano.body.nastaveni.zamceni) + ' ' + JSON.stringify(poslano.body.nastaveni.probuzeni), '{"zaluzie":true} {"nocniSvetla":true,"obehMin":15}');
+  applySnapshot({ zkratky: { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true }, zamceni: { obeh: true, zaluzie: true },
+    odemceni: { nocniSvetla: true }, klic: false, obehDo: 0, posledni: {} } });
+  check('odemčení: rozsvítit noční světla', zkK.querySelector('[data-udalost="odemceni"] input').checked + ' ' + zkK.querySelector('[data-udalost="odemceni"]').textContent.includes('rozsvítit noční světla'), 'true true');
+  check('návod zná zamceni/odemceni', zkK.textContent.includes('zamceni') && zkK.textContent.includes('odemceni'), 'true');
   const fetchPuv = window.fetch;
   window.fetch = async (url, opts) => { poslano = { url: String(url), body: JSON.parse(opts.body) }; return { ok: true, status: 200, json: async () => ({ reply: 'Noční světla zhasnuta.' }) }; };
   zkK.querySelector('[data-udalost="spanek"] button').click();

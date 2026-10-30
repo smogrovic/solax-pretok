@@ -12,7 +12,7 @@ function build(o = {}) {
   const state = o.state || {};
   const safeEqual = (a, b) => crypto.timingSafeEqual(crypto.createHash('sha256').update(String(a)).digest(), crypto.createHash('sha256').update(String(b)).digest());
   const api = new Function('state', 'app', 'requireAuth', 'addLog', 'broadcast', 'actuateRelay', 'autoSet', 'awayOn',
-    'safeEqual', 'fmtPragueTime', 'obehOknoNyni', 'process',
+    'safeEqual', 'fmtPragueTime', 'obehOknoNyni', 'process', 'obehOknoPreskocit', 'scenaZaluzie', 'tahomaEnabled',
     CODE + '\n; return { zkratkaProvest, zkratkyOver, zkratkyObehHlidej, zkratkyPayload };')(
     state, { post: (c, f) => { routy[c] = f; } },
     (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
@@ -20,7 +20,10 @@ function build(o = {}) {
     async (key, on, duvod) => { if (o.selze === key) throw new Error('Shelly nereaguje'); akce.push(`${key}:${on ? 'on' : 'off'} (${duvod})`); },
     async (key, turn, duvod, opt) => { akce.push(`auto:${key}:${turn} (${duvod})${opt && opt.force ? ' force' : ''}`); return true; },
     () => !!o.pryc, safeEqual, t => new Date(t).toISOString().slice(11, 16),
-    () => (o.okno || null), { env: o.env || {} });
+    () => (o.okno || null), { env: o.env || {} },
+    now => { akce.push('preskocit okno'); return o.okno || null; },
+    async () => { if (o.selze === 'zaluzie') throw new Error('TaHoma nereaguje'); akce.push('žaluzie dolů'); return 'Žaluzie: dolů.'; },
+    o.tahoma !== false);
   const volej = async (cesta, body, hlavicky = {}) => {
     let out, kod = 200;
     const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -78,6 +81,39 @@ function build(o = {}) {
     check('vyzkoušet z appky: proběhne i hned po pokynu, nepočítá se', r.out.reply + ' ' + h.akce.length + ' ' + (h.state.zkratky.posledni.spanek.kdy === t), 'Noční světla zhasnuta. 2 true');
   }
 
+  nadpis('Zamčení a odemčení');
+  {
+    const h = build();
+    h.state.zkratky.obehDo = 5000;
+    const r = await h.volej('/api/zkratka', { udalost: 'zamceni', kdo: 'Lukáš' });
+    check('zamčení: oběh vypnout (natvrdo), okno přeskočit, žaluzie dolů', h.akce.join(', '), 'preskocit okno, auto:obeh:off (zamčení) force, žaluzie dolů');
+    check('  odpověď', r.out.reply, 'Oběhové čerpadlo vypnuto, žaluzie zataženy.');
+    check('  konec probuzení zrušen', h.state.zkratky.obehDo, 0);
+    check('  log', h.logy.pop(), 'Zamčení (Lukáš): oběhové čerpadlo vypnuto, žaluzie zataženy');
+    check('  Nejsme doma se nepřepíná (žádná taková závislost)', /awaySet|state\.away\s*=/.test(CODE), false);
+    const t0 = Date.UTC(2026, 9, 30, 22, 0);
+    const o = await h.api.zkratkaProvest('odemceni', 'Lukáš', t0);
+    check('odemčení: noční světla', o + ' ' + h.akce.slice(3).join(), 'Noční světla rozsvícena. lightNocni:on (odemčení)');
+    const znovu = await h.api.zkratkaProvest('odemceni', '', t0 + 60000);
+    check('do 2 min se neopakuje', znovu, 'Už proběhlo v 22:00.');
+    await h.api.zkratkaProvest('odemceni', '', t0 + 3 * 60000);
+    check('po 3 min znovu svítí', h.akce.length, 5);
+  }
+  {
+    const h = build({ selze: 'zaluzie' });
+    const r = await h.api.zkratkaProvest('zamceni', '');
+    check('chyba žaluzií: čerpadlo stejně vypne', h.akce.join() + ' | ' + r, 'preskocit okno,auto:obeh:off (zamčení) force | Oběhové čerpadlo vypnuto, žaluzie zataženy — chyba (TaHoma nereaguje).');
+    const b = build({ tahoma: false });
+    check('bez TaHomy chyba, ne „zataženy"', await b.api.zkratkaProvest('zamceni', ''), 'Oběhové čerpadlo vypnuto, žaluzie zataženy — chyba (nejsou nastavené).');
+    const v = build();
+    v.state.zkratky.zamceni = { obeh: false, zaluzie: false };
+    v.state.zkratky.odemceni = { nocniSvetla: false };
+    check('vypnuté volby: nic', (await v.api.zkratkaProvest('zamceni', '')) + ' ' + (await v.api.zkratkaProvest('odemceni', '')) + ' ' + v.akce.length, 'Nic nastaveno. Nic nastaveno. 0');
+    const p = build({ pryc: true });
+    check('nejsme doma: zamčení i odemčení ignoruje', (await p.api.zkratkaProvest('zamceni', '')) + ' ' + (await p.api.zkratkaProvest('odemceni', '')) + ' ' + p.akce.length,
+      'Nejsme doma — pokyn se ignoruje. Nejsme doma — pokyn se ignoruje. 0');
+  }
+
   nadpis('Klíč');
   {
     const h = build({ env: { ZKRATKY_KLIC: 'tajne-123' } });
@@ -114,8 +150,15 @@ function build(o = {}) {
     await z.volej('/api/zkratky/restore', { nastaveni: { probuzeni: { nocniSvetla: true, obehMin: 10 }, spanek: { nocniSvetla: false } },
       obehDo: Date.now() + 60000, posledni: { spanek: { kdy: 123, kdo: 'L', vysledek: 'x' } } });
     check('obnova ze zálohy', [z.state.zkratky.probuzeni.obehMin, z.state.zkratky.obehDo > Date.now(), z.state.zkratky.posledni.spanek.kdy].join(' '), '10 true 123');
+    check('  stará záloha bez zamčení: výchozí', JSON.stringify([z.state.zkratky.zamceni, z.state.zkratky.odemceni]), '[{"obeh":true,"zaluzie":true},{"nocniSvetla":true}]');
+    const n = build();
+    await n.volej('/api/zkratky/nastaveni', { nastaveni: { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true },
+      zamceni: { obeh: true, zaluzie: false }, odemceni: { nocniSvetla: false } } });
+    check('  uložení zamčení/odemčení', JSON.stringify([n.state.zkratky.zamceni, n.state.zkratky.odemceni]), '[{"obeh":true,"zaluzie":false},{"nocniSvetla":false}]');
+    await n.volej('/api/zkratky/restore', { nastaveni: { probuzeni: { obehMin: 15 }, spanek: {} }, posledni: { zamceni: { kdy: 77, kdo: null, vysledek: 'x' } } });
+    check('  naposledy zamčení ze zálohy', n.state.zkratky.posledni.zamceni.kdy, 77);
   }
-  check('záloha a snapshot', SRC.includes("'/api/zkratky/restore',") && SRC.includes("'/api/zkratky/restore': (z => ({ nastaveni:") && SRC.includes('zkratky: zkratkyPayload(),'), true);
+  check('záloha a snapshot', SRC.includes("'/api/zkratky/restore',") && SRC.includes("'/api/zkratky/restore': (z => ({ nastaveni: { probuzeni: z.probuzeni, spanek: z.spanek, zamceni: z.zamceni, odemceni: z.odemceni }") && SRC.includes('zkratky: zkratkyPayload(),'), true);
   check('hlídání konce oběhu běží', /scheduleEvery\(\(\) => zkratkyObehHlidej\(\)/.test(SRC), true);
   konec();
 })();
