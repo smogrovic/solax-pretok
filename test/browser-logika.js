@@ -36,7 +36,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
                    'Data, notifikace, časovače', 'Oběhové čerpadlo', 'Rozvrh žaluzií', 'Nejsme doma'])
     check('je tam ' + s, sekce.some(x => x.startsWith(s)), 'true');
   // Po zjednodušení jen to, jak se to chová — žádné zdůvodňování na pozadí
-  check('odrážek je nejvýš 57', li.length <= 57, 'true');   // 53 + čerpadlo (1 v Nejsme doma, 3 v programu)
+  check('odrážek je nejvýš 58', li.length <= 58, 'true');   // 53 + čerpadlo (1 v Nejsme doma, 3 v programu) + zkratky iPhonu
   // Přepínač automatiky a Nejsme doma nahoře, nákupní seznam až úplně dole
   check('nahoře Obecné, Nejsme doma, čerpadlo, Zima', sekce.slice(0, 4).join(' | '), 'Obecné | Nejsme doma | Tepelné čerpadlo (program) | Zima');
   const karty = [...page.querySelectorAll(':scope > .page > .card')];
@@ -111,6 +111,35 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const wbIdx = sekce.findIndex(x => x.startsWith('Wallbox'));
   const wbSekce = [...page.querySelectorAll('.logic-sec')][wbIdx];
   check('wallbox má nejvýš pět odrážek', wbSekce.querySelectorAll('li').length <= 5, 'true');
+
+  OUT.push('\\n3) Pokyny ze zkratek iPhonu');
+  const zkK = document.getElementById('zkratkyKarta');
+  const zkKarty = [...page.querySelectorAll(':scope > .page > .card')];
+  check('karta hned pod Upozorněním', zkKarty[zkKarty.indexOf(zkK) - 1].contains(document.getElementById('oznameniHint')), 'true');
+  applySnapshot({ zkratky: { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true }, klic: true, obehDo: 0,
+    posledni: { probuzeni: { kdy: Date.now(), kdo: 'Lukáš', vysledek: 'noční světla rozsvícena' }, spanek: null } } });
+  const zkTxt = zkK.textContent;
+  check('naposledy s kým a co', zkTxt.includes('(Lukáš) — noční světla rozsvícena'), 'true');
+  check('  spánek zatím nepřišel', zkTxt.includes('Zatím nepřišel.'), 'true');
+  check('klíč: jen že je nastaven', zkTxt.includes('Klíč je nastaven') && !/klic":|X-Klic: \\S/.test(zkTxt), 'true');
+  check('adresa pro zkratku', zkTxt.includes('/api/zkratka'), 'true');
+  const zkSel = zkK.querySelector('[data-udalost="probuzeni"] select');
+  check('čerpadlo 15 min vybráno', zkSel.value, '15');
+  zkSel.value = '30'; zkSel.dispatchEvent(new Event('change'));
+  await wait(50);
+  check('změna minut se uloží', poslano.url + ' ' + JSON.stringify(poslano.body.nastaveni.probuzeni), '/api/zkratky/nastaveni {"nocniSvetla":true,"obehMin":30}');
+  check('  hláška Uloženo', document.getElementById('zkratkyHint').textContent, 'Uloženo.');
+  const zkCb = zkK.querySelector('[data-udalost="spanek"] input[type=checkbox]');
+  zkCb.checked = false; zkCb.dispatchEvent(new Event('change'));
+  await wait(50);
+  check('zaškrtávátko spánku', JSON.stringify(poslano.body.nastaveni.spanek), '{"nocniSvetla":false}');
+  const fetchPuv = window.fetch;
+  window.fetch = async (url, opts) => { poslano = { url: String(url), body: JSON.parse(opts.body) }; return { ok: true, status: 200, json: async () => ({ reply: 'Noční světla zhasnuta.' }) }; };
+  zkK.querySelector('[data-udalost="spanek"] button').click();
+  await wait(50);
+  window.fetch = fetchPuv;
+  check('Vyzkoušet pošle událost', poslano.url + ' ' + poslano.body.udalost, '/api/zkratky/zkouska spanek');
+  check('  a ukáže odpověď', document.getElementById('zkratkyHint').textContent, 'Jdu spát: Noční světla zhasnuta.');
 
  } catch (e) { OUT.push('CHYBA výjimka: ' + e.message); }
 

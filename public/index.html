@@ -303,12 +303,12 @@
     .kal-wx .poc-hod{font-size:15px;}
   }
   .kal-pocasi{position:relative;}
-  .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:8px;}
+  .poc-obsah{position:relative;z-index:1;display:flex;flex-direction:column;gap:6px;}
   .poc-hlava{text-align:center;text-shadow:0 1px 6px rgba(0,0,0,0.18);}
   .poc-misto{font-size:22px;font-weight:500;}
   .poc-teploty{display:flex;justify-content:center;gap:34px;margin-top:2px;}
   .poc-t{display:flex;flex-direction:column;align-items:center;}
-  .poc-teplota{font-size:66px;font-weight:200;line-height:1;margin-left:14px;}
+  .poc-teplota{font-size:60px;font-weight:200;line-height:1;margin-left:14px;}
   .poc-t-pop{font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.8;margin-top:2px;}
   /* Animovaná scéna za teplotami — jako pozadí v Počasí na iPhonu. Jen transform
      a opacity, ať to na iPadu jede plynule. */
@@ -360,7 +360,7 @@
     box-shadow:0 0 0 2px rgba(0,0,0,0.18);}
   .poc-male{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
   .poc-velke{font-size:26px;font-weight:400;line-height:1.1;}
-  .poc-pozn{font-size:12px;font-weight:500;opacity:0.85;margin-top:3px;line-height:1.3;}
+  .poc-pozn{font-size:12px;font-weight:500;opacity:0.85;margin-top:3px;line-height:1.25;}
   .poc-kruh{display:block;width:36px;height:36px;margin:2px 0 0;}
   .poc-sloupky{display:flex;align-items:flex-end;gap:2px;height:18px;margin-top:4px;}
   .poc-sloupky span{flex:1;background:#7cc7ff;border-radius:2px 2px 0 0;min-height:2px;}
@@ -1359,6 +1359,15 @@
   .aq-prave .temp-val{min-width:58px;text-align:center;}
   .aq-chyba{font-size:12px;color:#c0392b;margin-top:6px;}
   .sbal-btn[hidden]{display:none;}
+  .zk-sek{border-top:1px solid rgba(44,62,80,0.08);padding:8px 0 4px;}
+  .zk-sek:first-child{border-top:none;padding-top:2px;}
+  .zk-hlava{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;font-size:14px;margin-bottom:4px;}
+  .zk-volba{display:flex;align-items:center;gap:8px;font-size:13px;margin:5px 0;}
+  .zk-volba input[type=checkbox]{width:18px;height:18px;accent-color:var(--orange);}
+  .zk-volba .timer-select{margin:0;flex:0 0 auto;width:auto;}
+  .zk-posledni{font-size:12px;color:var(--grey-text);margin-top:2px;}
+  .zk-navod{font-size:12px;color:var(--grey-text);line-height:1.45;border-top:1px solid rgba(44,62,80,0.08);padding-top:8px;margin-top:4px;word-break:break-word;}
+  .zk-navod code{font-size:11px;background:rgba(44,62,80,0.06);border-radius:4px;padding:1px 4px;}
   .aq-card #aqProgramObsah{align-self:stretch;width:100%;box-sizing:border-box;}
   .aqp-hlava{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px;}
   .aqp-prepinac{display:flex;gap:6px;}
@@ -3701,6 +3710,13 @@
         <div class="rezim-hint" id="oznameniHint"></div>
       </div>
 
+      <!-- Pokyny ze zkratek iPhonu: zkratka jen oznámí událost, co se stane, je tady -->
+      <div class="card" data-rezim="full" id="zkratkyKarta">
+        <div class="asst-log-title">Pokyny ze zkratek iPhonu</div>
+        <div id="zkratkyObsah"></div>
+        <div class="rezim-hint" id="zkratkyHint"></div>
+      </div>
+
       <div class="card logic-card">
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Obecné</div>
@@ -3713,7 +3729,8 @@
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Nejsme doma</div>
           <ul class="logic-list">
-            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční a pergolu), <b>saunu</b> a <b>čerpadlo</b>. Bojler se nezapíná.</li>
+            <li><b>15 min</b> po zaškrtnutí zamkne, zatáhne žaluzie, vypne klimu a drží vypnutá <b>světla</b> (i noční), <b>saunu</b> a <b>čerpadlo</b>.</li>
+            <li>Bojler se nezapíná, <b>pokyny ze zkratek iPhonu</b> se ignorují.</li>
             <li><b>Tepelné čerpadlo</b>: vypne ohřev vody; když topí, sníží posun křivky na <b>−5 °C</b>, jinak zůstane vypnuté.</li>
             <li>Po návratu: <b>žaluzie podle rozvrhu</b>, klima a relé do automatiky, topení jak bylo, <b>voda zapnutá na 43 °C</b>.</li>
           </ul>
@@ -3744,7 +3761,7 @@
             <li><b>Zapne</b> při přebytku nad <b>1850 W</b>, <b>vypne</b> pod <b>−200 W</b> (nejdřív po 30 min).</li>
             <li><b>Aspoň 2 h denně.</b> Co chybí, dožene natvrdo mezi <b>13:00 a 15:00</b>.</li>
             <li><b>+24 h</b> jede natvrdo (do 72 h), ruší ho <b>Zrušit</b> nebo ruční OFF.</li>
-            <li><b>Teplota vody</b> se měří v tepelném čerpadle, jen když voda teče. Jinak ukazuje poslední naměřenou. V zimě je čerpadlo vypnuté (<b>offline</b>).</li>
+            <li><b>Teplota vody</b> se měří, jen když voda teče, jinak je vidět poslední. V zimě je čerpadlo vypnuté (<b>offline</b>).</li>
           </ul>
         </div>
 
@@ -3753,8 +3770,8 @@
           <ul class="logic-list">
             <li>Když topí (nad <b>500 W</b>), <b>bazén a solinátor jdou dolů</b> na <b>30 min</b> po posledním nátopu. Omyl <b>do 2 min</b> je pustí hned.</li>
             <li>Platí i přes ruční zapnutí a „+24 h".</li>
-            <li>Při nahřívání: <b>cíl −15 °C</b> → žaluzie v ložnici nahoru, <b>cíl −10 °C</b> → světlo v sauně a po západu zahrada dole (i když slunce zapadne až během saunování).</li>
-            <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b class="sauna-po-min">15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, pokud ji rozsvítila sauna.</li>
+            <li>Při nahřívání: <b>cíl −15 °C</b> → žaluzie v ložnici nahoru, <b>cíl −10 °C</b> → světlo v sauně a po západu zahrada dole (i při západu během saunování).</li>
+            <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b class="sauna-po-min">15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, rozsvítila-li ji sauna.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
             <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
           </ul>
@@ -3862,7 +3879,7 @@
           <div class="logic-h">Data, notifikace, časovače</div>
           <ul class="logic-list">
             <li>Každé <b>2 min</b>: Solax, Shelly, wallbox, sauna. Každých <b>5 min</b>: bojlery, klima, počasí, automatika.</li>
-            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 3 h, pak à 30 min · ⚠️ výpadek dat 15 min · relé neposlouchá.</li>
+            <li>Notifikace: 🔋 baterie <b>99 %</b> · 🚪 garáž 10 min · 🔌 auto dobito · 🔥 bojler 70 °C · 🧖 sauna 3 h (pak à 30 min) · ⚠️ výpadek dat 15 min · relé.</li>
             <li>Sauna po <b>3:30</b> červeně přes iPad. Log si pamatuje <b>týden</b>. Časovače přežijí nasazení. Popelnice <b>BIO</b> se připomíná jen <b>1. 4. – 31. 10.</b></li>
           </ul>
         </div>
@@ -7763,6 +7780,93 @@ function renderAquarea() {
     hned.type = 'button';
     hned.addEventListener('click', () => { hned.disabled = true; aquareaPost(aq, { ohrevVody: !aq.ohrevVody }); });
   }
+}
+
+// ---------- Pokyny ze zkratek iPhonu (Logika automatiky) ----------
+const zkratkyObsahEl = document.getElementById('zkratkyObsah');
+const zkratkyHintEl = document.getElementById('zkratkyHint');
+let zkratkyData = null;
+const ZK_MINUTY = [0, 5, 10, 15, 20, 30, 45, 60];
+
+async function zkratkyPost(cesta, telo) {
+  const res = await fetch(cesta, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(telo) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+  if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
+  return data;
+}
+
+function zkratkyKdy(t) {
+  const d = new Date(t), dnes = new Date();
+  const hm = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+  return d.toDateString() === dnes.toDateString() ? 'dnes ' + hm : d.getDate() + '. ' + (d.getMonth() + 1) + '. ' + hm;
+}
+
+function renderZkratky() {
+  if (!zkratkyObsahEl || !zkratkyData) return;
+  const z = zkratkyData;
+  zkratkyObsahEl.textContent = '';
+  const el = (tag, cls, rodic, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    rodic.appendChild(e);
+    return e;
+  };
+  const uloz = async nastaveni => {
+    zkratkyHintEl.textContent = '';
+    try {
+      const d = await zkratkyPost('/api/zkratky/nastaveni', { nastaveni });
+      zkratkyData = d.zkratky || zkratkyData;
+      zkratkyHintEl.textContent = 'Uloženo.';
+    } catch (err) { zkratkyHintEl.textContent = err.message; }
+    renderZkratky();
+  };
+  const nastaveni = () => ({ probuzeni: { ...z.probuzeni }, spanek: { ...z.spanek } });
+  const zaskrtnout = (rodic, text, hodnota, zmena) => {
+    const l = el('label', 'zk-volba', rodic);
+    const c = el('input', '', l);
+    c.type = 'checkbox';
+    c.checked = !!hodnota;
+    c.addEventListener('change', () => zmena(c.checked));
+    el('span', '', l, text);
+    return c;
+  };
+  const sekce = (udalost, nazev, obsah) => {
+    const s = el('div', 'zk-sek', zkratkyObsahEl);
+    s.dataset.udalost = udalost;
+    const h = el('div', 'zk-hlava', s);
+    el('span', '', h, nazev);
+    const zk = el('button', 'mode-btn', h, 'Vyzkoušet');
+    zk.type = 'button';
+    zk.addEventListener('click', async () => {
+      zk.disabled = true;
+      zkratkyHintEl.textContent = '';
+      try { zkratkyHintEl.textContent = nazev + ': ' + (await zkratkyPost('/api/zkratky/zkouska', { udalost })).reply; }
+      catch (err) { zkratkyHintEl.textContent = err.message; }
+      zk.disabled = false;
+    });
+    obsah(s);
+    const p = z.posledni && z.posledni[udalost];
+    el('div', 'zk-posledni', s, p ? `Naposledy: ${zkratkyKdy(p.kdy)}${p.kdo ? ' (' + p.kdo + ')' : ''} — ${p.vysledek}` : 'Zatím nepřišel.');
+  };
+  sekce('spanek', 'Jdu spát', s => {
+    zaskrtnout(s, 'zhasnout noční světla', z.spanek.nocniSvetla, v => { const n = nastaveni(); n.spanek.nocniSvetla = v; uloz(n); });
+  });
+  sekce('probuzeni', 'Probuzení / budík', s => {
+    zaskrtnout(s, 'rozsvítit noční světla', z.probuzeni.nocniSvetla, v => { const n = nastaveni(); n.probuzeni.nocniSvetla = v; uloz(n); });
+    const l = el('label', 'zk-volba', s);
+    el('span', '', l, 'oběhové čerpadlo');
+    const sel = el('select', 'timer-select', l);
+    for (const m of ZK_MINUTY) { const o = el('option', '', sel, m ? m + ' min' : 'nezapínat'); o.value = String(m); }
+    sel.value = String(z.probuzeni.obehMin);
+    sel.addEventListener('change', () => { const n = nastaveni(); n.probuzeni.obehMin = Number(sel.value); uloz(n); });
+  });
+  const navod = el('div', 'zk-navod', zkratkyObsahEl);
+  navod.innerHTML = 'Zkratka: <b>Načíst obsah URL</b> → <code>' + location.origin + '/api/zkratka</code>, metoda POST, '
+    + 'tělo JSON <code>udalost</code> = <code>spanek</code> nebo <code>probuzeni</code>, <code>kdo</code> = jméno. '
+    + (z.klic ? 'Klíč je nastaven — patří do hlavičky <code>X-Klic</code>.' : 'Klíč (ZKRATKY_KLIC v Renderu) není nastaven.')
+    + ' Při <b>Nejsme doma</b> se pokyn ignoruje. Stejný pokyn do 30 min se neopakuje.';
 }
 
 // ---------- Program tepelného čerpadla ----------
@@ -11808,6 +11912,7 @@ function applySnapshot(snap) {
   saveLogLocal();
   maybeRestoreLogToServer(serverLog, localLog);
   bezpecne(() => renderWeather(snap.weather));
+  if (snap.zkratky) bezpecne(() => { zkratkyData = snap.zkratky; renderZkratky(); });
   if (snap.aquareaProgram) bezpecne(() => { aqProgramData = snap.aquareaProgram; renderAqProgram(); });
   if (snap.pocasiPoloha && Number.isFinite(snap.pocasiPoloha.lat)) bezpecne(() => { pocasiPoloha = snap.pocasiPoloha; });
   if ('pocasiDnes' in snap) bezpecne(() => { pocasiDnesData = snap.pocasiDnes || null; renderKalDen(); });
@@ -12154,6 +12259,10 @@ function connectStream() {
   });
   es.addEventListener('weather', e => {
     renderWeather(JSON.parse(e.data).weather);
+  });
+  es.addEventListener('zkratky', e => {
+    const z = JSON.parse(e.data).zkratky;
+    bezpecne(() => { zkratkyData = z || null; renderZkratky(); });
   });
   es.addEventListener('aquareaProgram', e => {
     const p = JSON.parse(e.data).aquareaProgram;

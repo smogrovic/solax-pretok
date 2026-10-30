@@ -539,6 +539,7 @@ function snapshot() {
     pocasiDnes: state.pocasiDnes || null,
     pocasiPoloha: { lat: WEATHER_LAT, lon: WEATHER_LON },
     aquareaProgram: state.aquareaProgram,
+    zkratky: zkratkyPayload(),
     runtime: runtimePayload(),
     pvDays: state.pvDays,
     wbDays: state.wbDays,
@@ -11371,6 +11372,127 @@ app.post('/api/away/restore', (req, res) => {
   res.json(awayPayload());
 });
 
+// ---------- Pokyny ze zkratek iPhonu ----------
+// Zkratka v telefonu jen oznámí „jdu spát" nebo „probuzení" a co se stane, řeší
+// appka (nastavení na stránce Logika automatiky). Klíč ke Shelly tak v telefonu
+// není. Volitelný ZKRATKY_KLIC v Render → Environment: když je vyplněný, zkratka
+// ho musí poslat v hlavičce X-Klic. Při „Nejsme doma" se pokyn ignoruje celý —
+// pojistka navíc k podmínce na polohu ve zkratce.
+const ZKRATKY_KLIC = (process.env.ZKRATKY_KLIC || '').trim();
+const ZKRATKY_OPAKOVANI_MS = 30 * 60000;
+const ZKRATKY_TIK_MS = 30000;
+const ZKRATKY_OBEH_MINUTY = [0, 5, 10, 15, 20, 30, 45, 60];
+const ZKRATKY_UDALOSTI = { probuzeni: 'Probuzení', spanek: 'Jdu spát' };
+function zkratkyVychozi() {
+  return { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true },
+    posledni: { probuzeni: null, spanek: null }, obehDo: 0 };
+}
+if (!state.zkratky) state.zkratky = zkratkyVychozi();
+
+// Nastavení z appky/zálohy → { nastaveni } nebo { chyba }
+function zkratkyOver(n) {
+  if (!n || typeof n !== 'object') return { chyba: 'Chybí nastavení.' };
+  const p = n.probuzeni || {}, sp = n.spanek || {};
+  const min = Number(p.obehMin);
+  if (!ZKRATKY_OBEH_MINUTY.includes(min)) return { chyba: 'Oběhové čerpadlo: neplatný počet minut.' };
+  return { nastaveni: { probuzeni: { nocniSvetla: p.nocniSvetla === true, obehMin: min }, spanek: { nocniSvetla: sp.nocniSvetla === true } } };
+}
+
+const zkratkyPayload = () => ({ ...state.zkratky, klic: !!ZKRATKY_KLIC });
+
+// `zkouska`: tlačítko Vyzkoušet v appce — neblokuje se opakováním a nepočítá se jako proběhlé
+async function zkratkaProvest(udalost, kdo, now = Date.now(), { zkouska = false } = {}) {
+  const z = state.zkratky;
+  const nazev = ZKRATKY_UDALOSTI[udalost] + (kdo ? ` (${kdo})` : '');
+  if (awayOn()) {
+    addLog(`${nazev}: nejsme doma — pokyn ignorován`);
+    return 'Nejsme doma — pokyn se ignoruje.';
+  }
+  const pred = z.posledni && z.posledni[udalost];
+  if (!zkouska && pred && now - pred.kdy < ZKRATKY_OPAKOVANI_MS) return `Už proběhlo v ${fmtPragueTime(pred.kdy)}.`;
+  const kroky = [];
+  const zkus = async (popis, fn) => {
+    try { await fn(); kroky.push(popis); } catch (err) { kroky.push(`${popis} — chyba (${String(err.message).slice(0, 60)})`); }
+  };
+  if (udalost === 'spanek') {
+    if (z.spanek.nocniSvetla) await zkus('noční světla zhasnuta', () => actuateRelay('lightNocni', false, 'jdu spát'));
+  } else {
+    if (z.probuzeni.nocniSvetla) await zkus('noční světla rozsvícena', () => actuateRelay('lightNocni', true, 'probuzení'));
+    if (z.probuzeni.obehMin > 0) {
+      await zkus(`oběhové čerpadlo na ${z.probuzeni.obehMin} min`, async () => {
+        await actuateRelay('obeh', true, 'probuzení');
+        z.obehDo = now + z.probuzeni.obehMin * 60000;
+      });
+    }
+  }
+  const vysledek = kroky.length ? kroky.join(', ') : 'nic nastaveno';
+  if (!zkouska) z.posledni = { ...(z.posledni || {}), [udalost]: { kdy: now, kdo: kdo || null, vysledek } };
+  addLog(`${nazev}: ${vysledek}`);
+  broadcast('zkratky', { zkratky: zkratkyPayload() });
+  return vysledek.charAt(0).toUpperCase() + vysledek.slice(1) + '.';
+}
+
+app.post('/api/zkratka', async (req, res) => {
+  if (ZKRATKY_KLIC) {
+    const k = req.get('X-Klic');
+    if (typeof k !== 'string' || !k || !safeEqual(k, ZKRATKY_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
+  }
+  const b = req.body || {};
+  if (!ZKRATKY_UDALOSTI[b.udalost]) return res.status(400).json({ error: 'Neznámá událost (probuzeni / spanek).' });
+  const kdo = typeof b.kdo === 'string' ? b.kdo.trim().slice(0, 30) : '';
+  try {
+    res.json({ reply: await zkratkaProvest(b.udalost, kdo) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/zkratky/zkouska', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const u = req.body && req.body.udalost;
+  if (!ZKRATKY_UDALOSTI[u]) return res.status(400).json({ error: 'Neznámá událost.' });
+  try { res.json({ reply: await zkratkaProvest(u, 'zkouška z appky', Date.now(), { zkouska: true }) }); }
+  catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+app.post('/api/zkratky/nastaveni', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const o = zkratkyOver(req.body && req.body.nastaveni);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  Object.assign(state.zkratky, o.nastaveni);
+  state.zkratkyUpraveno = true;
+  broadcast('zkratky', { zkratky: zkratkyPayload() });
+  res.json({ ok: true, zkratky: zkratkyPayload() });
+});
+
+app.post('/api/zkratky/restore', (req, res) => {
+  const b = req.body || {};
+  const o = zkratkyOver(b.nastaveni);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  if (!state.zkratkyUpraveno) Object.assign(state.zkratky, o.nastaveni);
+  const cas = v => (Number.isFinite(v) && v > 0 ? v : 0);
+  if (!state.zkratky.obehDo && cas(b.obehDo) > Date.now()) state.zkratky.obehDo = cas(b.obehDo);
+  for (const u of Object.keys(ZKRATKY_UDALOSTI)) {
+    const p = b.posledni && b.posledni[u];
+    if (!state.zkratky.posledni[u] && p && cas(p.kdy)) {
+      state.zkratky.posledni[u] = { kdy: p.kdy, kdo: typeof p.kdo === 'string' ? p.kdo.slice(0, 30) : null,
+        vysledek: typeof p.vysledek === 'string' ? p.vysledek.slice(0, 200) : '' };
+    }
+  }
+  broadcast('zkratky', { zkratky: zkratkyPayload() });
+  res.json({ ok: true });
+});
+
+// Oběhové čerpadlo po probuzení: po nastavených minutách vypnout — ale ne uprostřed
+// okna rozvrhu, to si dojede samo
+async function zkratkyObehHlidej(now = Date.now()) {
+  const z = state.zkratky;
+  if (!z.obehDo || now < z.obehDo) return;
+  z.obehDo = 0;
+  if (obehOknoNyni(now)) return;
+  await autoSet('obeh', 'off', 'konec probuzení', { force: true });
+}
+
 // ---------- Trvalé úložiště (Upstash Redis přes REST) ----------
 // Render free tier startuje po každém nasazení s prázdnou pamětí a nemá disk, takže
 // historie doteď žila jen v telefonu — a ten umí vrátit jen to, co sám viděl otevřený.
@@ -11390,6 +11512,7 @@ const STORE_TIMEOUT_MS = 8000;
 // mít pod sebou hotová data.
 const STORE_POSTS = [
   '/api/automation/restore',
+  '/api/zkratky/restore',
   '/api/aquarea/program/restore',
   '/api/tempauto/restore',
   '/api/pool/force/restore',
@@ -11444,6 +11567,8 @@ function storeSnapshot() {
     '/api/away/restore': { since: (state.away && state.away.since) || 0, tempAutoPred: (state.away && state.away.tempAutoPred) || [],
       aquareaPred: (state.away && state.away.aquareaPred) || null },
     '/api/aquarea/program/restore': { program: state.aquareaProgram },
+    '/api/zkratky/restore': (z => ({ nastaveni: { probuzeni: z.probuzeni, spanek: z.spanek },
+      obehDo: z.obehDo || 0, posledni: z.posledni }))(state.zkratky || {}),
     '/api/history/restore': { points: state.history },
     '/api/wallbox-history/restore': { points: state.wallboxHistory },
     '/api/boiler-history/restore': { points: state.boilerHistory },
@@ -11942,6 +12067,7 @@ const server = app.listen(PORT, async () => {
   rozvrhMigraceV6();
   rozvrhMigraceV7();
   scheduleEvery(zavlahaPlanHlidej, ZAVLAHA_PLAN_TIK_MS, ZAVLAHA_PLAN_TIK_MS);
+  scheduleEvery(() => zkratkyObehHlidej().catch(() => {}), ZKRATKY_TIK_MS, ZKRATKY_TIK_MS);
   if (anthbotEnabled) scheduleEvery(() => sekackaNacti().catch(() => {}), ANTHBOT_TIK_MS, 5000);
   else console.log('Sekačka Anthbot vypnutá (chybí ANTHBOT_EMAIL / ANTHBOT_HESLO).');
   storeStart();

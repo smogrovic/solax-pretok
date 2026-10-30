@@ -49,7 +49,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     'state', 'zlib', 'fetch', 'pushSubscriptions', 'relayTimers', 'blindTimers',
     'airconTimers', 'blindRules', 'blindRulesAt', 'zavlahaNazvy', 'zavlahaSkryte', 'zavlahaVolbaMinut',
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
-    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov', 'topeniObnov',
+    'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov', 'topeniObnov', 'NAKUP_OBLIBENE_DOPLNENI',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
       storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
       storeNahrevUloz, STORE_NAHREV_KEY, storeTopeniUloz, STORE_TOPENI_KEY,
@@ -79,7 +79,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
       for (const r of telo.zaznamy) if (!m.has(r.t)) m.set(r.t, r);
       t.zaznamy = [...m.values()].sort((a, b) => a.t - b.t);
       return true;
-    });
+    }, 2);
 
   process.env = puvodni;
   return { api, state, kv, volani, posty, pushSubscriptions, timery, tahoma };
