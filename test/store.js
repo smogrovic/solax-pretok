@@ -51,7 +51,7 @@ function build({ env = {}, state: st, kv = {} } = {}) {
     'fmtPragueTime', 'broadcast', 'console', 'setInterval', 'process', 'AbortController',
     'lastCmd', 'DEVICES', 'RELAY_AUTO_OFF_MS', 'saunaTimers', 'tahomaSpinace', 'nahrevObnov', 'topeniObnov', 'NAKUP_OBLIBENE_DOPLNENI',
     CODE + `\n; return { storeEnabled, storeSnapshot, storeApplyPrimo, storeEncode, storeDecode,
-      storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY,
+      storeSave, storeLoad, storeStart, storeOtisk, storePayload, STORE_POSTS, STORE_KEY, storeUlozBrzy,
       storeNahrevUloz, STORE_NAHREV_KEY, storeTopeniUloz, STORE_TOPENI_KEY,
       nactenoFlag: () => storeLoaded, lastCmd };`
   )(state, zlib, fakeFetch, pushSubscriptions, [], [], [],
@@ -225,6 +225,13 @@ nadpis('3) Ukládání');
       h.api.storeSnapshot().posts['/api/zavlaha/dny/restore'].dny.length, 1);
     h.state.months[0].sauna = 41000;
     check('po změně zase ano', await h.api.storeSave(), true);
+    // Po důležité změně se uloží hned (jednou, i když přijde víc změn za sebou)
+    const pred = h.volani.filter(v => v.url.includes('/set/')).length;
+    h.state.nakup = [{ id: 'n_brzy0001', text: 'změna', t: 1 }];
+    check('uložit brzy: naplánuje', h.api.storeUlozBrzy(20) + ' ' + h.api.storeUlozBrzy(20), 'true false');
+    await new Promise(r => setTimeout(r, 80));
+    check('  po chvíli jedno uložení', h.volani.filter(v => v.url.includes('/set/')).length - pred >= 1 && h.volani.filter(v => v.url.includes('/set/')).length - pred <= 3, true);
+
   })();
 }
 {

@@ -11663,6 +11663,7 @@ app.post('/api/jidelnicek/import', (req, res) => {
   const o = jidelnicekOver(req.body, { bezOdkazu: req.body && req.body.nakupHotovo === true });
   if (o.chyba) return res.status(400).json({ error: o.chyba });
   jidelnicekUloz(o.plan);
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   const vecere = o.plan.recepty.filter(r => r.kategorie === 'vecere').length;
   addLog(`Jídelníček na týden od ${o.plan.tyden}: ${o.plan.recepty.length} receptů, ${o.plan.nakup.length} položek na seznamu`);
   if (!o.plan.nakupHotovo) sendPushToAll('🍽️ Jídelníček na příští týden', `${vecere} večeří a ${o.plan.nakup.length} položek na seznamu — vyškrtej, co máme doma.`, { log: false }).catch(() => {});
@@ -11678,6 +11679,7 @@ app.post('/api/jidelnicek/hotovo', (req, res) => {
   if (typeof b.hotovo !== 'boolean') return res.status(400).json({ error: 'Chybí hotovo (true/false).' });
   if (b.hotovo) j.recepty[b.index].hotovo = Date.now(); else delete j.recepty[b.index].hotovo;
   broadcast('jidelnicek', { jidelnicek: j });
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   res.json({ ok: true, jidelnicek: j });
 });
 
@@ -12130,6 +12132,16 @@ async function storeLoad(port) {
   console.log(`Záloha načtena (${obnoveno}/${STORE_POSTS.length}, ${fmtPragueTime(snap.at)})`);
   try { await storeNahrevNacti(); } catch (err) { console.error('Načtení měření sauny z Upstash selhalo:', err.message); }
   try { await storeTopeniNacti(); } catch (err) { console.error('Načtení dat o topení z Upstash selhalo:', err.message); }
+}
+
+// Po důležité změně (jídelníček, naučené výrobky) uložit hned, ne až za 10 min: Render
+// při nasazení pustí novou instanci dřív, než stará stihne uložit, a ta by si načetla
+// starší zálohu. Víc změn za sebou = jedno uložení.
+let storeBrzyTimer = null;
+function storeUlozBrzy(zpozdeniMs = 5000) {
+  if (!storeEnabled || storeBrzyTimer) return false;
+  storeBrzyTimer = setTimeout(() => { storeBrzyTimer = null; storeSave().catch(() => {}); }, zpozdeniMs);
+  return true;
 }
 
 function storeStart() {
@@ -12939,6 +12951,7 @@ app.post('/api/rohlik/nauc', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const n = rohlikNauc(req.body && req.body.polozky);
   const vyreseno = await rohlikNaucenoVyres().catch(() => 0);
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   res.json({ ok: true, nauceno: n, vyreseno, ceka: Object.keys(state.rohlikNauceno).length });
 });
 

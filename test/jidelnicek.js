@@ -8,14 +8,15 @@ const VZOR = require('./data/jidelnicek-vzor.json');
 const kopie = () => JSON.parse(JSON.stringify(VZOR));
 
 function build(o = {}) {
-  const routy = {}, zpravy = [], logy = [], push = [];
+  const routy = {}, zpravy = [], logy = [], push = [], ulozeni = [];
   const state = { nakup: o.nakup || [] };
   const safeEqual = (a, b) => crypto.timingSafeEqual(crypto.createHash('sha256').update(String(a)).digest(), crypto.createHash('sha256').update(String(b)).digest());
-  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process', 'requireAuth',
+  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process', 'requireAuth', 'storeUlozBrzy',
     CODE + '\n; return { jidelnicekOver, jidelnicekUloz, jidelnicekMnozstvi, JIDELNICEK_WEBY };')(
     state, { post: (c, f) => { routy['POST ' + c] = f; }, get: (c, f) => { routy['GET ' + c] = f; } },
     t => logy.push(t), (u, d) => zpravy.push(u), async (t, b) => { push.push(t + ' | ' + b); }, safeEqual,
-    o.max || 120, 200, 80, { env: o.env || {} }, (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; });
+    o.max || 120, 200, 80, { env: o.env || {} }, (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
+    () => { ulozeni.push(1); });
   if (o.vyber) state.rohlikVyber = o.vyber;
   if (o.nauceno) state.rohlikNauceno = o.nauceno;
   const volej = (cesta, body, hlavicky = {}) => {
@@ -24,7 +25,7 @@ function build(o = {}) {
     routy[cesta]({ body, get: k => hlavicky[k] }, res);
     return { out, kod };
   };
-  return { api, state, logy, zpravy, push, volej };
+  return { api, state, logy, zpravy, push, volej, ulozeni };
 }
 
 nadpis('Příjem');
@@ -35,6 +36,7 @@ nadpis('Příjem');
   check('  uložen s časem', h.state.jidelnicek.tyden + ' ' + (h.state.jidelnicek.vytvoreno > 0), '2026-11-02 true');
   check('  appka se dozví (seznam i jídelníček)', h.zpravy.join(), 'nakup,jidelnicek');
   check('  notifikace', h.push[0], '🍽️ Jídelníček na příští týden | 6 večeří a 27 položek na seznamu — vyškrtej, co máme doma.');
+  check('  záloha se uloží hned', h.ulozeni.length, 1);
   check('  log', h.logy[0], 'Jídelníček na týden od 2026-11-02: 10 receptů, 27 položek na seznamu');
   const moz = h.state.nakup.find(x => x.nazev === 'Mozzarella');
   check('položka na seznamu: název, množství, kategorie', JSON.stringify([moz.text, moz.mnozstvi, moz.kategorie, moz.zdroj]),
