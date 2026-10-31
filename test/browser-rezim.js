@@ -157,7 +157,7 @@ setTimeout(async () => {
   pouzijRezim('miky');
   check('zbydou jeho záložky a Připomínky', zalozky().join(' · '),
     // Nákup vidí i děti — ať můžou připsat, co chtějí koupit
-    'Asistent · Žaluzie · Ovládání · Bazén · Připomínky · Nákup · Logika automatiky');
+    'Asistent · Žaluzie · Ovládání · Bazén · Připomínky · Recepty/Nákup · Logika automatiky');
   // Asistent umí zapnout bojler i odemknout dům — do dětské ruky nepatří
   check('pole pro asistenta zmizí', vidim(document.getElementById('asstInput')), false);
   check('  i scénáře', vidim(document.getElementById('asstScenes')), false);

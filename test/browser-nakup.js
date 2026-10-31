@@ -102,7 +102,7 @@ setTimeout(async () => {
   check('zvoneček nákup nepočítá', pripSviticich(T), zvonekPred);
 
   // Nákup je samostatná stránka — záložka na ni přejede
-  const strana = document.querySelector('.slide[data-title="Nákup"]');
+  const strana = document.querySelector('.slide[data-title="Recepty/Nákup"]');
   check('nákup je samostatná stránka', !!strana && strana.contains(document.getElementById('nakupSeznam')), true);
   check('  okno nákupu už není', !!document.getElementById('nakupOkno'), false);
   const vsechny = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];

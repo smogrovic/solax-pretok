@@ -1607,6 +1607,7 @@
   .jid-recept summary::-webkit-details-marker{display:none;}
   .jid-nazev{font-size:15px;font-weight:700;color:var(--navy);}
   .jid-typ{font-size:11px;color:var(--grey-text);}
+  .jid-makra{font-size:11px;color:var(--grey-text);opacity:0.85;}
   .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
   .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
   a.jid-zdroj{color:#1b6fb8;}
@@ -3635,7 +3636,7 @@
   </div>
 
   <!-- Stránka: Nákup (vidí ji všichni, i děti — ať můžou připsat) -->
-  <div class="slide" data-title="Nákup" id="nakupSlide">
+  <div class="slide" data-title="Recepty/Nákup" id="nakupSlide">
     <div class="page">
       <!-- Jídelníček na týden: v pátek ho vytvoří naplánovaná úloha, suroviny jdou na seznam -->
       <div class="card nakup-karta jid-karta" id="jidKarta" hidden>
@@ -14088,6 +14089,8 @@ function renderJidelnicek() {
       const hlava = jidEl('span', 'jid-hlava', sum);
       jidEl('span', 'jid-nazev', hlava, r.nazev);
       jidEl('span', 'jid-typ', hlava, JID_TYPY[r.typ] || '');
+      const v = r.vyziva || {};
+      if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
       const telo = jidEl('div', 'jid-telo', det);
       jidOdkaz(r, telo);
       jidReceptDetail(r, telo);

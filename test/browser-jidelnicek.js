@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
 let v = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
-v = v.replace('</head>', '<style>.slide{display:none!important}.slide[data-title="Nákup"]{display:block!important}</style></head>');
+v = v.replace('</head>', '<style>.slide{display:none!important}.slide[data-title="Recepty/Nákup"]{display:block!important}</style></head>');
 const VZOR = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'jidelnicek-vzor.json'), 'utf8'));
 VZOR.vytvoreno = Date.UTC(2026, 9, 30, 5, 0);
 VZOR.kontrola.push({ bod: 'Obsahuje veganské jídlo 25–30 g bílkovin na porci?', ok: false, poznamka: 'má 24 g' });
@@ -44,6 +44,7 @@ setTimeout(async () => {
   const a = prvni.querySelector('a.jid-zdroj');
   check('odkaz na recept do nové karty', a.href === VZOR.recepty[0].zdroj.url && a.target === '_blank', true);
   check('  suroviny s množstvím', prvni.querySelector('.jid-suroviny li').textContent, '600 g Kuřecí prsa');
+  check('výživa pod názvem malým písmem', prvni.querySelector('.jid-makra').textContent, '550 kcal · B: 35 g · S: 50 g · T: 20 g');
   check('  výživa orientačně', [...prvni.querySelectorAll('.jid-meta')].some(e => /orientačně/.test(e.textContent)), true);
   const vlastni = [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Cottage pomazánka'));
   check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
