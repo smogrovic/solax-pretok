@@ -311,7 +311,7 @@ nadpis('N) Nákupní seznam');
   check('  položka z jídelníčku si drží název a množství', JSON.stringify(h4.state.nakup.map(x => [x.nazev || null, x.mnozstvi || null])), '[["Mozzarella","250 g"],[null,null]]');
 }
 
-nadpis('N2) Koupené 24 h přeškrtnuté');
+nadpis('N2) Koupené hodinu přeškrtnuté');
 {
   const h = build();
   const T = Date.UTC(2026, 9, 19, 10);
@@ -324,17 +324,17 @@ nadpis('N2) Koupené 24 h přeškrtnuté');
   check('  bez true/false 400', h.zavolej('/api/nakup/:id/koupeno', { id }, {}).status, 400);
   check('  neznámá 404', h.zavolej('/api/nakup/:id/koupeno', { id: 'n_xxxxxxxx' }, { koupeno: true }).status, 404);
   h.api.nakupKoupeno(id, true, T);
-  h.api.nakupUklid(T + 23 * H);
-  check('po 23 h ještě je', h.state.nakup.some(x => x.id === id), true);
-  h.api.nakupUklid(T + 25 * H);
-  check('po 25 h zmizí', h.state.nakup.some(x => x.id === id), false);
+  h.api.nakupUklid(T + 50 * 60000);
+  check('po 50 min ještě je', h.state.nakup.some(x => x.id === id), true);
+  h.api.nakupUklid(T + 61 * 60000);
+  check('po hodině zmizí', h.state.nakup.some(x => x.id === id), false);
   check('  nekoupená zůstává', h.state.nakup.length, 1);
   const id2 = h.state.nakup[0].id;
   h.api.nakupKoupeno(id2, true, T);
   h.api.nakupKoupeno(id2, false, T + H);
   check('vrácení smaže koupeno', 'koupeno' in h.state.nakup[0], false);
   h.api.nakupUklid(T + 48 * H);
-  check('  a vrácená po 24 h nezmizí', h.state.nakup.length, 1);
+  check('  a vrácená po hodině nezmizí', h.state.nakup.length, 1);
 
   // Limit počítá jen nekoupené
   const h2 = build();

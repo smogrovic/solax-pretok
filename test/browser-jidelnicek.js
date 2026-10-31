@@ -37,6 +37,7 @@ setTimeout(async () => {
   check('sekce bez dnů v týdnu', [...karta.querySelectorAll('.jid-sekce')].map(e => e.textContent).join(','), 'Večeře,Pečení,Snídaně');
   check('deset receptů', karta.querySelectorAll('details.jid-recept').length, 10);
   check('nesplněný bod kontroly je vidět', karta.querySelector('.jid-pozor').textContent.includes('Nesplněno: Obsahuje veganské jídlo'), true);
+  check('  žlutý box až pod jídly', karta.querySelector('#jidObsah').lastElementChild.classList.contains('jid-pozor'), true);
   const prvni = karta.querySelector('details.jid-recept');
   check('  zavřený na začátku', prvni.open, false);
   prvni.open = true;

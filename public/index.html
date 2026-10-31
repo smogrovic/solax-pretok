@@ -14064,15 +14064,12 @@ function renderJidelnicek() {
   jidKartaEl.hidden = !j;
   if (!j) return;
   const obsah = document.getElementById('jidObsah');
+  // Otevřené recepty zůstanou otevřené i po překreslení (SSE, tik po 5 min)
+  const otevrene = new Set([...obsah.querySelectorAll('details.jid-recept[open]')].map(d => d.dataset.index));
   obsah.textContent = '';
   const d = new Date(j.tyden + 'T12:00:00');
   document.getElementById('jidTyden').textContent = 'Týden od ' + d.getDate() + '. ' + (d.getMonth() + 1) + '.'
     + (j.vytvoreno ? ' · vytvořeno ' + new Date(j.vytvoreno).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }) : '');
-  const pozor = [...(j.upozorneni || []), ...(j.kontrola || []).filter(k => !k.ok).map(k => 'Nesplněno: ' + k.bod + (k.poznamka ? ' — ' + k.poznamka : ''))];
-  if (pozor.length) {
-    const box = jidEl('div', 'jid-pozor', obsah);
-    for (const p of pozor) jidEl('div', '', box, '⚠️ ' + p);
-  }
   for (const [kat, nazev] of JID_SEKCE) {
     // Odškrtnuté (uvařené) jídlo zůstane 12 h přeškrtnuté, pak ze stránky zmizí
     const rec = j.recepty.map((r, index) => ({ r, index }))
@@ -14082,6 +14079,7 @@ function renderJidelnicek() {
     for (const { r, index } of rec) {
       const det = jidEl('details', 'jid-recept' + (r.hotovo ? ' hotovo' : ''), obsah);
       det.dataset.index = index;
+      if (otevrene.has(String(index))) det.open = true;
       const sum = jidEl('summary', '', det);
       const odskrt = jidEl('button', 'nakup-odskrt', sum, r.hotovo ? '✓' : '');
       odskrt.type = 'button';
@@ -14095,6 +14093,20 @@ function renderJidelnicek() {
       jidReceptDetail(r, telo);
     }
   }
+  // Upozornění a nesplněné body kontroly až pod jídly
+  const pozor = [...(j.upozorneni || []), ...(j.kontrola || []).filter(k => !k.ok).map(k => 'Nesplněno: ' + k.bod + (k.poznamka ? ' — ' + k.poznamka : ''))];
+  if (pozor.length) {
+    const box = jidEl('div', 'jid-pozor', obsah);
+    for (const p of pozor) jidEl('div', '', box, '⚠️ ' + p);
+  }
+}
+
+// iPad se nevrací na kalendář, dokud je otevřený recept, tisková verze nebo průvodce
+// košíkem — 5 min se počítá až od zavření (zavření je dotyk)
+function ipadDrzi() {
+  return !!(document.querySelector('#jidObsah details.jid-recept[open]')
+    || (jidTiskOknoEl && !jidTiskOknoEl.hidden)
+    || (document.getElementById('pruvodceOkno') && !document.getElementById('pruvodceOkno').hidden));
 }
 
 // Tisková verze (A4) v okně appky: v PWA na iPhonu by nová karta nešla zavřít.
@@ -15539,7 +15551,7 @@ function kalJeNaDnesku() {
 }
 
 function ipadVychozi(now = Date.now()) {
-  if (!sirokyDisplej()) return;
+  if (!sirokyDisplej() || ipadDrzi()) return;
   const i = ipadSaunaIndex();
   if (!saunaBezi(now) || i < 0) { kalNaDnesek(); kalOtevri(true); return; }
   kalOtevri(false);

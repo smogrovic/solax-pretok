@@ -133,6 +133,25 @@ setTimeout(() => {
   saunaZapnutoData = null;
   ipadKontrola();
   check('  bez něj kalendář', document.getElementById('kalPanel').hidden, false);
+  // Otevřený recept z jídelníčku: iPad drží stránku, dokud se recept nezavře
+  jidelnicekData = { tyden: '2026-11-02', vytvoreno: 1, nakup: [], kontrola: [], upozorneni: [], recepty: [{ kategorie: 'vecere', typ: 'pracovni', nazev: 'Test',
+    vlastni: true, zdroj: null, porce: '5', cas: '', suroviny: [{ nazev: 'Rýže', mnozstvi: 300, jednotka: 'g' }], postup: ['Uvařit.'], vyziva: {}, stitky: [] }] };
+  renderJidelnicek();
+  kalOtevri(false);
+  document.querySelector('#jidObsah details.jid-recept').open = true;
+  ipadKontrola();
+  check('otevřený recept: kalendář nenaskočí', document.getElementById('kalPanel').hidden, true);
+  renderJidelnicek();
+  check('  recept zůstane otevřený i po překreslení', document.querySelector('#jidObsah details.jid-recept').open, true);
+  document.querySelector('#jidObsah details.jid-recept').open = false;
+  ipadKontrola();
+  check('  po zavření (a lhůtě) zase kalendář', document.getElementById('kalPanel').hidden, false);
+  kalOtevri(false);
+  document.getElementById('jidTiskOkno').hidden = false;
+  ipadKontrola();
+  check('otevřená tisková verze drží taky', document.getElementById('kalPanel').hidden, true);
+  document.getElementById('jidTiskOkno').hidden = true;
+  ipadKontrola();
   wrap.scrollTo = plynule;
 
   R.push('\\n8) Emoji připomínek jsou na iPadu 2× větší');

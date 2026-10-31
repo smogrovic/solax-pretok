@@ -1904,9 +1904,9 @@ if (typeof scheduleEvery === 'function') scheduleEvery(() => pripominkySezona(),
 const NAKUP_MAX = 120;             // nekoupených (jídelníček na týden dá i přes 60 surovin)
 const NAKUP_CELKEM_MAX = 200;      // i s koupenými, ať se seznam nenafoukne
 const NAKUP_TEXT_MAX = 80;
-// Koupené zůstanou 24 h přeškrtnuté na konci seznamu — je vidět, co už se koupilo,
-// a omyl jde napravit; pak zmizí samy
-const NAKUP_KOUPENO_MS = 24 * 3600000;
+// Koupené (vyškrtnuté) zůstanou hodinu přeškrtnuté na konci seznamu — omyl jde
+// napravit; pak zmizí samy
+const NAKUP_KOUPENO_MS = 3600000;
 
 function nakupUklid(now = Date.now()) {
   const pred = state.nakup.length;
@@ -2054,7 +2054,7 @@ app.post('/api/nakup/:id/koupeno', (req, res) => {
 });
 // Koupené mizí po 24 h samy, i když na seznam nikdo nesáhne
 if (typeof scheduleEvery === 'function') {
-  scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 3600000, 7 * 60000);
+  scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 5 * 60000, 7 * 60000);
 }
 app.post('/api/nakup/:id/smazat', (req, res) => {
   if (!nakupSmaz(req.params.id)) return res.status(404).json({ error: 'Položka už na seznamu není.' });
@@ -12982,14 +12982,17 @@ app.post('/api/rohlik/kosik', async (req, res) => {
   try {
     await rohlikDoKosiku(polozky);
   } catch (err) { return rohlikOdpovezChybou(res, err); }
+  // Co je v košíku, ze seznamu zmizí — seznam je pak „co ještě zbývá"
   const ted = Date.now();
+  const odeslane = new Set();
   for (const p of polozky) {
     const n = state.nakup.find(x => x.id === p.nakupId);
     if (n) {
-      n.kosik = ted;
+      odeslane.add(n.id);
       rohlikZapamatuj(n.nazev || n.text, p, ted);
     }
   }
+  state.nakup = state.nakup.filter(x => !odeslane.has(x.id));
   broadcast('nakup', { nakup: state.nakup });
   res.json({ ok: true, pridano: polozky.length, nakup: state.nakup });
 });

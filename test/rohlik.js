@@ -203,7 +203,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const volani = f.log.filter(x => x.telo.method === 'tools/call').pop();
     check('jedním voláním se všemi položkami', JSON.stringify(volani.telo.params), JSON.stringify({ name: 'add_items_to_cart', arguments: { items: [{ productId: 1349777, quantity: 2 }, { productId: 55, quantity: 1 }] } }));
     check('  nesmyslné množství = 1', volani.telo.params.arguments.items[1].quantity, 1);
-    check('  položky dostanou značku v košíku', h.state.nakup.every(x => typeof x.kosik === 'number'), true);
+    check('  odeslané ze seznamu zmizí', h.state.nakup.length, 0);
     check('  appka se dozví', h.zpravy.some(z => z.u === 'nakup'), true);
     check('  výběr se zapamatuje (bez diakritiky a velikosti)', h.state.rohlikVyber['mleko'] && h.state.rohlikVyber['mleko'].productId, 1349777);
     check('  i s obrázkem a cenou', h.state.rohlikVyber['mleko'].obrazek + ' ' + h.state.rohlikVyber['mleko'].cena, 'https://cdn/1.jpg 24.9');
@@ -403,7 +403,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     h.state.nakup.push({ id: 'n1', text: 'banány' });
     const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nakupId: 'n1', nazev: 'Banány', productId: 777, mnozstvi: 1 }] } });
     check('nepotvrzené přidání = chyba', r.out.error, 'Rohlík přidání nepotvrdil — košík na webu je pořád bez: Banány (viz diagnostika).');
-    check('  položka není označená v košíku', !!h.state.nakup[0].kosik, false);
+    check('  položka zůstane na seznamu', h.state.nakup.length, 1);
   }
   {
     // Skutečná odpověď Rohlíku: 202 bez dat → nepřihlášeno, košík se nesmí plnit anonymně
