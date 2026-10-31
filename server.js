@@ -11566,6 +11566,60 @@ function jidelnicekUrl(u) {
   return JIDELNICEK_WEBY.includes(host) ? url.href : null;
 }
 
+// Fotka receptu: jen z povolených webů (a jejich CDN na subdoménách) a z obrázků Bloggeru (MaruškaVeg)
+function jidelnicekFotoUrl(u) {
+  if (typeof u !== 'string' || u.length > 600) return null;
+  let url;
+  try { url = new URL(u); } catch { return null; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const host = url.hostname.toLowerCase();
+  const ok = JIDELNICEK_WEBY.some(w => host === w || host.endsWith('.' + w))
+    || host === 'blogger.googleusercontent.com' || host.endsWith('.bp.blogspot.com');
+  return ok ? url.href : null;
+}
+
+// Fotka jídla ze stránky receptu: JSON-LD, pak og:image (u Karoliny Four je to logo), pak první obrázek článku
+function jidelnicekFotoZeStranky(html) {
+  if (typeof html !== 'string') return null;
+  const neLogo = u => u && !/logo|cropped|avatar|gravatar|emoji/i.test(u);
+  const odesc = u => String(u || '').replace(/\\\//g, '/').replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/&amp;/g, '&');
+  const kandidati = [];
+  for (const m of html.matchAll(/"image"\s*:\s*\{\s*"@type"\s*:\s*"ImageObject"[^}]*?"url"\s*:\s*"([^"]+)"/g)) kandidati.push(odesc(m[1]));
+  for (const m of html.matchAll(/"@type"\s*:\s*"Recipe"[\s\S]{0,4000}?"image"\s*:\s*\[?\s*"([^"]+)"/g)) kandidati.push(odesc(m[1]));
+  const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (og) kandidati.push(odesc(og[1]));
+  for (const m of html.matchAll(/<img[^>]+src=["']([^"']*wp-content\/uploads[^"']+)["']/gi)) kandidati.push(odesc(m[1]));
+  for (const u of kandidati) if (neLogo(u) && jidelnicekFotoUrl(u)) return jidelnicekFotoUrl(u);
+  return null;
+}
+
+const JIDELNICEK_FOTO_ZNOVU_MS = 6 * 3600000;
+let jidelnicekFotkyBezi = false;
+async function jidelnicekDoplnFotky(now = Date.now()) {
+  const j = state.jidelnicek;
+  if (!j || jidelnicekFotkyBezi) return 0;
+  jidelnicekFotkyBezi = true;
+  let nove = 0;
+  try {
+    for (const r of j.recepty) {
+      if (r.foto || !r.zdroj || !r.zdroj.url || (r.fotoPokus && now - r.fotoPokus < JIDELNICEK_FOTO_ZNOVU_MS)) continue;
+      r.fotoPokus = now;
+      try {
+        const res = await fetch(r.zdroj.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Solinator; recept)' }, signal: AbortSignal.timeout(10000) });
+        if (!res.ok) continue;
+        const foto = jidelnicekFotoZeStranky((await res.text()).slice(0, 1500000));
+        if (foto && state.jidelnicek === j) { r.foto = foto; nove++; }
+      } catch { /* web neodpověděl — zkusí se za 6 h */ }
+    }
+  } finally { jidelnicekFotkyBezi = false; }
+  if (nove) {
+    broadcast('jidelnicek', { jidelnicek: state.jidelnicek });
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  return nove;
+}
+if (typeof scheduleEvery === 'function') scheduleEvery(() => { jidelnicekDoplnFotky().catch(() => {}); }, 30 * 60000, 2 * 60000);
+
 function jidelnicekSurovina(s) {
   const nazev = jidText(s && s.nazev, 80);
   if (!nazev) return null;
@@ -11604,7 +11658,9 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now() } = {}) {
       predem: jidText(r.predem, 300), skladovani: jidText(r.skladovani, 300), ohrev: jidText(r.ohrev, 300), forma: jidText(r.forma, 120),
       vyziva: { kcal: jidCislo(v.kcal), bilkoviny: jidCislo(v.bilkoviny), sacharidy: jidCislo(v.sacharidy), tuky: jidCislo(v.tuky) },
       stitky: (Array.isArray(r.stitky) ? r.stitky : []).filter(s => JIDELNICEK_STITKY.includes(s)),
-      ...(Number.isFinite(r.hotovo) && r.hotovo > 0 && r.hotovo <= now ? { hotovo: r.hotovo } : {})
+      ...(Number.isFinite(r.hotovo) && r.hotovo > 0 && r.hotovo <= now ? { hotovo: r.hotovo } : {}),
+      ...(jidelnicekFotoUrl(r.foto) ? { foto: jidelnicekFotoUrl(r.foto) } : {}),
+      ...(Number.isFinite(r.fotoPokus) && r.fotoPokus > 0 && r.fotoPokus <= now ? { fotoPokus: r.fotoPokus } : {})
     });
   }
   const nakupVstup = Array.isArray(b.nakup) ? b.nakup : [];
@@ -11664,6 +11720,7 @@ app.post('/api/jidelnicek/import', (req, res) => {
   if (o.chyba) return res.status(400).json({ error: o.chyba });
   jidelnicekUloz(o.plan);
   if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  jidelnicekDoplnFotky().catch(() => {});
   const vecere = o.plan.recepty.filter(r => r.kategorie === 'vecere').length;
   addLog(`Jídelníček na týden od ${o.plan.tyden}: ${o.plan.recepty.length} receptů, ${o.plan.nakup.length} položek na seznamu`);
   if (!o.plan.nakupHotovo) sendPushToAll('🍽️ Jídelníček na příští týden', `${vecere} večeří a ${o.plan.nakup.length} položek na seznamu — vyškrtej, co máme doma.`, { log: false }).catch(() => {});

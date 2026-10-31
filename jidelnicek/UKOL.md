@@ -42,6 +42,7 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
     "postup": ["…", "…"],
     "predem": "…", "skladovani": "…", "ohrev": "…", "forma": "jen u pečení, např. plech 30 × 40 cm",
     "vyziva": { "kcal": 0, "bilkoviny": 0, "sacharidy": 0, "tuky": 0 },
+    "foto": "adresa fotky jídla z otevřené stránky (nepovinné — appka ji jinak dohledá sama)",
     "stitky": ["maso", "vegan", "ryba", "tortilla", "brambory", "mozzarella", "cottage", "tvaroh"]
   }],
   "nakup": [{ "kategorie": "Mléčné výrobky a sýry", "nazev": "Mozzarella", "mnozstvi": 250, "jednotka": "g", "odhad": false, "poznamka": "" }],

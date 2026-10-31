@@ -1638,6 +1638,17 @@
     .jid-tisk-papir .recept{break-inside:avoid;}
   }
   .jid-recept summary{flex-direction:row!important;align-items:center;gap:10px;}
+  .jid-recept-papir{max-width:1100px;margin:0 auto;padding:22px 28px 60px;color:#111;text-align:left;font:18px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;}
+  .jid-recept-horni{display:flex;gap:28px;align-items:flex-start;}
+  .jid-recept-foto{flex:0 0 42%;max-height:70vh;object-fit:cover;border-radius:18px;background:#f2f2f2;width:42%;aspect-ratio:3/4;}
+  .jid-recept-info{flex:1;min-width:0;}
+  .jid-recept-info .jid-typ,.jid-recept-info .jid-makra{display:block;font-size:15px;}
+  .jid-recept-info .jid-zdroj{font-size:15px;margin:8px 0;}
+  .jid-recept-info .jid-suroviny{font-size:18px;}
+  .jid-recept-papir .jid-postup{font-size:19px;line-height:1.55;margin-top:18px;}
+  .jid-recept-papir .jid-postup li{margin:8px 0;}
+  .jid-recept-papir .jid-meta{font-size:15px;}
+  .jid-recept-okno.hotovo #jidReceptHotovo{background:#d8f3e1;color:#1f6e3c;}
   .jid-hlava{display:flex;flex-direction:column;flex:1;min-width:0;}
   .jid-recept.hotovo .jid-nazev{text-decoration:line-through;color:var(--muted);}
   .jid-recept.hotovo .nakup-odskrt{background:#2e9d57;opacity:0.6;}
@@ -4085,6 +4096,14 @@
     <button type="button" class="jid-tisk-akce" id="jidTiskSdilet">Sdílet / PDF</button>
   </div>
   <div class="jid-tisk-papir" id="jidTiskPapir"></div>
+</div>
+<div class="jid-tisk-okno jid-recept-okno" id="jidReceptOkno" hidden role="dialog" aria-labelledby="jidReceptNadpis">
+  <div class="jid-tisk-lista">
+    <button type="button" class="jid-tisk-x" id="jidReceptZavrit" aria-label="Zavřít">✕</button>
+    <span class="jid-tisk-nadpis" id="jidReceptNadpis"></span>
+    <button type="button" class="jid-tisk-akce" id="jidReceptHotovo">Uvařeno ✓</button>
+  </div>
+  <div class="jid-recept-papir" id="jidReceptPapir"></div>
 </div>
 <div class="potvrz" id="pruvodceOkno" hidden>
   <div class="potvrz-box rohlik-box">
@@ -14045,6 +14064,46 @@ function jidOdkaz(r, rodic) {
 
 const JID_HOTOVO_SKRYT_MS = 12 * 3600000;
 
+// Recept přes celou obrazovku (iPad), s fotkou z webu receptu, když ji appka našla
+const jidReceptOknoEl = document.getElementById('jidReceptOkno');
+let jidReceptIndex = null;
+function jidReceptOtevri(index) {
+  if (!jidReceptOknoEl || !jidelnicekData || !jidelnicekData.recepty[index]) return;
+  jidReceptIndex = index;
+  renderJidReceptOkno();
+  jidReceptOknoEl.hidden = false;
+  jidReceptOknoEl.scrollTop = 0;
+}
+function renderJidReceptOkno() {
+  const r = jidelnicekData && jidelnicekData.recepty[jidReceptIndex];
+  if (!r) { jidReceptOknoEl.hidden = true; return; }
+  document.getElementById('jidReceptNadpis').textContent = r.nazev;
+  document.getElementById('jidReceptHotovo').textContent = r.hotovo ? 'Vrátit' : 'Uvařeno ✓';
+  jidReceptOknoEl.classList.toggle('hotovo', !!r.hotovo);
+  const papir = document.getElementById('jidReceptPapir');
+  papir.textContent = '';
+  const horni = jidEl('div', 'jid-recept-horni', papir);
+  if (r.foto) {
+    const img = jidEl('img', 'jid-recept-foto', horni);
+    img.alt = r.nazev;
+    img.onerror = () => img.remove();
+    img.src = r.foto;
+  }
+  const info = jidEl('div', 'jid-recept-info', horni);
+  jidEl('h2', '', info, r.nazev);
+  jidEl('span', 'jid-typ', info, JID_TYPY[r.typ] || '');
+  const v = r.vyziva || {};
+  if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', info, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g (orientačně, na porci)`);
+  jidOdkaz(r, info);
+  const detail = document.createElement('div');
+  jidReceptDetail(r, detail);
+  // Suroviny vedle fotky, postup a zbytek pod ní přes celou šířku
+  const sur = detail.querySelector('.jid-suroviny');
+  [...detail.querySelectorAll('.jid-meta')].filter(e => e.compareDocumentPosition(sur) & Node.DOCUMENT_POSITION_FOLLOWING).forEach(e => info.appendChild(e));
+  if (sur) info.appendChild(sur);
+  while (detail.firstChild) papir.appendChild(detail.firstChild);
+}
+
 // Hned v appce, pak potvrdí server
 async function jidHotovo(index, hotovo) {
   const r = jidelnicekData && jidelnicekData.recepty[index];
@@ -14082,6 +14141,8 @@ function renderJidelnicek() {
       det.dataset.index = index;
       if (otevrene.has(String(index))) det.open = true;
       const sum = jidEl('summary', '', det);
+      // iPad: recept přes celou obrazovku (zůstane, dokud se nezavře); iPhone: rozbalí se v kartě
+      sum.addEventListener('click', ev => { if (sirokyDisplej()) { ev.preventDefault(); jidReceptOtevri(index); } });
       const odskrt = jidEl('button', 'nakup-odskrt', sum, r.hotovo ? '✓' : '');
       odskrt.type = 'button';
       odskrt.setAttribute('aria-label', (r.hotovo ? 'Vrátit: ' : 'Uvařeno: ') + r.nazev);
@@ -14096,6 +14157,7 @@ function renderJidelnicek() {
       jidReceptDetail(r, telo);
     }
   }
+  if (jidReceptOknoEl && !jidReceptOknoEl.hidden) renderJidReceptOkno();
   // Upozornění a nesplněné body kontroly až pod jídly
   const pozor = [...(j.upozorneni || []), ...(j.kontrola || []).filter(k => !k.ok).map(k => 'Nesplněno: ' + k.bod + (k.poznamka ? ' — ' + k.poznamka : ''))];
   if (pozor.length) {
@@ -14109,6 +14171,7 @@ function renderJidelnicek() {
 function ipadDrzi() {
   return !!(document.querySelector('#jidObsah details.jid-recept[open]')
     || (jidTiskOknoEl && !jidTiskOknoEl.hidden)
+    || (jidReceptOknoEl && !jidReceptOknoEl.hidden)
     || (document.getElementById('pruvodceOkno') && !document.getElementById('pruvodceOkno').hidden));
 }
 
@@ -14182,6 +14245,11 @@ if (jidKartaEl) {
   document.getElementById('jidTiskRecepty').addEventListener('click', () => jidTisk('recepty'));
   document.getElementById('jidTiskSeznam').addEventListener('click', () => jidTisk('seznam'));
   document.getElementById('jidTiskZavrit').addEventListener('click', () => { jidTiskOknoEl.hidden = true; });
+  document.getElementById('jidReceptZavrit').addEventListener('click', () => { jidReceptOknoEl.hidden = true; jidReceptIndex = null; });
+  document.getElementById('jidReceptHotovo').addEventListener('click', () => {
+    const r = jidelnicekData && jidelnicekData.recepty[jidReceptIndex];
+    if (r) jidHotovo(jidReceptIndex, !r.hotovo);
+  });
   document.getElementById('jidTiskSdilet').addEventListener('click', jidTiskSdilej);
   document.getElementById('jidTiskTisk').addEventListener('click', () => window.print());
   // Odškrtnutá jídla mizí po 12 h i bez zásahu

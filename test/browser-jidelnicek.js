@@ -41,6 +41,7 @@ setTimeout(async () => {
   const prvni = karta.querySelector('details.jid-recept');
   check('  zavřený na začátku', prvni.open, false);
   prvni.open = true;
+  check('  telefon: rozbalí se v kartě, žádné okno', document.getElementById('jidReceptOkno').hidden, true);
   const a = prvni.querySelector('a.jid-zdroj');
   check('odkaz na recept do nové karty', a.href === VZOR.recepty[0].zdroj.url && a.target === '_blank', true);
   check('  suroviny s množstvím', prvni.querySelector('.jid-suroviny li').textContent, '600 g Kuřecí prsa');

@@ -19,7 +19,7 @@ const check = (jmeno, got, want) => {
   R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno.padEnd(52) + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
 };
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
-setTimeout(() => {
+setTimeout(async () => {
  try {
   const wrap = document.getElementById('sliderWrap');
   // Na širokém displeji je po startu vidět kalendář (iPad visí na zdi). Tahle sada
@@ -152,6 +152,37 @@ setTimeout(() => {
   check('otevřená tisková verze drží taky', document.getElementById('kalPanel').hidden, true);
   document.getElementById('jidTiskOkno').hidden = true;
   ipadKontrola();
+  // Na iPadu se recept otevře přes celou obrazovku (i s fotkou z webu)
+  jidelnicekData.recepty[0].foto = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  jidelnicekData.recepty[0].vyziva = { kcal: 354, bilkoviny: 19, sacharidy: 41, tuky: 13 };
+  renderJidelnicek();
+  kalOtevri(false);
+  const rOkno = document.getElementById('jidReceptOkno');
+  document.querySelector('#jidObsah details.jid-recept summary .jid-nazev').click();
+  check('iPad: recept přes celou obrazovku', !rOkno.hidden && rOkno.getBoundingClientRect().width >= window.innerWidth - 1, true);
+  check('  karta se nerozbalí', document.querySelector('#jidObsah details.jid-recept').open, false);
+  check('  s fotkou, názvem a hodnotami', !!rOkno.querySelector('img.jid-recept-foto') + ' ' + document.getElementById('jidReceptNadpis').textContent + ' ' + rOkno.querySelector('.jid-makra').textContent.startsWith('354 kcal · B: 19 g'), 'true Test true');
+  check('  suroviny vedle fotky, postup pod ní', !!rOkno.querySelector('.jid-recept-info .jid-suroviny') + ' ' + (rOkno.querySelector('.jid-postup').parentElement.id), 'true jidReceptPapir');
+  ipadKontrola();
+  check('  kalendář nenaskočí', document.getElementById('kalPanel').hidden, true);
+  renderJidelnicek();
+  check('  překreslení ho nezavře', rOkno.hidden, false);
+  let hot = null;
+  const puvFetch = window.fetch;
+  window.fetch = async (url, o) => { hot = JSON.parse(o.body); return { ok: true, json: async () => ({}) }; };
+  document.getElementById('jidReceptHotovo').click();
+  await new Promise(r => setTimeout(r, 20));
+  window.fetch = puvFetch;
+  check('Uvařeno pošle hotovo', JSON.stringify(hot) + ' ' + document.getElementById('jidReceptHotovo').textContent, '{"index":0,"hotovo":true} Vrátit');
+  jidelnicekData.recepty[0].foto = 'https://karolinafour.cz/neexistuje-xyz.jpg';
+  delete jidelnicekData.recepty[0].hotovo;
+  renderJidelnicek();
+  await new Promise(r => setTimeout(r, 300));
+  check('rozbitá fotka zmizí', rOkno.querySelector('img.jid-recept-foto'), null);
+  document.getElementById('jidReceptZavrit').click();
+  check('✕ zavře', rOkno.hidden, true);
+  ipadKontrola();
+  check('  pak zase kalendář', document.getElementById('kalPanel').hidden, false);
   wrap.scrollTo = plynule;
 
   R.push('\\n8) Emoji připomínek jsou na iPadu 2× větší');

@@ -8,15 +8,16 @@ const VZOR = require('./data/jidelnicek-vzor.json');
 const kopie = () => JSON.parse(JSON.stringify(VZOR));
 
 function build(o = {}) {
-  const routy = {}, zpravy = [], logy = [], push = [], ulozeni = [];
+  const routy = {}, zpravy = [], logy = [], push = [], ulozeni = [], stazeno = [];
   const state = { nakup: o.nakup || [] };
   const safeEqual = (a, b) => crypto.timingSafeEqual(crypto.createHash('sha256').update(String(a)).digest(), crypto.createHash('sha256').update(String(b)).digest());
-  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process', 'requireAuth', 'storeUlozBrzy',
-    CODE + '\n; return { jidelnicekOver, jidelnicekUloz, jidelnicekMnozstvi, JIDELNICEK_WEBY };')(
+  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process', 'requireAuth', 'storeUlozBrzy', 'fetch',
+    CODE + '\n; return { jidelnicekOver, jidelnicekUloz, jidelnicekMnozstvi, JIDELNICEK_WEBY, jidelnicekFotoZeStranky, jidelnicekFotoUrl, jidelnicekDoplnFotky };')(
     state, { post: (c, f) => { routy['POST ' + c] = f; }, get: (c, f) => { routy['GET ' + c] = f; } },
     t => logy.push(t), (u, d) => zpravy.push(u), async (t, b) => { push.push(t + ' | ' + b); }, safeEqual,
     o.max || 120, 200, 80, { env: o.env || {} }, (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
-    () => { ulozeni.push(1); });
+    () => { ulozeni.push(1); },
+    async url => { stazeno.push(url); if (o.fetch) return o.fetch(url); return { ok: false, status: 404, text: async () => '' }; });
   if (o.vyber) state.rohlikVyber = o.vyber;
   if (o.nauceno) state.rohlikNauceno = o.nauceno;
   const volej = (cesta, body, hlavicky = {}) => {
@@ -25,7 +26,7 @@ function build(o = {}) {
     routy[cesta]({ body, get: k => hlavicky[k] }, res);
     return { out, kod };
   };
-  return { api, state, logy, zpravy, push, volej, ulozeni };
+  return { api, state, logy, zpravy, push, volej, ulozeni, stazeno };
 }
 
 nadpis('Příjem');
@@ -134,6 +135,41 @@ nadpis('Známé suroviny pro úlohu');
   check('doma', o.doma.join(), 'sůl,pepř');
 }
 
+nadpis('Fotky receptů');
+const fotkyTest = (async () => {
+  const h = build();
+  check('foto: povolený web i CDN subdoména', [h.api.jidelnicekFotoUrl('https://karolinafour.cz/wp-content/a.jpg'), h.api.jidelnicekFotoUrl('https://cdn.buchtavtroube.cz/a.jpg')].every(Boolean), true);
+  check('  Blogger (MaruškaVeg)', !!h.api.jidelnicekFotoUrl('https://blogger.googleusercontent.com/img/a.jpg') && !!h.api.jidelnicekFotoUrl('https://1.bp.blogspot.com/x.jpg'), true);
+  check('  cizí ne', h.api.jidelnicekFotoUrl('https://evil.com/karolinafour.cz.jpg') + ' ' + h.api.jidelnicekFotoUrl('https://karolinafour.cz.evil.com/a.jpg'), 'null null');
+  const karolina = '<meta property="og:image" content="https://karolinafour.cz/wp-content/uploads/cropped-logo.png">'
+    + '<script type="application/ld+json">{"image":{"@type":"ImageObject","url":"https:\\/\\/karolinafour.cz\\/wp-content\\/uploads\\/2018\\/kuskus.png","width":599}}</script>';
+  check('ze stránky: JSON-LD před logem v og:image', h.api.jidelnicekFotoZeStranky(karolina), 'https://karolinafour.cz/wp-content/uploads/2018/kuskus.png');
+  const buchta = '<script>{"image":{"@type":"ImageObject","url":"https://secure.gravatar.com/avatar/x"}}</script><meta property="og:image" content="https://www.buchtavtroube.cz/wp-content/uploads/2025/08/P8050025-scaled.jpg">';
+  check('  avatar přeskočí, vezme og:image', h.api.jidelnicekFotoZeStranky(buchta), 'https://www.buchtavtroube.cz/wp-content/uploads/2025/08/P8050025-scaled.jpg');
+  check('  záloha první obrázek článku', h.api.jidelnicekFotoZeStranky('<img src="https://karolinafour.cz/wp-content/uploads/logo.png"><img class="x" src="https://karolinafour.cz/wp-content/uploads/jidlo.jpg">'), 'https://karolinafour.cz/wp-content/uploads/jidlo.jpg');
+  check('  nic', h.api.jidelnicekFotoZeStranky('<p>bez obrázku</p>'), null);
+
+  const f = build({ fetch: async url => ({ ok: true, text: async () => url.includes('karolinafour') ? karolina : '<p>nic</p>' }) });
+  f.volej('POST /api/jidelnicek/import', kopie());
+  await new Promise(r => setTimeout(r, 20));
+  const sKaroli = f.state.jidelnicek.recepty.filter(r => r.zdroj && /karolinafour/.test(r.zdroj.url));
+  check('po importu se fotky doplní', sKaroli.length > 0 && sKaroli.every(r => r.foto === 'https://karolinafour.cz/wp-content/uploads/2018/kuskus.png'), true);
+  check('  vlastní recept bez odkazu se nestahuje', f.stazeno.length, f.state.jidelnicek.recepty.filter(r => r.zdroj && r.zdroj.url).length);
+  check('  appka se dozví, záloha se uloží', f.zpravy.slice(-1)[0] + ' ' + f.ulozeni.length, 'jidelnicek 2');
+  const pred = f.stazeno.length;
+  await f.api.jidelnicekDoplnFotky(Date.now() + 3600000);
+  check('bez fotky se znovu zkouší až po 6 h', f.stazeno.length - pred, 0);
+  await f.api.jidelnicekDoplnFotky(Date.now() + 7 * 3600000);
+  check('  po 6 h ano (jen ty bez fotky)', f.stazeno.length - pred, f.state.jidelnicek.recepty.filter(r => r.zdroj && r.zdroj.url && !r.foto).length);
+  const g = build({ fetch: async () => { throw new Error('síť'); } });
+  g.volej('POST /api/jidelnicek/import', kopie());
+  await new Promise(r => setTimeout(r, 20));
+  check('chyba sítě nic nerozbije', g.state.jidelnicek.recepty.length + ' ' + g.state.jidelnicek.recepty.some(r => r.foto), '10 false');
+  const z = build();
+  z.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: f.state.jidelnicek })));
+  check('fotka přežije zálohu', z.state.jidelnicek.recepty.filter(r => r.foto).length, sKaroli.length);
+})();
+
 nadpis('Klíč');
 {
   const h = build({ env: { JIDELNICEK_KLIC: 'tajne-456' } });
@@ -159,4 +195,4 @@ nadpis('Záloha');
 check('záloha, snapshot, úvodní data', SRC.includes("'/api/jidelnicek/restore',") && SRC.includes("'/api/jidelnicek/restore': { jidelnicek: state.jidelnicek, historie: state.jidelnicekHistorie }")
   && SRC.includes('jidelnicek: state.jidelnicek,'), true);
 check('Rohlík si pamatuje podle názvu bez množství', SRC.includes('rohlikZapamatuj(n.nazev || n.text, p, ted);'), true);
-konec();
+fotkyTest.then(konec);
