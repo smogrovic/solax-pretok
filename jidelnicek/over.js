@@ -8,6 +8,8 @@ const NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Mléčné vý
 const SKLADBA = [['vecere', 'pracovni', 4], ['vecere', 'vikend', 1], ['vecere', 'bez_vareni', 1],
   ['peceni', 'peceni', 1], ['snidane', 'pracovni_snidane', 2], ['snidane', 'vikend_snidane', 1]];
 const PREVOD = { kg: ['g', 1000], l: ['ml', 1000], dl: ['ml', 100] };
+// Doma je vždycky — v receptu ano, na nákupní seznam ne
+const DOMA = ['sul', 'pepr'];
 
 const klic = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const jednotka = (m, j) => { const p = PREVOD[klic(j)]; return p ? [m * p[1], p[0]] : [m, klic(j)]; };
@@ -62,7 +64,7 @@ function zkontroluj(plan, historie = []) {
       if (!WEBY.includes(host)) chyby.push(`${kde}: odkaz musí vést na ${WEBY.join(', ')} (nebo vlastni: true).`);
     }
     if (!Array.isArray(r.suroviny) || !r.suroviny.length) chyby.push(`${kde}: chybí suroviny.`);
-    for (const x of r.suroviny || []) if (!x.nazev || !Number.isFinite(x.mnozstvi) || !x.jednotka) chyby.push(`${kde}: surovina „${x.nazev || '?'}" bez přesného množství a jednotky.`);
+    for (const x of r.suroviny || []) if (!DOMA.includes(klic(x.nazev)) && (!x.nazev || !Number.isFinite(x.mnozstvi) || !x.jednotka)) chyby.push(`${kde}: surovina „${x.nazev || '?'}" bez přesného množství a jednotky.`);
     if (!Array.isArray(r.postup) || !r.postup.length) chyby.push(`${kde}: chybí postup.`);
     if (r.typ !== 'bez_vareni') {
       const v = r.vyziva || {};
@@ -74,13 +76,14 @@ function zkontroluj(plan, historie = []) {
   const nakup = Array.isArray(plan.nakup) ? plan.nakup : [];
   const soucet = new Map();
   for (const r of recepty) for (const x of r.suroviny || []) {
-    if (!Number.isFinite(x.mnozstvi)) continue;
+    if (!Number.isFinite(x.mnozstvi) || DOMA.includes(klic(x.nazev))) continue;
     const [m, j] = jednotka(x.mnozstvi, x.jednotka);
     const k = klic(x.nazev) + '|' + j;
     soucet.set(k, (soucet.get(k) || 0) + m);
   }
   const vNakupu = new Map();
   for (const n of nakup) {
+    if (DOMA.includes(klic(n.nazev))) { chyby.push(`Nákup: ${n.nazev} je vždy doma — vyřaď.`); continue; }
     if (!NAKUP_KATEGORIE.includes(n.kategorie)) chyby.push(`Nákup „${n.nazev}": neznámá kategorie.`);
     if (!Number.isFinite(n.mnozstvi)) { if (!n.odhad) chyby.push(`Nákup „${n.nazev}": bez množství musí mít odhad: true.`); continue; }
     const [m, j] = jednotka(n.mnozstvi, n.jednotka);

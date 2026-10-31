@@ -78,7 +78,7 @@ function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
   const api = new Function('state', 'app', 'requireAuth', 'broadcast', 'fetch', 'process', 'crypto',
     CODE + '\n; return { rohlikHledej, rohlikDoKosiku, rohlikVyrobky, rohlikPrectiOdpoved, rohlikKlic, rohlikZapamatuj,'
          + ' rohlikVyberObnov, rohlikArgKosik, rohlikArgHledani, ROHLIK_VYBER_MAX, rohlikPayload, rohlikOauthStart,'
-         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni, rohlikDiag, rohlikWebCookiesObnov };'
+         + ' rohlikOauthZpet, rohlikOauthObnov, rohlikPrihlaseni, rohlikDiag, rohlikWebCookiesObnov, rohlikNauc, rohlikNaucenoVyres };'
   )(state, { get: (c, h) => { routy['GET ' + c] = h; }, post: (c, h) => { routy['POST ' + c] = h; } },
     (req, res) => { if (odemceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push({ u, d }), f.fetch, { env }, require('crypto'));
@@ -498,6 +498,30 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('bez hesla web vypnutý', h.api.rohlikPayload().prihlaseno, false);
   }
   check('heslo z env se nikam nepíše', /(addLog|console\.\w+)\([^)]*ROHLIK_(HESLO|EMAIL)/.test(SRC), false);
+
+  nadpis('Naučené z objednávky');
+  {
+    const f = falesny({ nastroje: NASTROJE_A, hledani: a => ({ result: VYSLEDEK_A }) });
+    const h = build(f);
+    h.state.rohlikVyber.cottage = { productId: 5, nazev: 'X' };
+    const r = await h.volej('POST /api/rohlik/nauc', { body: { polozky: [
+      { surovina: 'Mléko', vyrobek: 'Kunín Mléko polotučné 1,5 %' },
+      { surovina: 'Mozzarella', vyrobek: 'Miil Mozzarella light' },
+      { surovina: 'Cottage', vyrobek: 'Miil Cottage sýr' },
+      { surovina: '', vyrobek: 'nic' }] } });
+    check('naučí, už vybrané a prázdné přeskočí', r.out.nauceno, 2);
+    check('přesná shoda názvu (mezery a velikost nevadí) → víme', JSON.stringify([h.state.rohlikVyber.mleko.productId, h.state.rohlikVyber.mleko.text]), JSON.stringify([1349777, 'Mléko']));
+    check('  nenalezené čeká na příště', r.out.vyreseno + ' ' + Object.keys(h.state.rohlikNauceno).join(), '1 mozzarella');
+    check('  vybrané se nepřepíše', h.state.rohlikVyber.cottage.productId, 5);
+    const fb = falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }) });
+    const b = build(fb, { prihlasen: false });
+    await b.volej('POST /api/rohlik/nauc', { body: { polozky: [{ surovina: 'Mléko', vyrobek: 'Kunín Mléko polotučné 1,5%' }] } });
+    check('bez přihlášení jen uloží, na Rohlík nesahá', Object.keys(b.state.rohlikVyber).length + ' ' + Object.keys(b.state.rohlikNauceno).join() + ' ' + fb.log.length, '0 mleko 0');
+    const c = build(falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: VYSLEDEK_A }) }), { prihlasen: false });
+    await c.volej('POST /api/rohlik/nauceno/restore', { body: { nauceno: b.state.rohlikNauceno } });
+    check('záloha', JSON.stringify(c.state.rohlikNauceno), JSON.stringify(b.state.rohlikNauceno));
+    check('v záloze i snapshotu', SRC.includes("'/api/rohlik/nauceno/restore',") && SRC.includes("'/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno }"), true);
+  }
 
   check('tokeny se nikde nepíšou do logu', /addLog\([^)]*rohlikOauth|console\.\w+\([^)]*rohlikOauth/.test(SRC), false);
   check('objednávka (checkout/order) se v kódu nevolá', /tools\/call[^\n]*(checkout|submit|order)/i.test(CODE), false);

@@ -10,11 +10,13 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 ## Postup
 
 1. **Historie:** `curl -s https://solax-pretok.onrender.com/api/jidelnicek/historie > /tmp/historie.json`.
-   Obsahuje názvy jídel z posledních týdnů a příznak `ryba`. Jídla se nemají opakovat a ryba
+   Obsahuje názvy jídel z posledních týdnů a příznak `ryba`, dále `zname` (suroviny, ke kterým
+   appka zná konkrétní výrobek na Rohlíku) a `doma` (sůl, pepř). Jídla se nemají opakovat a ryba
    má být jednou za 14 dní: když byla minulý týden, teď žádná, jinak právě jedna.
    Pokud appka neodpoví (Render se probouzí), zkus to znovu za minutu, nejvýš 3×.
 2. **Recepty:** hledej (WebSearch) a hlavně **otevři** (WebFetch) konkrétní recepty jen na:
    `maruskaveg.com`, `buchtavtroube.cz`, `receptyodanicky.cz`, `karolinafour.cz`.
+   MaruškaVeg jede jen přes http — odkazy tvaru `http://www.maruskaveg.com/…` jsou v pořádku.
    Pracovní večeře ber z více webů. Každý převzatý recept musí být otevřený a zkontrolovaný
    (název, suroviny, postup, porce). Když se recept dohledat nedá, vezmi jiný, nebo napiš
    vlastní (`vlastni: true`, bez odkazu). Odkazy nikdy nevymýšlej.
@@ -54,6 +56,9 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 - `stitky`: jen ty, které platí. `maso` jen u hlavních jídel s masem (přesně dvě),
   `vegan` u plně veganského hlavního jídla, `mozzarella`/`cottage`/`tvaroh` u receptů, kde jsou.
 - `mnozstvi` je číslo, jednotka `g`, `kg`, `ml`, `l`, `ks`, `lžíce`, `lžička`, `balení`…
+- **Sůl a pepř** jsou doma vždycky: v receptu je uveď (klidně bez množství), do `nakup` je nedávej.
+- Když surovina odpovídá něčemu ze `zname`, pojmenuj ji v receptech i v nákupu **přesně tak** —
+  appka pak výrobek na Rohlíku pozná a nemusí se vybírat.
 - **Nákup** je přesný součet surovin. Položka se jmenuje **stejně** jako surovina v receptech
   (stejné názvy napříč recepty, jinak se nesečtou) a má stejnou jednotku (kg/g a l/ml se převádí).
   Kategorie jsou přesně ty z promptu (sekce 13). Bez čísla jen s `"odhad": true`.

@@ -57,6 +57,16 @@ nadpis('Zdroje');
 nadpis('Nákup = součet receptů');
 {
   const p = kopie();
+  najdi(p, 'Kuřecí tortilly se zeleninou').suroviny.push({ nazev: 'Sůl', mnozstvi: null, jednotka: '' }, { nazev: 'Pepř', mnozstvi: 1, jednotka: 'špetka' });
+  check('sůl a pepř v receptu nevadí (bez množství, mimo součet)', chyby(p).join(), '');
+  p.nakup.push({ kategorie: 'Dochucovadla a ostatní', nazev: 'Sůl', mnozstvi: 5, jednotka: 'g' });
+  check('  v nákupu chyba', chyby(p).includes('Nákup: Sůl je vždy doma — vyřaď.'), true);
+  const m = kopie();
+  najdi(m, 'Tofu s červenou čočkou a dýní').zdroj.url = 'http://www.maruskaveg.com/2024/10/tofu.html';
+  check('MaruškaVeg přes http', chyby(m).join(), '');
+}
+{
+  const p = kopie();
   p.nakup = p.nakup.filter(n => n.nazev !== 'Mozzarella');
   check('chybějící surovina', chyby(p).includes('Nákup: chybí mozzarella (250 g).'), true);
   const q = kopie();

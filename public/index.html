@@ -1614,6 +1614,32 @@
   .jid-suroviny,.jid-postup{margin:6px 0;padding-left:18px;}
   .jid-suroviny li,.jid-postup li{margin:2px 0;}
   .jid-tisk{display:flex;gap:8px;margin-top:12px;}
+  .jid-tisk-okno{position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch;}
+  .jid-tisk-okno[hidden]{display:none;}
+  .jid-tisk-lista{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    background:rgba(255,255,255,0.96);border-bottom:1px solid rgba(44,62,80,0.12);z-index:1;}
+  .jid-tisk-x{width:38px;height:38px;border:none;border-radius:50%;background:rgba(44,62,80,0.08);font-size:18px;cursor:pointer;flex:0 0 auto;color:#111;}
+  .jid-tisk-nadpis{flex:1;font-weight:800;color:#111;font-size:15px;}
+  .jid-tisk-akce{border:none;border-radius:12px;padding:9px 12px;font:inherit;font-size:13px;font-weight:700;background:#e3f1ff;color:#0b4a7f;cursor:pointer;}
+  .jid-tisk-papir{max-width:800px;margin:0 auto;padding:16px 18px 40px;font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;text-align:left;}
+  .jid-tisk-papir h1{font-size:22px;margin:0 0 10px;}
+  .jid-tisk-papir h2{font-size:17px;border-bottom:2px solid #333;margin:22px 0 8px;text-transform:uppercase;}
+  .jid-tisk-papir h3{font-size:16px;margin:16px 0 2px;}
+  .jid-tisk-papir .pol{display:flex;gap:10px;padding:4px 0;}
+  .jid-tisk-papir .box{width:16px;height:16px;border:1.5px solid #333;flex:0 0 auto;margin-top:3px;border-radius:3px;}
+  .jid-tisk-papir ul,.jid-tisk-papir ol{margin:4px 0 8px;padding-left:22px;}
+  @media print {
+    body > *:not(#jidTiskOkno){display:none!important;}
+    body{background:#fff!important;}
+    .jid-tisk-okno{position:static;overflow:visible;}
+    .jid-tisk-lista{display:none!important;}
+    .jid-tisk-papir{max-width:none;padding:0;font-size:12pt;}
+    .jid-tisk-papir .recept{break-inside:avoid;}
+  }
+  .jid-recept summary{flex-direction:row!important;align-items:center;gap:10px;}
+  .jid-hlava{display:flex;flex-direction:column;flex:1;min-width:0;}
+  .jid-recept.hotovo .jid-nazev{text-decoration:line-through;color:var(--muted);}
+  .jid-recept.hotovo .nakup-odskrt{background:#2e9d57;opacity:0.6;}
   .jid-tisk .sek-btn{flex:1;}
   .nakup-karta .nakup-seznam, .nakup-karta .nakup-pridat, .nakup-karta .rohlik-tlacitka{width:100%;align-self:stretch;box-sizing:border-box;}
   .nakup-karta .graph-title{text-align:center;}
@@ -4049,6 +4075,15 @@
       <button class="potvrz-ano rohlik-pridat" id="rohlikPridat" type="button">Přidat do košíku</button>
     </div>
   </div>
+</div>
+<div class="jid-tisk-okno" id="jidTiskOkno" hidden role="dialog" aria-labelledby="jidTiskNadpis">
+  <div class="jid-tisk-lista">
+    <button type="button" class="jid-tisk-x" id="jidTiskZavrit" aria-label="Zavřít">✕</button>
+    <span class="jid-tisk-nadpis" id="jidTiskNadpis"></span>
+    <button type="button" class="jid-tisk-akce" id="jidTiskTisk">🖨️ Tisk</button>
+    <button type="button" class="jid-tisk-akce" id="jidTiskSdilet">Sdílet / PDF</button>
+  </div>
+  <div class="jid-tisk-papir" id="jidTiskPapir"></div>
 </div>
 <div class="potvrz" id="pruvodceOkno" hidden>
   <div class="potvrz-box rohlik-box">
@@ -14007,6 +14042,22 @@ function jidOdkaz(r, rodic) {
   a.href = r.zdroj.url; a.target = '_blank'; a.rel = 'noopener';
 }
 
+const JID_HOTOVO_SKRYT_MS = 12 * 3600000;
+
+// Hned v appce, pak potvrdí server
+async function jidHotovo(index, hotovo) {
+  const r = jidelnicekData && jidelnicekData.recepty[index];
+  if (!r) return;
+  if (hotovo) r.hotovo = Date.now(); else delete r.hotovo;
+  renderJidelnicek();
+  try {
+    const res = await fetch('/api/jidelnicek/hotovo', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ index, hotovo }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.jidelnicek) { jidelnicekData = data.jidelnicek; renderJidelnicek(); }
+  } catch { /* SSE to srovná */ }
+}
+
 function renderJidelnicek() {
   if (!jidKartaEl) return;
   const j = jidelnicekData;
@@ -14023,14 +14074,22 @@ function renderJidelnicek() {
     for (const p of pozor) jidEl('div', '', box, '⚠️ ' + p);
   }
   for (const [kat, nazev] of JID_SEKCE) {
-    const rec = j.recepty.filter(r => r.kategorie === kat);
+    // Odškrtnuté (uvařené) jídlo zůstane 12 h přeškrtnuté, pak ze stránky zmizí
+    const rec = j.recepty.map((r, index) => ({ r, index }))
+      .filter(x => x.r.kategorie === kat && !(x.r.hotovo && Date.now() - x.r.hotovo > JID_HOTOVO_SKRYT_MS));
     if (!rec.length) continue;
     jidEl('div', 'jid-sekce', obsah, nazev);
-    for (const r of rec) {
-      const det = jidEl('details', 'jid-recept', obsah);
+    for (const { r, index } of rec) {
+      const det = jidEl('details', 'jid-recept' + (r.hotovo ? ' hotovo' : ''), obsah);
+      det.dataset.index = index;
       const sum = jidEl('summary', '', det);
-      jidEl('span', 'jid-nazev', sum, r.nazev);
-      jidEl('span', 'jid-typ', sum, JID_TYPY[r.typ] || '');
+      const odskrt = jidEl('button', 'nakup-odskrt', sum, r.hotovo ? '✓' : '');
+      odskrt.type = 'button';
+      odskrt.setAttribute('aria-label', (r.hotovo ? 'Vrátit: ' : 'Uvařeno: ') + r.nazev);
+      odskrt.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); jidHotovo(index, !r.hotovo); });
+      const hlava = jidEl('span', 'jid-hlava', sum);
+      jidEl('span', 'jid-nazev', hlava, r.nazev);
+      jidEl('span', 'jid-typ', hlava, JID_TYPY[r.typ] || '');
       const telo = jidEl('div', 'jid-telo', det);
       jidOdkaz(r, telo);
       jidReceptDetail(r, telo);
@@ -14038,55 +14097,80 @@ function renderJidelnicek() {
   }
 }
 
-// Tisková verze A4 v novém okně: recepty, nebo nákupní seznam s políčky
+// Tisková verze (A4) v okně appky: v PWA na iPhonu by nová karta nešla zavřít.
+// Nahoře ✕, Sdílet (soubor do Souborů, Poznámek, tisku…) a Tisk (z tiskového okna jde i PDF).
+const jidTiskOknoEl = document.getElementById('jidTiskOkno');
+const jidTiskPapirEl = document.getElementById('jidTiskPapir');
+let jidTiskNazev = '';
+const JID_TISK_CSS = 'body{font:12pt/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:16mm}'
+  + 'h1{font-size:20pt;margin:0 0 4mm}h2{font-size:15pt;border-bottom:2px solid #333;margin:8mm 0 3mm;text-transform:uppercase}'
+  + 'h3{font-size:13pt;margin:5mm 0 1mm}.jid-meta,.jid-zdroj{font-size:10pt;color:#444}ul,ol{margin:1mm 0 2mm 6mm;padding-left:4mm}'
+  + '.recept{break-inside:avoid}.pol{display:flex;gap:3mm;padding:1mm 0}.box{width:4mm;height:4mm;border:1.5px solid #333;flex:0 0 auto;margin-top:1mm}';
+
 function jidTisk(co) {
   const j = jidelnicekData;
-  if (!j) return;
-  const w = window.open('', '_blank');
-  if (!w) return;
-  const doc = w.document;
-  doc.open();
-  doc.write('<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>' + (co === 'seznam' ? 'Nákupní seznam' : 'Rodinný jídelníček') + '</title>'
-    + '<style>@page{size:A4;margin:16mm}body{font:12pt/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111}'
-    + 'h1{font-size:20pt;margin:0 0 4mm}h2{font-size:15pt;border-bottom:2px solid #333;margin:8mm 0 3mm;text-transform:uppercase}'
-    + 'h3{font-size:13pt;margin:5mm 0 1mm}.jid-meta,.jid-zdroj{font-size:10pt;color:#444}ul,ol{margin:1mm 0 2mm 6mm;padding-left:4mm}'
-    + '.recept{break-inside:avoid}.pol{display:flex;gap:3mm;padding:1mm 0}.box{width:4mm;height:4mm;border:1.5px solid #333;flex:0 0 auto;margin-top:1mm}</style><body>');
-  // (bez uzavíracích značek head/body: testy do stránky vkládají skripty právě před ně)
-  doc.close();
-  const b = doc.body;
-  const el = (tag, cls, rodic, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; rodic.appendChild(e); return e; };
+  if (!j || !jidTiskOknoEl) return;
+  const b = jidTiskPapirEl;
+  b.textContent = '';
+  const tyden = j.tyden.split('-').reverse().join('. ');
   if (co === 'seznam') {
-    el('h1', '', b, 'Nákupní seznam — týden od ' + j.tyden.split('-').reverse().join('. '));
+    jidTiskNazev = 'Nákupní seznam — týden od ' + tyden;
+    jidEl('h1', '', b, jidTiskNazev);
     for (const k of JID_NAKUP_KATEGORIE) {
       const pol = j.nakup.filter(n => n.kategorie === k);
       if (!pol.length) continue;
-      el('h2', '', b, k);
+      jidEl('h2', '', b, k);
       for (const n of pol) {
-        const r = el('div', 'pol', b);
-        el('span', 'box', r);
-        el('span', '', r, n.nazev + ' — ' + (jidMnozstvi(n) || '') + (n.odhad ? ' (odhad)' : '') + (n.poznamka ? ', ' + n.poznamka : ''));
+        const r = jidEl('div', 'pol', b);
+        jidEl('span', 'box', r);
+        jidEl('span', '', r, n.nazev + ' — ' + (jidMnozstvi(n) || '') + (n.odhad ? ' (odhad)' : '') + (n.poznamka ? ', ' + n.poznamka : ''));
       }
     }
+    if (!j.nakup.length) jidEl('p', 'jid-meta', b, 'Na tento týden je nakoupeno.');
   } else {
-    el('h1', '', b, 'Rodinný jídelníček — týden od ' + j.tyden.split('-').reverse().join('. '));
+    jidTiskNazev = 'Rodinný jídelníček — týden od ' + tyden;
+    jidEl('h1', '', b, jidTiskNazev);
     for (const [kat, nazev] of JID_SEKCE) {
-      el('h2', '', b, nazev);
-      for (const r of j.recepty.filter(x => x.kategorie === kat)) {
-        const box = el('div', 'recept', b);
-        el('h3', '', box, r.nazev);
-        el('div', 'jid-zdroj', box, jidZdroj(r) + (!r.vlastni && r.zdroj && r.zdroj.url ? ' — ' + r.zdroj.url : ''));
-        const tmp = document.createElement('div');
-        jidReceptDetail(r, tmp);
-        box.insertAdjacentHTML('beforeend', tmp.innerHTML);
+      const rec = j.recepty.filter(x => x.kategorie === kat);
+      if (!rec.length) continue;
+      jidEl('h2', '', b, nazev);
+      for (const r of rec) {
+        const box = jidEl('div', 'recept', b);
+        jidEl('h3', '', box, r.nazev);
+        jidEl('div', 'jid-zdroj', box, jidZdroj(r) + (!r.vlastni && r.zdroj && r.zdroj.url ? ' — ' + r.zdroj.url : ''));
+        jidReceptDetail(r, box);
       }
     }
   }
-  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 300);
+  document.getElementById('jidTiskNadpis').textContent = co === 'seznam' ? 'Nákupní seznam' : 'Recepty';
+  jidTiskOknoEl.hidden = false;
+  jidTiskOknoEl.scrollTop = 0;
+}
+
+async function jidTiskSdilej() {
+  const html = '<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>' + jidTiskNazev.replace(/</g, '') + '</title><style>'
+    + JID_TISK_CSS + '</style><body>' + jidTiskPapirEl.innerHTML;
+  const nazevSouboru = (jidTiskNazev.startsWith('Nákup') ? 'nakupni-seznam' : 'jidelnicek') + '.html';
+  try {
+    if (navigator.canShare && typeof File === 'function') {
+      const soubor = new File([html], nazevSouboru, { type: 'text/html' });
+      if (navigator.canShare({ files: [soubor] })) { await navigator.share({ files: [soubor], title: jidTiskNazev }); return; }
+    }
+    if (navigator.share) { await navigator.share({ title: jidTiskNazev, text: jidTiskPapirEl.innerText }); return; }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;   // sdílení zrušené uživatelem
+  }
+  window.print();
 }
 
 if (jidKartaEl) {
   document.getElementById('jidTiskRecepty').addEventListener('click', () => jidTisk('recepty'));
   document.getElementById('jidTiskSeznam').addEventListener('click', () => jidTisk('seznam'));
+  document.getElementById('jidTiskZavrit').addEventListener('click', () => { jidTiskOknoEl.hidden = true; });
+  document.getElementById('jidTiskSdilet').addEventListener('click', jidTiskSdilej);
+  document.getElementById('jidTiskTisk').addEventListener('click', () => window.print());
+  // Odškrtnutá jídla mizí po 12 h i bez zásahu
+  setInterval(() => bezpecne(renderJidelnicek), 5 * 60000);
 }
 
 // ---------- Rohlík: průvodce krok po kroku ----------

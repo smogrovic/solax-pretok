@@ -11,11 +11,13 @@ function build(o = {}) {
   const routy = {}, zpravy = [], logy = [], push = [];
   const state = { nakup: o.nakup || [] };
   const safeEqual = (a, b) => crypto.timingSafeEqual(crypto.createHash('sha256').update(String(a)).digest(), crypto.createHash('sha256').update(String(b)).digest());
-  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process',
+  const api = new Function('state', 'app', 'addLog', 'broadcast', 'sendPushToAll', 'safeEqual', 'NAKUP_MAX', 'NAKUP_CELKEM_MAX', 'NAKUP_TEXT_MAX', 'process', 'requireAuth',
     CODE + '\n; return { jidelnicekOver, jidelnicekUloz, jidelnicekMnozstvi, JIDELNICEK_WEBY };')(
     state, { post: (c, f) => { routy['POST ' + c] = f; }, get: (c, f) => { routy['GET ' + c] = f; } },
     t => logy.push(t), (u, d) => zpravy.push(u), async (t, b) => { push.push(t + ' | ' + b); }, safeEqual,
-    o.max || 120, 200, 80, { env: o.env || {} });
+    o.max || 120, 200, 80, { env: o.env || {} }, (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; });
+  if (o.vyber) state.rohlikVyber = o.vyber;
+  if (o.nauceno) state.rohlikNauceno = o.nauceno;
   const volej = (cesta, body, hlavicky = {}) => {
     let out, kod = 200;
     const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -65,7 +67,7 @@ nadpis('Ověření');
   const h = build();
   const zkus = upravit => { const p = kopie(); upravit(p); return h.volej('POST /api/jidelnicek/import', p); };
   check('cizí web v odkazu', zkus(p => { p.recepty[0].zdroj.url = 'https://www.toprecepty.cz/x/'; }).out.error, 'Kuřecí tortilly se zeleninou: odkaz musí vést na jeden z povolených webů (maruskaveg.com, buchtavtroube.cz, receptyodanicky.cz, karolinafour.cz).');
-  check('jen https', zkus(p => { p.recepty[0].zdroj.url = 'http://www.karolinafour.cz/x/'; }).kod, 400);
+  check('jen http(s)', zkus(p => { p.recepty[0].zdroj.url = 'javascript:alert(1)//karolinafour.cz'; }).kod, 400);
   check('podvržená doména', zkus(p => { p.recepty[0].zdroj.url = 'https://karolinafour.cz.evil.com/x/'; }).kod, 400);
   check('vlastní recept bez odkazu projde', zkus(p => { p.recepty[0].vlastni = true; p.recepty[0].zdroj = null; }).kod, 200);
   check('neznámá kategorie nákupu', zkus(p => { p.nakup[0].kategorie = 'Drogerie'; }).kod, 400);
@@ -74,6 +76,60 @@ nadpis('Ověření');
   check('dlouhý text se ořízne', (zkus(p => { p.recepty[0].postup = ['a'.repeat(5000)]; }), h.state.jidelnicek.recepty[0].postup[0].length), 600);
   check('nepovolené štítky zmizí', (zkus(p => { p.recepty[0].stitky = ['maso', 'hack']; }), h.state.jidelnicek.recepty[0].stitky.join()), 'maso');
   check('množství bez čísla = odhad', h.api.jidelnicekMnozstvi({ mnozstvi: null, jednotka: 'balení', odhad: true }), 'balení (odhad)');
+}
+
+nadpis('MaruškaVeg, sůl a pepř, ruční týden');
+{
+  const h = build();
+  const zkus = upravit => { const p = kopie(); upravit(p); return h.volej('POST /api/jidelnicek/import', p); };
+  check('MaruškaVeg jen přes http projde', zkus(p => { p.recepty[2].zdroj.url = 'http://www.maruskaveg.com/2024/10/tofu.html'; }).kod, 200);
+  check('  cizí web přes http ne', zkus(p => { p.recepty[2].zdroj.url = 'http://www.toprecepty.cz/x/'; }).kod, 400);
+  check('  ftp ne', zkus(p => { p.recepty[2].zdroj.url = 'ftp://www.maruskaveg.com/x'; }).kod, 400);
+  zkus(p => { p.nakup.push({ kategorie: 'Dochucovadla a ostatní', nazev: 'Sůl', mnozstvi: 1, jednotka: 'lžička' }, { kategorie: 'Dochucovadla a ostatní', nazev: 'pepř', mnozstvi: null, jednotka: '', odhad: true }); });
+  check('sůl a pepř na seznam nejdou', h.state.nakup.some(x => /^(sůl|pepř)$/i.test(x.nazev)) + ' ' + h.state.jidelnicek.nakup.length, 'false 27');
+  check('bez odkazu u úlohy neprojde', zkus(p => { p.recepty[0].zdroj.url = ''; }).kod, 400);
+
+  // Ruční týden: už nakoupeno → na seznam nic, staré nekoupené z minulého jídelníčku pryč
+  h.state.nakup.push({ id: 'n_ruc00009', text: 'Toaletní papír', t: 1 });
+  const rucne = kopie();
+  rucne.nakupHotovo = true; rucne.nakup = [];
+  rucne.recepty[0].zdroj.url = '';
+  const pushPred = h.push.length;
+  const r = h.volej('POST /api/jidelnicek/import', rucne);
+  check('ruční týden: odkaz smí chybět, nákup prázdný', r.kod + ' ' + h.state.jidelnicek.recepty[0].zdroj.url + ' ' + h.state.jidelnicek.nakupHotovo, '200 null true');
+  check('  na seznamu zůstalo jen ruční', h.state.nakup.map(x => x.text).join(), 'Toaletní papír');
+  check('  bez notifikace', h.push.length - pushPred, 0);
+}
+
+nadpis('Odškrtnutá jídla');
+{
+  const h = build();
+  h.volej('POST /api/jidelnicek/import', kopie());
+  const r = h.volej('POST /api/jidelnicek/hotovo', { index: 3, hotovo: true });
+  check('odškrtnutí uloží čas', r.kod + ' ' + (h.state.jidelnicek.recepty[3].hotovo > 0), '200 true');
+  check('  appka se dozví', h.zpravy.slice(-1)[0], 'jidelnicek');
+  h.volej('POST /api/jidelnicek/hotovo', { index: 3, hotovo: false });
+  check('  vrácení smaže', 'hotovo' in h.state.jidelnicek.recepty[3], false);
+  check('index mimo 404', h.volej('POST /api/jidelnicek/hotovo', { index: 99, hotovo: true }).kod, 404);
+  check('bez hotovo 400', h.volej('POST /api/jidelnicek/hotovo', { index: 1 }).kod, 400);
+  check('zamčeno 401', build({ zamceno: true }).volej('POST /api/jidelnicek/hotovo', { index: 1, hotovo: true }).kod, 401);
+  h.volej('POST /api/jidelnicek/hotovo', { index: 1, hotovo: true });
+  const b = build();
+  b.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: h.state.jidelnicek })));
+  check('odškrtnutí přežije zálohu', b.state.jidelnicek.recepty[1].hotovo, h.state.jidelnicek.recepty[1].hotovo);
+  const c = build();
+  const budouci = JSON.parse(JSON.stringify(h.state.jidelnicek)); budouci.recepty[1].hotovo = Date.now() + 9e9;
+  c.volej('POST /api/jidelnicek/restore', { jidelnicek: budouci });
+  check('  čas z budoucnosti zahodí', 'hotovo' in c.state.jidelnicek.recepty[1], false);
+}
+
+nadpis('Známé suroviny pro úlohu');
+{
+  const h = build({ vyber: { mozzarella: { productId: 1, nazev: 'Miil Mozzarella light', text: 'Mozzarella' }, mleko: { productId: 2, nazev: 'M' } },
+    nauceno: { 'uzene tofu': { surovina: 'Uzené tofu', vyrobek: 'Lunter Tofu uzené XXL (2×160 g)' } } });
+  const o = h.volej('GET /api/jidelnicek/historie').out;
+  check('zname: vybrané i naučené, abecedně', o.zname.join(), 'mleko,Mozzarella,Uzené tofu');
+  check('doma', o.doma.join(), 'sůl,pepř');
 }
 
 nadpis('Klíč');

@@ -11545,6 +11545,10 @@ const JIDELNICEK_NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Ml
 const JIDELNICEK_RECEPTU_MAX = 20;
 const JIDELNICEK_NAKUP_MAX = 120;
 const JIDELNICEK_HISTORIE_TYDNU = 6;
+const JIDELNICEK_HOTOVO_SKRYT_MS = 12 * 3600000;   // odškrtnuté jídlo zmizí z appky po 12 h
+// Doma je vždycky — na nákupní seznam nepatří
+const JIDELNICEK_DOMA = ['sul', 'pepr'];
+const jidKlic = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 if (!Array.isArray(state.jidelnicekHistorie)) state.jidelnicekHistorie = [];
 if (state.jidelnicek === undefined) state.jidelnicek = null;
@@ -11552,12 +11556,12 @@ if (state.jidelnicek === undefined) state.jidelnicek = null;
 const jidText = (v, max) => (typeof v === 'string' ? v.trim().replace(/[ \t]+/g, ' ').slice(0, max) : '');
 const jidCislo = v => (Number.isFinite(v) && v >= 0 && v < 100000 ? Math.round(v * 10) / 10 : null);
 
-// Odkaz jen https a jen na povolené weby (i www.)
+// Odkaz jen na povolené weby (i www.). Kvůli MaruškaVeg i http — jiný její web nemá.
 function jidelnicekUrl(u) {
   if (typeof u !== 'string' || u.length > 400) return null;
   let url;
   try { url = new URL(u); } catch { return null; }
-  if (url.protocol !== 'https:') return null;
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
   const host = url.hostname.toLowerCase().replace(/^www\./, '');
   return JIDELNICEK_WEBY.includes(host) ? url.href : null;
 }
@@ -11569,8 +11573,10 @@ function jidelnicekSurovina(s) {
 }
 
 // Ověří plán z úlohy → { plan } nebo { chyba }
-function jidelnicekOver(b) {
+// `bezOdkazu`: ruční vložení — převzatý recept, jehož odkaz se nepodařilo ověřit, smí být bez URL
+function jidelnicekOver(b, { bezOdkazu = false, now = Date.now() } = {}) {
   if (!b || typeof b !== 'object') return { chyba: 'Chybí jídelníček.' };
+  const nakupHotovo = b.nakupHotovo === true;
   const tyden = typeof b.tyden === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.tyden) ? b.tyden : null;
   if (!tyden) return { chyba: 'Chybí tyden (YYYY-MM-DD, pondělí).' };
   if (!Array.isArray(b.recepty) || !b.recepty.length || b.recepty.length > JIDELNICEK_RECEPTU_MAX) return { chyba: 'Recepty: 1 až ' + JIDELNICEK_RECEPTU_MAX + '.' };
@@ -11584,8 +11590,9 @@ function jidelnicekOver(b) {
     let zdroj = null;
     if (!vlastni) {
       const url = jidelnicekUrl(r.zdroj && r.zdroj.url);
-      if (!url) return { chyba: `${nazev}: odkaz musí vést na jeden z povolených webů (${JIDELNICEK_WEBY.join(', ')}).` };
-      zdroj = { web: jidText(r.zdroj.web, 60), autor: jidText(r.zdroj.autor, 60), url };
+      const bez = bezOdkazu && r.zdroj && !r.zdroj.url && jidText(r.zdroj.web, 60);
+      if (!url && !bez) return { chyba: `${nazev}: odkaz musí vést na jeden z povolených webů (${JIDELNICEK_WEBY.join(', ')}).` };
+      zdroj = { web: jidText(r.zdroj.web, 60), autor: jidText(r.zdroj.autor, 60), url: url || null };
     }
     const suroviny = (Array.isArray(r.suroviny) ? r.suroviny : []).slice(0, 40).map(jidelnicekSurovina).filter(Boolean);
     if (!suroviny.length) return { chyba: `${nazev}: chybí suroviny.` };
@@ -11596,21 +11603,24 @@ function jidelnicekOver(b) {
       postup: (Array.isArray(r.postup) ? r.postup : []).slice(0, 25).map(x => jidText(x, 600)).filter(Boolean),
       predem: jidText(r.predem, 300), skladovani: jidText(r.skladovani, 300), ohrev: jidText(r.ohrev, 300), forma: jidText(r.forma, 120),
       vyziva: { kcal: jidCislo(v.kcal), bilkoviny: jidCislo(v.bilkoviny), sacharidy: jidCislo(v.sacharidy), tuky: jidCislo(v.tuky) },
-      stitky: (Array.isArray(r.stitky) ? r.stitky : []).filter(s => JIDELNICEK_STITKY.includes(s))
+      stitky: (Array.isArray(r.stitky) ? r.stitky : []).filter(s => JIDELNICEK_STITKY.includes(s)),
+      ...(Number.isFinite(r.hotovo) && r.hotovo > 0 && r.hotovo <= now ? { hotovo: r.hotovo } : {})
     });
   }
-  if (!Array.isArray(b.nakup) || !b.nakup.length || b.nakup.length > JIDELNICEK_NAKUP_MAX) return { chyba: 'Nákup: 1 až ' + JIDELNICEK_NAKUP_MAX + ' položek.' };
+  const nakupVstup = Array.isArray(b.nakup) ? b.nakup : [];
+  if ((!nakupHotovo && !nakupVstup.length) || nakupVstup.length > JIDELNICEK_NAKUP_MAX) return { chyba: 'Nákup: 1 až ' + JIDELNICEK_NAKUP_MAX + ' položek.' };
   const nakup = [];
-  for (const n of b.nakup) {
+  for (const n of nakupVstup) {
     const s = jidelnicekSurovina(n);
     if (!s) return { chyba: 'Nákup: položka bez názvu.' };
     if (!JIDELNICEK_NAKUP_KATEGORIE.includes(n.kategorie)) return { chyba: `Nákup „${s.nazev}": neznámá kategorie.` };
+    if (JIDELNICEK_DOMA.includes(jidKlic(s.nazev))) continue;
     nakup.push({ ...s, kategorie: n.kategorie, odhad: n.odhad === true });
   }
   const kontrola = (Array.isArray(b.kontrola) ? b.kontrola : []).slice(0, 40)
     .map(k => ({ bod: jidText(k && k.bod, 160), ok: !!(k && k.ok === true), poznamka: jidText(k && k.poznamka, 300) })).filter(k => k.bod);
   const upozorneni = (Array.isArray(b.upozorneni) ? b.upozorneni : []).slice(0, 15).map(x => jidText(x, 400)).filter(Boolean);
-  return { plan: { tyden, recepty, nakup, kontrola, upozorneni } };
+  return { plan: { tyden, recepty, nakup, kontrola, upozorneni, ...(nakupHotovo ? { nakupHotovo: true } : {}) } };
 }
 
 // „375 g", „2 ks (odhad)" — co se ukáže u položky na seznamu
@@ -11650,25 +11660,40 @@ app.post('/api/jidelnicek/import', (req, res) => {
     const k = req.get('X-Klic');
     if (typeof k !== 'string' || !k || !safeEqual(k, JIDELNICEK_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
   }
-  const o = jidelnicekOver(req.body);
+  const o = jidelnicekOver(req.body, { bezOdkazu: req.body && req.body.nakupHotovo === true });
   if (o.chyba) return res.status(400).json({ error: o.chyba });
   jidelnicekUloz(o.plan);
   const vecere = o.plan.recepty.filter(r => r.kategorie === 'vecere').length;
   addLog(`Jídelníček na týden od ${o.plan.tyden}: ${o.plan.recepty.length} receptů, ${o.plan.nakup.length} položek na seznamu`);
-  sendPushToAll('🍽️ Jídelníček na příští týden', `${vecere} večeří a ${o.plan.nakup.length} položek na seznamu — vyškrtej, co máme doma.`, { log: false }).catch(() => {});
+  if (!o.plan.nakupHotovo) sendPushToAll('🍽️ Jídelníček na příští týden', `${vecere} večeří a ${o.plan.nakup.length} položek na seznamu — vyškrtej, co máme doma.`, { log: false }).catch(() => {});
   res.json({ ok: true, receptu: o.plan.recepty.length, polozek: o.plan.nakup.length });
+});
+
+// Odškrtnuté (uvařené) jídlo: v appce přeškrtnuté, po 12 h zmizí
+app.post('/api/jidelnicek/hotovo', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const j = state.jidelnicek;
+  const b = req.body || {};
+  if (!j || !Number.isInteger(b.index) || !j.recepty[b.index]) return res.status(404).json({ error: 'Recept už v jídelníčku není.' });
+  if (typeof b.hotovo !== 'boolean') return res.status(400).json({ error: 'Chybí hotovo (true/false).' });
+  if (b.hotovo) j.recepty[b.index].hotovo = Date.now(); else delete j.recepty[b.index].hotovo;
+  broadcast('jidelnicek', { jidelnicek: j });
+  res.json({ ok: true, jidelnicek: j });
 });
 
 // Pro úlohu: co bylo v minulých týdnech (opakování, ryba jednou za 14 dní)
 app.get('/api/jidelnicek/historie', (req, res) => {
-  res.json({ ok: true, weby: JIDELNICEK_WEBY, historie: state.jidelnicekHistorie });
+  // Suroviny, ke kterým appka zná výrobek na Rohlíku — úloha je má pojmenovat stejně
+  const zname = [...new Set([...Object.entries(state.rohlikVyber || {}).map(([k, v]) => (v && v.text) || k),
+    ...Object.values(state.rohlikNauceno || {}).map(v => v && v.surovina).filter(Boolean)])].sort((a, c) => a.localeCompare(c, 'cs'));
+  res.json({ ok: true, weby: JIDELNICEK_WEBY, doma: ['sůl', 'pepř'], zname, historie: state.jidelnicekHistorie });
 });
 
 // Záloha po nasazení — jen když appka ještě nic nemá
 app.post('/api/jidelnicek/restore', (req, res) => {
   const b = req.body || {};
   if (!state.jidelnicek && b.jidelnicek) {
-    const o = jidelnicekOver(b.jidelnicek);
+    const o = jidelnicekOver(b.jidelnicek, { bezOdkazu: true });
     if (!o.chyba) state.jidelnicek = { ...o.plan, vytvoreno: Number.isFinite(b.jidelnicek.vytvoreno) ? b.jidelnicek.vytvoreno : 0 };
   }
   if (!state.jidelnicekHistorie.length && Array.isArray(b.historie)) {
@@ -11724,6 +11749,7 @@ const STORE_POSTS = [
   '/api/nakup/restore',
   '/api/nakup/oblibene/restore',
   '/api/rohlik/vyber/restore',
+  '/api/rohlik/nauceno/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/solinator/restore',
@@ -11776,6 +11802,7 @@ function storeSnapshot() {
     '/api/nakup/restore': { nakup: state.nakup },
     '/api/nakup/oblibene/restore': { polozky: state.nakupOblibene || [], doplneno: NAKUP_OBLIBENE_DOPLNENI },
     '/api/rohlik/vyber/restore': { vyber: state.rohlikVyber },
+    '/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/solinator/restore': { ...state.solinator },
@@ -12846,7 +12873,7 @@ const rohlikKlic = text => String(text || '').normalize('NFD').replace(/[̀-ͯ]/
 function rohlikZapamatuj(text, v, now = Date.now()) {
   const k = rohlikKlic(text);
   if (!k || !v || (typeof v.productId !== 'number' && typeof v.productId !== 'string')) return;
-  state.rohlikVyber[k] = { productId: v.productId, nazev: String(v.nazev || '').slice(0, 120),
+  state.rohlikVyber[k] = { productId: v.productId, nazev: String(v.nazev || '').slice(0, 120), text: String(text).trim().slice(0, 80),
     obrazek: typeof v.obrazek === 'string' && /^https:\/\//.test(v.obrazek) ? v.obrazek : null,
     cena: typeof v.cena === 'number' ? v.cena : null, kdy: now };
   const klice = Object.keys(state.rohlikVyber);
@@ -12863,6 +12890,68 @@ function rohlikVyberObnov(b) {
     rohlikZapamatuj(k, v, Number.isFinite(v.kdy) ? v.kdy : 0);
   }
   return true;
+}
+
+// Naučené z objednávky: surovina → název výrobku na Rohlíku (bez productId, ten zná jen
+// Rohlík). Dokud není přihlášení, čeká to tady; pak se výrobek jednou dohledá podle
+// přesného názvu a uloží jako normální zapamatovaný výběr (značka „víme").
+const ROHLIK_NAUCENO_MAX = 200;
+if (!state.rohlikNauceno || typeof state.rohlikNauceno !== 'object') state.rohlikNauceno = {};
+
+function rohlikNauc(polozky) {
+  let n = 0;
+  for (const p of (Array.isArray(polozky) ? polozky : []).slice(0, ROHLIK_NAUCENO_MAX)) {
+    const surovina = p && typeof p.surovina === 'string' ? p.surovina.trim().slice(0, 80) : '';
+    const vyrobek = p && typeof p.vyrobek === 'string' ? p.vyrobek.trim().slice(0, 160) : '';
+    const k = rohlikKlic(surovina);
+    if (!k || !vyrobek || state.rohlikVyber[k]) continue;
+    state.rohlikNauceno[k] = { surovina, vyrobek };
+    n++;
+  }
+  const klice = Object.keys(state.rohlikNauceno);
+  for (const k of klice.slice(0, Math.max(0, klice.length - ROHLIK_NAUCENO_MAX))) delete state.rohlikNauceno[k];
+  return n;
+}
+
+let rohlikNaucenoBezi = false;
+async function rohlikNaucenoVyres() {
+  if (rohlikNaucenoBezi || !rohlikPrihlasen()) return 0;
+  rohlikNaucenoBezi = true;
+  let vyreseno = 0;
+  try {
+    for (const [k, p] of Object.entries(state.rohlikNauceno)) {
+      if (state.rohlikVyber[k]) { delete state.rohlikNauceno[k]; continue; }
+      let vyrobky;
+      try { vyrobky = await rohlikHledej(p.vyrobek); } catch { break; }   // Rohlík neodpovídá — zkusí se příště
+      // Shoda názvu bez ohledu na mezery, diakritiku a velikost („1,5 %" = „1,5%")
+      const bezMezer = t => rohlikKlic(t).replace(/\s+/g, '');
+      const v = vyrobky.find(x => bezMezer(x.nazev) === bezMezer(p.vyrobek));
+      if (!v) continue;
+      rohlikZapamatuj(p.surovina, v);
+      delete state.rohlikNauceno[k];
+      vyreseno++;
+    }
+  } finally { rohlikNaucenoBezi = false; }
+  return vyreseno;
+}
+
+app.post('/api/rohlik/nauc', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const n = rohlikNauc(req.body && req.body.polozky);
+  const vyreseno = await rohlikNaucenoVyres().catch(() => 0);
+  res.json({ ok: true, nauceno: n, vyreseno, ceka: Object.keys(state.rohlikNauceno).length });
+});
+
+app.post('/api/rohlik/nauceno/restore', (req, res) => {
+  const b = req.body || {};
+  if (b.nauceno && typeof b.nauceno === 'object' && !Object.keys(state.rohlikNauceno).length) {
+    rohlikNauc(Object.values(b.nauceno));
+  }
+  res.json({ ok: true });
+});
+
+if (typeof scheduleEvery === 'function') {
+  scheduleEvery(() => { if (Object.keys(state.rohlikNauceno).length) rohlikNaucenoVyres().catch(() => {}); }, 10 * 60000, 3 * 60000);
 }
 
 const rohlikOdpovezChybou = (res, err) => {
