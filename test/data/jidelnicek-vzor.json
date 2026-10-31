@@ -1,0 +1,736 @@
+{
+ "_poznamka": "Vzor pro testy — odkazy nejsou skutečné recepty.",
+ "tyden": "2026-11-02",
+ "recepty": [
+  {
+   "kategorie": "vecere",
+   "typ": "pracovni",
+   "nazev": "Kuřecí tortilly se zeleninou",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Karolina Four",
+    "autor": "Karolína Fourová",
+    "url": "https://www.karolinafour.cz/test-vzor/105/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Kuřecí prsa",
+     "mnozstvi": 600,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Tortilly",
+     "mnozstvi": 10,
+     "jednotka": "ks",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Paprika",
+     "mnozstvi": 2,
+     "jednotka": "ks",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Olivový olej",
+     "mnozstvi": 2,
+     "jednotka": "lžíce",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "maso",
+    "tortilla"
+   ]
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "pracovni",
+   "nazev": "Hovězí s rýží a mrkví",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Recepty od Aničky",
+    "autor": "Anna Částková",
+    "url": "https://www.receptyodanicky.cz/test-vzor/308/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Hovězí kližka",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Rýže",
+     "mnozstvi": 300,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Mrkev",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Olivový olej",
+     "mnozstvi": 1,
+     "jednotka": "lžíce",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "maso"
+   ]
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "pracovni",
+   "nazev": "Tofu s červenou čočkou a dýní",
+   "vlastni": false,
+   "zdroj": {
+    "web": "MaruškaVeg",
+    "autor": "Maruška",
+    "url": "https://www.maruskaveg.com/test-vzor/156/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Tofu",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Červená čočka",
+     "mnozstvi": 250,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Dýně hokkaido",
+     "mnozstvi": 600,
+     "jednotka": "g",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 520,
+    "bilkoviny": 28,
+    "sacharidy": 60,
+    "tuky": 14
+   },
+   "stitky": [
+    "vegan"
+   ]
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "pracovni",
+   "nazev": "Zapečené těstoviny s mozzarellou",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Karolina Four",
+    "autor": "Karolína Fourová",
+    "url": "https://www.karolinafour.cz/test-vzor/625/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Těstoviny",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Mozzarella",
+     "mnozstvi": 250,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Rajčata",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "mozzarella"
+   ]
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "vikend",
+   "nazev": "Losos s bramborami",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Recepty od Aničky",
+    "autor": "Anna Částková",
+    "url": "https://www.receptyodanicky.cz/test-vzor/349/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Losos",
+     "mnozstvi": 600,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Brambory",
+     "mnozstvi": 1,
+     "jednotka": "kg",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Olivový olej",
+     "mnozstvi": 1,
+     "jednotka": "lžíce",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "ryba",
+    "brambory"
+   ]
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "bez_vareni",
+   "nazev": "Cottage pomazánka s pečivem",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Cottage",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Celozrnné pečivo",
+     "mnozstvi": 8,
+     "jednotka": "ks",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Paprika",
+     "mnozstvi": 1,
+     "jednotka": "ks",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "cottage"
+   ]
+  },
+  {
+   "kategorie": "peceni",
+   "typ": "peceni",
+   "nazev": "Švestková buchta",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Buchta v troubě",
+    "autor": "Lucie Nováková",
+    "url": "https://www.buchtavtroube.cz/test-vzor/772/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Hladká mouka",
+     "mnozstvi": 300,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Švestky",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Cukr",
+     "mnozstvi": 100,
+     "jednotka": "g",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": []
+  },
+  {
+   "kategorie": "snidane",
+   "typ": "pracovni_snidane",
+   "nazev": "Tvarohová miska s jablkem",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Karolina Four",
+    "autor": "Karolína Fourová",
+    "url": "https://www.karolinafour.cz/test-vzor/807/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Tvaroh",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Jablka",
+     "mnozstvi": 3,
+     "jednotka": "ks",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": [
+    "tvaroh"
+   ]
+  },
+  {
+   "kategorie": "snidane",
+   "typ": "pracovni_snidane",
+   "nazev": "Overnight oats s hruškou",
+   "vlastni": false,
+   "zdroj": {
+    "web": "Recepty od Aničky",
+    "autor": "Anna Částková",
+    "url": "https://www.receptyodanicky.cz/test-vzor/366/"
+   },
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Ovesné vločky",
+     "mnozstvi": 250,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Mléko",
+     "mnozstvi": 0.5,
+     "jednotka": "l",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Hrušky",
+     "mnozstvi": 2,
+     "jednotka": "ks",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": []
+  },
+  {
+   "kategorie": "snidane",
+   "typ": "vikend_snidane",
+   "nazev": "Vajíčka na másle s pečivem",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "4 + 1 do krabičky",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Vejce",
+     "mnozstvi": 10,
+     "jednotka": "ks",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Máslo",
+     "mnozstvi": 30,
+     "jednotka": "g",
+     "poznamka": ""
+    },
+    {
+     "nazev": "Celozrnné pečivo",
+     "mnozstvi": 5,
+     "jednotka": "ks",
+     "poznamka": ""
+    }
+   ],
+   "postup": [
+    "Krok 1.",
+    "Krok 2."
+   ],
+   "predem": "Ano",
+   "skladovani": "Lednice 2 dny",
+   "ohrev": "Mikrovlnka",
+   "forma": "",
+   "vyziva": {
+    "kcal": 550,
+    "bilkoviny": 35,
+    "sacharidy": 50,
+    "tuky": 20
+   },
+   "stitky": []
+  }
+ ],
+ "nakup": [
+  {
+   "kategorie": "Maso, ryby, tofu a další bílkoviny",
+   "nazev": "Kuřecí prsa",
+   "mnozstvi": 600,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Pečivo a přílohy",
+   "nazev": "Tortilly",
+   "mnozstvi": 10,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Zelenina",
+   "nazev": "Paprika",
+   "mnozstvi": 3,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Dochucovadla a ostatní",
+   "nazev": "Olivový olej",
+   "mnozstvi": 4,
+   "jednotka": "lžíce",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Maso, ryby, tofu a další bílkoviny",
+   "nazev": "Hovězí kližka",
+   "mnozstvi": 500,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Pečivo a přílohy",
+   "nazev": "Rýže",
+   "mnozstvi": 300,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": "suchá hmotnost"
+  },
+  {
+   "kategorie": "Zelenina",
+   "nazev": "Mrkev",
+   "mnozstvi": 400,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Maso, ryby, tofu a další bílkoviny",
+   "nazev": "Tofu",
+   "mnozstvi": 400,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mouky, vločky a suché potraviny",
+   "nazev": "Červená čočka",
+   "mnozstvi": 250,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Zelenina",
+   "nazev": "Dýně hokkaido",
+   "mnozstvi": 600,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Pečivo a přílohy",
+   "nazev": "Těstoviny",
+   "mnozstvi": 400,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": "suchá hmotnost"
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Mozzarella",
+   "mnozstvi": 250,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Zelenina",
+   "nazev": "Rajčata",
+   "mnozstvi": 400,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Maso, ryby, tofu a další bílkoviny",
+   "nazev": "Losos",
+   "mnozstvi": 600,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Zelenina",
+   "nazev": "Brambory",
+   "mnozstvi": 1,
+   "jednotka": "kg",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Cottage",
+   "mnozstvi": 400,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Pečivo a přílohy",
+   "nazev": "Celozrnné pečivo",
+   "mnozstvi": 13,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mouky, vločky a suché potraviny",
+   "nazev": "Hladká mouka",
+   "mnozstvi": 300,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Ovoce",
+   "nazev": "Švestky",
+   "mnozstvi": 500,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Ořechy, semínka a sladké suroviny",
+   "nazev": "Cukr",
+   "mnozstvi": 100,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Tvaroh",
+   "mnozstvi": 500,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Ovoce",
+   "nazev": "Jablka",
+   "mnozstvi": 3,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mouky, vločky a suché potraviny",
+   "nazev": "Ovesné vločky",
+   "mnozstvi": 250,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Mléko",
+   "mnozstvi": 0.5,
+   "jednotka": "l",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Ovoce",
+   "nazev": "Hrušky",
+   "mnozstvi": 2,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Vejce",
+   "mnozstvi": 10,
+   "jednotka": "ks",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Máslo",
+   "mnozstvi": 30,
+   "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  }
+ ],
+ "kontrola": [
+  {
+   "bod": "Je přesně 5 hlavních jídel?",
+   "ok": true,
+   "poznamka": ""
+  }
+ ],
+ "upozorneni": []
+}

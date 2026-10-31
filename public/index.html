@@ -1580,6 +1580,41 @@
   .rohlik-odkazy button{border:none;background:none;padding:0;font:inherit;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .rohlik-info{font-size:12px;color:var(--muted);margin-top:6px;}
   .nakup-karta{text-align:left;}
+  .nakup-seznam li.nakup-kat{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;color:var(--grey-text);padding:12px 2px 4px;}
+  .nakup-mnozstvi{flex:0 0 auto;font-size:12px;color:var(--grey-text);}
+  .nakup-znacka{flex:0 0 auto;font-size:10px;font-weight:800;border-radius:8px;padding:2px 6px;}
+  .nakup-znacka.vime{color:#2e9d57;background:rgba(46,157,87,0.12);}
+  .nakup-znacka.nevime{color:var(--grey-text);background:rgba(44,62,80,0.07);}
+  .nakup-jiny{flex:0 0 auto;border:none;background:none;padding:0 2px;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
+  .rohlik-btn-krok{background:#e3f1ff;}
+  .rohlik-tlacitka{flex-wrap:wrap;}
+  .rohlik-tlacitka .rohlik-btn-krok{flex-basis:100%;}
+  .pruvodce-krok{font-size:12px;font-weight:800;color:var(--grey-text);margin-bottom:6px;}
+  .pruvodce-potreba{font-size:13px;color:var(--navy);margin-top:4px;}
+  .pruvodce-preskocit{margin-top:10px;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
+  .pruvodce-radek{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(44,62,80,0.1);}
+  .pruvodce-radek.preskoceno{opacity:0.5;}
+  .pruvodce-text{flex:1;min-width:0;}
+  .pruvodce-pol{font-size:14px;font-weight:700;color:var(--navy);overflow-wrap:anywhere;}
+  .pruvodce-vyrobek{font-size:12px;color:var(--grey-text);overflow-wrap:anywhere;}
+  .pruvodce-zmenit{flex:0 0 auto;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
+  .pruvodce-soucet{font-size:13px;font-weight:800;color:var(--navy);padding:10px 0 2px;border-top:1px solid rgba(44,62,80,0.15);}
+  .jid-tyden{font-size:12px;color:var(--grey-text);text-align:center;margin-top:2px;}
+  .jid-pozor{font-size:12px;color:#8a5a00;background:rgba(255,210,63,0.18);border-radius:10px;padding:8px 10px;margin-top:8px;}
+  .jid-sekce{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--orange);margin:14px 0 2px;}
+  .jid-recept{border-top:1px solid rgba(44,62,80,0.08);}
+  .jid-recept summary{display:flex;flex-direction:column;padding:8px 2px;cursor:pointer;list-style:none;}
+  .jid-recept summary::-webkit-details-marker{display:none;}
+  .jid-nazev{font-size:15px;font-weight:700;color:var(--navy);}
+  .jid-typ{font-size:11px;color:var(--grey-text);}
+  .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
+  .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
+  a.jid-zdroj{color:#1b6fb8;}
+  .jid-meta{font-size:12px;color:var(--grey-text);margin:3px 0;}
+  .jid-suroviny,.jid-postup{margin:6px 0;padding-left:18px;}
+  .jid-suroviny li,.jid-postup li{margin:2px 0;}
+  .jid-tisk{display:flex;gap:8px;margin-top:12px;}
+  .jid-tisk .sek-btn{flex:1;}
   .nakup-karta .nakup-seznam, .nakup-karta .nakup-pridat, .nakup-karta .rohlik-tlacitka{width:100%;align-self:stretch;box-sizing:border-box;}
   .nakup-karta .graph-title{text-align:center;}
   .nakup-oblibene{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
@@ -3576,6 +3611,16 @@
   <!-- Stránka: Nákup (vidí ji všichni, i děti — ať můžou připsat) -->
   <div class="slide" data-title="Nákup" id="nakupSlide">
     <div class="page">
+      <!-- Jídelníček na týden: v pátek ho vytvoří naplánovaná úloha, suroviny jdou na seznam -->
+      <div class="card nakup-karta jid-karta" id="jidKarta" hidden>
+        <div class="graph-title">🍽️ Jídelníček na týden</div>
+        <div class="jid-tyden" id="jidTyden"></div>
+        <div id="jidObsah"></div>
+        <div class="jid-tisk">
+          <button class="sek-btn" id="jidTiskRecepty" type="button">🖨️ Recepty</button>
+          <button class="sek-btn" id="jidTiskSeznam" type="button">🖨️ Nákupní seznam</button>
+        </div>
+      </div>
       <div class="card nakup-karta">
         <div class="graph-title">🛒 Nákupní seznam</div>
         <form class="nakup-pridat" id="nakupForm">
@@ -3590,6 +3635,7 @@
         <div class="rohlik-tlacitka" id="rohlikTlacitka" hidden>
           <button class="rohlik-btn" id="rohlikNaposledBtn" type="button">🥐 Jako naposled</button>
           <button class="rohlik-btn rohlik-btn-vyber" id="rohlikBtn" type="button">🖼️ S výběrem</button>
+          <button class="rohlik-btn rohlik-btn-krok" id="rohlikKrokBtn" type="button">🧭 Krok po kroku</button>
         </div>
       </div>
     </div>
@@ -4001,6 +4047,19 @@
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="rohlikZavrit" type="button">Zavřít</button>
       <button class="potvrz-ano rohlik-pridat" id="rohlikPridat" type="button">Přidat do košíku</button>
+    </div>
+  </div>
+</div>
+<div class="potvrz" id="pruvodceOkno" hidden>
+  <div class="potvrz-box rohlik-box">
+    <div class="potvrz-nadpis">🧭 Do košíku krok po kroku</div>
+    <div class="potvrz-text">Známé výrobky jdou rovnou, ostatní vybereš jeden po druhém. Objednávku dokončíš v appce Rohlík.</div>
+    <div class="rohlik-seznam" id="pruvodceObsah"></div>
+    <div class="potvrz-text" id="pruvodceStav"></div>
+    <button class="rohlik-odhlasit" id="pruvodceZavrit" type="button">zavřít</button>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="pruvodceZpet" type="button">‹ Zpět</button>
+      <button class="potvrz-ano rohlik-pridat" id="pruvodceDal" type="button">Další ›</button>
     </div>
   </div>
 </div>
@@ -11991,6 +12050,8 @@ function applySnapshot(snap) {
   pripData = snap.pripominky || null;
   rohlikData = snap.rohlik || null;
   nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
+  jidelnicekData = snap.jidelnicek || null;
+  bezpecne(renderJidelnicek);
   nakupOblibeneData = Array.isArray(snap.nakupOblibene) ? snap.nakupOblibene : [];
   bezpecne(renderOblibeneNastaveni);
   bezpecne(renderNakup);
@@ -12438,6 +12499,10 @@ function connectStream() {
     nakupOblibeneData = JSON.parse(e.data).nakupOblibene || [];
     bezpecne(renderOblibeneNastaveni);
     bezpecne(renderNakupOblibene);
+  });
+  es.addEventListener('jidelnicek', e => {
+    jidelnicekData = JSON.parse(e.data).jidelnicek || null;
+    bezpecne(renderJidelnicek);
   });
   es.addEventListener('nakup', e => {
     nakupData = JSON.parse(e.data).nakup || [];
@@ -13537,14 +13602,27 @@ function renderNakup(now = Date.now()) {
     nakupSeznamEl.appendChild(li);
     return;
   }
+  // Suroviny z jídelníčku pod ručně připsanými, po kategoriích
+  const kat = p => (p.zdroj === 'jidelnicek' ? 1 + Math.max(0, JID_NAKUP_KATEGORIE.indexOf(p.kategorie)) : 0);
+  nekoupene.sort((a, b) => kat(a) - kat(b) || a.t - b.t);
+  const znacky = !!(rohlikData && rohlikData.prihlaseno);
+  if (znacky && !rohlikZname) rohlikZnameNacti();
+  let posledniKat = null;
   for (const p of [...nekoupene, ...koupene]) {
+    if (!p.koupeno && p.zdroj === 'jidelnicek' && p.kategorie !== posledniKat) {
+      posledniKat = p.kategorie;
+      const h = document.createElement('li');
+      h.className = 'nakup-kat';
+      h.textContent = p.kategorie || 'Jídelníček';
+      nakupSeznamEl.appendChild(h);
+    }
     const li = document.createElement('li');
     li.className = p.koupeno ? 'koupeno' : '';
     if (p.koupeno && p === koupene[0] && nekoupene.length) li.classList.add('prvni-koupena');
     li.dataset.id = p.id;
     const text = document.createElement('span');
     text.className = 'nakup-text';
-    text.textContent = p.text;
+    text.textContent = p.zdroj === 'jidelnicek' && p.nazev ? p.nazev : p.text;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'nakup-odskrt';
@@ -13552,6 +13630,27 @@ function renderNakup(now = Date.now()) {
     btn.textContent = p.koupeno ? '✓' : '';
     btn.addEventListener('click', () => nakupOdskrtni(p, !p.koupeno));
     li.append(btn, text);
+    if (p.zdroj === 'jidelnicek' && p.mnozstvi) {
+      const m = document.createElement('span');
+      m.className = 'nakup-mnozstvi';
+      m.textContent = p.mnozstvi;
+      li.appendChild(m);
+    }
+    // Víme / nevíme, jaký výrobek z Rohlíku to je; u známých jde vybrat jiný
+    if (znacky && rohlikZname && !p.koupeno && !p.kosik) {
+      const v = rohlikZname[rohlikKlicPolozky(p)];
+      const z = document.createElement('span');
+      z.className = 'nakup-znacka ' + (v ? 'vime' : 'nevime');
+      z.textContent = v ? 'víme' : 'nevíme';
+      if (v) z.title = v.nazev;
+      const j = document.createElement('button');
+      j.type = 'button';
+      j.className = 'nakup-jiny';
+      j.textContent = v ? 'jiný' : 'vybrat';
+      j.setAttribute('aria-label', (v ? 'Vybrat jiný výrobek: ' : 'Vybrat výrobek: ') + (p.nazev || p.text));
+      j.addEventListener('click', () => pruvodceOtevri(p));
+      li.append(z, j);
+    }
     if (p.kosik && !p.koupeno) {
       const k = document.createElement('span');
       k.className = 'nakup-kosik';
@@ -13864,6 +13963,307 @@ if (rohlikOknoEl) {
     });
   }, 800);
 })();
+
+// ---------- Jídelníček na týden (stránka Nákup) ----------
+// Vytváří ho páteční naplánovaná úloha Claude Code (jidelnicek/UKOL.md); appka ho jen
+// ukazuje. Bez dnů v týdnu — jen VEČEŘE, PEČENÍ, SNÍDANĚ, jak chce prompt.
+let jidelnicekData = null;
+const jidKartaEl = document.getElementById('jidKarta');
+const JID_SEKCE = [['vecere', 'Večeře'], ['peceni', 'Pečení'], ['snidane', 'Snídaně']];
+const JID_TYPY = { pracovni: 'pracovní večeře', vikend: 'víkendové jídlo', bez_vareni: 'rychlá večeře bez vaření',
+  peceni: 'sladké pečení', pracovni_snidane: 'pracovní snídaně bez vajec', vikend_snidane: 'víkendová snídaně' };
+const JID_NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Mléčné výrobky a sýry', 'Zelenina', 'Ovoce',
+  'Pečivo a přílohy', 'Mouky, vločky a suché potraviny', 'Ořechy, semínka a sladké suroviny', 'Dochucovadla a ostatní'];
+
+function jidEl(tag, cls, rodic, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (rodic) rodic.appendChild(e);
+  return e;
+}
+const jidMnozstvi = s => [s.mnozstvi === null || s.mnozstvi === undefined ? '' : String(s.mnozstvi).replace('.', ','), s.jednotka].filter(Boolean).join(' ');
+const jidVyziva = v => v && v.kcal !== null && v.kcal !== undefined
+  ? `${Math.round(v.kcal)} kcal · B ${v.bilkoviny ?? '?'} g · S ${v.sacharidy ?? '?'} g · T ${v.tuky ?? '?'} g (orientačně, na porci)` : '';
+const jidZdroj = r => r.vlastni ? 'Vlastní recept' : [r.zdroj && r.zdroj.web, r.zdroj && r.zdroj.autor].filter(Boolean).join(' · ');
+
+// Detail receptu: tentýž obsah v appce i v tiskové verzi
+function jidReceptDetail(r, rodic) {
+  const meta = [r.porce && 'Porce: ' + r.porce, r.cas && 'Čas: ' + r.cas, r.forma && 'Forma: ' + r.forma].filter(Boolean).join(' · ');
+  if (meta) jidEl('div', 'jid-meta', rodic, meta);
+  if (r.upraveno) jidEl('div', 'jid-meta', rodic, r.upraveno);
+  const ul = jidEl('ul', 'jid-suroviny', rodic);
+  for (const s of r.suroviny) jidEl('li', '', ul, [jidMnozstvi(s), s.nazev].filter(Boolean).join(' ') + (s.poznamka ? ' (' + s.poznamka + ')' : ''));
+  const ol = jidEl('ol', 'jid-postup', rodic);
+  for (const k of r.postup) jidEl('li', '', ol, k);
+  for (const [n, t] of [['Předem', r.predem], ['Skladování', r.skladovani], ['Ohřev', r.ohrev]]) if (t) jidEl('div', 'jid-meta', rodic, n + ': ' + t);
+  const v = jidVyziva(r.vyziva);
+  if (v) jidEl('div', 'jid-meta', rodic, v);
+}
+
+function jidOdkaz(r, rodic) {
+  if (r.vlastni || !r.zdroj || !r.zdroj.url) { jidEl('span', 'jid-zdroj', rodic, jidZdroj(r)); return; }
+  const a = jidEl('a', 'jid-zdroj', rodic, jidZdroj(r) || r.zdroj.url);
+  a.href = r.zdroj.url; a.target = '_blank'; a.rel = 'noopener';
+}
+
+function renderJidelnicek() {
+  if (!jidKartaEl) return;
+  const j = jidelnicekData;
+  jidKartaEl.hidden = !j;
+  if (!j) return;
+  const obsah = document.getElementById('jidObsah');
+  obsah.textContent = '';
+  const d = new Date(j.tyden + 'T12:00:00');
+  document.getElementById('jidTyden').textContent = 'Týden od ' + d.getDate() + '. ' + (d.getMonth() + 1) + '.'
+    + (j.vytvoreno ? ' · vytvořeno ' + new Date(j.vytvoreno).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }) : '');
+  const pozor = [...(j.upozorneni || []), ...(j.kontrola || []).filter(k => !k.ok).map(k => 'Nesplněno: ' + k.bod + (k.poznamka ? ' — ' + k.poznamka : ''))];
+  if (pozor.length) {
+    const box = jidEl('div', 'jid-pozor', obsah);
+    for (const p of pozor) jidEl('div', '', box, '⚠️ ' + p);
+  }
+  for (const [kat, nazev] of JID_SEKCE) {
+    const rec = j.recepty.filter(r => r.kategorie === kat);
+    if (!rec.length) continue;
+    jidEl('div', 'jid-sekce', obsah, nazev);
+    for (const r of rec) {
+      const det = jidEl('details', 'jid-recept', obsah);
+      const sum = jidEl('summary', '', det);
+      jidEl('span', 'jid-nazev', sum, r.nazev);
+      jidEl('span', 'jid-typ', sum, JID_TYPY[r.typ] || '');
+      const telo = jidEl('div', 'jid-telo', det);
+      jidOdkaz(r, telo);
+      jidReceptDetail(r, telo);
+    }
+  }
+}
+
+// Tisková verze A4 v novém okně: recepty, nebo nákupní seznam s políčky
+function jidTisk(co) {
+  const j = jidelnicekData;
+  if (!j) return;
+  const w = window.open('', '_blank');
+  if (!w) return;
+  const doc = w.document;
+  doc.open();
+  doc.write('<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>' + (co === 'seznam' ? 'Nákupní seznam' : 'Rodinný jídelníček') + '</title>'
+    + '<style>@page{size:A4;margin:16mm}body{font:12pt/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111}'
+    + 'h1{font-size:20pt;margin:0 0 4mm}h2{font-size:15pt;border-bottom:2px solid #333;margin:8mm 0 3mm;text-transform:uppercase}'
+    + 'h3{font-size:13pt;margin:5mm 0 1mm}.jid-meta,.jid-zdroj{font-size:10pt;color:#444}ul,ol{margin:1mm 0 2mm 6mm;padding-left:4mm}'
+    + '.recept{break-inside:avoid}.pol{display:flex;gap:3mm;padding:1mm 0}.box{width:4mm;height:4mm;border:1.5px solid #333;flex:0 0 auto;margin-top:1mm}</style><body>');
+  // (bez uzavíracích značek head/body: testy do stránky vkládají skripty právě před ně)
+  doc.close();
+  const b = doc.body;
+  const el = (tag, cls, rodic, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; rodic.appendChild(e); return e; };
+  if (co === 'seznam') {
+    el('h1', '', b, 'Nákupní seznam — týden od ' + j.tyden.split('-').reverse().join('. '));
+    for (const k of JID_NAKUP_KATEGORIE) {
+      const pol = j.nakup.filter(n => n.kategorie === k);
+      if (!pol.length) continue;
+      el('h2', '', b, k);
+      for (const n of pol) {
+        const r = el('div', 'pol', b);
+        el('span', 'box', r);
+        el('span', '', r, n.nazev + ' — ' + (jidMnozstvi(n) || '') + (n.odhad ? ' (odhad)' : '') + (n.poznamka ? ', ' + n.poznamka : ''));
+      }
+    }
+  } else {
+    el('h1', '', b, 'Rodinný jídelníček — týden od ' + j.tyden.split('-').reverse().join('. '));
+    for (const [kat, nazev] of JID_SEKCE) {
+      el('h2', '', b, nazev);
+      for (const r of j.recepty.filter(x => x.kategorie === kat)) {
+        const box = el('div', 'recept', b);
+        el('h3', '', box, r.nazev);
+        el('div', 'jid-zdroj', box, jidZdroj(r) + (!r.vlastni && r.zdroj && r.zdroj.url ? ' — ' + r.zdroj.url : ''));
+        const tmp = document.createElement('div');
+        jidReceptDetail(r, tmp);
+        box.insertAdjacentHTML('beforeend', tmp.innerHTML);
+      }
+    }
+  }
+  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 300);
+}
+
+if (jidKartaEl) {
+  document.getElementById('jidTiskRecepty').addEventListener('click', () => jidTisk('recepty'));
+  document.getElementById('jidTiskSeznam').addEventListener('click', () => jidTisk('seznam'));
+}
+
+// ---------- Rohlík: průvodce krok po kroku ----------
+// Známé položky (zapamatovaný výrobek) jdou rovnou, neznámé se vybírají v okně jedna
+// po druhé, na konci je souhrn a Přidat do košíku. „jiný"/„vybrat" u položky na
+// seznamu otevře průvodce jen pro ni. Objednávka se odsud nikdy neodesílá.
+let rohlikZname = null;          // zapamatované výrobky z /api/rohlik/vyber (značky víme/nevíme)
+let rohlikZnameNacitam = false;
+const pruvodceOknoEl = document.getElementById('pruvodceOkno');
+const pruvodceObsahEl = document.getElementById('pruvodceObsah');
+const pruvodceStavEl = document.getElementById('pruvodceStav');
+let pruvodce = null;   // { radky: [{ polozka, vyber, vysledky, hledam, chyba, mnozstvi, preskocit, znamy }], kroky: [index], krok, souhrn }
+
+const rohlikKlicPolozky = p => rohlikKlicJs(p.nazev || p.text);
+
+async function rohlikZnameNacti(znovu = false) {
+  if (!(rohlikData && rohlikData.prihlaseno) || rohlikZnameNacitam || (rohlikZname && !znovu)) return;
+  rohlikZnameNacitam = true;
+  try { rohlikZname = (await rohlikGet('/api/rohlik/vyber')).vyber || {}; } catch { /* značky se ukážou příště */ }
+  rohlikZnameNacitam = false;
+  bezpecne(renderNakup);
+}
+
+async function pruvodceOtevri(jenPolozka = null) {
+  if (!pruvodceOknoEl) return;
+  if (!(rohlikData && rohlikData.prihlaseno)) { rohlikOtevri(); return; }   // přihlášení je ve starém okně
+  const polozky = jenPolozka ? [jenPolozka] : (nakupData || []).filter(p => !p.koupeno && !p.kosik).sort((a, b) => a.t - b.t);
+  pruvodce = { radky: polozky.map(p => ({ polozka: p, vyber: null, vysledky: null, hledam: false, chyba: '', mnozstvi: 1, preskocit: false, znamy: false })),
+    kroky: [], krok: 0, souhrn: false, jen: !!jenPolozka };
+  pruvodceStavEl.textContent = 'Načítám…';
+  pruvodceOknoEl.hidden = false;
+  renderPruvodce();
+  try { rohlikZname = (await rohlikGet('/api/rohlik/vyber')).vyber || {}; }
+  catch (err) { pruvodceStavEl.textContent = err.message; return; }
+  pruvodceStavEl.textContent = '';
+  pruvodce.radky.forEach((r, i) => {
+    r.vyber = rohlikZname[rohlikKlicPolozky(r.polozka)] || null;
+    r.znamy = !!r.vyber;
+    if (!r.vyber || pruvodce.jen) pruvodce.kroky.push(i);
+  });
+  pruvodce.souhrn = !pruvodce.kroky.length;
+  renderPruvodce();
+  pruvodceHledej();
+}
+
+async function pruvodceHledej() {
+  if (!pruvodce || pruvodce.souhrn) return;
+  const r = pruvodce.radky[pruvodce.kroky[pruvodce.krok]];
+  if (!r || r.vysledky || r.hledam) return;
+  r.hledam = true; r.chyba = ''; renderPruvodce();
+  try { r.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(r.polozka.nazev || r.polozka.text))).vyrobky || []; }
+  catch (err) { r.chyba = err.message; r.vysledky = []; }
+  r.hledam = false;
+  renderPruvodce();
+}
+
+function pruvodceJdi(krok) {
+  if (krok >= pruvodce.kroky.length) { pruvodce.souhrn = true; }
+  else { pruvodce.souhrn = false; pruvodce.krok = Math.max(0, krok); }
+  renderPruvodce();
+  pruvodceHledej();
+}
+
+const pruvodceCena = c => c.toFixed(2).replace('.', ',') + ' Kč';
+
+function pruvodcePocet(r, rodic) {
+  const mn = jidEl('span', 'rohlik-mnozstvi', rodic);
+  const minus = jidEl('button', '', mn, '−'); minus.type = 'button';
+  jidEl('span', 'rohlik-pocet', mn, r.mnozstvi + '×');
+  const plus = jidEl('button', '', mn, '+'); plus.type = 'button';
+  minus.addEventListener('click', () => { r.mnozstvi = Math.max(1, r.mnozstvi - 1); renderPruvodce(); });
+  plus.addEventListener('click', () => { r.mnozstvi = Math.min(20, r.mnozstvi + 1); renderPruvodce(); });
+}
+
+function renderPruvodce() {
+  if (!pruvodceObsahEl || !pruvodce) return;
+  pruvodceObsahEl.textContent = '';
+  const zpet = document.getElementById('pruvodceZpet'), dal = document.getElementById('pruvodceDal');
+  if (!pruvodce.radky.length) {
+    jidEl('div', 'rohlik-info', pruvodceObsahEl, 'Všechno z nákupního seznamu už je v košíku nebo vyškrtnuté.');
+    zpet.hidden = true; dal.hidden = true;
+    return;
+  }
+  if (!pruvodce.souhrn) {
+    const i = pruvodce.kroky[pruvodce.krok];
+    const r = pruvodce.radky[i];
+    if (!r) return;
+    jidEl('div', 'pruvodce-krok', pruvodceObsahEl, (pruvodce.krok + 1) + ' / ' + pruvodce.kroky.length);
+    const hlava = jidEl('div', 'rohlik-hlava', pruvodceObsahEl);
+    jidEl('span', 'rohlik-nazev', hlava, r.polozka.nazev || r.polozka.text);
+    pruvodcePocet(r, hlava);
+    if (r.polozka.mnozstvi) jidEl('div', 'pruvodce-potreba', pruvodceObsahEl, 'Potřeba: ' + r.polozka.mnozstvi);
+    const vyrobky = jidEl('div', 'rohlik-vyrobky', pruvodceObsahEl);
+    const ukazane = new Set();
+    if (r.vyber) { vyrobky.appendChild(rohlikVyrobekEl(r.vyber, true, null)); ukazane.add(String(r.vyber.productId)); }
+    for (const v of (r.vysledky || []).slice(0, 6)) {
+      if (ukazane.has(String(v.productId))) continue;
+      vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; renderPruvodce(); }));
+    }
+    const info = r.hledam ? 'Hledám…' : r.chyba ? r.chyba : (r.vysledky && !r.vysledky.length ? 'Nic se nenašlo — přeskoč, nebo dokup jinde.' : '');
+    if (info) jidEl('div', 'rohlik-info', pruvodceObsahEl, info);
+    const presk = jidEl('button', 'rohlik-preskocit pruvodce-preskocit', pruvodceObsahEl, 'Přeskočit — nekupovat na Rohlíku');
+    presk.type = 'button';
+    presk.addEventListener('click', () => { r.preskocit = true; pruvodceJdi(pruvodce.krok + 1); });
+    zpet.hidden = false; zpet.textContent = pruvodce.krok ? '‹ Zpět' : 'Zavřít';
+    dal.hidden = false; dal.textContent = pruvodce.krok + 1 < pruvodce.kroky.length ? 'Další ›' : 'Souhrn ›';
+    dal.disabled = !r.vyber;
+    return;
+  }
+  // Souhrn
+  jidEl('div', 'pruvodce-krok', pruvodceObsahEl, 'Souhrn');
+  let soucet = 0, bezCeny = 0;
+  pruvodce.radky.forEach((r, i) => {
+    const radek = jidEl('div', 'pruvodce-radek' + (r.preskocit || !r.vyber ? ' preskoceno' : ''), pruvodceObsahEl);
+    radek.dataset.id = r.polozka.id;
+    const t = jidEl('div', 'pruvodce-text', radek);
+    jidEl('div', 'pruvodce-pol', t, (r.znamy ? '🟢 ' : '') + (r.polozka.nazev || r.polozka.text) + (r.polozka.mnozstvi ? ' · ' + r.polozka.mnozstvi : ''));
+    jidEl('div', 'pruvodce-vyrobek', t, r.preskocit || !r.vyber ? 'přeskočeno' : r.vyber.nazev
+      + (typeof r.vyber.cena === 'number' ? ' · ' + pruvodceCena(r.vyber.cena * r.mnozstvi) : ''));
+    if (r.vyber && !r.preskocit) {
+      if (typeof r.vyber.cena === 'number') soucet += r.vyber.cena * r.mnozstvi; else bezCeny++;
+      pruvodcePocet(r, radek);
+    }
+    const zmen = jidEl('button', 'pruvodce-zmenit', radek, r.preskocit || !r.vyber ? 'vybrat' : 'jiný');
+    zmen.type = 'button';
+    zmen.addEventListener('click', () => {
+      r.preskocit = false;
+      let k = pruvodce.kroky.indexOf(i);
+      if (k < 0) { pruvodce.kroky.push(i); k = pruvodce.kroky.length - 1; }
+      r.vysledky = null;
+      pruvodceJdi(k);
+    });
+  });
+  const n = pruvodce.radky.filter(r => r.vyber && !r.preskocit).length;
+  if (n) jidEl('div', 'pruvodce-soucet', pruvodceObsahEl, 'Orientačně ' + pruvodceCena(soucet) + ' podle cen na Rohlíku' + (bezCeny ? ' (u ' + bezCeny + ' cena chybí)' : ''));
+  zpet.hidden = false; zpet.textContent = pruvodce.kroky.length ? '‹ Zpět' : 'Zavřít';
+  dal.hidden = false; dal.textContent = 'Přidat do košíku (' + n + ')'; dal.disabled = !n;
+}
+
+async function pruvodcePridej() {
+  const radky = pruvodce.radky.filter(r => r.vyber && !r.preskocit);
+  const polozky = radky.map(r => ({ nakupId: r.polozka.id, productId: r.vyber.productId, nazev: r.vyber.nazev,
+    obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, mnozstvi: r.mnozstvi }));
+  if (!polozky.length) return;
+  document.getElementById('pruvodceDal').disabled = true;
+  pruvodceStavEl.textContent = 'Přidávám…';
+  try {
+    const res = await fetch('/api/rohlik/kosik', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ polozky }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se přidat.');
+    if (Array.isArray(data.nakup)) nakupData = data.nakup;
+    pruvodce.radky = pruvodce.radky.filter(r => !(r.vyber && !r.preskocit));
+    pruvodce.kroky = []; pruvodce.souhrn = true;
+    renderPruvodce();
+    pruvodceStavEl.textContent = 'Přidáno ' + data.pridano + ' položek. Objednávku dokonči v appce Rohlík.';
+    rohlikZnameNacti(true);
+    renderNakup();
+  } catch (err) {
+    pruvodceStavEl.textContent = err.message;
+    renderPruvodce();
+  }
+}
+
+if (pruvodceOknoEl) {
+  document.getElementById('rohlikKrokBtn').addEventListener('click', () => pruvodceOtevri());
+  document.getElementById('pruvodceZpet').addEventListener('click', () => {
+    if (!pruvodce || (!pruvodce.souhrn && pruvodce.krok === 0) || (pruvodce.souhrn && !pruvodce.kroky.length)) { pruvodceOknoEl.hidden = true; return; }
+    pruvodceJdi(pruvodce.souhrn ? pruvodce.kroky.length - 1 : pruvodce.krok - 1);
+  });
+  document.getElementById('pruvodceDal').addEventListener('click', () => {
+    if (!pruvodce) return;
+    if (pruvodce.souhrn) pruvodcePridej(); else pruvodceJdi(pruvodce.krok + 1);
+  });
+  document.getElementById('pruvodceZavrit').addEventListener('click', () => { pruvodceOknoEl.hidden = true; });
+}
 
 // ---------- Nákup: pravidelně kupované ----------
 // Klepnutím do pole „Co koupit…" se pod ním rozbalí, co se kupuje pravidelně;

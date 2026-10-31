@@ -1,0 +1,159 @@
+// Jídelníček na stránce Nákup: karta s recepty, značky víme/nevíme u seznamu,
+// průvodce košíkem krok po kroku a tisková verze.
+const fs = require('fs');
+const path = require('path');
+const SP = process.env.TEST_OUT || require('os').tmpdir();
+let v = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+v = v.replace('</head>', '<style>.slide{display:none!important}.slide[data-title="Nákup"]{display:block!important}</style></head>');
+const VZOR = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'jidelnicek-vzor.json'), 'utf8'));
+VZOR.vytvoreno = Date.UTC(2026, 9, 30, 5, 0);
+VZOR.kontrola.push({ bod: 'Obsahuje veganské jídlo 25–30 g bílkovin na porci?', ok: false, poznamka: 'má 24 g' });
+
+const DRIVER = `
+const R = [];
+const check = (jmeno, got, want) => {
+  const ok = String(got) === String(want);
+  R.push((ok ? '  OK   ' : 'CHYBA  ') + jmeno + ' → ' + got + (ok ? '' : '   (čekáno ' + want + ')'));
+};
+const VZOR = ${JSON.stringify(VZOR)};
+let dotazy = [];
+let odpoved = () => ({ ok: true });
+window.fetch = async (url, init) => {
+  const telo = init && init.body ? JSON.parse(init.body) : null;
+  dotazy.push({ url, telo });
+  const d = odpoved(url, telo);
+  return { ok: !d.error, status: d.error ? 400 : 200, json: async () => d };
+};
+const pockej = ms => new Promise(r => setTimeout(r, ms));
+const vidi = el => !!el && el.getClientRects().length > 0;
+setTimeout(async () => {
+ try {
+  R.push('1) Karta jídelníčku');
+  const karta = document.getElementById('jidKarta');
+  jidelnicekData = null; renderJidelnicek();
+  check('bez jídelníčku skrytá', karta.hidden, true);
+  jidelnicekData = VZOR; renderJidelnicek();
+  check('s jídelníčkem vidět', vidi(karta), true);
+  check('sekce bez dnů v týdnu', [...karta.querySelectorAll('.jid-sekce')].map(e => e.textContent).join(','), 'Večeře,Pečení,Snídaně');
+  check('deset receptů', karta.querySelectorAll('details.jid-recept').length, 10);
+  check('nesplněný bod kontroly je vidět', karta.querySelector('.jid-pozor').textContent.includes('Nesplněno: Obsahuje veganské jídlo'), true);
+  const prvni = karta.querySelector('details.jid-recept');
+  check('  zavřený na začátku', prvni.open, false);
+  prvni.open = true;
+  const a = prvni.querySelector('a.jid-zdroj');
+  check('odkaz na recept do nové karty', a.href === VZOR.recepty[0].zdroj.url && a.target === '_blank', true);
+  check('  suroviny s množstvím', prvni.querySelector('.jid-suroviny li').textContent, '600 g Kuřecí prsa');
+  check('  výživa orientačně', [...prvni.querySelectorAll('.jid-meta')].some(e => /orientačně/.test(e.textContent)), true);
+  const vlastni = [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Cottage pomazánka'));
+  check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
+
+  R.push('\\n2) Seznam: kategorie, množství, víme/nevíme');
+  nakupData = [
+    { id: 'n_ruc00001', text: 'Toaletní papír', t: 1 },
+    { id: 'n_jid00001', text: 'Tvaroh 500 g', t: 2, nazev: 'Tvaroh', mnozstvi: '500 g', kategorie: 'Mléčné výrobky a sýry', zdroj: 'jidelnicek' },
+    { id: 'n_jid00002', text: 'Kuřecí prsa 600 g', t: 3, nazev: 'Kuřecí prsa', mnozstvi: '600 g', kategorie: 'Maso, ryby, tofu a další bílkoviny', zdroj: 'jidelnicek' },
+    { id: 'n_jid00003', text: 'Mozzarella 250 g', t: 4, nazev: 'Mozzarella', mnozstvi: '250 g', kategorie: 'Mléčné výrobky a sýry', zdroj: 'jidelnicek' }
+  ];
+  rohlikData = { enabled: true, prihlaseno: true };
+  rohlikZname = null;
+  odpoved = (url, telo) => {
+    if (url === '/api/rohlik/vyber') return { ok: true, vyber: { mozzarella: { productId: 11, nazev: 'Galbani Mozzarella 125 g', cena: 29.9 } } };
+    if (url.startsWith('/api/rohlik/hledat')) {
+      const q = decodeURIComponent(url.split('q=')[1]);
+      return { ok: true, vyrobky: [{ productId: q.length * 100 + 1, nazev: q + ' A', cena: 10 }, { productId: q.length * 100 + 2, nazev: q + ' B', cena: 20 }] };
+    }
+    if (url === '/api/rohlik/kosik') return { ok: true, pridano: telo.polozky.length, nakup: nakupData.map(p => telo.polozky.some(x => x.nakupId === p.id) ? { ...p, kosik: 1 } : p) };
+    return { ok: true };
+  };
+  renderNakup();
+  await pockej(60);
+  const radky = [...document.querySelectorAll('#nakupSeznam li')];
+  check('ruční nahoře, pak kategorie v pořadí promptu', radky.map(li => li.classList.contains('nakup-kat') ? '[' + li.textContent + ']' : li.querySelector('.nakup-text').textContent).join(' | '),
+    'Toaletní papír | [Maso, ryby, tofu a další bílkoviny] | Kuřecí prsa | [Mléčné výrobky a sýry] | Tvaroh | Mozzarella');
+  const li = id => document.querySelector('#nakupSeznam li[data-id="' + id + '"]');
+  check('množství zvlášť', li('n_jid00001').querySelector('.nakup-mnozstvi').textContent, '500 g');
+  check('značka víme u zapamatovaného', li('n_jid00003').querySelector('.nakup-znacka').textContent + ' ' + li('n_jid00003').querySelector('.nakup-jiny').textContent, 'víme jiný');
+  check('  nevíme u ostatních', li('n_jid00001').querySelector('.nakup-znacka').textContent + ' ' + li('n_jid00001').querySelector('.nakup-jiny').textContent, 'nevíme vybrat');
+  check('  i u ručních', li('n_ruc00001').querySelector('.nakup-znacka').textContent, 'nevíme');
+  check('  vybraný výrobek v bublině', li('n_jid00003').querySelector('.nakup-znacka').title, 'Galbani Mozzarella 125 g');
+
+  R.push('\\n3) Průvodce krok po kroku');
+  const okno = document.getElementById('pruvodceOkno');
+  const obsah = document.getElementById('pruvodceObsah');
+  const dal = document.getElementById('pruvodceDal'), zpet = document.getElementById('pruvodceZpet');
+  dotazy = [];
+  document.getElementById('rohlikKrokBtn').click();
+  await pockej(80);
+  check('okno se otevře', vidi(okno), true);
+  check('kroky jen pro neznámé (3 ze 4)', obsah.querySelector('.pruvodce-krok').textContent, '1 / 3');
+  check('  první je toaletní papír', obsah.querySelector('.rohlik-nazev').textContent, 'Toaletní papír');
+  check('  hledá se podle názvu bez množství', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).map(d => decodeURIComponent(d.url.split('q=')[1])).join(), 'Toaletní papír');
+  check('Další až po výběru', dal.disabled, true);
+  obsah.querySelectorAll('.rohlik-vyrobek')[1].click();
+  check('  po klepnutí na výrobek jde dál', dal.disabled + ' ' + obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Toaletní papír B'), 'false true');
+  obsah.querySelectorAll('.rohlik-mnozstvi button')[1].click();
+  check('počet +', obsah.querySelector('.rohlik-pocet').textContent, '2×');
+  dal.click(); await pockej(60);
+  check('druhý krok: tvaroh s potřebou', obsah.querySelector('.pruvodce-krok').textContent + ' ' + obsah.querySelector('.rohlik-nazev').textContent + ' · ' + obsah.querySelector('.pruvodce-potreba').textContent, '2 / 3 Tvaroh · Potřeba: 500 g');
+  obsah.querySelector('.pruvodce-preskocit').click(); await pockej(60);
+  check('přeskočit → další krok', obsah.querySelector('.pruvodce-krok').textContent + ' ' + obsah.querySelector('.rohlik-nazev').textContent, '3 / 3 Kuřecí prsa');
+  zpet.click(); await pockej(30);
+  check('zpět na tvaroh', obsah.querySelector('.rohlik-nazev').textContent, 'Tvaroh');
+  zpet.click(); await pockej(30);
+  check('  a na první s vybraným výrobkem', obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Toaletní papír B') + ' ' + obsah.querySelector('.rohlik-pocet').textContent, 'true 2×');
+  dal.click(); await pockej(30);
+  check('  na přeskočeném tvarohu Další nejde', dal.disabled, true);
+  obsah.querySelector('.pruvodce-preskocit').click(); await pockej(30);
+  obsah.querySelectorAll('.rohlik-vyrobek')[0].click();
+  check('poslední krok vede na souhrn', dal.textContent, 'Souhrn ›');
+  dal.click(); await pockej(30);
+  check('souhrn: všechny položky', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_ruc00001,n_jid00001,n_jid00002,n_jid00003');
+  check('  známá s puntíkem a výrobkem', obsah.querySelector('.pruvodce-radek[data-id="n_jid00003"]').textContent.includes('🟢 Mozzarella · 250 g') && obsah.textContent.includes('Galbani Mozzarella 125 g'), true);
+  check('  přeskočená', obsah.querySelector('.pruvodce-radek[data-id="n_jid00001"]').classList.contains('preskoceno'), true);
+  check('  cena z Rohlíku sečtená', obsah.querySelector('.pruvodce-soucet').textContent, 'Orientačně 79,90 Kč podle cen na Rohlíku');
+  check('  tlačítko počítá', dal.textContent, 'Přidat do košíku (3)');
+  dotazy = [];
+  dal.click(); await pockej(60);
+  const kos = dotazy.find(d => d.url === '/api/rohlik/kosik');
+  check('do košíku správné výrobky a počty', JSON.stringify(kos.telo.polozky.map(p => [p.nakupId, p.productId, p.mnozstvi])),
+    JSON.stringify([['n_ruc00001', 1402, 2], ['n_jid00002', 1101, 1], ['n_jid00003', 11, 1]]));
+  check('  hláška, objednávka se neodesílá', document.getElementById('pruvodceStav').textContent, 'Přidáno 3 položek. Objednávku dokonči v appce Rohlík.');
+  check('  zbude jen přeskočený tvaroh', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_jid00001');
+  document.getElementById('pruvodceZavrit').click();
+  check('zavřít', okno.hidden, true);
+
+  R.push('\\n4) „jiný" u známé položky');
+  nakupData = nakupData.map(p => ({ ...p, kosik: undefined }));
+  renderNakup(); await pockej(30);
+  li('n_jid00003').querySelector('.nakup-jiny').click();
+  await pockej(80);
+  check('průvodce jen pro mozzarellu', obsah.querySelector('.pruvodce-krok').textContent + ' ' + obsah.querySelector('.rohlik-nazev').textContent, '1 / 1 Mozzarella');
+  check('  zapamatovaný předvybraný, nabídka dalších', obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Galbani') + ' ' + obsah.querySelectorAll('.rohlik-vyrobek').length, 'true 3');
+  obsah.querySelectorAll('.rohlik-vyrobek')[2].click();
+  dal.click(); await pockej(30);
+  check('  souhrn jen s ní', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join() + ' ' + dal.textContent, 'n_jid00003 Přidat do košíku (1)');
+  document.getElementById('pruvodceZavrit').click();
+
+  R.push('\\n5) Tisk');
+  let tisk = null;
+  window.open = () => { const d = document.implementation.createHTMLDocument('t'); tisk = { document: { open() {}, close() {}, write(h) { d.documentElement.innerHTML = h.replace(/^<!doctype html>/i, ''); }, get body() { return d.body; }, createElement: t => d.createElement(t) }, focus() {}, print() {} }; return tisk; };
+  document.getElementById('jidTiskSeznam').click();
+  const b = tisk.document.body;
+  check('seznam: políčko u každé položky', b.querySelectorAll('.box').length, VZOR.nakup.length);
+  check('  kategorie jako nadpisy', b.querySelectorAll('h2')[0].textContent, 'Maso, ryby, tofu a další bílkoviny');
+  document.getElementById('jidTiskRecepty').click();
+  const b2 = tisk.document.body;
+  check('recepty: tři sekce, deset receptů', b2.querySelectorAll('h2').length + ' ' + b2.querySelectorAll('h3').length, '3 10');
+  check('  s odkazem na web', b2.textContent.includes(VZOR.recepty[0].zdroj.url), true);
+ } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
+  const chyb = R.filter(r => r.startsWith('CHYBA')).length;
+  const pre = document.createElement('pre');
+  pre.id = 'VYSLEDEK';
+  pre.textContent = R.join('\\n') + '\\n\\n' + (chyb ? 'SELHALO — ' + chyb + ' chyb' : 'VŠE PROŠLO — ' + R.length + ' ok, 0 chyb (jídelníček)');
+  document.body.appendChild(pre);
+}, 700);
+`;
+v = v.replace('</body>', '<script>' + DRIVER + '<\/script></body>');
+const out = path.join(SP, 'jidelnicek.html');
+fs.writeFileSync(out, v);
+console.log(out);

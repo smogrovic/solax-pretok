@@ -168,7 +168,7 @@ setTimeout(async () => {
   rohlikData = { enabled: true };
   renderNakup();
   check('s Rohlíkem a nekoupenými jsou', vidi(rtl), true);
-  check('  dvě: jako naposled a s výběrem', [...rtl.querySelectorAll('button')].map(b => b.textContent).join(' | '), '🥐 Jako naposled | 🖼️ S výběrem');
+  check('  tři: jako naposled, s výběrem, krok po kroku', [...rtl.querySelectorAll('button')].map(b => b.textContent).join(' | '), '🥐 Jako naposled | 🖼️ S výběrem | 🧭 Krok po kroku');
   check('  vedle sebe', rtl.querySelectorAll('button')[0].getBoundingClientRect().top === rbtn.getBoundingClientRect().top, true);
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
   renderNakup();

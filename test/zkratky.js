@@ -5,7 +5,7 @@ const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('zkratky');
 
 const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
-const CODE = between('// ---------- Pokyny ze zkratek iPhonu ----------', '// ---------- Trvalé úložiště');
+const CODE = between('// ---------- Pokyny ze zkratek iPhonu ----------', '// ---------- Jídelníček na týden');
 
 function build(o = {}) {
   const routy = {}, zpravy = [], logy = [], akce = [];

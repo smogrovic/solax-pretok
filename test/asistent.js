@@ -13,7 +13,7 @@ const MIN = 60000;
 // Ke scénám patří i skutečné „sauna běží" (kamna, nebo světlo a ≥ 60 °C)
 const CODE = between('const SAUNA_BEZI_C', 'function saunaRelaceSleduj') + '\n'
   + between('// ---------- Tlačítka na Asistentovi (scény) a „nejsme doma" ----------',
-            '// ---------- Trvalé úložiště');
+            '// ---------- Jídelníček na týden');
 
 function build({ poZapadu = false, nuki = true, tahoma = true, klimy = [], svetla = [],
                  zamekSelze = false, huum = true, dvere = true,

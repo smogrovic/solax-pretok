@@ -298,13 +298,17 @@ nadpis('N) Nákupní seznam');
   h.zavolej('/api/nakup', {}, { text: smazana.text, id: smazana.id, t: smazana.t });
   check('  dvojí Zpět nezdvojí', h.state.nakup.filter(x => x.id === smazana.id).length, 1);
   while (h.state.nakup.length < h.api.NAKUP_MAX) h.api.nakupPridej({ text: 'p' + h.state.nakup.length });
-  check('nejvýš 50', h.zavolej('/api/nakup', {}, { text: 'navíc' }).status, 400);
+  check('nejvýš 120 (jídelníček na týden)', h.api.NAKUP_MAX + ' ' + h.zavolej('/api/nakup', {}, { text: 'navíc' }).status, '120 400');
 
   const h2 = build();
   h2.api.nakupObnov({ nakup: [{ id: 'n_aaaa1111', text: 'chleba', t: 5 }, { id: 'zly', text: 'x', t: 1 }, { id: 'n_bbbb2222', text: '', t: 2 }] });
   check('obnova do prázdného, jen platné', h2.state.nakup.map(x => x.text).join(','), 'chleba');
   h2.api.nakupObnov({ nakup: [{ id: 'n_cccc3333', text: 'máslo', t: 9 }] });
   check('  do neprázdného nic', h2.state.nakup.length, 1);
+  const h4 = build();
+  h4.api.nakupObnov({ nakup: [{ id: 'n_dddd4444', text: 'Mozzarella 250 g', t: 3, zdroj: 'jidelnicek', nazev: 'Mozzarella', mnozstvi: '250 g', kategorie: 'Mléčné výrobky a sýry' },
+    { id: 'n_eeee5555', text: 'chleba', t: 4, nazev: 'podvrh' }] });
+  check('  položka z jídelníčku si drží název a množství', JSON.stringify(h4.state.nakup.map(x => [x.nazev || null, x.mnozstvi || null])), '[["Mozzarella","250 g"],[null,null]]');
 }
 
 nadpis('N2) Koupené 24 h přeškrtnuté');
