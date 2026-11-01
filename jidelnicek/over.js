@@ -9,7 +9,7 @@ const SKLADBA = [['vecere', 'pracovni', 4], ['vecere', 'vikend', 1], ['vecere', 
   ['peceni', 'peceni', 1], ['snidane', 'pracovni_snidane', 2], ['snidane', 'vikend_snidane', 1]];
 const PREVOD = { kg: ['g', 1000], l: ['ml', 1000], dl: ['ml', 100] };
 // Doma je vždycky — v receptu ano, na nákupní seznam ne
-const DOMA = ['sul', 'pepr'];
+const DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
 
 const klic = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const jednotka = (m, j) => { const p = PREVOD[klic(j)]; return p ? [m * p[1], p[0]] : [m, klic(j)]; };

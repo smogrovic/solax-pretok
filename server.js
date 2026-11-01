@@ -11557,7 +11557,7 @@ const JIDELNICEK_NAKUP_MAX = 120;
 const JIDELNICEK_HISTORIE_TYDNU = 6;
 const JIDELNICEK_HOTOVO_SKRYT_MS = 12 * 3600000;   // odškrtnuté jídlo zmizí z appky po 12 h
 // Doma je vždycky — na nákupní seznam nepatří
-const JIDELNICEK_DOMA = ['sul', 'pepr'];
+const JIDELNICEK_DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
 const jidKlic = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 if (!Array.isArray(state.jidelnicekHistorie)) state.jidelnicekHistorie = [];
