@@ -101,6 +101,17 @@ nadpis('Výběr: ✕ smazat, aktivovat náhradní, přidat na seznam');
   h.state.nakup = [{ id: 'n_ruc00031', text: 'Kafe', t: 1 }];
   h.volej('POST /api/jidelnicek/potvrdit', {});
   check('  po smazání seznamu vrátí suroviny, ruční zůstane', h.state.nakup.length + ' ' + h.state.nakup.some(x => x.text === 'Kafe'), '26 true');
+  // Uvařené jídlo (fajfka) se při opakovaném přidání vynechá
+  const koIdx = j().recepty.findIndex(x => x.nazev === 'Švestková buchta');
+  h.volej('POST /api/jidelnicek/hotovo', { index: koIdx, hotovo: true });
+  h.state.nakup = [];
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('uvařená buchta: švestky ani cukr se nepřidají', !!nak('Švestky') + ' ' + !!nak('Cukr') + ' ' + !!nak('Kuřecí prsa'), 'false false true');
+  h.volej('POST /api/jidelnicek/hotovo', { index: koIdx, hotovo: false });
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('  po zrušení fajfky zase ano', !!nak('Švestky'), true);
+  j().recepty.forEach((x, i) => h.volej('POST /api/jidelnicek/hotovo', { index: i, hotovo: true }));
+  check('všechno uvařené: 400', h.volej('POST /api/jidelnicek/potvrdit', {}).out.error, 'Všechna jídla jsou uvařená — není co přidat.');
   const ru = build();
   const rt = kopie(); rt.nakupHotovo = true; rt.nakup = [];
   ru.volej('POST /api/jidelnicek/import', rt);
