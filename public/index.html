@@ -14149,7 +14149,7 @@ function renderJidelnicek() {
       odskrt.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); jidHotovo(index, !r.hotovo); });
       const hlava = jidEl('span', 'jid-hlava', sum);
       jidEl('span', 'jid-nazev', hlava, r.nazev);
-      jidEl('span', 'jid-typ', hlava, JID_TYPY[r.typ] || '');
+      jidEl('span', 'jid-typ', hlava, (JID_TYPY[r.typ] || '') + (r.zMinula ? ' · z minulého týdne' : ''));
       const v = r.vyziva || {};
       if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
       const telo = jidEl('div', 'jid-telo', det);

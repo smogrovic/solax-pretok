@@ -11628,12 +11628,12 @@ function jidelnicekSurovina(s) {
 
 // Ověří plán z úlohy → { plan } nebo { chyba }
 // `bezOdkazu`: ruční vložení — převzatý recept, jehož odkaz se nepodařilo ověřit, smí být bez URL
-function jidelnicekOver(b, { bezOdkazu = false, now = Date.now() } = {}) {
+function jidelnicekOver(b, { bezOdkazu = false, now = Date.now(), maxReceptu = JIDELNICEK_RECEPTU_MAX } = {}) {
   if (!b || typeof b !== 'object') return { chyba: 'Chybí jídelníček.' };
   const nakupHotovo = b.nakupHotovo === true;
   const tyden = typeof b.tyden === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.tyden) ? b.tyden : null;
   if (!tyden) return { chyba: 'Chybí tyden (YYYY-MM-DD, pondělí).' };
-  if (!Array.isArray(b.recepty) || !b.recepty.length || b.recepty.length > JIDELNICEK_RECEPTU_MAX) return { chyba: 'Recepty: 1 až ' + JIDELNICEK_RECEPTU_MAX + '.' };
+  if (!Array.isArray(b.recepty) || !b.recepty.length || b.recepty.length > maxReceptu) return { chyba: 'Recepty: 1 až ' + maxReceptu + '.' };
   const recepty = [];
   for (const [i, r] of b.recepty.entries()) {
     const nazev = jidText(r && r.nazev, 120);
@@ -11660,6 +11660,7 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now() } = {}) {
       stitky: (Array.isArray(r.stitky) ? r.stitky : []).filter(s => JIDELNICEK_STITKY.includes(s)),
       ...(Number.isFinite(r.hotovo) && r.hotovo > 0 && r.hotovo <= now ? { hotovo: r.hotovo } : {}),
       ...(jidelnicekFotoUrl(r.foto) ? { foto: jidelnicekFotoUrl(r.foto) } : {}),
+      ...(typeof r.zMinula === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.zMinula) ? { zMinula: r.zMinula } : {}),
       ...(Number.isFinite(r.fotoPokus) && r.fotoPokus > 0 && r.fotoPokus <= now ? { fotoPokus: r.fotoPokus } : {})
     });
   }
@@ -11702,8 +11703,21 @@ function jidelnicekNaSeznam(plan, now = Date.now()) {
   broadcast('nakup', { nakup: state.nakup });
 }
 
+// Neuvařená jídla z minulého jídelníčku zůstávají (nakoupeno na ně už je) a nová
+// přibudou před ně. Starší než 14 dní se dál nevláčí. Stejný týden = oprava, přepíše vše.
+const JIDELNICEK_PREVOD_DNI = 14;
+function jidelnicekZbyva(plan) {
+  const st = state.jidelnicek;
+  if (!st || st.tyden === plan.tyden) return [];
+  const den = t => Date.parse(t + 'T12:00:00Z') / 86400000;
+  return st.recepty.filter(r => !r.hotovo)
+    .map(r => ({ ...r, zMinula: r.zMinula || st.tyden }))
+    .filter(r => den(plan.tyden) - den(r.zMinula) <= JIDELNICEK_PREVOD_DNI);
+}
+
 function jidelnicekUloz(plan, now = Date.now()) {
-  state.jidelnicek = { ...plan, vytvoreno: now };
+  const zbyva = jidelnicekZbyva(plan);
+  state.jidelnicek = { ...plan, recepty: [...plan.recepty, ...zbyva], vytvoreno: now };
   const zaznam = { tyden: plan.tyden, nazvy: plan.recepty.map(r => r.nazev), ryba: plan.recepty.some(r => r.stitky.includes('ryba')) };
   state.jidelnicekHistorie = [zaznam, ...state.jidelnicekHistorie.filter(h => h.tyden !== plan.tyden)]
     .sort((a, c) => (a.tyden < c.tyden ? 1 : -1)).slice(0, JIDELNICEK_HISTORIE_TYDNU);
@@ -11745,14 +11759,16 @@ app.get('/api/jidelnicek/historie', (req, res) => {
   // Suroviny, ke kterým appka zná výrobek na Rohlíku — úloha je má pojmenovat stejně
   const zname = [...new Set([...Object.entries(state.rohlikVyber || {}).map(([k, v]) => (v && v.text) || k),
     ...Object.values(state.rohlikNauceno || {}).map(v => v && v.surovina).filter(Boolean)])].sort((a, c) => a.localeCompare(c, 'cs'));
-  res.json({ ok: true, weby: JIDELNICEK_WEBY, doma: ['sůl', 'pepř'], zname, historie: state.jidelnicekHistorie });
+  // Neuvařená jídla, která v jídelníčku zůstanou i po novém generování — neopakovat, nenakupovat
+  const zbyva = state.jidelnicek ? state.jidelnicek.recepty.filter(r => !r.hotovo).map(r => r.nazev) : [];
+  res.json({ ok: true, weby: JIDELNICEK_WEBY, doma: ['sůl', 'pepř'], zname, zbyva, historie: state.jidelnicekHistorie });
 });
 
 // Záloha po nasazení — jen když appka ještě nic nemá
 app.post('/api/jidelnicek/restore', (req, res) => {
   const b = req.body || {};
   if (!state.jidelnicek && b.jidelnicek) {
-    const o = jidelnicekOver(b.jidelnicek, { bezOdkazu: true });
+    const o = jidelnicekOver(b.jidelnicek, { bezOdkazu: true, maxReceptu: 2 * JIDELNICEK_RECEPTU_MAX });
     if (!o.chyba) state.jidelnicek = { ...o.plan, vytvoreno: Number.isFinite(b.jidelnicek.vytvoreno) ? b.jidelnicek.vytvoreno : 0 };
   }
   if (!state.jidelnicekHistorie.length && Array.isArray(b.historie)) {

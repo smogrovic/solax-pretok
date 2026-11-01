@@ -11,7 +11,9 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 
 1. **Historie:** `curl -s https://solax-pretok.onrender.com/api/jidelnicek/historie > /tmp/historie.json`.
    Obsahuje názvy jídel z posledních týdnů a příznak `ryba`, dále `zname` (suroviny, ke kterým
-   appka zná konkrétní výrobek na Rohlíku) a `doma` (sůl, pepř). Jídla se nemají opakovat a ryba
+   appka zná konkrétní výrobek na Rohlíku) a `doma` (sůl, pepř).
+   `zbyva` jsou neuvařená jídla, která v jídelníčku zůstávají (nakoupeno na ně je) — nová jídla
+   je nesmí opakovat a do `nakup` za ně nic nepatří. Nový jídelníček má i tak plnou skladbu. Jídla se nemají opakovat a ryba
    má být jednou za 14 dní: když byla minulý týden, teď žádná, jinak právě jedna.
    Pokud appka neodpoví (Render se probouzí), zkus to znovu za minutu, nejvýš 3×.
 2. **Recepty:** hledej (WebSearch) a hlavně **otevři** (WebFetch) konkrétní recepty jen na:

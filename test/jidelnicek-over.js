@@ -4,7 +4,7 @@ const { check, nadpis, konec } = suite('jídelníček — kontrola');
 const { zkontroluj } = require('../jidelnicek/over');
 const VZOR = require('./data/jidelnicek-vzor.json');
 const kopie = () => JSON.parse(JSON.stringify(VZOR));
-const chyby = (p, h) => zkontroluj(p, h).chyby;
+const chyby = (p, h, z) => zkontroluj(p, h, z).chyby;
 const najdi = (p, nazev) => p.recepty.find(r => r.nazev === nazev);
 
 nadpis('Vzor projde');
@@ -46,6 +46,8 @@ check('minulý týden ryba → teď ne', chyby(kopie(), [{ tyden: '2026-10-26', 
 }
 check('opakování z historie je upozornění', zkontroluj(kopie(), [{ tyden: '2026-10-19', ryba: false, nazvy: ['Švestková buchta'] }]).varovani
   .includes('Švestková buchta: bylo v některém z minulých týdnů.'), true);
+
+check('jídlo, které zůstává z minula, se nesmí opakovat', chyby(kopie(), [], ['Švestková buchta']).includes('Švestková buchta: v jídelníčku už zůstává z minula — vyber jiné.'), true);
 
 nadpis('Zdroje');
 {

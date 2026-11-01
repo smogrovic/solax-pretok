@@ -48,6 +48,9 @@ setTimeout(async () => {
   check('výživa pod názvem malým písmem', prvni.querySelector('.jid-makra').textContent, '550 kcal · B: 35 g · S: 50 g · T: 20 g');
   check('  výživa orientačně', [...prvni.querySelectorAll('.jid-meta')].some(e => /orientačně/.test(e.textContent)), true);
   const vlastni = [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Cottage pomazánka'));
+  jidelnicekData = { ...VZOR, recepty: [...VZOR.recepty, { ...VZOR.recepty[3], nazev: 'Zbylé jídlo', zMinula: '2026-10-26' }] }; renderJidelnicek();
+  check('převedené jídlo: z minulého týdne', [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Zbylé jídlo')).querySelector('.jid-typ').textContent, 'pracovní večeře · z minulého týdne');
+  jidelnicekData = VZOR; renderJidelnicek();
   check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
 
   R.push('\\n2) Seznam: kategorie, množství, víme/nevíme');

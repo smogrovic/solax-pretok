@@ -65,6 +65,36 @@ nadpis('Příjem');
   check('limit seznamu se dodrží', h.state.nakup.length, 10);
 }
 
+nadpis('Nový týden: neuvařená jídla zůstanou');
+{
+  const h = build();
+  h.volej('POST /api/jidelnicek/import', kopie());
+  h.volej('POST /api/jidelnicek/hotovo', { index: 0, hotovo: true });
+  h.volej('POST /api/jidelnicek/hotovo', { index: 1, hotovo: true });
+  // Ruční položka připsaná před generováním i po něm zůstane; staré nekoupené z jídelníčku pryč (nakoupeno)
+  h.state.nakup.push({ id: 'n_ruc00011', text: 'Pečivo na víkend', t: 1 });
+  check('zbyva pro úlohu: neuvařená', h.volej('GET /api/jidelnicek/historie').out.zbyva.length, 8);
+  const p2 = kopie(); p2.tyden = '2026-11-09';
+  p2.recepty.forEach(r => { r.nazev = 'Nové ' + r.nazev; });
+  p2.nakup = p2.nakup.slice(0, 3);
+  h.volej('POST /api/jidelnicek/import', p2);
+  const rec = h.state.jidelnicek.recepty;
+  check('nová jídla první, pak neuvařená z minula', rec.length + ' ' + rec[0].nazev.startsWith('Nové') + ' ' + rec.slice(10).every(r => r.zMinula === '2026-11-02'), '18 true true');
+  check('  uvařená se nepřevedou', rec.some(r => r.nazev === VZOR.recepty[0].nazev || r.nazev === VZOR.recepty[1].nazev), false);
+  check('  historie týdne jen s novými', h.state.jidelnicekHistorie[0].nazvy.length, 10);
+  check('na seznam jen suroviny nových jídel', h.state.nakup.filter(x => x.zdroj === 'jidelnicek').length, 3);
+  check('  ruční zůstala', h.state.nakup.some(x => x.text === 'Pečivo na víkend'), true);
+  const b = build();
+  b.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: h.state.jidelnicek })));
+  check('záloha s 18 recepty se obnoví i se zMinula', b.state.jidelnicek && b.state.jidelnicek.recepty.length + ' ' + b.state.jidelnicek.recepty[17].zMinula, '18 2026-11-02');
+  const p3 = kopie(); p3.tyden = '2026-11-09';
+  h.volej('POST /api/jidelnicek/import', p3);
+  check('stejný týden znovu (oprava): nic se nepřevádí', h.state.jidelnicek.recepty.length, 10);
+  const p4 = kopie(); p4.tyden = '2026-11-30';
+  h.volej('POST /api/jidelnicek/import', p4);
+  check('starší než 14 dní se nepřevádí', h.state.jidelnicek.recepty.length, 10);
+}
+
 nadpis('Ověření');
 {
   const h = build();

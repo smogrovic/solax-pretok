@@ -14,7 +14,7 @@ const DOMA = ['sul', 'pepr'];
 const klic = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const jednotka = (m, j) => { const p = PREVOD[klic(j)]; return p ? [m * p[1], p[0]] : [m, klic(j)]; };
 
-function zkontroluj(plan, historie = []) {
+function zkontroluj(plan, historie = [], zbyva = []) {
   const chyby = [], varovani = [];
   if (!plan || typeof plan !== 'object') return { chyby: ['Soubor neobsahuje jídelníček.'], varovani };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(plan.tyden || '')) chyby.push('tyden musí být datum pondělí (YYYY-MM-DD).');
@@ -53,7 +53,9 @@ function zkontroluj(plan, historie = []) {
   }
   // Opakování z minulých týdnů
   const dřív = new Set((historie || []).flatMap(h => (h.nazvy || []).map(klic)));
-  for (const r of recepty) if (dřív.has(klic(r.nazev))) varovani.push(`${r.nazev}: bylo v některém z minulých týdnů.`);
+  const zustava = new Set((zbyva || []).map(klic));
+  for (const r of recepty) if (zustava.has(klic(r.nazev))) chyby.push(`${r.nazev}: v jídelníčku už zůstává z minula — vyber jiné.`);
+  for (const r of recepty) if (!zustava.has(klic(r.nazev)) && dřív.has(klic(r.nazev))) varovani.push(`${r.nazev}: bylo v některém z minulých týdnů.`);
 
   // Zdroje a údaje u receptů
   for (const r of recepty) {
@@ -109,9 +111,9 @@ if (require.main === module) {
   const [soubor, histSoubor] = process.argv.slice(2);
   if (!soubor) { console.error('Použití: node jidelnicek/over.js plan.json [historie.json]'); process.exit(2); }
   const plan = JSON.parse(fs.readFileSync(soubor, 'utf8'));
-  let historie = [];
-  if (histSoubor) { const h = JSON.parse(fs.readFileSync(histSoubor, 'utf8')); historie = Array.isArray(h) ? h : h.historie || []; }
-  const { chyby, varovani } = zkontroluj(plan, historie);
+  let historie = [], zbyva = [];
+  if (histSoubor) { const h = JSON.parse(fs.readFileSync(histSoubor, 'utf8')); historie = Array.isArray(h) ? h : h.historie || []; zbyva = (h && h.zbyva) || []; }
+  const { chyby, varovani } = zkontroluj(plan, historie, zbyva);
   for (const v of varovani) console.log('UPOZORNĚNÍ ' + v);
   for (const c of chyby) console.log('CHYBA ' + c);
   console.log(chyby.length ? `\n${chyby.length} chyb — oprav a zkontroluj znovu.` : '\nOK — jídelníček odpovídá pravidlům.');
