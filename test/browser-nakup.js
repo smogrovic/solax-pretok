@@ -158,50 +158,56 @@ setTimeout(async () => {
   renderNakup();
   check('vyprázdněný seznam záložku schová', vidi(zal), false);
 
-  R.push('\\n3) Rohlík');
-  const rbtn = document.getElementById('rohlikBtn');
+  R.push('\\n3) Tlačítka pod seznamem a Rohlík');
   const rtl = document.getElementById('rohlikTlacitka');
+  const kosBtn = document.getElementById('rohlikKosikBtn'), krokBtn = document.getElementById('rohlikKrokBtn'), smazBtn = document.getElementById('nakupSmazatBtn');
   rohlikData = null;
   nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
   renderNakup();
-  check('bez nastaveného Rohlíku tlačítka nejsou', vidi(rtl), false);
+  check('bez Rohlíku jen Smazat', vidi(smazBtn) + ' ' + vidi(kosBtn) + ' ' + vidi(krokBtn), 'true false false');
   rohlikData = { enabled: true };
   renderNakup();
-  check('s Rohlíkem a nekoupenými jsou', vidi(rtl), true);
-  check('  tři: jako naposled, s výběrem, krok po kroku', [...rtl.querySelectorAll('button')].map(b => b.textContent).join(' | '), '🥐 Jako naposled | 🖼️ S výběrem | 🧭 Krok po kroku');
-  check('  vedle sebe', rtl.querySelectorAll('button')[0].getBoundingClientRect().top === rbtn.getBoundingClientRect().top, true);
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
+  check('s Rohlíkem tři tlačítka', [...rtl.querySelectorAll('button')].filter(vidi).map(b => b.textContent).join(' | '), '🗑️ Smazat | 🛒 Přidat do košíku | 🧭 Krok po kroku');
+  check('  vedle sebe', smazBtn.getBoundingClientRect().top === krokBtn.getBoundingClientRect().top, true);
+  nakupData = [{ id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
   renderNakup();
-  check('všechno v košíku nebo koupené = tlačítka nejsou', vidi(rtl), false);
+  check('jen přeškrtnuté: Smazat ano, košík ne', vidi(smazBtn) + ' ' + vidi(kosBtn), 'true false');
   nakupData = [];
   renderNakup();
-  check('  prázdný seznam taky ne', vidi(rtl), false);
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1, kosik: Date.now() }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
+  check('prázdný seznam: nic', vidi(rtl), false);
+  // Smazat celý seznam se zeptá
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
   renderNakup();
-  check('štítek v košíku', document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik').textContent, '🛒 v košíku');
+  dotazy = [];
+  odpoved = url => url === '/api/nakup/vymazat' ? { ok: true, nakup: [] } : { ok: true };
+  smazBtn.click();
+  await pockej(30);
+  check('Smazat se nejdřív zeptá', dotazy.length + ' ' + !document.getElementById('potvrzOkno').hidden, '0 true');
+  potvrzKonec(true);
+  await pockej(40);
+  check('  po potvrzení smaže celý seznam', dotazy[0] && dotazy[0].url + ' ' + nakupData.length, '/api/nakup/vymazat 0');
 
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }, { id: 'n_cccc3333', text: 'sýr', t: 3 }];
-  // Nepřihlášený: okno ukáže jen přihlášení
+  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }];
+  // Nepřihlášený: okno ukáže jen přihlášení, po přihlášení se otevře průvodce
   rohlikData = { enabled: true, prihlaseno: false };
   renderNakup();
   dotazy = [];
   odpoved = url => url === '/api/rohlik/prihlasit' ? { ok: true, url: '#rohlik-test-prihlaseni' } : { ok: true };
-  rbtn.click();
+  kosBtn.click();
   await pockej(30);
-  check('nepřihlášený: tlačítko přihlásit', document.getElementById('rohlikPrihlaseni').hidden, false);
-  check('  bez seznamu a bez Přidat', document.getElementById('rohlikSeznam').hidden + ' ' + document.getElementById('rohlikPridat').hidden, 'true true');
+  check('nepřihlášený: okno s přihlášením', document.getElementById('rohlikOkno').hidden + ' ' + document.getElementById('rohlikPrihlaseni').hidden, 'false false');
   check('  nic se nehledá', dotazy.length, 0);
   document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback?error=stara';
   document.getElementById('rohlikPrihlasitBtn').click();
   await pockej(30);
-  check('Přihlásit pošle požadavek se zámkem', dotazy[0] && dotazy[0].url, '/api/rohlik/prihlasit');
+  check('Přihlásit pošle požadavek', dotazy[0] && dotazy[0].url, '/api/rohlik/prihlasit');
   check('  ukáže krok 2 s polem na adresu', document.getElementById('rohlikKrok2').hidden, false);
   check('  pole na adresu je po startu prázdné', document.getElementById('rohlikAdresa').value, '');
-  // Dokončení vloženou adresou
   dotazy = [];
   odpoved = (url, telo) => url === '/api/rohlik/oauth/kod'
     ? (/code=/.test(telo.adresa) ? { ok: true, rohlik: { enabled: true, prihlaseno: true } } : { error: 'V adrese chybí kód.' })
-    : (url === '/api/rohlik/vyber' ? { ok: true, vyber: {} } : (url.startsWith('/api/rohlik/hledat') ? { ok: true, vyrobky: [] } : { ok: true }));
+    : (url === '/api/rohlik/vyber' ? { ok: true, vyber: { mleko: { productId: 1349777, nazev: 'Kunín Mléko 1,5 %', cena: 24.9 } } }
+      : (url.startsWith('/api/rohlik/hledat') ? { ok: true, vyrobky: [{ productId: 55, nazev: 'Chléb Šumava', cena: 39.9 }] } : { ok: true }));
   document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback';
   document.getElementById('rohlikDokoncitBtn').click();
   await pockej(30);
@@ -209,83 +215,18 @@ setTimeout(async () => {
   check('  a pole se vyprázdní', document.getElementById('rohlikAdresa').value, '');
   document.getElementById('rohlikAdresa').value = 'http://localhost:3334/oauth/callback?code=KOD&state=S';
   document.getElementById('rohlikDokoncitBtn').click();
-  await pockej(120);
-  check('Dokončit pošle vloženou adresu', dotazy.filter(d => d.url === '/api/rohlik/oauth/kod').pop().telo.adresa, 'http://localhost:3334/oauth/callback?code=KOD&state=S');
-  check('  přihlášeno', document.getElementById('rohlikStav').textContent, 'Přihlášeno k Rohlíku ✓');
-  check('  a ukáže výběr výrobků', document.getElementById('rohlikPrihlaseni').hidden + ' ' + document.getElementById('rohlikSeznam').hidden, 'true false');
-  document.getElementById('rohlikZavrit').click();
-  rohlikData = { enabled: true, prihlaseno: true };
-  renderNakup();
-  dotazy = [];
-  odpoved = (url, telo) => {
-    if (url === '/api/rohlik/vyber') return { ok: true, vyber: { mleko: { productId: 1349777, nazev: 'Kunín Mléko 1,5 %', cena: 24.9 } } };
-    if (url.startsWith('/api/rohlik/hledat')) return { ok: true, vyrobky: /chleba/.test(decodeURIComponent(url))
-      ? [{ productId: 55, nazev: 'Chléb Šumava', cena: 39.9, obrazek: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' },
-        { productId: 56, nazev: 'Chléb kmínový', cena: 35, obrazek: 'data:image/png;base64,AAAA' }] : [] };
-    if (url === '/api/rohlik/kosik') return { ok: true, pridano: telo.polozky.length, nakup: nakupData.map(p => telo.polozky.some(x => x.nakupId === p.id) ? { ...p, kosik: 1 } : p) };
-    return { ok: true };
-  };
-  rbtn.click();
-  await pockej(80);
-  const rok = document.getElementById('rohlikOkno');
-  check('okno se otevře', rok.hidden, false);
-  check('  přihlášený: bez tlačítka přihlásit', document.getElementById('rohlikPrihlaseni').hidden, true);
-  check('  s tokenem', dotazy.find(d => d.url === '/api/rohlik/vyber') && true, true);
-  const box = id => document.querySelector('#rohlikSeznam .rohlik-polozka[data-id="' + id + '"]');
-  check('zapamatovaný výběr je předvybraný', box('n_aaaa1111').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Kunín Mléko'), true);
-  check('s výběrem se hledá všechno (fotky na výběr)', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).length, 3);
-  check('  výsledky k výběru', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek').length, 2);
   await pockej(150);
-  check('  fotky výrobků', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img') && box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[0].querySelector('img').getBoundingClientRect().width, 56);
-  check('  rozbitá fotka zmizí', box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[1].querySelector('img'), null);
-  check('  nic nenalezeno se řekne', /Nic se nenašlo/.test(box('n_cccc3333').textContent), true);
-  check('tlačítko počítá vybrané', document.getElementById('rohlikPridat').textContent, 'Přidat do košíku (1)');
-  box('n_bbbb2222').querySelectorAll('.rohlik-vyrobek')[1].click();
-  check('klepnutím se vybere', box('n_bbbb2222').querySelector('.rohlik-vyrobek.vybrany').textContent.includes('kmínový'), true);
-  box('n_aaaa1111').querySelectorAll('.rohlik-mnozstvi button')[1].click();
-  check('množství +', box('n_aaaa1111').querySelector('.rohlik-pocet').textContent, '2×');
-  box('n_cccc3333').querySelector('.rohlik-preskocit').click();
-  check('přeskočit', box('n_cccc3333').classList.contains('preskoceno'), true);
-  dotazy = [];
-  document.getElementById('rohlikPridat').click();
-  await pockej(40);
-  const kos = dotazy.find(d => d.url === '/api/rohlik/kosik');
-  check('odešle vybrané s množstvím', kos && kos.telo.polozky.map(p => p.nakupId + ':' + p.productId + ':' + p.mnozstvi).join(','), 'n_aaaa1111:1349777:2,n_bbbb2222:56:1');
-  check('  hláška o přidání', /Přidáno 2 položek/.test(document.getElementById('rohlikStav').textContent), true);
-  check('  v okně zbude jen přeskočená', [...document.querySelectorAll('#rohlikSeznam .rohlik-polozka')].map(b => b.dataset.id).join(), 'n_cccc3333');
-  check('  a v seznamu je štítek', !!document.querySelector('#nakupSeznam li[data-id="n_aaaa1111"] .nakup-kosik'), true);
-  document.getElementById('rohlikZavrit').click();
-  check('Zavřít', rok.hidden, true);
-
-  // Jako naposled: zapamatované rovnou do košíku, v okně jen to, co je potřeba vybrat
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 }];
-  renderNakup();
-  dotazy = [];
-  document.getElementById('rohlikNaposledBtn').click();
+  check('Dokončit pošle vloženou adresu', dotazy.filter(d => d.url === '/api/rohlik/oauth/kod').pop().telo.adresa, 'http://localhost:3334/oauth/callback?code=KOD&state=S');
+  const pok = document.getElementById('pruvodceOkno');
+  check('  po přihlášení se otevře průvodce košíkem', document.getElementById('rohlikOkno').hidden + ' ' + pok.hidden, 'true false');
+  check('Přidat do košíku: známé mléko přeskočí, chleba se vybírá', document.querySelector('#pruvodceObsah .pruvodce-titul-nazev').textContent + ' ' + document.querySelector('#pruvodceObsah .pruvodce-krok').textContent, 'chleba 1 / 1');
+  document.getElementById('pruvodceZavrit').click();
+  krokBtn.click();
   await pockej(120);
-  const kos2 = dotazy.find(d => d.url === '/api/rohlik/kosik');
-  check('jako naposled: zapamatované hned do košíku', kos2 && kos2.telo.polozky.map(p => p.nakupId + ':' + p.productId + ':' + p.mnozstvi).join(), 'n_aaaa1111:1349777:1');
-  check('  zapamatované se nehledá', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).map(d => decodeURIComponent(d.url.split('q=')[1])).join(), 'chleba');
-  check('  v okně zbude jen nezapamatované', [...document.querySelectorAll('#rohlikSeznam .rohlik-polozka')].map(b => b.dataset.id).join(), 'n_bbbb2222');
-  check('  hláška', document.getElementById('rohlikStav').textContent, 'Přidáno 1 jako naposled. Zbytek vyber níž.');
-  document.getElementById('rohlikZavrit').click();
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
-  renderNakup();
-  dotazy = [];
-  document.getElementById('rohlikNaposledBtn').click();
-  await pockej(80);
-  check('  všechno zapamatované: hotovo bez hledání', dotazy.some(d => d.url.startsWith('/api/rohlik/hledat')) + ' | ' + document.getElementById('rohlikStav').textContent,
-    'false | Přidáno 1 jako naposled. Objednávku dokonči v appce Rohlík.');
-  document.getElementById('rohlikZavrit').click();
-  nakupData = [{ id: 'n_aaaa1111', text: 'Mléko', t: 1 }];
-  renderNakup();
-  odpoved = url => url === '/api/rohlik/vyber' ? { ok: true, vyber: { mleko: { productId: 1, nazev: 'M' } } } : url === '/api/rohlik/kosik' ? { error: 'Rohlík přihlášení nedokončil' } : { ok: true, vyrobky: [] };
-  dotazy = [];
-  document.getElementById('rohlikNaposledBtn').click();
-  await pockej(80);
-  check('  chyba košíku se ukáže a nic dál se nehledá', document.getElementById('rohlikStav').textContent + ' | ' + dotazy.some(d => d.url.startsWith('/api/rohlik/hledat')),
-    'Rohlík přihlášení nedokončil | false');
-  document.getElementById('rohlikZavrit').click();
+  check('Krok po kroku ukáže i známé (předvybrané)', document.querySelector('#pruvodceObsah .pruvodce-krok').textContent + ' ' + document.querySelector('#pruvodceObsah .pruvodce-titul-nazev').textContent
+    + ' ' + document.querySelector('#pruvodceObsah .rohlik-vyrobek.vybrany').textContent.includes('Kunín'), '1 / 2 Mléko true');
+  document.getElementById('pruvodceZavrit').click();
+  check('staré „S výběrem" a „Jako naposled" pryč', !!document.getElementById('rohlikBtn') + ' ' + !!document.getElementById('rohlikNaposledBtn'), 'false false');
 
   R.push('\\n4) Pravidelně kupované');
   const obl = document.getElementById('nakupOblibene');

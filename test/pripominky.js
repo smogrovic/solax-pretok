@@ -293,6 +293,14 @@ nadpis('N) Nákupní seznam');
   check('smazání', h.zavolej('/api/nakup/:id/smazat', { id: smazana.id }, {}).status, 200);
   check('  je pryč', h.state.nakup.some(x => x.id === smazana.id), false);
   check('  podruhé 404', h.zavolej('/api/nakup/:id/smazat', { id: smazana.id }, {}).status, 404);
+  {
+    const v = build();
+    v.api.nakupPridej({ text: 'a' }); v.api.nakupPridej({ text: 'b' });
+    v.api.nakupKoupeno(v.state.nakup[0].id, true);
+    const r = v.zavolej('/api/nakup/vymazat', {}, {});
+    check('smazat celý seznam (i přeškrtnuté)', r.status + ' ' + r.json.smazano + ' ' + v.state.nakup.length, '200 2 0');
+    check('  appka se dozví', v.broadcasts.slice(-1)[0] && (v.broadcasts.slice(-1)[0].typ || v.broadcasts.slice(-1)[0][0] || JSON.stringify(v.broadcasts.slice(-1)[0])).toString().includes('nakup'), true);
+  }
   h.zavolej('/api/nakup', {}, { text: smazana.text, id: smazana.id, t: smazana.t });
   check('Zpět vrátí na původní místo', h.state.nakup[0].id + ' ' + h.state.nakup[0].text, smazana.id + ' mléko polotučné');
   h.zavolej('/api/nakup', {}, { text: smazana.text, id: smazana.id, t: smazana.t });

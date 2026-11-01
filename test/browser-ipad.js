@@ -146,12 +146,6 @@ setTimeout(async () => {
   document.querySelector('#jidObsah details.jid-recept').open = false;
   ipadKontrola();
   check('  po zavření (a lhůtě) zase kalendář', document.getElementById('kalPanel').hidden, false);
-  kalOtevri(false);
-  document.getElementById('jidTiskOkno').hidden = false;
-  ipadKontrola();
-  check('otevřená tisková verze drží taky', document.getElementById('kalPanel').hidden, true);
-  document.getElementById('jidTiskOkno').hidden = true;
-  ipadKontrola();
   // Na iPadu se recept otevře přes celou obrazovku (i s fotkou z webu)
   jidelnicekData.recepty[0].foto = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   jidelnicekData.recepty[0].vyziva = { kcal: 354, bilkoviny: 19, sacharidy: 41, tuky: 13 };

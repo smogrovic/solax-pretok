@@ -1587,10 +1587,14 @@
   .nakup-znacka.nevime{color:var(--grey-text);background:rgba(44,62,80,0.07);}
   .nakup-jiny{flex:0 0 auto;border:none;background:none;padding:0 2px;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .rohlik-btn-krok{background:#e3f1ff;}
-  .rohlik-tlacitka{flex-wrap:wrap;}
-  .rohlik-tlacitka .rohlik-btn-krok{flex-basis:100%;}
+  .rohlik-tlacitka .rohlik-btn{font-size:13px;padding:11px 8px;}
+  .rohlik-btn-smazat{background:rgba(44,62,80,0.08);color:var(--navy);flex:0 0 auto!important;padding-left:14px;padding-right:14px;}
+  .rohlik-btn[hidden]{display:none;}
   .pruvodce-krok{font-size:12px;font-weight:800;color:var(--grey-text);margin-bottom:6px;}
-  .pruvodce-potreba{font-size:13px;color:var(--navy);margin-top:4px;}
+  .pruvodce-titul{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px;}
+  .pruvodce-titul-nazev{font-size:20px;font-weight:800;color:var(--navy);}
+  .pruvodce-potreba{font-size:16px;font-weight:700;color:var(--orange);}
+  .rohlik-hlava .rohlik-nazev{font-weight:600;font-size:13px;color:var(--grey-text);}
   .pruvodce-preskocit{margin-top:10px;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .pruvodce-radek{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(44,62,80,0.1);}
   .pruvodce-radek.preskoceno{opacity:0.5;}
@@ -1621,7 +1625,6 @@
   .jid-meta{font-size:12px;color:var(--grey-text);margin:3px 0;}
   .jid-suroviny,.jid-postup{margin:6px 0;padding-left:18px;}
   .jid-suroviny li,.jid-postup li{margin:2px 0;}
-  .jid-tisk{display:flex;gap:8px;margin-top:12px;}
   .jid-tisk-okno{position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto;-webkit-overflow-scrolling:touch;}
   .jid-tisk-okno[hidden]{display:none;}
   .jid-tisk-lista{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
@@ -1629,21 +1632,6 @@
   .jid-tisk-x{width:38px;height:38px;border:none;border-radius:50%;background:rgba(44,62,80,0.08);font-size:18px;cursor:pointer;flex:0 0 auto;color:#111;}
   .jid-tisk-nadpis{flex:1;font-weight:800;color:#111;font-size:15px;}
   .jid-tisk-akce{border:none;border-radius:12px;padding:9px 12px;font:inherit;font-size:13px;font-weight:700;background:#e3f1ff;color:#0b4a7f;cursor:pointer;}
-  .jid-tisk-papir{max-width:800px;margin:0 auto;padding:16px 18px 40px;font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;text-align:left;}
-  .jid-tisk-papir h1{font-size:22px;margin:0 0 10px;}
-  .jid-tisk-papir h2{font-size:17px;border-bottom:2px solid #333;margin:22px 0 8px;text-transform:uppercase;}
-  .jid-tisk-papir h3{font-size:16px;margin:16px 0 2px;}
-  .jid-tisk-papir .pol{display:flex;gap:10px;padding:4px 0;}
-  .jid-tisk-papir .box{width:16px;height:16px;border:1.5px solid #333;flex:0 0 auto;margin-top:3px;border-radius:3px;}
-  .jid-tisk-papir ul,.jid-tisk-papir ol{margin:4px 0 8px;padding-left:22px;}
-  @media print {
-    body > *:not(#jidTiskOkno){display:none!important;}
-    body{background:#fff!important;}
-    .jid-tisk-okno{position:static;overflow:visible;}
-    .jid-tisk-lista{display:none!important;}
-    .jid-tisk-papir{max-width:none;padding:0;font-size:12pt;}
-    .jid-tisk-papir .recept{break-inside:avoid;}
-  }
   .jid-recept summary{flex-direction:row!important;align-items:center;gap:10px;}
   .jid-recept-papir{max-width:1100px;margin:0 auto;padding:22px 28px 60px;color:#111;text-align:left;font:18px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;}
   .jid-recept-horni{display:flex;gap:28px;align-items:flex-start;}
@@ -3662,10 +3650,6 @@
         <div class="jid-tyden" id="jidTyden"></div>
         <div id="jidObsah"></div>
         <div class="rezim-hint" id="jidZprava"></div>
-        <div class="jid-tisk">
-          <button class="sek-btn" id="jidTiskRecepty" type="button">🖨️ Recepty</button>
-          <button class="sek-btn" id="jidTiskSeznam" type="button">🖨️ Nákupní seznam</button>
-        </div>
       </div>
       <div class="card nakup-karta">
         <div class="graph-title">🛒 Nákupní seznam</div>
@@ -3679,8 +3663,8 @@
         <div class="potvrz-text vlastni-chyba" id="nakupChyba"></div>
         <!-- Do košíku na Rohlíku: rovnou podle minula, nebo s výběrem výrobků (fotky) -->
         <div class="rohlik-tlacitka" id="rohlikTlacitka" hidden>
-          <button class="rohlik-btn" id="rohlikNaposledBtn" type="button">🥐 Jako naposled</button>
-          <button class="rohlik-btn rohlik-btn-vyber" id="rohlikBtn" type="button">🖼️ S výběrem</button>
+          <button class="rohlik-btn rohlik-btn-smazat" id="nakupSmazatBtn" type="button">🗑️ Smazat</button>
+          <button class="rohlik-btn" id="rohlikKosikBtn" type="button">🛒 Přidat do košíku</button>
           <button class="rohlik-btn rohlik-btn-krok" id="rohlikKrokBtn" type="button">🧭 Krok po kroku</button>
         </div>
       </div>
@@ -4076,8 +4060,7 @@
 </div>
 <div class="potvrz" id="rohlikOkno" hidden>
   <div class="potvrz-box rohlik-box">
-    <div class="potvrz-nadpis">🥐 Do košíku na Rohlíku</div>
-    <div class="potvrz-text">Vyber výrobek ke každé položce. Appka si ho zapamatuje a příště ho vybere sama. Objednávku dokončíš v appce Rohlík.</div>
+    <div class="potvrz-nadpis">🥐 Rohlík</div>
     <div class="rohlik-prihlaseni" id="rohlikPrihlaseni" hidden>
       <div class="potvrz-text">Rohlík vyžaduje jednorázové přihlášení. Pak si appka přístup pamatuje.</div>
       <button class="rohlik-btn" id="rohlikPrihlasitBtn" type="button">1. Přihlásit se k Rohlíku</button>
@@ -4087,23 +4070,12 @@
         <button class="rohlik-btn" id="rohlikDokoncitBtn" type="button">2. Dokončit přihlášení</button>
       </div>
     </div>
-    <div class="rohlik-seznam" id="rohlikSeznam"></div>
     <div class="potvrz-text" id="rohlikStav"></div>
     <button class="rohlik-odhlasit" id="rohlikOdhlasitBtn" type="button" hidden>odhlásit Rohlík</button>
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="rohlikZavrit" type="button">Zavřít</button>
-      <button class="potvrz-ano rohlik-pridat" id="rohlikPridat" type="button">Přidat do košíku</button>
     </div>
   </div>
-</div>
-<div class="jid-tisk-okno" id="jidTiskOkno" hidden role="dialog" aria-labelledby="jidTiskNadpis">
-  <div class="jid-tisk-lista">
-    <button type="button" class="jid-tisk-x" id="jidTiskZavrit" aria-label="Zavřít">✕</button>
-    <span class="jid-tisk-nadpis" id="jidTiskNadpis"></span>
-    <button type="button" class="jid-tisk-akce" id="jidTiskTisk">🖨️ Tisk</button>
-    <button type="button" class="jid-tisk-akce" id="jidTiskSdilet">Sdílet / PDF</button>
-  </div>
-  <div class="jid-tisk-papir" id="jidTiskPapir"></div>
 </div>
 <div class="jid-tisk-okno jid-recept-okno" id="jidReceptOkno" hidden role="dialog" aria-labelledby="jidReceptNadpis">
   <div class="jid-tisk-lista">
@@ -13631,8 +13603,6 @@ const nakupVstupEl = document.getElementById('nakupVstup');
 const nakupChybaEl = document.getElementById('nakupChyba');
 
 let rohlikData = null;
-const rohlikBtnEl = document.getElementById('rohlikBtn');
-const rohlikNaposledEl = document.getElementById('rohlikNaposledBtn');
 const rohlikTlacitkaEl = document.getElementById('rohlikTlacitka');
 // Co se ještě kupuje — jen to svítí na zelené záložce
 const nakupNekoupene = () => (nakupData || []).filter(p => !p.koupeno);
@@ -13657,7 +13627,11 @@ function renderNakup(now = Date.now()) {
   const nekoupene = vse.filter(p => !p.koupeno).sort((a, b) => a.t - b.t);
   // Koupené na konci, naposledy koupené nahoře
   const koupene = vse.filter(p => p.koupeno).sort((a, b) => b.koupeno - a.koupeno);
-  if (rohlikTlacitkaEl) rohlikTlacitkaEl.hidden = !(rohlikData && rohlikData.enabled && nekoupene.some(p => !p.kosik));
+  if (rohlikTlacitkaEl) {
+    const rohlik = !!(rohlikData && rohlikData.enabled && nekoupene.some(p => !p.kosik));
+    rohlikTlacitkaEl.hidden = !vse.length;
+    for (const id of ['rohlikKosikBtn', 'rohlikKrokBtn']) { const b = document.getElementById(id); if (b) b.hidden = !rohlik; }
+  }
   if (!vse.length) {
     const li = document.createElement('li');
     li.className = 'nakup-prazdno';
@@ -13762,16 +13736,17 @@ if (nakupSlideEl) {
     if (await nakupPost('/api/nakup', { text })) nakupVstupEl.value = '';
     nakupVstupEl.focus();
   });
+  const smazat = document.getElementById('nakupSmazatBtn');
+  if (smazat) smazat.addEventListener('click', async () => {
+    if (!(await zeptejSe('Smazat celý nákupní seznam?', 'Zmizí všechny položky včetně přeškrtnutých.'))) return;
+    nakupPost('/api/nakup/vymazat', {});
+  });
 }
 
-// ---------- Rohlík: nákupní seznam do košíku ----------
-// Ke každé nekoupené položce (která ještě není v košíku) jeden výrobek. Zapamatovaný
-// výběr je předvybraný, ostatní se hledají. Objednávka se odsud neodesílá.
+// ---------- Rohlík: přihlášení a společné kousky pro průvodce košíkem ----------
+// Objednávka se odsud nikdy neodesílá — jen se plní košík.
 const rohlikOknoEl = document.getElementById('rohlikOkno');
-const rohlikSeznamEl = document.getElementById('rohlikSeznam');
 const rohlikStavEl = document.getElementById('rohlikStav');
-const rohlikPridatEl = document.getElementById('rohlikPridat');
-let rohlikRadky = [];   // { polozka, vyber, vysledky, hledam, chyba, preskocit, mnozstvi }
 
 const rohlikKlicJs = text => String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80);
@@ -13792,8 +13767,6 @@ function rohlikPrihlasenyStav() {
   const ano = !!(rohlikData && rohlikData.prihlaseno);
   if (rohlikPrihlaseniEl) rohlikPrihlaseniEl.hidden = ano;
   if (rohlikOdhlasitEl) rohlikOdhlasitEl.hidden = !ano;
-  if (rohlikSeznamEl) rohlikSeznamEl.hidden = !ano;
-  if (rohlikPridatEl) rohlikPridatEl.hidden = !ano;
   return ano;
 }
 
@@ -13816,46 +13789,12 @@ async function rohlikPrihlasit() {
   }
 }
 
-// naposled: zapamatované výrobky jdou rovnou do košíku, v okně zbude jen to, co je
-// potřeba vybrat. Jinak se hledá všechno — i zapamatované, ať jsou vidět fotky na výběr.
-async function rohlikOtevri({ naposled = false } = {}) {
+// Okno Rohlíku už jen na přihlášení / odhlášení; výběr výrobků je v průvodci
+function rohlikOtevri() {
   if (!rohlikOknoEl) return;
-  if (!rohlikPrihlasenyStav()) {
-    rohlikStavEl.textContent = '';
-    rohlikOknoEl.hidden = false;
-    return;
-  }
-  const polozky = (nakupData || []).filter(p => !p.koupeno && !p.kosik).sort((a, b) => a.t - b.t);
-  rohlikRadky = polozky.map(p => ({ polozka: p, vyber: null, vysledky: null, hledam: false, chyba: '', preskocit: false, mnozstvi: 1 }));
-  rohlikStavEl.textContent = 'Načítám…';
-  rohlikOknoEl.hidden = false;
-  renderRohlik();
-  let vyber = {};
-  try { vyber = (await rohlikGet('/api/rohlik/vyber')).vyber || {}; }
-  catch (err) { rohlikStavEl.textContent = err.message; return; }
+  rohlikPrihlasenyStav();
   rohlikStavEl.textContent = '';
-  for (const r of rohlikRadky) r.vyber = vyber[rohlikKlicJs(r.polozka.text)] || null;
-  renderRohlik();
-  if (naposled) {
-    const n = rohlikRadky.filter(r => r.vyber).length;
-    if (n) {
-      const ok = await rohlikPridej();
-      if (!ok) return;
-      rohlikStavEl.textContent = rohlikRadky.length
-        ? 'Přidáno ' + n + ' jako naposled. Zbytek vyber níž.'
-        : 'Přidáno ' + n + ' jako naposled. Objednávku dokonči v appce Rohlík.';
-    }
-  }
-  // Hledá se po jednom, ať se Rohlík nezahltí
-  for (const r of rohlikRadky) if (!r.vyber || !naposled) await rohlikHledej(r);
-}
-
-async function rohlikHledej(r) {
-  r.hledam = true; r.chyba = ''; renderRohlik();
-  try { r.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(r.polozka.text))).vyrobky || []; }
-  catch (err) { r.chyba = err.message; r.vysledky = []; }
-  r.hledam = false;
-  renderRohlik();
+  rohlikOknoEl.hidden = false;
 }
 
 function rohlikVyrobekEl(v, vybrany, onClick) {
@@ -13882,101 +13821,8 @@ function rohlikVyrobekEl(v, vybrany, onClick) {
   return b;
 }
 
-function renderRohlik() {
-  if (!rohlikSeznamEl) return;
-  rohlikSeznamEl.textContent = '';
-  if (!rohlikRadky.length) {
-    const d = document.createElement('div');
-    d.className = 'rohlik-info';
-    d.textContent = 'Všechno z nákupního seznamu už je v košíku nebo koupené.';
-    rohlikSeznamEl.appendChild(d);
-  }
-  for (const r of rohlikRadky) {
-    const box = document.createElement('div');
-    box.className = 'rohlik-polozka' + (r.preskocit ? ' preskoceno' : '');
-    box.dataset.id = r.polozka.id;
-    const hlava = document.createElement('div');
-    hlava.className = 'rohlik-hlava';
-    const nazev = document.createElement('span');
-    nazev.className = 'rohlik-nazev';
-    nazev.textContent = r.polozka.text;
-    const mn = document.createElement('span');
-    mn.className = 'rohlik-mnozstvi';
-    const minus = document.createElement('button'); minus.type = 'button'; minus.textContent = '−';
-    const pocet = document.createElement('span'); pocet.className = 'rohlik-pocet'; pocet.textContent = r.mnozstvi + '×';
-    const plus = document.createElement('button'); plus.type = 'button'; plus.textContent = '+';
-    minus.addEventListener('click', () => { r.mnozstvi = Math.max(1, r.mnozstvi - 1); renderRohlik(); });
-    plus.addEventListener('click', () => { r.mnozstvi = Math.min(20, r.mnozstvi + 1); renderRohlik(); });
-    mn.append(minus, pocet, plus);
-    hlava.append(nazev, mn);
-    box.appendChild(hlava);
-    const vyrobky = document.createElement('div');
-    vyrobky.className = 'rohlik-vyrobky';
-    if (r.vyber) vyrobky.appendChild(rohlikVyrobekEl(r.vyber, true, null));
-    if (r.vysledky) {
-      for (const v of r.vysledky.slice(0, 5)) {
-        if (r.vyber && String(v.productId) === String(r.vyber.productId)) continue;
-        vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; r.vysledky = null; renderRohlik(); }));
-      }
-    }
-    box.appendChild(vyrobky);
-    const info = document.createElement('div');
-    info.className = 'rohlik-info';
-    info.textContent = r.hledam ? 'Hledám…' : r.chyba ? r.chyba
-      : (r.vysledky && !r.vysledky.length ? 'Nic se nenašlo.' : (!r.vyber && r.vysledky ? 'Klepni na výrobek.' : ''));
-    if (info.textContent) box.appendChild(info);
-    const odkazy = document.createElement('div');
-    odkazy.className = 'rohlik-odkazy';
-    if (r.vyber && !r.vysledky) {
-      const zmenit = document.createElement('button'); zmenit.type = 'button'; zmenit.textContent = 'změnit';
-      zmenit.addEventListener('click', () => rohlikHledej(r));
-      odkazy.appendChild(zmenit);
-    }
-    const presk = document.createElement('button'); presk.type = 'button'; presk.className = 'rohlik-preskocit';
-    presk.textContent = r.preskocit ? 'nepřeskakovat' : 'přeskočit';
-    presk.addEventListener('click', () => { r.preskocit = !r.preskocit; renderRohlik(); });
-    odkazy.appendChild(presk);
-    box.appendChild(odkazy);
-    rohlikSeznamEl.appendChild(box);
-  }
-  const n = rohlikRadky.filter(r => r.vyber && !r.preskocit).length;
-  rohlikPridatEl.textContent = 'Přidat do košíku (' + n + ')';
-  rohlikPridatEl.disabled = !n;
-}
-
-async function rohlikPridej() {
-  const polozky = rohlikRadky.filter(r => r.vyber && !r.preskocit).map(r => ({
-    nakupId: r.polozka.id, productId: r.vyber.productId, nazev: r.vyber.nazev,
-    obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, mnozstvi: r.mnozstvi }));
-  if (!polozky.length) return false;
-  rohlikPridatEl.disabled = true;
-  rohlikStavEl.textContent = 'Přidávám…';
-  try {
-    const res = await fetch('/api/rohlik/kosik', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ polozky })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401) { setLocked(true); throw new Error('Odemkni appku kódem.'); }
-    if (!res.ok) throw new Error(data.error || 'Nepodařilo se přidat.');
-    if (Array.isArray(data.nakup)) nakupData = data.nakup;
-    renderNakup();
-    rohlikRadky = rohlikRadky.filter(r => !(r.vyber && !r.preskocit));
-    renderRohlik();
-    rohlikStavEl.textContent = 'Přidáno ' + data.pridano + ' položek. Objednávku dokonči v appce Rohlík.';
-    return true;
-  } catch (err) {
-    rohlikStavEl.textContent = err.message;
-    renderRohlik();
-    return false;
-  }
-}
-
 if (rohlikOknoEl) {
-  rohlikBtnEl.addEventListener('click', () => rohlikOtevri());
-  rohlikNaposledEl.addEventListener('click', () => rohlikOtevri({ naposled: true }));
   document.getElementById('rohlikZavrit').addEventListener('click', () => { rohlikOknoEl.hidden = true; });
-  rohlikPridatEl.addEventListener('click', rohlikPridej);
   document.getElementById('rohlikPrihlasitBtn').addEventListener('click', rohlikPrihlasit);
   document.getElementById('rohlikDokoncitBtn').addEventListener('click', async () => {
     const adresa = document.getElementById('rohlikAdresa').value.trim();
@@ -13992,8 +13838,9 @@ if (rohlikOknoEl) {
       document.getElementById('rohlikAdresa').value = '';
       document.getElementById('rohlikKrok2').hidden = true;
       renderNakup();
-      await rohlikOtevri();
       rohlikStavEl.textContent = 'Přihlášeno k Rohlíku ✓';
+      rohlikOknoEl.hidden = true;
+      pruvodceOtevri();
     } catch (err) {
       rohlikStavEl.textContent = err.message;
       document.getElementById('rohlikAdresa').value = '';
@@ -14021,9 +13868,9 @@ if (rohlikOknoEl) {
   try { history.replaceState(null, '', location.pathname + location.hash); } catch {}
   setTimeout(() => {
     if (v === 'ok') rohlikData = { ...(rohlikData || {}), enabled: true, prihlaseno: true };
-    rohlikOtevri().then(() => {
-      rohlikStavEl.textContent = v === 'ok' ? 'Přihlášeno k Rohlíku ✓' : 'Přihlášení se nepovedlo: ' + (q.get('duvod') || 'neznámá chyba');
-    });
+    if (v === 'ok') { pruvodceOtevri(); return; }
+    rohlikOtevri();
+    rohlikStavEl.textContent = 'Přihlášení se nepovedlo: ' + (q.get('duvod') || 'neznámá chyba');
   }, 800);
 })();
 
@@ -14221,92 +14068,20 @@ function renderJidelnicek() {
   }
 }
 
-// iPad se nevrací na kalendář, dokud je otevřený recept, tisková verze nebo průvodce
+// iPad se nevrací na kalendář, dokud je otevřený recept nebo průvodce
 // košíkem — 5 min se počítá až od zavření (zavření je dotyk)
 function ipadDrzi() {
   return !!(document.querySelector('#jidObsah details.jid-recept[open]')
-    || (jidTiskOknoEl && !jidTiskOknoEl.hidden)
     || (jidReceptOknoEl && !jidReceptOknoEl.hidden)
     || (document.getElementById('pruvodceOkno') && !document.getElementById('pruvodceOkno').hidden));
 }
 
-// Tisková verze (A4) v okně appky: v PWA na iPhonu by nová karta nešla zavřít.
-// Nahoře ✕, Sdílet (soubor do Souborů, Poznámek, tisku…) a Tisk (z tiskového okna jde i PDF).
-const jidTiskOknoEl = document.getElementById('jidTiskOkno');
-const jidTiskPapirEl = document.getElementById('jidTiskPapir');
-let jidTiskNazev = '';
-const JID_TISK_CSS = 'body{font:12pt/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:16mm}'
-  + 'h1{font-size:20pt;margin:0 0 4mm}h2{font-size:15pt;border-bottom:2px solid #333;margin:8mm 0 3mm;text-transform:uppercase}'
-  + 'h3{font-size:13pt;margin:5mm 0 1mm}.jid-meta,.jid-zdroj{font-size:10pt;color:#444}ul,ol{margin:1mm 0 2mm 6mm;padding-left:4mm}'
-  + '.recept{break-inside:avoid}.pol{display:flex;gap:3mm;padding:1mm 0}.box{width:4mm;height:4mm;border:1.5px solid #333;flex:0 0 auto;margin-top:1mm}';
-
-function jidTisk(co) {
-  const j = jidelnicekData;
-  if (!j || !jidTiskOknoEl) return;
-  const b = jidTiskPapirEl;
-  b.textContent = '';
-  const tyden = j.tyden.split('-').reverse().join('. ');
-  if (co === 'seznam') {
-    jidTiskNazev = 'Nákupní seznam — týden od ' + tyden;
-    jidEl('h1', '', b, jidTiskNazev);
-    for (const k of JID_NAKUP_KATEGORIE) {
-      const pol = j.nakup.filter(n => n.kategorie === k);
-      if (!pol.length) continue;
-      jidEl('h2', '', b, k);
-      for (const n of pol) {
-        const r = jidEl('div', 'pol', b);
-        jidEl('span', 'box', r);
-        jidEl('span', '', r, n.nazev + ' — ' + (jidMnozstvi(n) || '') + (n.odhad ? ' (odhad)' : '') + (n.poznamka ? ', ' + n.poznamka : ''));
-      }
-    }
-    if (!j.nakup.length) jidEl('p', 'jid-meta', b, 'Na tento týden je nakoupeno.');
-  } else {
-    jidTiskNazev = 'Rodinný jídelníček — týden od ' + tyden;
-    jidEl('h1', '', b, jidTiskNazev);
-    for (const [kat, nazev] of JID_SEKCE) {
-      const rec = j.recepty.filter(x => x.kategorie === kat && !x.nahradni);
-      if (!rec.length) continue;
-      jidEl('h2', '', b, nazev);
-      for (const r of rec) {
-        const box = jidEl('div', 'recept', b);
-        jidEl('h3', '', box, r.nazev);
-        jidEl('div', 'jid-zdroj', box, jidZdroj(r) + (!r.vlastni && r.zdroj && r.zdroj.url ? ' — ' + r.zdroj.url : ''));
-        jidReceptDetail(r, box);
-      }
-    }
-  }
-  document.getElementById('jidTiskNadpis').textContent = co === 'seznam' ? 'Nákupní seznam' : 'Recepty';
-  jidTiskOknoEl.hidden = false;
-  jidTiskOknoEl.scrollTop = 0;
-}
-
-async function jidTiskSdilej() {
-  const html = '<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>' + jidTiskNazev.replace(/</g, '') + '</title><style>'
-    + JID_TISK_CSS + '</style><body>' + jidTiskPapirEl.innerHTML;
-  const nazevSouboru = (jidTiskNazev.startsWith('Nákup') ? 'nakupni-seznam' : 'jidelnicek') + '.html';
-  try {
-    if (navigator.canShare && typeof File === 'function') {
-      const soubor = new File([html], nazevSouboru, { type: 'text/html' });
-      if (navigator.canShare({ files: [soubor] })) { await navigator.share({ files: [soubor], title: jidTiskNazev }); return; }
-    }
-    if (navigator.share) { await navigator.share({ title: jidTiskNazev, text: jidTiskPapirEl.innerText }); return; }
-  } catch (err) {
-    if (err && err.name === 'AbortError') return;   // sdílení zrušené uživatelem
-  }
-  window.print();
-}
-
 if (jidKartaEl) {
-  document.getElementById('jidTiskRecepty').addEventListener('click', () => jidTisk('recepty'));
-  document.getElementById('jidTiskSeznam').addEventListener('click', () => jidTisk('seznam'));
-  document.getElementById('jidTiskZavrit').addEventListener('click', () => { jidTiskOknoEl.hidden = true; });
   document.getElementById('jidReceptZavrit').addEventListener('click', () => { jidReceptOknoEl.hidden = true; jidReceptIndex = null; });
   document.getElementById('jidReceptHotovo').addEventListener('click', () => {
     const r = jidelnicekData && jidelnicekData.recepty[jidReceptIndex];
     if (r) jidHotovo(jidReceptIndex, !r.hotovo);
   });
-  document.getElementById('jidTiskSdilet').addEventListener('click', jidTiskSdilej);
-  document.getElementById('jidTiskTisk').addEventListener('click', () => window.print());
   // Odškrtnutá jídla mizí po 12 h i bez zásahu
   setInterval(() => bezpecne(renderJidelnicek), 5 * 60000);
 }
@@ -14332,12 +14107,13 @@ async function rohlikZnameNacti(znovu = false) {
   bezpecne(renderNakup);
 }
 
-async function pruvodceOtevri(jenPolozka = null) {
+// vse: Krok po kroku — okno ukáže všechny položky, i známé (známý výrobek předvybraný)
+async function pruvodceOtevri(jenPolozka = null, { vse = false } = {}) {
   if (!pruvodceOknoEl) return;
-  if (!(rohlikData && rohlikData.prihlaseno)) { rohlikOtevri(); return; }   // přihlášení je ve starém okně
+  if (!(rohlikData && rohlikData.prihlaseno)) { rohlikOtevri(); return; }   // nejdřív přihlášení
   const polozky = jenPolozka ? [jenPolozka] : (nakupData || []).filter(p => !p.koupeno && !p.kosik).sort((a, b) => a.t - b.t);
   pruvodce = { radky: polozky.map(p => ({ polozka: p, vyber: null, vysledky: null, hledam: false, chyba: '', mnozstvi: 1, preskocit: false, znamy: false })),
-    kroky: [], krok: 0, souhrn: false, jen: !!jenPolozka };
+    kroky: [], krok: 0, souhrn: false, jen: !!jenPolozka || vse };
   pruvodceStavEl.textContent = 'Načítám…';
   pruvodceOknoEl.hidden = false;
   renderPruvodce();
@@ -14396,11 +14172,14 @@ function renderPruvodce() {
     const i = pruvodce.kroky[pruvodce.krok];
     const r = pruvodce.radky[i];
     if (!r) return;
+    // Nahoře položka ze seznamu a kolik je potřeba podle receptu
+    const titul = jidEl('div', 'pruvodce-titul', pruvodceObsahEl);
+    jidEl('span', 'pruvodce-titul-nazev', titul, r.polozka.nazev || r.polozka.text);
+    if (r.polozka.mnozstvi) jidEl('span', 'pruvodce-potreba', titul, r.polozka.mnozstvi);
     jidEl('div', 'pruvodce-krok', pruvodceObsahEl, (pruvodce.krok + 1) + ' / ' + pruvodce.kroky.length);
     const hlava = jidEl('div', 'rohlik-hlava', pruvodceObsahEl);
-    jidEl('span', 'rohlik-nazev', hlava, r.polozka.nazev || r.polozka.text);
+    jidEl('span', 'rohlik-nazev', hlava, 'Kolik kusů z Rohlíku');
     pruvodcePocet(r, hlava);
-    if (r.polozka.mnozstvi) jidEl('div', 'pruvodce-potreba', pruvodceObsahEl, 'Potřeba: ' + r.polozka.mnozstvi);
     const vyrobky = jidEl('div', 'rohlik-vyrobky', pruvodceObsahEl);
     const ukazane = new Set();
     if (r.vyber) { vyrobky.appendChild(rohlikVyrobekEl(r.vyber, true, null)); ukazane.add(String(r.vyber.productId)); }
@@ -14475,7 +14254,8 @@ async function pruvodcePridej() {
 }
 
 if (pruvodceOknoEl) {
-  document.getElementById('rohlikKrokBtn').addEventListener('click', () => pruvodceOtevri());
+  document.getElementById('rohlikKosikBtn').addEventListener('click', () => pruvodceOtevri());
+  document.getElementById('rohlikKrokBtn').addEventListener('click', () => pruvodceOtevri(null, { vse: true }));
   document.getElementById('pruvodceZpet').addEventListener('click', () => {
     if (!pruvodce || (!pruvodce.souhrn && pruvodce.krok === 0) || (pruvodce.souhrn && !pruvodce.kroky.length)) { pruvodceOknoEl.hidden = true; return; }
     pruvodceJdi(pruvodce.souhrn ? pruvodce.kroky.length - 1 : pruvodce.krok - 1);

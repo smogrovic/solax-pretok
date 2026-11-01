@@ -2056,6 +2056,16 @@ app.post('/api/nakup/:id/koupeno', (req, res) => {
 if (typeof scheduleEvery === 'function') {
   scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 5 * 60000, 7 * 60000);
 }
+// Smazat celý seznam (i přeškrtnuté) — tlačítko pod seznamem, s potvrzením v appce
+function nakupVymaz() {
+  const n = state.nakup.length;
+  state.nakup = [];
+  broadcast('nakup', { nakup: state.nakup });
+  return n;
+}
+app.post('/api/nakup/vymazat', (req, res) => {
+  res.json({ ok: true, smazano: nakupVymaz(), nakup: state.nakup });
+});
 app.post('/api/nakup/:id/smazat', (req, res) => {
   if (!nakupSmaz(req.params.id)) return res.status(404).json({ error: 'Položka už na seznamu není.' });
   res.json({ ok: true, nakup: state.nakup });
