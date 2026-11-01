@@ -74,7 +74,12 @@ setTimeout(async () => {
   karta.querySelector('.jid-potvrdit').click();
   await pockej(30);
   check('Přidat na nákupní seznam', dotazy[2] && dotazy[2].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam přidáno 25 položek.');
-  check('  potom bez ✕, náhradních a tlačítka', karta.querySelectorAll('.jid-smazat, details.nahradni, .jid-potvrdit, .jid-napoveda').length, 0);
+  check('  potom bez ✕ a náhradních', karta.querySelectorAll('.jid-smazat, details.nahradni, .jid-napoveda').length, 0);
+  check('  tlačítko zůstane jako „Přidat znovu"', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat znovu na nákupní seznam');
+  odpoved = url => url === '/api/jidelnicek/potvrdit' ? { ok: true, polozek: 27, znovu: true } : { ok: true };
+  karta.querySelector('.jid-potvrdit').click();
+  await pockej(30);
+  check('  znovu přidá', dotazy.slice(-1)[0].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam znovu přidáno 27 položek.');
   jidelnicekData = VZOR; renderJidelnicek();
 
   R.push('\\n2) Seznam: kategorie, množství, víme/nevíme');

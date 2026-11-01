@@ -11802,6 +11802,15 @@ app.post('/api/jidelnicek/recept', (req, res) => {
 // „Přidat na nákupní seznam": suroviny vybraných nových jídel na seznam, náhradní pryč
 app.post('/api/jidelnicek/potvrdit', (req, res) => {
   if (!requireAuth(req, res)) return;
+  const j0 = state.jidelnicek;
+  // Už potvrzený: znovu přidat uložený součet (např. po smazání seznamu); bez duplicit,
+  // protože jidelnicekNaSeznam nejdřív odebere nekoupené položky jídelníčku
+  if (j0 && j0.nakupPotvrzeno !== false) {
+    if (!j0.nakup || !j0.nakup.length) return res.status(400).json({ error: 'V jídelníčku nejsou suroviny k přidání.' });
+    jidelnicekNaSeznam({ nakup: j0.nakup }, Date.now());
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+    return res.json({ ok: true, polozek: j0.nakup.length, znovu: true, jidelnicek: j0 });
+  }
   const j = jidelnicekNepotvrzeny(res);
   if (!j) return;
   const nove = j.recepty.filter(r => !r.nahradni && !r.zMinula);

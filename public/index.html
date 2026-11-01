@@ -13991,7 +13991,7 @@ async function jidPotvrdit() {
   jidZprava('');
   try {
     const d = await jidPost('/api/jidelnicek/potvrdit', {});
-    jidZprava(`Na nákupní seznam přidáno ${d.polozek} položek.`);
+    jidZprava(`Na nákupní seznam ${d.znovu ? 'znovu ' : ''}přidáno ${d.polozek} položek.`);
   } catch (err) { jidZprava(err.message); }
 }
 
@@ -14058,6 +14058,11 @@ function renderJidelnicek() {
     const b = jidEl('button', 'jid-potvrdit', obsah, `🛒 Přidat na nákupní seznam (${pocet} ${pocet === 1 ? 'jídlo' : pocet < 5 && pocet > 1 ? 'jídla' : 'jídel'})`);
     b.type = 'button';
     b.disabled = !pocet;
+    b.addEventListener('click', jidPotvrdit);
+  } else if (j.nakup && j.nakup.length) {
+    // Zůstává i po přidání — kdyby se seznam smazal, jde to přidat znovu
+    const b = jidEl('button', 'jid-potvrdit', obsah, '🛒 Přidat znovu na nákupní seznam');
+    b.type = 'button';
     b.addEventListener('click', jidPotvrdit);
   }
   if (jidReceptOknoEl && !jidReceptOknoEl.hidden) renderJidReceptOkno();
