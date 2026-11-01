@@ -1962,6 +1962,10 @@ function nakupObnov(b, now = Date.now()) {
     const p = { id: x.id, text: x.text.trim().slice(0, NAKUP_TEXT_MAX), t: x.t };
     if (Number.isFinite(x.koupeno) && x.koupeno > 0 && x.koupeno <= now) p.koupeno = x.koupeno;
     if (Number.isFinite(x.kosik) && x.kosik > 0 && x.kosik <= now) p.kosik = x.kosik;
+    const v = nakupVyberOver(x.vyber);
+    if (v) p.vyber = v;
+    if (Number.isInteger(x.kusu) && x.kusu >= 1 && x.kusu <= 20) p.kusu = x.kusu;
+    if (typeof x.vyprodano === 'string') p.vyprodano = x.vyprodano.slice(0, 120);
     // Položky z jídelníčku nesou název bez množství (klíč pro Rohlík), množství a kategorii
     if (x.zdroj === 'jidelnicek' && typeof x.nazev === 'string' && x.nazev.trim()) {
       Object.assign(p, { zdroj: 'jidelnicek', nazev: x.nazev.trim().slice(0, 80),
@@ -2056,6 +2060,36 @@ app.post('/api/nakup/:id/koupeno', (req, res) => {
 if (typeof scheduleEvery === 'function') {
   scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 5 * 60000, 7 * 60000);
 }
+// Rozpracovaný výběr výrobku z Rohlíku u položky seznamu (průvodce košíkem). Drží se,
+// i když se okno zavře; do trvalé paměti výrobků jde až po přidání do košíku.
+function nakupVyberOver(v) {
+  if (v === null) return null;
+  if (!v || typeof v !== 'object') return undefined;
+  const id = v.productId;
+  if (!(typeof id === 'number' || (typeof id === 'string' && id.length && id.length <= 40))) return undefined;
+  const text = (x, n) => (typeof x === 'string' ? x.slice(0, n) : null);
+  return { productId: id, nazev: text(v.nazev, 120) || '', cena: typeof v.cena === 'number' && v.cena >= 0 ? v.cena : null,
+    obrazek: typeof v.obrazek === 'string' && /^https:\/\//.test(v.obrazek) && v.obrazek.length <= 500 ? v.obrazek : null,
+    jednotka: text(v.jednotka, 30) };
+}
+function nakupVyber(id, b) {
+  const x = state.nakup.find(y => y.id === id);
+  if (!x) return { kod: 404, chyba: 'Položka už na seznamu není.' };
+  const v = nakupVyberOver(b && b.vyber);
+  if (v === undefined) return { kod: 400, chyba: 'Neplatný výrobek.' };
+  if (v) { x.vyber = v; delete x.vyprodano; } else delete x.vyber;
+  const k = b && b.kusu;
+  if (Number.isInteger(k) && k >= 1 && k <= 20) x.kusu = k;
+  else if (k !== undefined) return { kod: 400, chyba: 'Počet kusů 1–20.' };
+  broadcast('nakup', { nakup: state.nakup });
+  return { kod: 200 };
+}
+app.post('/api/nakup/:id/vyber', (req, res) => {
+  const r = nakupVyber(req.params.id, req.body);
+  if (r.chyba) return res.status(r.kod).json({ error: r.chyba });
+  res.json({ ok: true, nakup: state.nakup });
+});
+
 // Smazat celý seznam (i přeškrtnuté) — tlačítko pod seznamem, s potvrzením v appce
 function nakupVymaz() {
   const n = state.nakup.length;
@@ -12999,22 +13033,37 @@ async function rohlikWebFotky(vyrobky) {
   } catch {}
 }
 
+// Vyprodaný / nedostupný výrobek: Rohlík odpoví chybou s kódem product_not_available
+const rohlikNedostupny = r => {
+  const zpravy = (r && r.j && Array.isArray(r.j.messages)) ? r.j.messages : [];
+  return zpravy.some(m => m && (/not_available|sold_?out|out_of_stock/i.test(String(m.messageCode || ''))
+    || /vyprod|není dostupn|neni dostupn/i.test(String(m.content || ''))));
+};
+
+// Položku po položce; vyprodané se přeskočí (vrátí se v seznamu), jiná chyba zastaví
 async function rohlikWebKosik(polozky) {
+  const nedostupne = [], pridane = [];
   for (const p of polozky) {
     const r = await rohlikWeb('/services/frontend-service/v2/cart', { method: 'POST', body: JSON.stringify({
       actionId: null, productId: Number(p.productId), quantity: p.mnozstvi, recipeId: null, source: 'true:Shopping Lists' }) });
-    if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) throw rohlikWebChyba(r, 'košík');
+    if (r.status >= 300 || (r.j && typeof r.j.status === 'number' && r.j.status >= 300)) {
+      if (rohlikNedostupny(r)) { nedostupne.push(p); continue; }
+      throw rohlikWebChyba(r, 'košík');
+    }
+    pridane.push(p);
   }
+  if (!pridane.length) return { nedostupne };
   // Ověření: přidané výrobky musí v košíku na webu opravdu být
   const k = await rohlikWeb('/services/frontend-service/v2/cart');
   if (k.status >= 300 || !k.j) throw rohlikWebChyba(k, 'kontrola košíku');
   const vKosiku = rohlikIdVKosiku(k.j);
-  const chybi = polozky.filter(p => !vKosiku.has(String(p.productId)));
+  const chybi = pridane.filter(p => !vKosiku.has(String(p.productId)));
   if (chybi.length) {
     rohlikWebChyba(k, 'kontrola košíku');
     throw new RohlikChyba('Rohlík přidání nepotvrdil — košík na webu je pořád bez: '
       + chybi.map(p => p.nazev || p.productId).join(', ').slice(0, 120) + ' (viz diagnostika).');
   }
+  return { nedostupne };
 }
 
 // Všechna čísla výrobků v odpovědi košíku (klíče i pole productId/id)
@@ -13170,22 +13219,31 @@ app.post('/api/rohlik/kosik', async (req, res) => {
   const polozky = vstup.filter(p => p && (typeof p.productId === 'number' || (typeof p.productId === 'string' && p.productId.length <= 40)))
     .map(p => ({ ...p, mnozstvi: Number.isInteger(p.mnozstvi) && p.mnozstvi >= 1 && p.mnozstvi <= 20 ? p.mnozstvi : 1 }));
   if (!polozky.length) return res.status(400).json({ error: 'Nic k přidání.' });
+  let vysledek;
   try {
-    await rohlikDoKosiku(polozky);
+    vysledek = await rohlikDoKosiku(polozky);
   } catch (err) { return rohlikOdpovezChybou(res, err); }
+  // Vyprodané zůstanou na seznamu (bez rozpracovaného výběru, s poznámkou), ať se vybere jiný
+  const nedostupne = (vysledek && vysledek.nedostupne) || [];
+  const vyprodane = new Set(nedostupne.map(p => String(p.productId)));
   // Co je v košíku, ze seznamu zmizí — seznam je pak „co ještě zbývá"
   const ted = Date.now();
   const odeslane = new Set();
   for (const p of polozky) {
     const n = state.nakup.find(x => x.id === p.nakupId);
-    if (n) {
-      odeslane.add(n.id);
-      rohlikZapamatuj(n.nazev || n.text, p, ted);
+    if (!n) continue;
+    if (vyprodane.has(String(p.productId))) {
+      delete n.vyber;
+      n.vyprodano = String(p.nazev || p.productId).slice(0, 120);
+      continue;
     }
+    odeslane.add(n.id);
+    rohlikZapamatuj(n.nazev || n.text, p, ted);
   }
   state.nakup = state.nakup.filter(x => !odeslane.has(x.id));
   broadcast('nakup', { nakup: state.nakup });
-  res.json({ ok: true, pridano: polozky.length, nakup: state.nakup });
+  res.json({ ok: true, pridano: polozky.length - nedostupne.length,
+    nedostupne: nedostupne.map(p => ({ nakupId: p.nakupId || null, nazev: p.nazev || String(p.productId) })), nakup: state.nakup });
 });
 
 // Adresa, kam se prohlížeč po přihlášení u Rohlíku vrátí

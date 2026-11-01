@@ -95,7 +95,7 @@ function build(f, { prihlasen = true, odemceno = true, env = {} } = {}) {
 // Falešný web Rohlíku (neveřejné rozhraní): přihlášení e-mailem → cookie, hledání, košík
 const EMAIL = 'jana.test@example.cz', HESLO = 'Heslo-Tajne-987';
 function falesnyWeb({ schvaleni = false, nedokonceno = false, html = false, vyprsiPo = 0, spatneHeslo = false, kosikChyba = false, neuklada = false, bezCookie = false,
-    produkty = null, detaily = null } = {}) {
+    produkty = null, detaily = null, vyprodane = [] } = {}) {
   const log = [];
   const kosik = {};
   const zar = { schvaleno: false };
@@ -133,6 +133,8 @@ function falesnyWeb({ schvaleni = false, nedokonceno = false, html = false, vypr
     if (u.pathname === '/services/frontend-service/v2/cart' && opts.method === 'POST') {
       if (kosikChyba) return odpovez(400, { status: 400, messages: [{ content: 'Produkt není skladem' }] });
       const t = JSON.parse(opts.body);
+      if (vyprodane.includes(t.productId)) return odpovez(400, { status: 400, messages: [{ context: 'global', type: 'error',
+        content: 'Produkt "Vejce M" je v tuto chvíli vyprodán.', messageCode: 'cartService.product_not_available_exception' }] });
       if (!neuklada) kosik[t.productId] = { productId: t.productId, quantity: t.quantity };
       return odpovez(200, { status: 200, data: {} });
     }
@@ -521,6 +523,21 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     await c.volej('POST /api/rohlik/nauceno/restore', { body: { nauceno: b.state.rohlikNauceno } });
     check('záloha', JSON.stringify(c.state.rohlikNauceno), JSON.stringify(b.state.rohlikNauceno));
     check('v záloze i snapshotu', SRC.includes("'/api/rohlik/nauceno/restore',") && SRC.includes("'/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno }"), true);
+  }
+
+  nadpis('Vyprodané výrobky');
+  {
+    const h = build(falesnyWeb({ vyprodane: [14] }), { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    h.state.nakup.push({ id: 'n_v0000001', text: 'Vejce', t: 1, vyber: { productId: 14, nazev: 'Vejce M' } }, { id: 'n_v0000002', text: 'Mléko', t: 2 });
+    const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [
+      { nakupId: 'n_v0000001', productId: 14, nazev: 'Vejce M', mnozstvi: 1 }, { nakupId: 'n_v0000002', productId: 1349777, nazev: 'Kunín Mléko', mnozstvi: 1 }] } });
+    check('vyprodaná se přeskočí, ostatní se přidají', r.kod + ' ' + r.out.pridano + ' ' + JSON.stringify(r.out.nedostupne), '200 1 [{"nakupId":"n_v0000001","nazev":"Vejce M"}]');
+    check('  vyprodaná zůstane na seznamu bez výběru, s poznámkou', JSON.stringify(h.state.nakup.map(x => [x.id, x.vyprodano, x.vyber || null])), JSON.stringify([['n_v0000001', 'Vejce M', null]]));
+    check('  vyprodaná se nezapamatuje, přidaná ano', !!h.state.rohlikVyber.vejce + ' ' + !!h.state.rohlikVyber.mleko, 'false true');
+    const v = build(falesnyWeb({ vyprodane: [14] }), { prihlasen: false, env: { ROHLIK_EMAIL: EMAIL, ROHLIK_HESLO: HESLO } });
+    v.state.nakup.push({ id: 'n_v0000003', text: 'Vejce', t: 1 });
+    const r2 = await v.volej('POST /api/rohlik/kosik', { body: { polozky: [{ nakupId: 'n_v0000003', productId: 14, nazev: 'Vejce M', mnozstvi: 1 }] } });
+    check('  jen vyprodané: nic se nepřidá, bez chyby', r2.kod + ' ' + r2.out.pridano + ' ' + r2.out.nedostupne.length, '200 0 1');
   }
 
   check('tokeny se nikde nepíšou do logu', /addLog\([^)]*rohlikOauth|console\.\w+\([^)]*rohlikOauth/.test(SRC), false);

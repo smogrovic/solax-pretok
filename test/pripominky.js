@@ -298,6 +298,22 @@ nadpis('N) Nákupní seznam');
     v.api.nakupPridej({ text: 'a' }); v.api.nakupPridej({ text: 'b' });
     v.api.nakupKoupeno(v.state.nakup[0].id, true);
     const r = v.zavolej('/api/nakup/vymazat', {}, {});
+    const w = build();
+    w.api.nakupPridej({ text: 'Vejce' });
+    const wid = w.state.nakup[0].id;
+    check('rozpracovaný výběr se uloží', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M', cena: 99.9, obrazek: 'http://x/y.jpg' }, kusu: 2 }).status
+      + ' ' + JSON.stringify([w.state.nakup[0].vyber.productId, w.state.nakup[0].vyber.obrazek, w.state.nakup[0].kusu]), '200 [14,null,2]');
+    check('  neplatný výrobek 400', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { nazev: 'bez id' } }).status, 400);
+    check('  kusů jen 1–20', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 1 }, kusu: 50 }).status, 400);
+    check('  neznámá položka 404', w.zavolej('/api/nakup/:id/vyber', { id: 'n_xxxxxxxx' }, { vyber: null }).status, 404);
+    w.state.nakup[0].vyprodano = 'Vejce M';
+    w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 15, nazev: 'Vejce L' } });
+    check('  nový výběr zruší „vyprodáno"', 'vyprodano' in w.state.nakup[0], false);
+    const z = build();
+    z.api.nakupObnov(JSON.parse(JSON.stringify({ nakup: w.state.nakup })));
+    check('  záloha výběr ponechá', z.state.nakup[0].vyber.productId + ' ' + z.state.nakup[0].kusu, '15 2');
+    w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: null });
+    check('  smazání výběru', 'vyber' in w.state.nakup[0], false);
     check('smazat celý seznam (i přeškrtnuté)', r.status + ' ' + r.json.smazano + ' ' + v.state.nakup.length, '200 2 0');
     check('  appka se dozví', v.broadcasts.slice(-1)[0] && (v.broadcasts.slice(-1)[0].typ || v.broadcasts.slice(-1)[0][0] || JSON.stringify(v.broadcasts.slice(-1)[0])).toString().includes('nakup'), true);
   }

@@ -18,6 +18,7 @@ const check = (jmeno, got, want) => {
 const VZOR = ${JSON.stringify(VZOR)};
 let dotazy = [];
 let odpoved = () => ({ ok: true });
+let odpovedPuv = null;
 window.fetch = async (url, init) => {
   const telo = init && init.body ? JSON.parse(init.body) : null;
   dotazy.push({ url, telo });
@@ -166,6 +167,58 @@ setTimeout(async () => {
   for (let k = 0; k < 3; k++) { obsah.querySelector('.pruvodce-preskocit').click(); await pockej(30); }
   check('  známá mozzarella je předvybraná', obsah.querySelector('.pruvodce-titul').textContent + ' ' + obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Galbani'), 'Mozzarella250 g true');
   document.getElementById('pruvodceZavrit').click();
+
+  R.push('\\n3c) Pamatování výběru, Nekupovat, vyprodané');
+  const nakupPred = nakupData;
+  nakupData = [
+    { id: 'n_ruc00001', text: 'Toaletní papír', t: 1 },
+    { id: 'n_jid00001', text: 'Tvaroh 500 g', t: 2, nazev: 'Tvaroh', mnozstvi: '500 g', kategorie: 'Mléčné výrobky a sýry', zdroj: 'jidelnicek' },
+    { id: 'n_jid00002', text: 'Kuřecí prsa 600 g', t: 3, nazev: 'Kuřecí prsa', mnozstvi: '600 g', kategorie: 'Maso, ryby, tofu a další bílkoviny', zdroj: 'jidelnicek' }
+  ];
+  renderNakup(); await pockej(30);
+  dotazy = [];
+  document.getElementById('rohlikKosikBtn').click();
+  await pockej(80);
+  obsah.querySelectorAll('.rohlik-vyrobek')[1].click();
+  obsah.querySelectorAll('.rohlik-mnozstvi button')[1].click();
+  await pockej(30);
+  const ulozeni = dotazy.filter(d => d.url === '/api/nakup/n_ruc00001/vyber');
+  check('výběr i počet se hned uloží na server', ulozeni.length + ' ' + JSON.stringify(ulozeni.pop().telo.kusu), '2 2');
+  document.getElementById('pruvodceZavrit').click();
+  check('  na seznamu značka vybráno', document.querySelector('#nakupSeznam li[data-id="n_ruc00001"] .nakup-znacka').textContent, 'vybráno');
+  document.getElementById('rohlikKosikBtn').click();
+  await pockej(80);
+  check('po znovuotevření rozpracovaný výběr nevyskočí (2 kroky místo 3)', obsah.querySelector('.pruvodce-krok').textContent + ' ' + obsah.querySelector('.pruvodce-titul-nazev').textContent, '1 / 2 Tvaroh');
+  document.getElementById('pruvodceZavrit').click();
+  document.getElementById('rohlikKrokBtn').click();
+  await pockej(80);
+  check('  v Krok po kroku je předvybraný se stejným počtem', obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Toaletní papír B') + ' ' + obsah.querySelector('.rohlik-pocet').textContent, 'true 2×');
+  document.getElementById('pruvodceDal').click(); await pockej(40);
+  dotazy = [];
+  obsah.querySelector('.pruvodce-nekupovat').click(); await pockej(40);
+  check('Nekupovat smaže ze seznamu a jde dál', (dotazy[0] && dotazy[0].url) + ' ' + nakupData.some(x => x.id === 'n_jid00001') + ' ' + obsah.querySelector('.pruvodce-titul-nazev').textContent,
+    '/api/nakup/n_jid00001/smazat false Kuřecí prsa');
+  obsah.querySelectorAll('.rohlik-vyrobek')[0].click();
+  document.getElementById('pruvodceDal').click(); await pockej(30);
+  check('  v souhrnu smazaná není', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_ruc00001,n_jid00002');
+  // Košík vrátí vyprodaný výrobek → průvodce skočí na jeho výběr
+  odpovedPuv = odpoved;
+  odpoved = (url, telo) => url === '/api/rohlik/kosik'
+    ? { ok: true, pridano: 0, nedostupne: [{ nakupId: 'n_ruc00001', nazev: 'Toaletní papír B' }],
+        nakup: nakupData.filter(x => x.id === 'n_ruc00001').map(x => ({ ...x, vyber: undefined, vyprodano: 'Toaletní papír B' })) }
+    : odpovedPuv(url, telo);
+  obsah.querySelector('.pruvodce-radek[data-id="n_jid00002"] .pruvodce-zmenit:last-child').click(); await pockej(30);
+  check('nekupovat v souhrnu', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_ruc00001');
+  document.getElementById('pruvodceDal').click(); await pockej(80);
+  check('vyprodané: okno skočí na výběr jiného', obsah.querySelector('.pruvodce-titul-nazev').textContent + ' | ' + obsah.querySelector('.pruvodce-vyprodano').textContent,
+    'Toaletní papír | ⚠️ Toaletní papír B je vyprodaný — vyber jiný');
+  check('  vyprodaný výrobek se nenabízí, nic předvybráno', [...obsah.querySelectorAll('.rohlik-vyrobek')].map(v => v.textContent).join('|').includes('Toaletní papír B') + ' ' + !!obsah.querySelector('.rohlik-vyrobek.vybrany'), 'false false');
+  check('  hláška', document.getElementById('pruvodceStav').textContent, 'Přidáno 0 položek. Vyprodané: Toaletní papír B — vyber jiný.');
+  odpoved = odpovedPuv;
+  document.getElementById('pruvodceZavrit').click();
+  renderNakup(); await pockej(20);
+  check('na seznamu značka vyprodáno', document.querySelector('#nakupSeznam li[data-id="n_ruc00001"] .nakup-znacka').textContent, 'vyprodáno');
+  nakupData = nakupPred;
 
   R.push('\\n4) „jiný" u známé položky');
   nakupData = nakupData.map(p => ({ ...p, kosik: undefined }));
