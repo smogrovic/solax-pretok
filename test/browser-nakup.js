@@ -169,6 +169,7 @@ setTimeout(async () => {
   renderNakup();
   check('s Rohlíkem tři tlačítka', [...rtl.querySelectorAll('button')].filter(vidi).map(b => b.textContent).join(' | '), '🗑️ Smazat | 🛒 Přidat do košíku | 🧭 Krok po kroku');
   check('  vedle sebe', smazBtn.getBoundingClientRect().top === krokBtn.getBoundingClientRect().top, true);
+  check('  vejdou se do karty', krokBtn.getBoundingClientRect().right <= rtl.getBoundingClientRect().right + 1 && smazBtn.getBoundingClientRect().width < rtl.getBoundingClientRect().width / 3, true);
   nakupData = [{ id: 'n_bbbb2222', text: 'chleba', t: 2, koupeno: Date.now() }];
   renderNakup();
   check('jen přeškrtnuté: Smazat ano, košík ne', vidi(smazBtn) + ' ' + vidi(kosBtn), 'true false');
