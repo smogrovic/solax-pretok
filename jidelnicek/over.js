@@ -19,7 +19,10 @@ function zkontroluj(plan, historie = [], zbyva = []) {
   if (!plan || typeof plan !== 'object') return { chyby: ['Soubor neobsahuje jídelníček.'], varovani };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(plan.tyden || '')) chyby.push('tyden musí být datum pondělí (YYYY-MM-DD).');
   else if (new Date(plan.tyden + 'T12:00:00Z').getUTCDay() !== 1) chyby.push(`tyden ${plan.tyden} není pondělí.`);
-  const recepty = Array.isArray(plan.recepty) ? plan.recepty : [];
+  // Náhradní recepty (nahradni: true) se do skladby týdne ani do nákupu nepočítají
+  const vsechny = Array.isArray(plan.recepty) ? plan.recepty : [];
+  const recepty = vsechny.filter(r => r.nahradni !== true);
+  const nahradni = vsechny.filter(r => r.nahradni === true);
   const s = (r, x) => Array.isArray(r.stitky) && r.stitky.includes(x);
 
   // Skladba týdne
@@ -48,17 +51,26 @@ function zkontroluj(plan, historie = [], zbyva = []) {
   if (minule && minule.ryba && ryby) chyby.push('Ryba byla minulý týden — tento týden žádná.');
   if (minule && !minule.ryba && ryby !== 1) chyby.push(`Minulý týden ryba nebyla — tento týden má být právě jedna (je ${ryby}).`);
   if (!minule && ryby > 1) chyby.push('Ryba nejvýš jednou.');
-  for (const r of recepty.filter(r => r.typ === 'pracovni_snidane')) {
+  // Náhradní: 2 hlavní jídla, 1 pečení, 1 snídaně
+  for (const [popis, n, f] of [['hlavní jídla (vecere pracovni/vikend)', 2, r => r.kategorie === 'vecere' && (r.typ === 'pracovni' || r.typ === 'vikend')],
+    ['pečení', 1, r => r.kategorie === 'peceni'], ['snídaně', 1, r => r.kategorie === 'snidane']]) {
+    const pocet = nahradni.filter(f).length;
+    if (pocet !== n) chyby.push(`Náhradní ${popis}: má být ${n}, je ${pocet}.`);
+  }
+  if (nahradni.length !== 4) chyby.push(`Náhradních receptů má být 4, je ${nahradni.length}.`);
+  for (const r of vsechny.filter(r => r.typ === 'pracovni_snidane')) {
     if ((r.suroviny || []).some(x => /vejce|vajic/.test(klic(x.nazev)))) chyby.push(`${r.nazev}: pracovní snídaně je bez vajec.`);
   }
   // Opakování z minulých týdnů
   const dřív = new Set((historie || []).flatMap(h => (h.nazvy || []).map(klic)));
   const zustava = new Set((zbyva || []).map(klic));
-  for (const r of recepty) if (zustava.has(klic(r.nazev))) chyby.push(`${r.nazev}: v jídelníčku už zůstává z minula — vyber jiné.`);
-  for (const r of recepty) if (!zustava.has(klic(r.nazev)) && dřív.has(klic(r.nazev))) varovani.push(`${r.nazev}: bylo v některém z minulých týdnů.`);
+  for (const r of vsechny) if (zustava.has(klic(r.nazev))) chyby.push(`${r.nazev}: v jídelníčku už zůstává z minula — vyber jiné.`);
+  const nazvy = vsechny.map(r => klic(r.nazev));
+  if (new Set(nazvy).size !== nazvy.length) chyby.push('Některé jídlo je v jídelníčku dvakrát (i mezi náhradními).');
+  for (const r of vsechny) if (!zustava.has(klic(r.nazev)) && dřív.has(klic(r.nazev))) varovani.push(`${r.nazev}: bylo v některém z minulých týdnů.`);
 
-  // Zdroje a údaje u receptů
-  for (const r of recepty) {
+  // Zdroje a údaje u receptů (i náhradních)
+  for (const r of vsechny) {
     const kde = r.nazev || '(bez názvu)';
     if (r.vlastni !== true) {
       let host = '';
@@ -67,6 +79,8 @@ function zkontroluj(plan, historie = [], zbyva = []) {
     }
     if (!Array.isArray(r.suroviny) || !r.suroviny.length) chyby.push(`${kde}: chybí suroviny.`);
     for (const x of r.suroviny || []) if (!DOMA.includes(klic(x.nazev)) && (!x.nazev || !Number.isFinite(x.mnozstvi) || !x.jednotka)) chyby.push(`${kde}: surovina „${x.nazev || '?'}" bez přesného množství a jednotky.`);
+    // Kategorie u suroviny: po aktivaci náhradního jídla z ní appka sečte nákup
+    for (const x of r.suroviny || []) if (!DOMA.includes(klic(x.nazev)) && !NAKUP_KATEGORIE.includes(x.kategorie)) chyby.push(`${kde}: surovina „${x.nazev || '?'}" bez platné kategorie.`);
     if (!Array.isArray(r.postup) || !r.postup.length) chyby.push(`${kde}: chybí postup.`);
     if (r.typ !== 'bez_vareni') {
       const v = r.vyziva || {};

@@ -53,6 +53,30 @@ setTimeout(async () => {
   jidelnicekData = VZOR; renderJidelnicek();
   check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
 
+  R.push('\\n1b) Výběr před nákupem');
+  jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), nakupPotvrzeno: false }; renderJidelnicek();
+  check('nápověda nahoře', karta.querySelector('#jidObsah').firstElementChild.classList.contains('jid-napoveda'), true);
+  check('✕ u aktivních (10), náhradní sekce se 4', karta.querySelectorAll('.jid-smazat').length + ' ' + karta.querySelectorAll('details.nahradni').length, '10 4');
+  check('  náhradní dole, šedé, s Aktivovat', [...karta.querySelectorAll('.jid-sekce')].pop().textContent + ' ' + getComputedStyle(karta.querySelector('details.nahradni .jid-hlava')).opacity + ' ' + karta.querySelectorAll('.jid-aktivovat').length, 'Náhradní jídla 0.5 4');
+  check('  náhradní bez odškrtávání', karta.querySelector('details.nahradni .nakup-odskrt'), null);
+  check('tlačítko na seznam', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (10 jídel)');
+  dotazy = [];
+  odpoved = (url, telo) => url === '/api/jidelnicek/recept' ? { ok: true } : url === '/api/jidelnicek/potvrdit' ? { ok: true, polozek: 25, jidelnicek: { ...VZOR, recepty: VZOR.recepty.filter(r => !r.nahradni), nakupPotvrzeno: true } } : { ok: true };
+  karta.querySelector('details.nahradni .jid-aktivovat').click();
+  await pockej(30);
+  check('Aktivovat pošle akci s názvem', JSON.stringify(dotazy[0] && dotazy[0].telo), JSON.stringify({ index: 10, nazev: 'Krůtí rizoto s hráškem', akce: 'aktivovat' }));
+  karta.querySelector('.jid-smazat').click();
+  await pockej(30);
+  check('✕ se nejdřív zeptá', !document.getElementById('potvrzOkno') || !document.getElementById('potvrzOkno').hidden, true);
+  potvrzKonec(true);
+  await pockej(30);
+  check('  po potvrzení smaže', JSON.stringify(dotazy[1] && dotazy[1].telo), JSON.stringify({ index: 0, nazev: VZOR.recepty[0].nazev, akce: 'smazat' }));
+  karta.querySelector('.jid-potvrdit').click();
+  await pockej(30);
+  check('Přidat na nákupní seznam', dotazy[2] && dotazy[2].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam přidáno 25 položek.');
+  check('  potom bez ✕, náhradních a tlačítka', karta.querySelectorAll('.jid-smazat, details.nahradni, .jid-potvrdit, .jid-napoveda').length, 0);
+  jidelnicekData = VZOR; renderJidelnicek();
+
   R.push('\\n2) Seznam: kategorie, množství, víme/nevíme');
   nakupData = [
     { id: 'n_ruc00001', text: 'Toaletní papír', t: 1 },

@@ -40,7 +40,8 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
     "upraveno": "Vlastní úprava: … (nebo null)",
     "porce": "4 + 1 do krabičky",
     "cas": "30 min",
-    "suroviny": [{ "nazev": "Rýže", "mnozstvi": 300, "jednotka": "g", "poznamka": "suchá hmotnost" }],
+    "suroviny": [{ "nazev": "Rýže", "mnozstvi": 300, "jednotka": "g", "poznamka": "suchá hmotnost", "kategorie": "Pečivo a přílohy" }],
+    "nahradni": false,
     "postup": ["…", "…"],
     "predem": "…", "skladovani": "…", "ohrev": "…", "forma": "jen u pečení, např. plech 30 × 40 cm",
     "vyziva": { "kcal": 0, "bilkoviny": 0, "sacharidy": 0, "tuky": 0 },
@@ -56,6 +57,12 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 - `tyden` je pondělí příštího týdne (pražský čas).
 - Receptů je přesně 10: 4× `pracovni`, 1× `vikend`, 1× `bez_vareni` (vše `vecere`), 1× `peceni`,
   2× `pracovni_snidane` a 1× `vikend_snidane` (obě `snidane`). Pizza se nepíše.
+- **Náhradní recepty navíc:** přidej 4 recepty s `"nahradni": true` — 2 hlavní jídla (`vecere`, typ
+  `pracovni` nebo `vikend`), 1 `peceni` a 1 `snidane`. Platí pro ně stejná pravidla (povolené weby, ověřené
+  odkazy, gramáže, výživa), nesmí opakovat ostatní jídla ani `zbyva`. Do skladby týdne ani do `nakup` se
+  nepočítají — v appce jsou šedé dole a jdou aktivovat místo něčeho, co se nelíbí.
+- Každá surovina má `kategorie` (jedna z 8 kategorií nákupu, sekce 13 promptu; sůl a pepř nemusí).
+  Appka z nich po potvrzení výběru sama sečte nákup, i za aktivovaná náhradní jídla.
 - `stitky`: jen ty, které platí. `maso` jen u hlavních jídel s masem (přesně dvě),
   `vegan` u plně veganského hlavního jídla, `mozzarella`/`cottage`/`tvaroh` u receptů, kde jsou.
 - `mnozstvi` je číslo, jednotka `g`, `kg`, `ml`, `l`, `ks`, `lžíce`, `lžička`, `balení`…

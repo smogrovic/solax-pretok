@@ -37,6 +37,28 @@ nadpis('Skladba týdne');
   check('týden musí začínat pondělím', chyby(pon).includes('tyden 2026-11-03 není pondělí.'), true);
 }
 
+nadpis('Náhradní jídla');
+{
+  const p = kopie();
+  p.recepty = p.recepty.filter(r => !(r.nahradni && r.kategorie === 'peceni'));
+  check('chybí náhradní pečení', chyby(p).includes('Náhradní pečení: má být 1, je 0.'), true);
+  const q = kopie();
+  q.recepty.find(r => r.nahradni && r.kategorie === 'vecere').stitky.push('ryba');
+  check('ryba v náhradním se do týdne nepočítá', chyby(q).join(), '');
+  const m = kopie();
+  m.recepty.filter(r => r.nahradni).forEach(r => { r.stitky.push('maso'); });
+  check('  ani maso', chyby(m).some(c => c.startsWith('Hlavní jídla s masem')), false);
+  const n = kopie();
+  n.nakup.push({ kategorie: 'Ovoce', nazev: 'Hrušky', mnozstvi: 500, jednotka: 'g' });
+  check('suroviny náhradního do nákupu nepatří', chyby(n).includes('Nákup: hrusky není v žádném receptu.'), true);
+  const k = kopie();
+  delete k.recepty.find(r => r.nahradni).suroviny[0].kategorie;
+  check('surovina bez kategorie', chyby(k).some(c => c.includes('bez platné kategorie')), true);
+  const d = kopie();
+  d.recepty.find(r => r.nahradni).nazev = d.recepty[0].nazev;
+  check('náhradní nesmí opakovat aktivní', chyby(d).includes('Některé jídlo je v jídelníčku dvakrát (i mezi náhradními).'), true);
+}
+
 nadpis('Ryba jednou za 14 dní');
 check('minulý týden ryba → teď ne', chyby(kopie(), [{ tyden: '2026-10-26', ryba: true, nazvy: [] }]).includes('Ryba byla minulý týden — tento týden žádná.'), true);
 {

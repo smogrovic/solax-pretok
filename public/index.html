@@ -1608,6 +1608,13 @@
   .jid-nazev{font-size:15px;font-weight:700;color:var(--navy);}
   .jid-typ{font-size:11px;color:var(--grey-text);}
   .jid-makra{font-size:11px;color:var(--grey-text);opacity:0.85;}
+  .jid-napoveda{font-size:12px;color:var(--grey-text);background:rgba(44,62,80,0.05);border-radius:10px;padding:8px 10px;margin-top:8px;}
+  .jid-recept.nahradni .jid-hlava{opacity:0.5;}
+  .jid-sekce-nahradni{color:var(--grey-text);}
+  .jid-smazat{flex:0 0 auto;width:30px;height:30px;border:none;border-radius:50%;background:rgba(44,62,80,0.07);color:var(--grey-text);font-size:14px;cursor:pointer;}
+  .jid-aktivovat{flex:0 0 auto;border:none;border-radius:12px;padding:7px 12px;font:inherit;font-size:12px;font-weight:700;background:#e3f1ff;color:#0b4a7f;cursor:pointer;opacity:1;}
+  .jid-potvrdit{width:100%;margin-top:14px;border:none;border-radius:14px;padding:12px;font:inherit;font-size:15px;font-weight:800;background:#2e9d57;color:#fff;cursor:pointer;}
+  .jid-potvrdit:disabled{opacity:0.4;}
   .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
   .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
   a.jid-zdroj{color:#1b6fb8;}
@@ -3654,6 +3661,7 @@
         <div class="graph-title">🍽️ Jídelníček na týden</div>
         <div class="jid-tyden" id="jidTyden"></div>
         <div id="jidObsah"></div>
+        <div class="rezim-hint" id="jidZprava"></div>
         <div class="jid-tisk">
           <button class="sek-btn" id="jidTiskRecepty" type="button">🖨️ Recepty</button>
           <button class="sek-btn" id="jidTiskSeznam" type="button">🖨️ Nákupní seznam</button>
@@ -14118,6 +14126,27 @@ async function jidHotovo(index, hotovo) {
   } catch { /* SSE to srovná */ }
 }
 
+async function jidPost(cesta, telo) {
+  const res = await fetch(cesta, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(telo) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
+  if (data.jidelnicek) { jidelnicekData = data.jidelnicek; renderJidelnicek(); }
+  return data;
+}
+const jidZprava = t => { const e = document.getElementById('jidZprava'); if (e) e.textContent = t; };
+async function jidReceptAkce(index, nazev, akce) {
+  jidZprava('');
+  try { await jidPost('/api/jidelnicek/recept', { index, nazev, akce }); }
+  catch (err) { jidZprava(err.message); }
+}
+async function jidPotvrdit() {
+  jidZprava('');
+  try {
+    const d = await jidPost('/api/jidelnicek/potvrdit', {});
+    jidZprava(`Na nákupní seznam přidáno ${d.polozek} položek.`);
+  } catch (err) { jidZprava(err.message); }
+}
+
 function renderJidelnicek() {
   if (!jidKartaEl) return;
   const j = jidelnicekData;
@@ -14130,32 +14159,58 @@ function renderJidelnicek() {
   const d = new Date(j.tyden + 'T12:00:00');
   document.getElementById('jidTyden').textContent = 'Týden od ' + d.getDate() + '. ' + (d.getMonth() + 1) + '.'
     + (j.vytvoreno ? ' · vytvořeno ' + new Date(j.vytvoreno).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }) : '');
+  // Nový jídelníček čeká na výběr: ✕ smaže jídlo, náhradní jdou aktivovat, pak „Přidat na nákupní seznam"
+  const vyber = j.nakupPotvrzeno === false;
+  if (vyber) jidEl('div', 'jid-napoveda', obsah, 'Uprav výběr: ✕ smaže jídlo, náhradní jde aktivovat. Pak přidej na nákupní seznam.');
+  const radek = (r, index, rodic) => {
+    const det = jidEl('details', 'jid-recept' + (r.hotovo ? ' hotovo' : '') + (r.nahradni ? ' nahradni' : ''), rodic);
+    det.dataset.index = index;
+    if (otevrene.has(String(index))) det.open = true;
+    const sum = jidEl('summary', '', det);
+    // iPad: recept přes celou obrazovku (zůstane, dokud se nezavře); iPhone: rozbalí se v kartě
+    sum.addEventListener('click', ev => { if (sirokyDisplej()) { ev.preventDefault(); jidReceptOtevri(index); } });
+    const tlac = (cls, text, popis, fn) => {
+      const b = jidEl('button', cls, sum, text);
+      b.type = 'button';
+      b.setAttribute('aria-label', popis);
+      b.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); fn(); });
+      return b;
+    };
+    if (!r.nahradni) tlac('nakup-odskrt', r.hotovo ? '✓' : '', (r.hotovo ? 'Vrátit: ' : 'Uvařeno: ') + r.nazev, () => jidHotovo(index, !r.hotovo));
+    const hlava = jidEl('span', 'jid-hlava', sum);
+    jidEl('span', 'jid-nazev', hlava, r.nazev);
+    jidEl('span', 'jid-typ', hlava, (JID_TYPY[r.typ] || '') + (r.zMinula ? ' · z minulého týdne' : ''));
+    const v = r.vyziva || {};
+    if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
+    if (vyber && r.nahradni) tlac('jid-aktivovat', 'Aktivovat', 'Aktivovat: ' + r.nazev, () => jidReceptAkce(index, r.nazev, 'aktivovat'));
+    else if (vyber && !r.zMinula) {
+      tlac('jid-smazat', '✕', 'Smazat: ' + r.nazev, async () => {
+        if (await zeptejSe('Smazat jídlo?', r.nazev)) jidReceptAkce(index, r.nazev, 'smazat');
+      });
+    }
+    const telo = jidEl('div', 'jid-telo', det);
+    jidOdkaz(r, telo);
+    jidReceptDetail(r, telo);
+  };
   for (const [kat, nazev] of JID_SEKCE) {
     // Odškrtnuté (uvařené) jídlo zůstane 12 h přeškrtnuté, pak ze stránky zmizí
     const rec = j.recepty.map((r, index) => ({ r, index }))
-      .filter(x => x.r.kategorie === kat && !(x.r.hotovo && Date.now() - x.r.hotovo > JID_HOTOVO_SKRYT_MS));
+      .filter(x => x.r.kategorie === kat && !x.r.nahradni && !(x.r.hotovo && Date.now() - x.r.hotovo > JID_HOTOVO_SKRYT_MS));
     if (!rec.length) continue;
     jidEl('div', 'jid-sekce', obsah, nazev);
-    for (const { r, index } of rec) {
-      const det = jidEl('details', 'jid-recept' + (r.hotovo ? ' hotovo' : ''), obsah);
-      det.dataset.index = index;
-      if (otevrene.has(String(index))) det.open = true;
-      const sum = jidEl('summary', '', det);
-      // iPad: recept přes celou obrazovku (zůstane, dokud se nezavře); iPhone: rozbalí se v kartě
-      sum.addEventListener('click', ev => { if (sirokyDisplej()) { ev.preventDefault(); jidReceptOtevri(index); } });
-      const odskrt = jidEl('button', 'nakup-odskrt', sum, r.hotovo ? '✓' : '');
-      odskrt.type = 'button';
-      odskrt.setAttribute('aria-label', (r.hotovo ? 'Vrátit: ' : 'Uvařeno: ') + r.nazev);
-      odskrt.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); jidHotovo(index, !r.hotovo); });
-      const hlava = jidEl('span', 'jid-hlava', sum);
-      jidEl('span', 'jid-nazev', hlava, r.nazev);
-      jidEl('span', 'jid-typ', hlava, (JID_TYPY[r.typ] || '') + (r.zMinula ? ' · z minulého týdne' : ''));
-      const v = r.vyziva || {};
-      if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
-      const telo = jidEl('div', 'jid-telo', det);
-      jidOdkaz(r, telo);
-      jidReceptDetail(r, telo);
+    for (const { r, index } of rec) radek(r, index, obsah);
+  }
+  if (vyber) {
+    const nahr = j.recepty.map((r, index) => ({ r, index })).filter(x => x.r.nahradni);
+    if (nahr.length) {
+      jidEl('div', 'jid-sekce jid-sekce-nahradni', obsah, 'Náhradní jídla');
+      for (const { r, index } of nahr) radek(r, index, obsah);
     }
+    const pocet = j.recepty.filter(r => !r.nahradni && !r.zMinula).length;
+    const b = jidEl('button', 'jid-potvrdit', obsah, `🛒 Přidat na nákupní seznam (${pocet} ${pocet === 1 ? 'jídlo' : pocet < 5 && pocet > 1 ? 'jídla' : 'jídel'})`);
+    b.type = 'button';
+    b.disabled = !pocet;
+    b.addEventListener('click', jidPotvrdit);
   }
   if (jidReceptOknoEl && !jidReceptOknoEl.hidden) renderJidReceptOkno();
   // Upozornění a nesplněné body kontroly až pod jídly
@@ -14209,7 +14264,7 @@ function jidTisk(co) {
     jidTiskNazev = 'Rodinný jídelníček — týden od ' + tyden;
     jidEl('h1', '', b, jidTiskNazev);
     for (const [kat, nazev] of JID_SEKCE) {
-      const rec = j.recepty.filter(x => x.kategorie === kat);
+      const rec = j.recepty.filter(x => x.kategorie === kat && !x.nahradni);
       if (!rec.length) continue;
       jidEl('h2', '', b, nazev);
       for (const r of rec) {

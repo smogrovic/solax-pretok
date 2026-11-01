@@ -1,5 +1,5 @@
 {
- "_poznamka": "Vzor pro testy — odkazy nejsou skutečné recepty.",
+ "_poznamka": "Vzor pro testy — odkazy nejsou skutečné recepty. 10 aktivních + 4 náhradní.",
  "tyden": "2026-11-02",
  "recepty": [
   {
@@ -20,25 +20,29 @@
      "nazev": "Kuřecí prsa",
      "mnozstvi": 600,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Maso, ryby, tofu a další bílkoviny"
     },
     {
      "nazev": "Tortilly",
      "mnozstvi": 10,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
     },
     {
      "nazev": "Paprika",
      "mnozstvi": 2,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     },
     {
      "nazev": "Olivový olej",
      "mnozstvi": 2,
      "jednotka": "lžíce",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Dochucovadla a ostatní"
     }
    ],
    "postup": [
@@ -78,25 +82,29 @@
      "nazev": "Hovězí kližka",
      "mnozstvi": 500,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Maso, ryby, tofu a další bílkoviny"
     },
     {
      "nazev": "Rýže",
      "mnozstvi": 300,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
     },
     {
      "nazev": "Mrkev",
      "mnozstvi": 400,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     },
     {
      "nazev": "Olivový olej",
      "mnozstvi": 1,
      "jednotka": "lžíce",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Dochucovadla a ostatní"
     }
    ],
    "postup": [
@@ -135,19 +143,22 @@
      "nazev": "Tofu",
      "mnozstvi": 400,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Maso, ryby, tofu a další bílkoviny"
     },
     {
      "nazev": "Červená čočka",
      "mnozstvi": 250,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mouky, vločky a suché potraviny"
     },
     {
      "nazev": "Dýně hokkaido",
      "mnozstvi": 600,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     }
    ],
    "postup": [
@@ -186,19 +197,22 @@
      "nazev": "Těstoviny",
      "mnozstvi": 400,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
     },
     {
      "nazev": "Mozzarella",
      "mnozstvi": 250,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Rajčata",
      "mnozstvi": 400,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     }
    ],
    "postup": [
@@ -237,19 +251,22 @@
      "nazev": "Losos",
      "mnozstvi": 600,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Maso, ryby, tofu a další bílkoviny"
     },
     {
      "nazev": "Brambory",
      "mnozstvi": 1,
      "jednotka": "kg",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     },
     {
      "nazev": "Olivový olej",
      "mnozstvi": 1,
      "jednotka": "lžíce",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Dochucovadla a ostatní"
     }
    ],
    "postup": [
@@ -285,19 +302,22 @@
      "nazev": "Cottage",
      "mnozstvi": 400,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Celozrnné pečivo",
      "mnozstvi": 8,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
     },
     {
      "nazev": "Paprika",
      "mnozstvi": 1,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Zelenina"
     }
    ],
    "postup": [
@@ -336,19 +356,22 @@
      "nazev": "Hladká mouka",
      "mnozstvi": 300,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mouky, vločky a suché potraviny"
     },
     {
      "nazev": "Švestky",
      "mnozstvi": 500,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Ovoce"
     },
     {
      "nazev": "Cukr",
      "mnozstvi": 100,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Ořechy, semínka a sladké suroviny"
     }
    ],
    "postup": [
@@ -385,13 +408,15 @@
      "nazev": "Tvaroh",
      "mnozstvi": 500,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Jablka",
      "mnozstvi": 3,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Ovoce"
     }
    ],
    "postup": [
@@ -430,19 +455,22 @@
      "nazev": "Ovesné vločky",
      "mnozstvi": 250,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mouky, vločky a suché potraviny"
     },
     {
      "nazev": "Mléko",
      "mnozstvi": 0.5,
      "jednotka": "l",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Hrušky",
      "mnozstvi": 2,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Ovoce"
     }
    ],
    "postup": [
@@ -475,19 +503,22 @@
      "nazev": "Vejce",
      "mnozstvi": 10,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Máslo",
      "mnozstvi": 30,
      "jednotka": "g",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
     },
     {
      "nazev": "Celozrnné pečivo",
      "mnozstvi": 5,
      "jednotka": "ks",
-     "poznamka": ""
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
     }
    ],
    "postup": [
@@ -505,6 +536,188 @@
     "tuky": 20
    },
    "stitky": []
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "pracovni",
+   "nazev": "Krůtí rizoto s hráškem",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "5",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Krůtí prsa",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Maso, ryby, tofu a další bílkoviny"
+    },
+    {
+     "nazev": "Rýže",
+     "mnozstvi": 0.3,
+     "jednotka": "kg",
+     "poznamka": "",
+     "kategorie": "Pečivo a přílohy"
+    },
+    {
+     "nazev": "Paprika",
+     "mnozstvi": 1,
+     "jednotka": "ks",
+     "poznamka": "",
+     "kategorie": "Zelenina"
+    },
+    {
+     "nazev": "Sůl",
+     "mnozstvi": null,
+     "jednotka": "",
+     "poznamka": "",
+     "kategorie": "Dochucovadla a ostatní"
+    }
+   ],
+   "postup": [
+    "Krok 1."
+   ],
+   "predem": "",
+   "skladovani": "",
+   "ohrev": "",
+   "forma": "",
+   "vyziva": {
+    "kcal": 500,
+    "bilkoviny": 30,
+    "sacharidy": 50,
+    "tuky": 15
+   },
+   "stitky": [
+    "maso"
+   ],
+   "nahradni": true
+  },
+  {
+   "kategorie": "vecere",
+   "typ": "vikend",
+   "nazev": "Cizrnové kari",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "5",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Cizrna",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Mouky, vločky a suché potraviny"
+    },
+    {
+     "nazev": "Rajčata",
+     "mnozstvi": 400,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Zelenina"
+    }
+   ],
+   "postup": [
+    "Krok 1."
+   ],
+   "predem": "",
+   "skladovani": "",
+   "ohrev": "",
+   "forma": "",
+   "vyziva": {
+    "kcal": 500,
+    "bilkoviny": 30,
+    "sacharidy": 50,
+    "tuky": 15
+   },
+   "stitky": [
+    "vegan"
+   ],
+   "nahradni": true
+  },
+  {
+   "kategorie": "peceni",
+   "typ": "peceni",
+   "nazev": "Hrušková bublanina",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "5",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Hrušky",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Ovoce"
+    },
+    {
+     "nazev": "Hladká mouka",
+     "mnozstvi": 200,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Mouky, vločky a suché potraviny"
+    }
+   ],
+   "postup": [
+    "Krok 1."
+   ],
+   "predem": "",
+   "skladovani": "",
+   "ohrev": "",
+   "forma": "",
+   "vyziva": {
+    "kcal": 500,
+    "bilkoviny": 30,
+    "sacharidy": 50,
+    "tuky": 15
+   },
+   "stitky": [],
+   "nahradni": true
+  },
+  {
+   "kategorie": "snidane",
+   "typ": "pracovni_snidane",
+   "nazev": "Jogurtová miska s ořechy",
+   "vlastni": true,
+   "zdroj": null,
+   "upraveno": null,
+   "porce": "5",
+   "cas": "30 min",
+   "suroviny": [
+    {
+     "nazev": "Bílý jogurt",
+     "mnozstvi": 500,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Mléčné výrobky a sýry"
+    },
+    {
+     "nazev": "Vlašské ořechy",
+     "mnozstvi": 50,
+     "jednotka": "g",
+     "poznamka": "",
+     "kategorie": "Ořechy, semínka a sladké suroviny"
+    }
+   ],
+   "postup": [
+    "Krok 1."
+   ],
+   "predem": "",
+   "skladovani": "",
+   "ohrev": "",
+   "forma": "",
+   "vyziva": {
+    "kcal": 500,
+    "bilkoviny": 30,
+    "sacharidy": 50,
+    "tuky": 15
+   },
+   "stitky": [],
+   "nahradni": true
   }
  ],
  "nakup": [
