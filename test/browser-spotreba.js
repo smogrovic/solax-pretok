@@ -89,8 +89,25 @@ const HISTORIE = ${JSON.stringify(HISTORIE)};
   check('tabulka: sloupce jako ručně vedená', hlavicka,
     'Celková|Bazén|Sauna|Auto|TČ topení|TČ voda|TČ dohřev bojler 1|Bojler 2 (přídavný)|Voda celkem|Dům zbytek|Ze sítě|Přetok|Výroba FVE|Sobě­stač­nost|Venku|Náklady|Ušetřeno FVE');
   const radky = [...tab.querySelectorAll('tbody tr')];
-  check('  nahoře součet 12 měsíců (MWh)', radky[0].textContent.startsWith('12 měsíců18,02'), true);
-  check('  pak součty roků', [radky[1], radky[2]].map(r => r.classList.contains('sp-rok') && r.children[0].textContent + ' ' + r.children[1].firstChild.textContent).join(' / '),
+  check('  nahoře součet 12 měsíců (MWh)', /^12 měsíců ▸18,02/.test(radky[0].textContent), true);
+  try { localStorage.removeItem('sbaleno:spRoky'); } catch (e) {}
+  spRokyOtevreno = false;
+  renderSpotreba();
+  {
+    const t2 = document.querySelector('.sp-tabulka');
+    const r12 = t2.querySelector('tr.sp-12');
+    const tloust = r => getComputedStyle(r.children[1]).borderBottomWidth;
+    check('roky normálně schované, u 12 měsíců šipka ▸', [...t2.querySelectorAll('tr.sp-rok')].every(r => r.hidden) + ' ' + r12.querySelector('.sp-sipka').textContent, 'true  ▸');
+    check('  tlustá čára pod 12 měsíci', tloust(r12), '3px');
+    r12.click();
+    const rk = [...t2.querySelectorAll('tr.sp-rok')];
+    check('klepnutí roky ukáže', rk.every(r => !r.hidden) + ' ' + r12.querySelector('.sp-sipka').textContent + ' ' + r12.getAttribute('aria-expanded'), 'true  ▾ true');
+    check('  čára je teď pod posledním rokem', [tloust(r12), tloust(rk[rk.length - 1])].join(' '), '1px 3px');
+    renderSpotreba();
+    check('  rozbalení drží i po překreslení', [...document.querySelectorAll('.sp-tabulka tr.sp-rok')].every(r => !r.hidden), true);
+  }
+  const radkyR = [...document.querySelectorAll('.sp-tabulka tbody tr')];
+  check('  pak součty roků', [radkyR[1], radkyR[2]].map(r => r.classList.contains('sp-rok') && r.children[0].textContent + ' ' + r.children[1].firstChild.textContent).join(' / '),
     'rok 2026 (zatím) 14,70 / rok 2025 (od února) 13,59');
   check('  12 měsíců: náklady a úspora', [...radky[0].querySelectorAll('td')].slice(16).map(t => t.textContent).join(' | '), '~41 809 Kč | ~32 826 Kč');
   check('  pak běžící měsíc s označením', radky[3].classList.contains('sp-bezi') && /běží/.test(radky[3].textContent), true);
@@ -110,7 +127,7 @@ const HISTORIE = ${JSON.stringify(HISTORIE)};
   const obal = document.getElementById('spTabulkaObal');
   check('tabulka se posouvá uvnitř karty, stránka nepřetéká',
     obal.scrollWidth > obal.clientWidth && slide.querySelector('.page').scrollWidth <= slide.querySelector('.page').clientWidth + 1, true);
-  check('  první sloupec drží na místě', getComputedStyle(tab.querySelector('td')).position, 'sticky');
+  check('  první sloupec drží na místě', getComputedStyle(document.querySelector('.sp-tabulka td')).position, 'sticky');
   const leg = souhrn.querySelector('.sp-legenda');
   check('legenda se vejde', leg.scrollWidth <= leg.clientWidth + 1, true);
 

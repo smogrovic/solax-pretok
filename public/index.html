@@ -1396,6 +1396,10 @@
   .sp-tabulka tr.sp-12 td{font-weight:800;background:#f5f7fa;}
   .sp-tabulka tr.sp-12 td:first-child{background:#f5f7fa;}
   .sp-tabulka tr.sp-rok td{font-weight:700;background:#fafbfc;}
+  .sp-tabulka tr.sp-rok[hidden]{display:none;}
+  .sp-tabulka tr.sp-12{cursor:pointer;}
+  .sp-tabulka .sp-sipka{font-size:11px;color:var(--grey-text);}
+  .sp-tabulka tr.sp-souhrn-konec td{border-bottom:3px solid rgba(44,62,80,0.25);}
   .sp-tabulka tr.sp-rok td:first-child{background:#fafbfc;}
   .sp-tabulka tr.sp-rok:last-of-type td,.sp-tabulka tr.sp-rok + tr:not(.sp-rok) td{border-top:0;}
   .sp-tabulka tr.sp-skupiny th{font-size:9px;letter-spacing:.06em;color:var(--navy);text-align:center;border-bottom:2px solid rgba(44,62,80,0.12);padding:4px 6px;}
@@ -10578,6 +10582,33 @@ function spVyuctovani(mesice, cenik, dnes = new Date()) {
   };
 }
 
+// Součty za roky jsou pod řádkem „12 měsíců" schované — klepnutím se rozbalí.
+// Stav se pamatuje jako ostatní rozbalovací části (výchozí sbaleno).
+let spRokyOtevreno = (() => { try { return localStorage.getItem('sbaleno:spRoky') === 'ne'; } catch { return false; } })();
+function spRokyNastav(t) {
+  const r12 = t.querySelector('tr.sp-12');
+  if (!r12) return;
+  const roky = [...t.querySelectorAll('tr.sp-rok')];
+  roky.forEach(r => { r.hidden = !spRokyOtevreno; });
+  const bunka = r12.firstElementChild;
+  let sipka = bunka.querySelector('.sp-sipka');
+  if (!sipka) { sipka = document.createElement('span'); sipka.className = 'sp-sipka'; bunka.appendChild(sipka); }
+  sipka.textContent = roky.length ? (spRokyOtevreno ? ' ▾' : ' ▸') : '';
+  r12.setAttribute('role', 'button');
+  r12.setAttribute('aria-expanded', String(spRokyOtevreno));
+  // Tlustá čára pod posledním viditelným součtem
+  t.querySelectorAll('.sp-souhrn-konec').forEach(r => r.classList.remove('sp-souhrn-konec'));
+  (spRokyOtevreno && roky.length ? roky[roky.length - 1] : r12).classList.add('sp-souhrn-konec');
+  if (!r12.dataset.klik) {
+    r12.dataset.klik = '1';
+    r12.addEventListener('click', () => {
+      spRokyOtevreno = !spRokyOtevreno;
+      try { localStorage.setItem('sbaleno:spRoky', spRokyOtevreno ? 'ne' : 'ano'); } catch {}
+      spRokyNastav(t);
+    });
+  }
+}
+
 function renderSpotreba() {
   const souhrnEl = document.getElementById('spSouhrn');
   if (!souhrnEl) return;
@@ -10806,6 +10837,7 @@ function renderSpotreba() {
   }
   t.innerHTML = html + '</tbody>';
   tabEl.appendChild(t);
+  spRokyNastav(t);
   const rucneDo = spotrebaData.rucneDo;
   const doKdy = rucneDo ? SP_MES_GEN[+rucneDo.slice(5, 7) - 1] + ' ' + rucneDo.slice(0, 4) : '';
   poznEl.textContent = (rucneDo ? 'Do ' + doKdy + ' z ručně vedené tabulky, další měsíce se zapisují samy'
