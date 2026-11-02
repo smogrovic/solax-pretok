@@ -12,7 +12,7 @@ const check = (jmeno, got, want) => {
   return ok;
 };
 window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
-setTimeout(() => {
+setTimeout(async () => {
   const el = document.getElementById('storeNote');
   const T = new Date(); T.setHours(12, 34, 0, 0);
   check('řádek na stránce Log existuje', !!el, true);
@@ -42,6 +42,40 @@ setTimeout(() => {
   check('  i při vypnuté záloze', /Verze b950250/.test(el.textContent), true);
   renderStore({ enabled: true, savedAt: T.getTime(), verze: '' });
   check('bez verze nic navíc', /Verze/.test(el.textContent), false);
+
+  // Záloha do souboru
+  const karta = document.getElementById('zalohaKarta');
+  check('karta Záloha je na Log/Nastavení', karta.closest('.slide').dataset.title, 'Log/Nastavení');
+  check('  dvě tlačítka', [...karta.querySelectorAll('button')].map(b => b.textContent).join(' | '),
+    '⬇️ Stáhnout zálohu (data + aplikace) | ⬆️ Obnovit data ze zálohy');
+  let dotaz = null, stazeno = null;
+  const puvodniKlik = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { stazeno = this.download; };
+  window.fetch = async (adresa, init) => {
+    dotaz = { adresa, init };
+    return { ok: true, status: 200, headers: { get: () => 'attachment; filename="solinator-zaloha-2026-11-02.json"' },
+      blob: async () => new Blob(['{"zaloha":"solinator"}'], { type: 'application/json' }) };
+  };
+  await zalohaStahni();
+  HTMLAnchorElement.prototype.click = puvodniKlik;
+  check('stažení: s tokenem', dotaz.adresa + ' ' + ('X-Auth-Token' in dotaz.init.headers), '/api/zaloha true');
+  check('  uloží se pod jménem ze serveru', stazeno, 'solinator-zaloha-2026-11-02.json');
+  check('  a řekne to', /Staženo: solinator-zaloha-2026-11-02\.json/.test(document.getElementById('zalohaHint').textContent), true);
+
+  // Obnova: po potvrzení jen data
+  window.zeptejSe = async () => true;
+  zeptejSe = window.zeptejSe;
+  window.fetch = async (adresa, init) => { dotaz = { adresa, telo: JSON.parse(init.body) }; return { ok: true, status: 200, json: async () => ({ ok: true, obnoveno: 30, celkem: 41 }) }; };
+  await zalohaObnov(JSON.stringify({ zaloha: 'solinator', at: Date.now(), data: { posts: { a: 1 }, primo: {} }, aplikace: { soubory: { 'server.js': 'x' } } }));
+  check('obnova pošle jen data', dotaz.adresa + ' ' + Object.keys(dotaz.telo).join(',') + ' ' + JSON.stringify(dotaz.telo.data.posts), '/api/zaloha/obnovit data {"a":1}');
+  check('  a ukáže výsledek', document.getElementById('zalohaHint').textContent, 'Obnoveno 30 z 41 částí.');
+  dotaz = null;
+  await zalohaObnov('{"neco":1}');
+  check('cizí soubor se nepošle', [dotaz, document.getElementById('zalohaHint').textContent].join(' '), ' Soubor není záloha Solinátoru.');
+  window.zeptejSe = async () => false;
+  zeptejSe = window.zeptejSe;
+  await zalohaObnov(JSON.stringify({ data: { posts: {} } }));
+  check('bez potvrzení nic', dotaz, null);
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

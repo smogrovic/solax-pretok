@@ -1415,6 +1415,14 @@
   .sp-graf-leg i{display:inline-block;width:16px;border-top:2px dashed #c0392b;}
   /* Spotřeba přes celou obrazovku (iPad, počítač): souhrn a graf vedle sebe, tabulka pod nimi */
   .sp-zavrit{display:none;}
+  .zaloha-btns{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
+  .huum-vypnout{margin-top:10px;}
+  .huum-vypnout-h{font-size:12px;font-weight:700;color:var(--grey-text);margin-bottom:6px;text-align:center;}
+  .huum-vypnout-btns{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;}
+  .huum-vypnout-btns[hidden],.huum-vypnout-stav[hidden],.huum-vypnout[hidden]{display:none;}
+  .huum-vypnout-btns .mode-btn{padding:8px 2px;font-size:12px;}
+  .huum-vypnout-stav{display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;font-weight:700;color:var(--navy);}
+  .huum-vypnout-stav .mode-btn{padding:6px 12px;font-size:12px;}
   body.sp-cela #spotrebaSlide{position:fixed;inset:0;z-index:60;width:auto;height:auto;background:var(--bg);box-shadow:none;
     padding:max(12px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));}
   body.sp-cela .sp-zavrit{display:block;align-self:flex-end;border:none;background:var(--card);color:var(--navy);font:inherit;font-weight:700;
@@ -3638,6 +3646,12 @@
         </div>
         <!-- Odhad náběhu podle modelu (teplota v sauně + venku) -->
         <div class="huum-odhad" id="huumOdhad"></div>
+        <!-- Časovač vypnutí: jen když kamna topí -->
+        <div class="huum-vypnout" id="huumVypnout" hidden>
+          <div class="huum-vypnout-h">Vypnout za</div>
+          <div class="huum-vypnout-btns" id="huumVypnoutBtns"></div>
+          <div class="huum-vypnout-stav" id="huumVypnoutStav" hidden></div>
+        </div>
         <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
         <!-- Světlo patří ke kamnům, ne na vlastní kartu — je to ta samá věc,
              jen druhý vypínač. Oddělovač nahoře ho odděluje od číselníku. -->
@@ -3837,6 +3851,17 @@
         </div>
       </div>
 
+      <!-- Záloha do souboru: data i aplikace (bez hesel a přihlášení) -->
+      <div class="card jen-full" id="zalohaKarta">
+        <div class="asst-log-title">Záloha</div>
+        <div class="zaloha-btns">
+          <button class="sek-btn" id="zalohaStahnout" type="button">⬇️ Stáhnout zálohu (data + aplikace)</button>
+          <button class="sek-btn" id="zalohaObnovit" type="button">⬆️ Obnovit data ze zálohy</button>
+          <input type="file" id="zalohaSoubor" accept=".json,application/json" hidden>
+        </div>
+        <div class="rezim-hint" id="zalohaHint">Data se zálohují i automaticky. Soubor obsahuje i aplikaci, ale bez hesel a přihlášení.</div>
+      </div>
+
       <!-- Vlastní upozornění: po potvrzení ho appka ukáže přes celou obrazovku na všech
            zařízeních (i přes kalendář), dokud ho někdo neodklikne -->
       <div class="card" data-rezim="full">
@@ -3903,7 +3928,7 @@
             <li>Platí i přes ruční zapnutí a „+24 h".</li>
             <li>Při nahřívání: <b>cíl −15 °C</b> → žaluzie v ložnici nahoru, <b>cíl −10 °C</b> → světlo v sauně a po západu zahrada dole (i při západu během saunování).</li>
             <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b class="sauna-po-min">15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, rozsvítila-li ji sauna.</li>
-            <li>Notifikace po <b>2 h</b> topení, pak po 6 h.</li>
+            <li>Notifikace po <b>2 h</b> topení, pak po 6 h. Při topení jde nastavit <b>vypnutí za 5–30 min</b>.</li>
             <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
           </ul>
           <div class="zapad-row">
@@ -7967,6 +7992,67 @@ function renderAquareaSpotreba(el) {
   if (t.chyba) el('div', 'aq-pozn', box, 'Spotřebu se teď nepodařilo načíst.');
 }
 
+// ---------- Záloha do souboru ----------
+// Stáhne JSON s daty i aplikací (server vynechá hesla a přihlášení). Obnova posílá
+// jen data — kód appky běží z GitHubu a odsud se nepřepisuje.
+const zalohaHintEl = document.getElementById('zalohaHint');
+async function zalohaStahni() {
+  zalohaHintEl.textContent = 'Připravuji zálohu…';
+  try {
+    const res = await fetch('/api/zaloha', { headers: { 'X-Auth-Token': authToken } });
+    if (res.status === 401) { setLocked(true); throw new Error('Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error('Server zálohu nevydal (HTTP ' + res.status + ').');
+    const blob = await res.blob();
+    const jm = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'solinator-zaloha.json';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = jm;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    zalohaHintEl.textContent = `Staženo: ${jm} (${Math.round(blob.size / 1024)} kB).`;
+  } catch (err) {
+    zalohaHintEl.textContent = err.message;
+  }
+}
+async function zalohaObnov(text) {
+  let zaloha;
+  try { zaloha = JSON.parse(text); } catch { zalohaHintEl.textContent = 'Soubor není záloha Solinátoru.'; return; }
+  const data = zaloha && zaloha.data;
+  if (!data || typeof data.posts !== 'object') { zalohaHintEl.textContent = 'Soubor není záloha Solinátoru.'; return; }
+  const kdy = zaloha.at ? new Date(zaloha.at).toLocaleString('cs-CZ') : 'neznámo kdy';
+  if (!(await zeptejSe('Obnovit data ze zálohy?', `Záloha z ${kdy}. Doplní se, co chybí; nic se nesmaže.`))) return;
+  zalohaHintEl.textContent = 'Obnovuji…';
+  try {
+    const res = await fetch('/api/zaloha/obnovit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ data })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error('Ovládání je zamčené.'); }
+    if (!res.ok) throw new Error(out.error || 'Obnova se nepovedla.');
+    zalohaHintEl.textContent = `Obnoveno ${out.obnoveno} z ${out.celkem} částí.`;
+  } catch (err) {
+    zalohaHintEl.textContent = err.message;
+  }
+}
+{
+  const st = document.getElementById('zalohaStahnout');
+  const ob = document.getElementById('zalohaObnovit');
+  const vstup = document.getElementById('zalohaSoubor');
+  if (st) st.addEventListener('click', zalohaStahni);
+  if (ob && vstup) {
+    ob.addEventListener('click', () => { vstup.value = ''; vstup.click(); });
+    vstup.addEventListener('change', async () => {
+      const f = vstup.files && vstup.files[0];
+      if (f) zalohaObnov(await f.text());
+    });
+  }
+}
+
 // ---------- Pokyny ze zkratek iPhonu (Logika automatiky) ----------
 const zkratkyObsahEl = document.getElementById('zkratkyObsah');
 const zkratkyHintEl = document.getElementById('zkratkyHint');
@@ -9614,9 +9700,66 @@ function renderHuumTopeni(d, cerstve) {
   e.btn.classList.toggle('vypnuto', huumTopiTed === false);
   e.btn.setAttribute('aria-label', huumTopiTed === true ? 'Vypnout saunu' : 'Zapnout saunu');
   dialKresli();
+  bezpecne(() => renderHuumVypnout(d));
   // iPad na zdi: rozjetá sauna má přednost před kalendářem
   bezpecne(ipadKontrola);
 }
+
+// Časovač vypnutí: tlačítka 5–30 min, po nastavení čas a Zrušit
+const HUUM_VYPNOUT_MIN = [5, 10, 15, 20, 25, 30];
+function renderHuumVypnout(d, now = Date.now()) {
+  const box = document.getElementById('huumVypnout');
+  if (!box) return;
+  const btns = document.getElementById('huumVypnoutBtns');
+  const stav = document.getElementById('huumVypnoutStav');
+  box.hidden = huumTopiTed !== true;
+  if (!btns.childElementCount) {
+    for (const m of HUUM_VYPNOUT_MIN) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mode-btn';
+      b.dataset.minut = m;
+      b.textContent = m + ' min';
+      b.addEventListener('click', () => huumVypnoutZa(m));
+      btns.appendChild(b);
+    }
+  }
+  const v = d && typeof d.vypnoutV === 'number' ? d.vypnoutV : null;
+  stav.hidden = !v;
+  btns.hidden = !!v;
+  if (v) {
+    const zbyva = Math.max(0, Math.ceil((v - now) / 60000));
+    stav.textContent = '';
+    const t = document.createElement('span');
+    t.textContent = `Vypne se v ${fmtSolTime(v)} (za ${zbyva} min)`;
+    const z = document.createElement('button');
+    z.type = 'button';
+    z.className = 'mode-btn huum-vypnout-zrusit';
+    z.textContent = 'Zrušit';
+    z.addEventListener('click', () => huumVypnoutZa(0));
+    stav.appendChild(t);
+    stav.appendChild(z);
+  }
+}
+async function huumVypnoutZa(minut) {
+  const hint = huumTopeniEls.hint;
+  try {
+    const res = await fetch('/api/sauna/vypnout-za', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ minut })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    if (data && data.huum) { huumData = data.huum; renderHuum(); }
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
+    if (hint) hint.textContent = '';
+  } catch (err) {
+    if (hint) hint.textContent = err.message;
+  }
+}
+// Odpočet minut se obnovuje i bez nové zprávy ze serveru
+setInterval(() => { if (huumData && huumData.vypnoutV) bezpecne(() => renderHuumVypnout(huumData)); }, 30000);
 
 // ---- tažení po kruhu ----
 // Vrací null tam, kde se hodnota měnit NEMÁ: ve spodní mezeře mezi koncem

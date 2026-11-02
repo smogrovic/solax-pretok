@@ -169,6 +169,29 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('hláška o vybavení je pryč', /Osazeno/.test(huumHint.textContent), 'false');
   check('  a při připojených kamnech je hint prázdný', huumHint.textContent, '');
 
+  OUT.push('\\n7b) Časovač vypnutí');
+  const vyp = document.getElementById('huumVypnout');
+  check('když topí, je vidět „Vypnout za"', vyp.hidden, false);
+  check('  tlačítka 5–30 min po 5', [...vyp.querySelectorAll('#huumVypnoutBtns button')].map(b => b.dataset.minut).join(','), '5,10,15,20,25,30');
+  const puvodniFetch = window.fetch;
+  let poslano = null;
+  window.fetch = async (adresa, opts) => {
+    poslano = { adresa, telo: JSON.parse(opts.body) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, huum: { ...huumData, vypnoutV: Date.now() + 15 * MIN } }) };
+  };
+  vyp.querySelector('#huumVypnoutBtns button[data-minut="15"]').click();
+  await wait(50);
+  check('klepnutí pošle minuty', poslano && poslano.adresa + ' ' + poslano.telo.minut, '/api/sauna/vypnout-za 15');
+  const stav = document.getElementById('huumVypnoutStav');
+  check('  pak ukáže čas a odpočet', !stav.hidden && /^Vypne se v \\d{1,2}:\\d{2} \\(za 15 min\\)Zrušit$/.test(stav.textContent), true);
+  check('  tlačítka minut zmizí', document.getElementById('huumVypnoutBtns').hidden, true);
+  stav.querySelector('button').click();
+  await wait(50);
+  check('Zrušit pošle nulu', poslano.telo.minut, 0);
+  window.fetch = puvodniFetch;
+  huumData = { ...huumData, vypnoutV: null };
+  renderHuum();
+
   OUT.push('\\n8) Kamna HUUM — mezní stavy');
   // Cílovou teplotu API nevrací, dokud sauna netopí
   huumData = { ...huumData, statusCode: 232, statusText: 'připravená', heating: false,
@@ -176,6 +199,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('teplota zůstane', huumTemp.textContent, '78 °C');
   check('semafor zhasne', huumLight.className, 'traffic-light off');
+  check('netopí → „Vypnout za" schované', document.getElementById('huumVypnout').hidden, true);
   check('prázdné řádky se po připojení schovají', vidi('end'), 'false');
   check('  ale dveře zůstanou', vidi('door'), 'true');
   huumData = { ...huumData, doorClosed: false };

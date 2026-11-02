@@ -408,8 +408,10 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   }
 }));
-// Týdenní log z telefonu se do výchozích 100 kB nevejde
-app.use(express.json({ limit: '512kb' }));
+// Týdenní log z telefonu se do výchozích 100 kB nevejde. Obnova ze souboru zálohy
+// má vlastní, větší limit (viz /api/zaloha/obnovit) — obecný parser ji přeskočí.
+const jsonBezne = express.json({ limit: '512kb' });
+app.use((req, res, next) => (req.path === '/api/zaloha/obnovit' ? next() : jsonBezne(req, res, next)));
 
 // ---------- SSE stream pro živé aktualizace ----------
 
@@ -9339,7 +9341,7 @@ async function pollHuum() {
 
 function huumPayload() {
   const odhad = typeof saunaOdhad === 'function' ? saunaOdhad() : null;
-  return { ...state.huum, enabled: huumEnabled, odhad };
+  return { ...state.huum, enabled: huumEnabled, odhad, vypnoutV: state.saunaVypnoutV || null };
 }
 
 // ---------- Časovač sauny: „Půjdu do sauny v“ ----------
@@ -9616,6 +9618,54 @@ app.post('/api/sauna/huum-stop', async (req, res) => {
     res.status(502).json({ error: err.message, huum: huumPayload() });
   }
 });
+
+// ---------- Časovač vypnutí sauny: „vypnout za 5–30 min" ----------
+// Jen když kamna topí. Kontrola každých 30 s; když je kamna mezitím vypnutá jinak
+// (appka HUUM, panel, vlastní limit kamen), časovač se tiše zruší.
+const SAUNA_VYPNOUT_MIN = [5, 10, 15, 20, 25, 30];
+app.post('/api/sauna/vypnout-za', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
+  const minut = Number((req.body || {}).minut);
+  if (minut === 0) {
+    if (state.saunaVypnoutV) addLog('Sauna: časovač vypnutí zrušen');
+    state.saunaVypnoutV = null;
+  } else {
+    if (!SAUNA_VYPNOUT_MIN.includes(minut)) return res.status(400).json({ error: 'Vypnout jde za 5–30 min po 5 min.' });
+    if (!(state.huum && state.huum.heating)) return res.status(409).json({ error: 'Kamna netopí.' });
+    state.saunaVypnoutV = Date.now() + minut * 60000;
+    addLog(`Sauna: vypnu v ${fmtPragueTime(state.saunaVypnoutV)} (za ${minut} min)`);
+  }
+  broadcast('huum', { huum: huumPayload() });
+  res.json({ ok: true, huum: huumPayload() });
+});
+
+let saunaVypnoutBezi = false;
+async function saunaVypnoutTik(now = Date.now()) {
+  if (!state.saunaVypnoutV || saunaVypnoutBezi) return false;
+  if (!(state.huum && state.huum.heating)) {
+    // Vypnutá jinak — časovač nemá co dělat
+    state.saunaVypnoutV = null;
+    broadcast('huum', { huum: huumPayload() });
+    return false;
+  }
+  if (now < state.saunaVypnoutV) return false;
+  saunaVypnoutBezi = true;
+  try {
+    state.saunaVypnoutV = null;
+    await huumPovel('stop', {});
+    addLog('Sauna: vypnuta (časovač vypnutí)');
+    await huumOverStav(false);
+    return true;
+  } catch (err) {
+    addLog(`Sauna: časovač vypnutí selhal (${String(err.message).slice(0, 100)})`, 'error');
+    return false;
+  } finally {
+    saunaVypnoutBezi = false;
+    broadcast('huum', { huum: huumPayload() });
+  }
+}
+setInterval(() => { saunaVypnoutTik().catch(() => {}); }, 30000);
 
 // Světlo z appky. Stav se vrací až po ověření, takže tlačítko neřekne „hotovo",
 // když se nic nestalo — u světla je to hned vidět, ale mlčet o tom je horší.
@@ -12746,6 +12796,8 @@ function storeSnapshot() {
     rohlikWebCookies: state.rohlikWebCookies || null,
     // Kdy odešel týdenní report — nasazení v neděli večer ho nesmí poslat podruhé
     tydenReport: state.tydenReport || null,
+    // Časovač vypnutí sauny musí přežít nasazení
+    saunaVypnoutV: state.saunaVypnoutV || null,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -12782,6 +12834,7 @@ function storeApplyPrimo(p) {
     }
   }
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
+  if (Number.isFinite(p.saunaVypnoutV) && p.saunaVypnoutV > 0 && !state.saunaVypnoutV) state.saunaVypnoutV = p.saunaVypnoutV;
   if (typeof p.tydenReport === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.tydenReport)
       && !(state.tydenReport >= p.tydenReport)) state.tydenReport = p.tydenReport;
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
@@ -12990,6 +13043,28 @@ async function storeSave() {
   }
 }
 
+// Obnova přes vlastní /restore endpointy (po startu i ze souboru zálohy)
+async function storeObnovPosts(port, posts) {
+  const p = posts && typeof posts === 'object' ? posts : {};
+  let obnoveno = 0;
+  for (const cesta of STORE_POSTS) {
+    const telo = p[cesta];
+    if (!telo || typeof telo !== 'object') continue;
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}${cesta}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(telo)
+      });
+      if (r.ok) obnoveno++;
+      else console.error(`Obnova ${cesta}: HTTP ${r.status}`);
+    } catch (err) {
+      console.error(`Obnova ${cesta}: ${err.message}`);
+    }
+  }
+  return obnoveno;
+}
+
 async function storeLoad(port) {
   if (!storeEnabled) return;
   let snap = null;
@@ -13004,23 +13079,7 @@ async function storeLoad(port) {
   storeLoaded = true;          // prázdný klíč je taky platná odpověď (první spuštění)
   if (!snap) return;
   storeApplyPrimo(snap.primo);
-  const posts = snap.posts && typeof snap.posts === 'object' ? snap.posts : {};
-  let obnoveno = 0;
-  for (const cesta of STORE_POSTS) {
-    const telo = posts[cesta];
-    if (!telo || typeof telo !== 'object') continue;
-    try {
-      const r = await fetch(`http://127.0.0.1:${port}${cesta}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(telo)
-      });
-      if (r.ok) obnoveno++;
-      else console.error(`Obnova ${cesta}: HTTP ${r.status}`);
-    } catch (err) {
-      console.error(`Obnova ${cesta}: ${err.message}`);
-    }
-  }
+  const obnoveno = await storeObnovPosts(port, snap.posts);
   storeStav.loadedAt = Date.now();
   console.log(`Záloha načtena (${obnoveno}/${STORE_POSTS.length}, ${fmtPragueTime(snap.at)})`);
   try { await storeNahrevNacti(); } catch (err) { console.error('Načtení měření sauny z Upstash selhalo:', err.message); }
@@ -13200,6 +13259,85 @@ const server = app.listen(PORT, async () => {
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
   scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
+});
+
+// ---------- Záloha do souboru (data i aplikace) ----------
+// Tlačítkem na Log/Nastavení se stáhne jeden JSON: data (stejný snímek jako do Upstash
+// plus řada topení, která má vlastní klíč) a soubory aplikace, ze kterých se dá appka
+// postavit znovu. Bez tajností: přihlášení k Rohlíku a push odběry se vynechají,
+// proměnné prostředí (klíče, hesla) v souboru nejsou nikdy. Obnova bere jen data —
+// kód běží z GitHubu přes Render a z appky se nepřepisuje.
+const ZALOHA_SOUBORY = ['server.js', 'package.json', 'package-lock.json', 'nas-start.sh', '.env.example', '.gitignore'];
+const ZALOHA_SLOZKY = ['public', 'data', 'jidelnicek', 'shelly'];
+// Konfigurace NASu s hesly a tokeny (gitignorované) do zálohy nikdy
+const ZALOHA_NE = /(^|\/)(\.env|[^/]*\.config\.json|[^/]*tokeny[^/]*|[^/]*relace[^/]*|__pycache__|node_modules)(\/|$)/;
+const ZALOHA_BINARNI = /\.(png|jpe?g|gif|ico|webp|pdf|zip)$/i;
+const ZALOHA_PRIMO_TAJNE = ['rohlikOauth', 'rohlikWebCookies', 'push'];
+
+function zalohaSoubory(koren = __dirname) {
+  const fs = require('fs'), path = require('path');
+  const out = {};
+  const pridej = rel => {
+    if (ZALOHA_NE.test(rel)) return;
+    const plna = path.join(koren, rel);
+    let st;
+    try { st = fs.statSync(plna); } catch { return; }
+    if (st.isDirectory()) {
+      for (const f of fs.readdirSync(plna).sort()) pridej(rel + '/' + f);
+    } else if (st.isFile() && st.size <= 5 * 1024 * 1024) {
+      out[rel] = ZALOHA_BINARNI.test(rel) ? { base64: fs.readFileSync(plna).toString('base64') } : fs.readFileSync(plna, 'utf8');
+    }
+  };
+  for (const f of ZALOHA_SOUBORY) pridej(f);
+  try { for (const f of fs.readdirSync(koren).filter(f => /\.md$/i.test(f)).sort()) pridej(f); } catch {}
+  for (const d of ZALOHA_SLOZKY) pridej(d);
+  return out;
+}
+
+function zalohaData() {
+  const snap = storeSnapshot();
+  const primo = { ...snap.primo };
+  for (const k of ZALOHA_PRIMO_TAJNE) delete primo[k];
+  return { v: snap.v, at: snap.at, posts: snap.posts, primo,
+    topeni: { zaznamy: (state.topeni && state.topeni.zaznamy) || [] } };
+}
+
+app.get('/api/zaloha', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const soubory = zalohaSoubory();
+  const at = Date.now();
+  const nazev = `solinator-zaloha-${pragueDateString(at)}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${nazev}"`);
+  res.json({
+    zaloha: 'solinator', verze: 1, at,
+    data: zalohaData(),
+    aplikace: { at, souboru: Object.keys(soubory).length, soubory,
+      pozn: 'Kód appky (běží z GitHubu přes Render). Hesla a klíče jsou v proměnných prostředí, sem nepatří.' }
+  });
+});
+
+// Obnova: stejné /restore endpointy jako po nasazení (slučuje, nic nemaže)
+const zalohaJson = express.json({ limit: '20mb' });
+app.post('/api/zaloha/obnovit', zalohaJson, async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const b = req.body || {};
+  const d = b.data && typeof b.data === 'object' ? b.data : b;
+  if (!d || typeof d.posts !== 'object' || !d.posts || Array.isArray(d.posts)) {
+    return res.status(400).json({ error: 'Tohle není záloha Solinátoru (chybí data).' });
+  }
+  const primo = d.primo && typeof d.primo === 'object' ? { ...d.primo } : null;
+  if (primo) for (const k of ZALOHA_PRIMO_TAJNE) delete primo[k];
+  try {
+    if (primo) storeApplyPrimo(primo);
+    const port = (req.socket && req.socket.localPort) || PORT;
+    const obnoveno = await storeObnovPosts(port, d.posts);
+    if (d.topeni && Array.isArray(d.topeni.zaznamy)) topeniObnov(d.topeni);
+    addLog(`Záloha: data obnovena ze souboru (${obnoveno}/${STORE_POSTS.length} částí)`);
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+    res.json({ ok: true, obnoveno, celkem: STORE_POSTS.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Obnova selhala: ' + String(err.message).slice(0, 120) });
+  }
 });
 
 // ---------- Rohlík (košík) ----------

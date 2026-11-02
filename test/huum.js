@@ -69,7 +69,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
          + ' huumSvetloZmenaMimo, saunaTimerTik, odhadNabehu, saunaRelaceSleduj, saunaAktivni,'
-         + ' casovace: () => saunaTimers };'
+         + ' saunaVypnoutTik, casovace: () => saunaTimers };'
   )(
     user, pass, url, zapnuto, fetchStub, h.state,
     { get: (c, fn) => { h.routy['GET ' + c] = fn; },
@@ -964,6 +964,38 @@ nadpis('19) Časovač počítá s teplotou v době zapnutí (předpověď)');
   k.predpoved = () => 6;
   k.api.saunaTimerPridej('19:00', 80, jdu - 60 * MINUTA);
   check('zapnutí hned: bez předpovědi', k.api.casovace()[0].nabeh.zPredpovedi, false);
+}
+
+nadpis('20) Časovač vypnutí: za 5–30 min po 5');
+{
+  const h = build();
+  h.state.huum = { heating: true, temperature: 80, fetchedAt: new Date().toISOString(), error: null };
+  check('jen 5–30 po 5', [(await volej(h, 'POST /api/sauna/vypnout-za', { minut: 7 })).kod, (await volej(h, 'POST /api/sauna/vypnout-za', { minut: 35 })).kod].join(' '), '400 400');
+  const pred = Date.now();
+  const r = await volej(h, 'POST /api/sauna/vypnout-za', { minut: 15 });
+  check('nastaví čas vypnutí', r.kod === 200 && Math.abs(h.state.saunaVypnoutV - (pred + 15 * MINUTA)) < 2000, true);
+  check('  a pošle ho do appky', r.out.huum.vypnoutV, h.state.saunaVypnoutV);
+  check('  log', /Sauna: vypnu v .* \(za 15 min\)/.test(h.zapisy[h.zapisy.length - 1]), true);
+  check('dřív se nic nestane', [await h.api.saunaVypnoutTik(h.state.saunaVypnoutV - MINUTA), h.volani.length].join(' '), 'false 0');
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
+  check('v čase kamna vypne', await h.api.saunaVypnoutTik(h.state.saunaVypnoutV), true);
+  check('  povel stop a časovač pryč', [h.volani[0].adresa.endsWith('/stop'), h.state.saunaVypnoutV === null].join(' '), 'true true');
+  check('  log', h.zapisy.includes('Sauna: vypnuta (časovač vypnutí)'), true);
+  const z = build();
+  z.state.huum = { heating: true };
+  await volej(z, 'POST /api/sauna/vypnout-za', { minut: 30 });
+  check('zrušení nulou', [(await volej(z, 'POST /api/sauna/vypnout-za', { minut: 0 })).kod, z.state.saunaVypnoutV === null].join(' '), '200 true');
+  const n = build();
+  n.state.huum = { heating: false };
+  check('netopí → nejde nastavit', (await volej(n, 'POST /api/sauna/vypnout-za', { minut: 10 })).kod, 409);
+  const j = build();
+  j.state.huum = { heating: true };
+  await volej(j, 'POST /api/sauna/vypnout-za', { minut: 10 });
+  j.state.huum.heating = false;
+  check('vypnutá jinak → časovač se zruší bez povelu', [await j.api.saunaVypnoutTik(Date.now() + 20 * MINUTA), j.state.saunaVypnoutV === null, j.volani.length].join(' '), 'false true 0');
+  const zam = build();
+  zam.pustDal = false;
+  check('zamčeno', (await volej(zam, 'POST /api/sauna/vypnout-za', { minut: 10 })).kod, 401);
 }
 
 konec();
