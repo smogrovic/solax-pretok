@@ -299,6 +299,7 @@ const state = {
   huumSyrove: null,  // poslední odpověď z HUUM tak, jak přišla — jen do diagnostiky
   heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
+  tcSpotreba: { dny: [], ts: 0, chyba: null },  // TČ Aquarea po dnech { d, topeni, voda, chlazeni } kWh
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
   // teploty v pokojích za 24 h pro graf: temps = podle guid klimatizace, sens = Shelly čidla
@@ -562,6 +563,7 @@ function snapshot() {
     saunaTimers,
     siteDny: state.siteDny,
     months: state.months,
+    tcSpotreba: tcSpotrebaPayload(),
     timeline: state.timeline,
     // Rozvrh čerpadla jde do appky odsud, ať se popisek v kartě nemůže rozejít
     // se skutečnými časy
@@ -1137,8 +1139,15 @@ function topeniSouhrn(zaznamy = state.topeni.zaznamy) {
   }
   const prumer = a => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null);
   return [...dny.values()].sort((a, b) => a.d.localeCompare(b.d)).slice(-TOPENI_SOUHRN_DNU)
-    .map(r => ({ d: r.d, hodin: r.hodin, topeniKwh: Math.round(r.wh / 100) / 10,
-      venkuC: prumer(r.venku), pokojeC: prumer(r.pokoje) }));
+    .map(r => {
+      const out = { d: r.d, hodin: r.hodin, topeniKwh: Math.round(r.wh / 100) / 10,
+        venkuC: prumer(r.venku), pokojeC: prumer(r.pokoje) };
+      // Skutečná spotřeba TČ z Comfort Cloudu, když ji den má — odhad zůstává vedle
+      const tc = ((state.tcSpotreba && state.tcSpotreba.dny) || []).find(x => x.d === r.d);
+      if (tc && typeof tc.topeni === 'number') out.tcTopeniKwh = tc.topeni;
+      if (tc && typeof tc.voda === 'number') out.tcVodaKwh = tc.voda;
+      return out;
+    });
 }
 
 function topeniModel() {
@@ -1153,6 +1162,7 @@ function topeniNavod() {
     'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
     'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
     'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'SKUTEČNÁ SPOTŘEBA TČ: V denním souhrnu tcTopeniKwh / tcVodaKwh = elektřina tepelného čerpadla na topení / ohřev vody za den podle Comfort Cloudu (měřené jednotkou). Kde jsou, mají přednost před odhadem.',
     'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0. Obě konstanty jsou hrubé odhady (viz `model`). Klidně je přepočítej ze surových dumW/bojleryW/saunaW — např. stálý odběr urči z nočních hodin teplých dnů, kdy se netopí (aqTopi = 0, klimaTopi = 0).',
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
     'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
@@ -2150,7 +2160,9 @@ const MONTHS_MAX = 13;
 // a vlastní místo v řetězu dělení sítě nedostala.
 const MONTH_CELKEM = ['sauna', 'pool', 'wb', 'dum'];
 const MONTH_SPLIT = ['pool', 'wb', 'dum'];
-const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']));
+// Tepelné čerpadlo: měsíční součty z Comfort Cloudu (viz tcMesice), v „domu" jsou obsažené
+const MONTH_TC = ['tc', 'tcTopeni', 'tcVoda'];
+const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']), MONTH_TC);
 
 function pragueMonthString(at) {
   return pragueDateString(at).slice(0, 7);
@@ -7238,6 +7250,234 @@ if (panasonicEnabled) {
   scheduleEvery(pollAircon, 5 * 60 * 1000, 80000); // offset 80 s
 }
 
+// ---------- Spotřeba tepelného čerpadla (Aquarea) ----------
+// Comfort Cloud vede spotřebu TČ po dnech: topení, chlazení a ohřev vody v kWh.
+// Jde přes stejný proxy common/transfer jako stav (apiName /remote/v1/api/consumption,
+// dataMode 1 = jeden záznam za každý den měsíce z `date`). Živý příkon cloud nemá,
+// dnešek se doplňuje zhruba po hodinách. -255 = den, který ještě data nemá.
+const TC_SPOTREBA_API = '/remote/v1/api/consumption';
+const TC_SPOTREBA_DNU = 400;
+const TC_SPOTREBA_TIK_MS = 60 * 60 * 1000;
+const TC_NEZNAMO = -255;
+
+function tcPosunPrahy(datum) {
+  // Pražský posun v poledne toho dne: "+01:00" v zimě, "+02:00" v létě
+  const poledne = Date.UTC(+datum.slice(0, 4), +datum.slice(5, 7) - 1, +datum.slice(8, 10), 12);
+  const h = pragueTime(poledne).hour - 12;
+  return `${h >= 0 ? '+' : '-'}${String(Math.abs(h)).padStart(2, '0')}:00`;
+}
+
+function tcSpotrebaTelo(guid, datum) {
+  return {
+    apiName: TC_SPOTREBA_API,
+    requestMethod: 'POST',
+    bodyParam: { gwid: guid, dataMode: 1, date: datum.replace(/-/g, ''), osTimezone: tcPosunPrahy(datum) }
+  };
+}
+
+// Odmítnutí od Aquarey chodí jako HTTP 200 se seznamem `message`
+function tcOdmitnuti(j) {
+  if (!j || typeof j !== 'object') return null;
+  const seznam = Array.isArray(j.message) ? j.message : [j.message];
+  for (const m of seznam) {
+    if (m && typeof m === 'object' && (m.errorCode || m.errorMessage)) {
+      return `Aquarea odmítla dotaz na spotřebu${m.errorCode ? ` (${String(m.errorCode).slice(0, 40)})` : ''}: ${String(m.errorMessage || '').slice(0, 120)}`;
+    }
+  }
+  return null;
+}
+
+function aquareaSpotrebaRozeber(j) {
+  const kwh = v => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    return typeof n === 'number' && Number.isFinite(n) && n !== TC_NEZNAMO && n >= 0 ? Math.round(n * 100) / 100 : null;
+  };
+  const dny = [];
+  for (const z of (j && Array.isArray(j.historyDataList)) ? j.historyDataList : []) {
+    const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String((z && z.dataTime) || ''));
+    if (!m) continue;
+    const den = { d: `${m[1]}-${m[2]}-${m[3]}`, topeni: kwh(z.heatConsumption), voda: kwh(z.tankConsumption), chlazeni: kwh(z.coolConsumption) };
+    if (den.topeni === null && den.voda === null && den.chlazeni === null) continue;
+    dny.push(den);
+  }
+  return dny.sort((a, b) => a.d.localeCompare(b.d));
+}
+
+const tcCelkem = den => (den.topeni || 0) + (den.voda || 0) + (den.chlazeni || 0);
+
+function tcSpotrebaSluc(nove, dnes = pragueDateString()) {
+  const t = state.tcSpotreba;
+  for (const den of nove) {
+    if (den.d > dnes) continue;
+    const i = t.dny.findIndex(r => r.d === den.d);
+    if (i >= 0) t.dny[i] = den;
+    else t.dny.push(den);
+  }
+  t.dny.sort((a, b) => a.d.localeCompare(b.d));
+  t.dny = t.dny.slice(-TC_SPOTREBA_DNU);
+}
+
+// Měsíční součty TČ do spotřeby po měsících (Wh). Nastavují se z dnů, nesčítají —
+// opakované načtení tak nic nezdvojí.
+function tcMesice() {
+  const mesice = new Map();
+  for (const den of state.tcSpotreba.dny) {
+    const m = den.d.slice(0, 7);
+    const r = mesice.get(m) || { tc: 0, tcTopeni: 0, tcVoda: 0 };
+    r.tc += tcCelkem(den) * 1000;
+    r.tcTopeni += (den.topeni || 0) * 1000;
+    r.tcVoda += (den.voda || 0) * 1000;
+    mesice.set(m, r);
+  }
+  let zmena = false;
+  for (const [m, r] of mesice) {
+    let rec = state.months.find(x => x.m === m);
+    if (!rec) {
+      // Starší měsíce, které se už do řady nevejdou, se nezakládají
+      const nejstarsi = state.months.length >= MONTHS_MAX ? state.months.map(x => x.m).sort()[0] : null;
+      if (nejstarsi && m < nejstarsi) continue;
+      rec = { m, sauna: 0, pool: 0, wb: 0, dum: 0 };
+      state.months.push(rec);
+    }
+    for (const k of MONTH_TC) {
+      const v = Math.round(r[k]);
+      if (rec[k] !== v) { rec[k] = v; zmena = true; }
+    }
+  }
+  if (zmena) {
+    state.months.sort((a, b) => a.m.localeCompare(b.m));
+    state.months = state.months.slice(-MONTHS_MAX);
+  }
+  return zmena;
+}
+
+function tcSpotrebaPayload(now = Date.now()) {
+  const t = state.tcSpotreba;
+  const dnes = pragueDateString(now);
+  const vcera = pragueDateString(now - 86400000);
+  const mesic = dnes.slice(0, 7);
+  const predMesic = (() => { const d = new Date(Date.UTC(+mesic.slice(0, 4), +mesic.slice(5, 7) - 2, 1)); return d.toISOString().slice(0, 7); })();
+  const soucet = m => {
+    const dny = t.dny.filter(r => r.d.startsWith(m));
+    if (!dny.length) return null;
+    const zaokr = v => Math.round(v * 100) / 100;
+    return {
+      topeni: zaokr(dny.reduce((s, r) => s + (r.topeni || 0), 0)),
+      voda: zaokr(dny.reduce((s, r) => s + (r.voda || 0), 0)),
+      celkem: zaokr(dny.reduce((s, r) => s + tcCelkem(r), 0))
+    };
+  };
+  const den = d => {
+    const r = t.dny.find(x => x.d === d);
+    return r ? { topeni: r.topeni, voda: r.voda, celkem: Math.round(tcCelkem(r) * 100) / 100 } : null;
+  };
+  return {
+    dnes: den(dnes), vcera: den(vcera),
+    mesic: soucet(mesic), minulyMesic: soucet(predMesic),
+    dny: t.dny.slice(-14), ts: t.ts || 0, chyba: t.chyba || null
+  };
+}
+
+async function aquareaSpotrebaNacti(guid, datum) {
+  const j = await pccQueued(() => pccApiFetch('/remote/v1/app/common/transfer', {
+    method: 'POST', body: JSON.stringify(tcSpotrebaTelo(guid, datum))
+  }));
+  const odmitnuti = tcOdmitnuti(j);
+  if (odmitnuti) throw new Error(odmitnuti);
+  return j;
+}
+
+// Které měsíce načíst: běžící, a prvních 5 dní i minulý (ať se dopíše jeho konec)
+function tcMesiceKNacteni(now = Date.now()) {
+  const dnes = pragueDateString(now);
+  const out = [dnes];
+  if (+dnes.slice(8, 10) <= 5) {
+    const d = new Date(Date.UTC(+dnes.slice(0, 4), +dnes.slice(5, 7) - 1, 0));
+    out.unshift(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+let tcSpotrebaBezi = false;
+async function tcSpotrebaPoll() {
+  if (!panasonicEnabled || tcSpotrebaBezi) return;
+  const aq = ((state.aircon && state.aircon.aquarea) || [])[0];
+  if (!aq || !aq.guid) return;
+  tcSpotrebaBezi = true;
+  const t = state.tcSpotreba;
+  try {
+    for (const datum of tcMesiceKNacteni()) {
+      tcSpotrebaSluc(aquareaSpotrebaRozeber(await aquareaSpotrebaNacti(aq.guid, datum)));
+    }
+    if (t.chyba) addLog('Tepelné čerpadlo: spotřeba z Comfort Cloudu zase chodí');
+    t.chyba = null;
+    t.ts = Date.now();
+    if (tcMesice()) broadcast('months', { months: state.months });
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  } catch (err) {
+    const text = String(err.message || err).replace(aq.guid, '…').slice(0, 160);
+    if (!t.chyba) addLog('Tepelné čerpadlo: spotřebu se nepodařilo načíst — ' + text, 'error');
+    t.chyba = text;
+  } finally {
+    tcSpotrebaBezi = false;
+  }
+  broadcast('tcSpotreba', { tcSpotreba: tcSpotrebaPayload() });
+  if (typeof topeniPayload === 'function') broadcast('topeni', { topeni: topeniPayload() });
+}
+
+if (panasonicEnabled && typeof scheduleEvery === 'function') {
+  // Po startu za 2 min (stav Aquarey už je načtený), pak jednou za hodinu
+  scheduleEvery(() => tcSpotrebaPoll().catch(() => {}), TC_SPOTREBA_TIK_MS, 2 * 60 * 1000 + 20000);
+}
+
+// Co Comfort Cloud ke spotřebě vrací — bez GUID a tokenů, jen tvar a první dny
+app.get('/api/aquarea/spotreba/diagnostika', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const aq = ((state.aircon && state.aircon.aquarea) || [])[0];
+  if (!panasonicEnabled || !aq) return res.json({ ok: false, chyba: 'Tepelné čerpadlo není načtené.' });
+  try {
+    const j = await aquareaSpotrebaNacti(aq.guid, pragueDateString());
+    const seznam = Array.isArray(j && j.historyDataList) ? j.historyDataList : [];
+    res.json({
+      ok: true,
+      klice: j && typeof j === 'object' ? Object.keys(j) : [],
+      dateString: j && j.dateString,
+      zaznamu: seznam.length,
+      prvni: seznam.slice(0, 3),
+      rozebrano: aquareaSpotrebaRozeber(j).slice(-3),
+      stav: { dnu: state.tcSpotreba.dny.length, ts: state.tcSpotreba.ts, chyba: state.tcSpotreba.chyba }
+    });
+  } catch (err) {
+    res.json({ ok: false, chyba: String(err.message || err).replace(aq.guid, '…').slice(0, 200) });
+  }
+});
+
+// Obnova dnů po nasazení — novější data z cloudu je stejně přepíšou
+app.post('/api/aquarea/spotreba/restore', (req, res) => {
+  const dny = req.body && Array.isArray(req.body.dny) ? req.body.dny : null;
+  if (!dny) return res.status(400).json({ error: 'Chybí dny.' });
+  const kwh = v => (v === null || v === undefined ? null : typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 500 ? v : undefined);
+  const dnes = pragueDateString();
+  let pridano = 0;
+  for (const z of dny.slice(-TC_SPOTREBA_DNU)) {
+    if (!z || typeof z.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(z.d) || z.d > dnes) continue;
+    const den = { d: z.d, topeni: kwh(z.topeni), voda: kwh(z.voda), chlazeni: kwh(z.chlazeni) };
+    if ([den.topeni, den.voda, den.chlazeni].some(v => v === undefined)) continue;
+    if (den.topeni === null && den.voda === null && den.chlazeni === null) continue;
+    if (state.tcSpotreba.dny.some(r => r.d === den.d)) continue;
+    state.tcSpotreba.dny.push(den);
+    pridano++;
+  }
+  if (pridano) {
+    state.tcSpotreba.dny.sort((a, b) => a.d.localeCompare(b.d));
+    state.tcSpotreba.dny = state.tcSpotreba.dny.slice(-TC_SPOTREBA_DNU);
+    if (typeof req.body.ts === 'number' && !state.tcSpotreba.ts) state.tcSpotreba.ts = req.body.ts;
+    if (tcMesice()) broadcast('months', { months: state.months });
+    broadcast('tcSpotreba', { tcSpotreba: tcSpotrebaPayload() });
+  }
+  res.json({ ok: true, pridano });
+});
+
 app.post('/api/aircon/set', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const { guid, power, temperature, mode } = req.body || {};
@@ -11966,6 +12206,7 @@ const STORE_POSTS = [
   '/api/rohlik/nauceno/restore',
   '/api/site-dny/restore',
   '/api/months/restore',
+  '/api/aquarea/spotreba/restore',
   '/api/solinator/restore',
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
@@ -12019,6 +12260,7 @@ function storeSnapshot() {
     '/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
+    '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts },
     '/api/solinator/restore': { ...state.solinator },
     '/api/timers/restore': {
       savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers,

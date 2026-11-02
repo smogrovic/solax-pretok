@@ -119,6 +119,7 @@ function vzorovyStav() {
     zavlahaDny: [{ d: '2026-08-30', zony: { 3: 600000 } }],
     months: [{ m: '2026-08', sauna: 40000, pool: 12000, wb: 300000, dum: 500000,
                poolGrid: 4000, poolPv: 8000 }],
+    tcSpotreba: { dny: [{ d: '2026-08-30', topeni: 6.4, voda: 2.1, chlazeni: 0 }], ts: t, chyba: null },
     solinator: { date: '2026-08-31', bonusMs: 3600000, boostMs: 0, carryMs: 0, disabledUntil: 0 },
     runtime: { date: '2026-08-31', ms: { shelly: 1, pool: 2, solinator: 3 }, wh: { feed: 4 }, yesterday: null },
     wbDayType: { manual: 'weekend', until: Date.now() + 3600000 },
@@ -165,6 +166,7 @@ nadpis('2) Balení');
   check('odkud šla spotřeba taky', snap.posts['/api/usage-days/restore'].usageDays[0].pv, 9000);
   check('runtime nese datum', snap.posts['/api/runtime/restore'].date, '2026-08-31');
   check('měsíční rozpad na síť se ukládá', snap.posts['/api/months/restore'].months[0].poolGrid, 4000);
+  check('spotřeba TČ po dnech se ukládá', JSON.stringify(snap.posts['/api/aquarea/spotreba/restore'].dny), '[{"d":"2026-08-30","topeni":6.4,"voda":2.1,"chlazeni":0}]');
   check('zimní režim se ukládá', snap.posts['/api/automation/restore'].mode, 'winter');
   check('meze sauny se už neukládají (jsou natvrdo)', '/api/sauna/limits/restore' in snap.posts, false);
   check('časovače mají razítko', typeof snap.posts['/api/timers/restore'].savedAt, 'number');
@@ -565,6 +567,7 @@ function prazdnyStav() {
     wbModeHistory: [], log: [], timeline: {}, pvDays: [], wbDays: [], poolDays: [], saunaDays: [], siteDny: [],
     zavlahaDny: [],
     months: [], solinator: {}, runtime: { date: '', ms: {}, wh: {}, yesterday: null },
+    tcSpotreba: { dny: [], ts: 0, chyba: null },
     usageDays: [],
     wbDayType: { manual: null, until: 0 }, wbLowSoc: { until: 0 }, wbAuto: true,
     tempAuto: { obyvak: false, loznice: false, elenka: false, miky: false },

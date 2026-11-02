@@ -59,6 +59,17 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   check('  a součtem na konci', /Celkem \\(2 měsíců\\)/.test(s[2]) && /73,2 kWh/.test(s[2]), 'true');
   check('bazén má svoje čísla', /98,0 kWh/.test(radky(poolMonths)[0]), 'true');
   check('wallbox taky', /305,0 kWh/.test(radky(wbMonths)[0]), 'true');
+  // Tepelné čerpadlo uvnitř domu: rozpad u měsíce i v součtu
+  monthsData = [
+    { m: kl(predminuly), sauna: 0, pool: 0, wb: 0, dum: 400000, tc: 150000, tcTopeni: 120000, tcVoda: 30000 },
+    { m: kl(minuly), sauna: 0, pool: 0, wb: 0, dum: 300000 }
+  ];
+  renderMonths();
+  const tcR = [...dumMonths.querySelectorAll('.wbsrc-tc')].map(e => e.textContent);
+  check('TČ jen u měsíce, který ho má, a v součtu', tcR.length, 2);
+  check('  rozpad a dům bez TČ', tcR[0], 'z toho tepelné čerpadlo 150,0 kWh (topení 120,0 kWh · voda 30,0 kWh) · dům bez TČ 250,0 kWh');
+  check('  v jiných kartách TČ není', saunaMonths.querySelectorAll('.wbsrc-tc').length + poolMonths.querySelectorAll('.wbsrc-tc').length, 0);
+  check('slučování TČ drží', (mergeMonths([{ m: kl(minuly), tc: 5 }], [{ m: kl(minuly), tc: 9, tcTopeni: 7 }])[0] || {}).tc, 9);
   monthsData = [];
   renderMonths();
   check('bez uzavřeného měsíce to řekne', /Zatím žádný celý měsíc/.test(saunaMonths.textContent), 'true');

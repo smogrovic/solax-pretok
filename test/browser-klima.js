@@ -189,6 +189,21 @@ setTimeout(async () => {
     + box.querySelector('.aq-voda .aq-pozn').textContent + ' | ' + [...box.querySelectorAll('.temp-btn')].every(b => b.disabled),
     '34,0 °C · cíl se načítá | v nádrži 48,2 °C · cíl se načítá | true');
 
+  // Spotřeba z Comfort Cloudu
+  check('bez spotřeby řádek není', box.querySelector('.aq-spotreba'), null);
+  tcSpotrebaData = { dnes: { topeni: 2, voda: 0.5, celkem: 2.5 }, vcera: { topeni: 8.25, voda: 1.5, celkem: 9.75 },
+    mesic: { topeni: 10.25, voda: 2, celkem: 12.25 }, minulyMesic: null, dny: [], ts: Date.now(), chyba: null };
+  renderAquarea();
+  const sp = box.querySelector('.aq-spotreba');
+  check('spotřeba: dnes, včera, měsíc', sp && sp.querySelector('.aq-spotreba-cisla').textContent, 'dnes 2,5 kWhvčera 9,8 kWhtento měsíc 12,3 kWh');
+  check('  rozpad topení a voda', /měsíc: topení 10,3 kWh · voda 2,0 kWh/.test(sp.textContent), true);
+  check('  vejde se', box.scrollWidth <= box.clientWidth + 1 && sp.scrollWidth <= sp.clientWidth + 1, true);
+  tcSpotrebaData = { dnes: null, vcera: null, mesic: null, dny: [], ts: 0, chyba: 'HTTP 500' };
+  renderAquarea();
+  check('  chyba bez dat šedě', box.querySelector('.aq-spotreba').textContent, 'SpotřebaSpotřebu se teď nepodařilo načíst.');
+  tcSpotrebaData = null;
+  renderAquarea();
+
   R.push('\\nProgram tepelného čerpadla');
   const pbox = document.getElementById('aqProgramBox');
   check('bez programu ze serveru box není', pbox.hidden, true);

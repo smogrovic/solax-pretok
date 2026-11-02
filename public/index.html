@@ -1358,6 +1358,12 @@
   .aq-prave{display:flex;align-items:center;gap:8px;}
   .aq-prave .temp-val{min-width:58px;text-align:center;}
   .aq-chyba{font-size:12px;color:#c0392b;margin-top:6px;}
+  .aq-spotreba{padding:8px 0 2px;border-top:1px solid rgba(44,62,80,0.06);}
+  .aq-spotreba-cisla{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;}
+  .aq-spotreba-cisla span{white-space:nowrap;}
+  .aq-spotreba-cisla b{font-weight:700;}
+  .aq-spotreba .aq-pozn{white-space:normal;margin-top:2px;}
+  .wbsrc-tc{font-size:12px;color:var(--grey-text);margin-top:3px;}
   .sbal-btn[hidden]{display:none;}
   .zk-sek{border-top:1px solid rgba(44,62,80,0.08);padding:8px 0 4px;}
   .zk-sek:first-child{border-top:none;padding-top:2px;}
@@ -7880,6 +7886,35 @@ function renderAquarea() {
     hned.type = 'button';
     hned.addEventListener('click', () => { hned.disabled = true; aquareaPost(aq, { ohrevVody: !aq.ohrevVody }); });
   }
+  renderAquareaSpotreba(el);
+}
+
+// Spotřeba TČ z Comfort Cloudu (kWh po dnech, cloud ji doplňuje zhruba po hodinách)
+let tcSpotrebaData = null;
+function tcKwh(v) {
+  return (Math.round((Number(v) || 0) * 10) / 10).toFixed(1).replace('.', ',') + ' kWh';
+}
+function renderAquareaSpotreba(el) {
+  const t = tcSpotrebaData;
+  if (!t || (!t.dnes && !t.vcera && !t.mesic && !t.chyba)) return;
+  const box = el('div', 'aq-spotreba', aquareaObsahEl);
+  el('div', 'aq-nazev', box, 'Spotřeba');
+  if (t.dnes || t.vcera || t.mesic) {
+    const cisla = el('div', 'aq-spotreba-cisla', box);
+    const polozka = (popis, v) => {
+      if (!v) return;
+      const s = el('span', '', cisla, popis + ' ');
+      el('b', '', s, tcKwh(v.celkem));
+    };
+    polozka('dnes', t.dnes);
+    polozka('včera', t.vcera);
+    polozka('tento měsíc', t.mesic);
+    const m = t.mesic || t.vcera || t.dnes;
+    const stari = t.ts ? Math.round((Date.now() - t.ts) / 60000) : null;
+    el('div', 'aq-pozn', box, (t.mesic ? 'měsíc: ' : '') + 'topení ' + tcKwh(m.topeni) + ' · voda ' + tcKwh(m.voda)
+      + ' · cloud doplňuje po hodinách' + (stari !== null && stari >= 120 ? ' (data před ' + Math.round(stari / 60) + ' h)' : ''));
+  }
+  if (t.chyba) el('div', 'aq-pozn', box, 'Spotřebu se teď nepodařilo načíst.');
 }
 
 // ---------- Pokyny ze zkratek iPhonu (Logika automatiky) ----------
@@ -10083,14 +10118,18 @@ function renderTopeni() {
     den.className = 'wbsrc-day';
     den.textContent = denNadpis(new Date(d.d + 'T12:00:00').getTime());
     const kwh = document.createElement('span');
-    kwh.textContent = 'topení ~' + String(d.topeniKwh).replace('.', ',') + ' kWh';
+    // Změřené tepelným čerpadlem (Comfort Cloud) má přednost před odhadem
+    const zmereno = typeof d.tcTopeniKwh === 'number';
+    kwh.textContent = zmereno ? 'TČ topení ' + tcKwh(d.tcTopeniKwh) : 'topení ~' + String(d.topeniKwh).replace('.', ',') + ' kWh';
     head.appendChild(den);
     head.appendChild(kwh);
     row.appendChild(head);
     const tep = document.createElement('div');
     tep.className = 'wbsrc-legend';
     tep.textContent = 'venku ' + topeniStupne(d.venkuC) + ' · doma ' + topeniStupne(d.pokojeC)
-      + (d.hodin < 24 ? ' · ' + d.hodin + ' h dat' : '');
+      + (d.hodin < 24 ? ' · ' + d.hodin + ' h dat' : '')
+      + (typeof d.tcVodaKwh === 'number' ? ' · TČ voda ' + tcKwh(d.tcVodaKwh) : '')
+      + (zmereno ? ' · odhad ~' + String(d.topeniKwh).replace('.', ',') + ' kWh' : '');
     row.appendChild(tep);
     topeniListEl.appendChild(row);
   }
@@ -10263,6 +10302,16 @@ function pruhSitFve(grid, pv) {
   return box;
 }
 
+// Tepelné čerpadlo uvnitř „domu": kolik bralo a kolik zbylo na zbytek domu (Wh)
+function tcRadek(tc, topeni, voda, dum) {
+  const kwh = wh => ((wh || 0) / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  const d = document.createElement('div');
+  d.className = 'wbsrc-tc';
+  d.textContent = 'z toho tepelné čerpadlo ' + kwh(tc) + ' (topení ' + kwh(topeni) + ' · voda ' + kwh(voda) + ')'
+    + ' · dům bez TČ ' + kwh(Math.max(0, (dum || 0) - tc));
+  return d;
+}
+
 function renderMonths() {
   const bezici = tentoMesic();
   const hotove = (monthsData || [])
@@ -10281,6 +10330,7 @@ function renderMonths() {
     }
     const frag = document.createDocumentFragment();
     let celkem = 0, celkemGrid = 0, celkemPv = 0, seRozpadem = 0;
+    let tcCelkem = 0, tcTopeniCelkem = 0, tcVodaCelkem = 0, tcDumCelkem = 0;
     for (const r of hotove) {
       celkem += r[kus] || 0;
       const row = document.createElement('div');
@@ -10304,6 +10354,10 @@ function renderMonths() {
         celkemPv += pv;
         seRozpadem += r[kus] || 0;
       }
+      if (kus === 'celek' && (r.tc || 0) > 0) {
+        row.appendChild(tcRadek(r.tc, r.tcTopeni, r.tcVoda, r.dum));
+        tcCelkem += r.tc; tcTopeniCelkem += r.tcTopeni || 0; tcVodaCelkem += r.tcVoda || 0; tcDumCelkem += r.dum || 0;
+      }
       frag.appendChild(row);
     }
     if (hotove.length > 1) {
@@ -10322,6 +10376,7 @@ function renderMonths() {
       // Součtový pruh jen z měsíců, které rozpad mají — jinak by vyšel podíl z FVE
       // vyšší, než ve skutečnosti byl (starší měsíce by se tvářily jako samé slunce)
       if (split && seRozpadem > 0) row.appendChild(pruhSitFve(celkemGrid, celkemPv));
+      if (kus === 'celek' && tcCelkem > 0) row.appendChild(tcRadek(tcCelkem, tcTopeniCelkem, tcVodaCelkem, tcDumCelkem));
       frag.appendChild(row);
     }
     el.appendChild(frag);
@@ -10354,6 +10409,10 @@ function mergeMonths(a, b) {
           delete m[k + 'Pv'];
         }
       }
+    }
+    // Tepelné čerpadlo (z Comfort Cloudu): bere se větší, jako u ostatních součtů
+    for (const k of ['tc', 'tcTopeni', 'tcVoda']) {
+      if (typeof r[k] === 'number' && r[k] >= (m[k] || 0)) m[k] = r[k];
     }
     mapa.set(r.m, m);
   }
@@ -12029,6 +12088,7 @@ function applySnapshot(snap) {
   bezpecne(() => renderStore(snap.store));
   airconEnabled = snap.airconEnabled !== false;
   airconData = snap.aircon || { devices: [], error: null };
+  tcSpotrebaData = snap.tcSpotreba || null;
   sensorsData = snap.sensors || {};
   {
     const serverHist = pruneAirconHistory(snap.airconHistory);
@@ -12427,6 +12487,10 @@ function connectStream() {
     renderObehTimeline();
     renderWallboxChart();   // dráha „připojeno"
     saveTimelineLocal();
+  });
+  es.addEventListener('tcSpotreba', e => {
+    tcSpotrebaData = JSON.parse(e.data).tcSpotreba || null;
+    bezpecne(renderAquarea);
   });
   es.addEventListener('aircon', e => {
     airconData = JSON.parse(e.data).aircon || { devices: [], error: null };

@@ -93,6 +93,16 @@ nadpis('3) Souhrn, ořez a obnova');
   const mnoho = [];
   for (let d = 0; d < 30; d++) mnoho.push({ t: h0 - d * 24 * HOD, topeniW: 100 });
   check('souhrn jen 14 dní', api.topeniSouhrn(mnoho.reverse()).length, 14);
+  {
+    // Skutečná spotřeba TČ z Comfort Cloudu se k dni přidá, odhad zůstane
+    const d0 = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(h0));
+    const bez = api.topeniSouhrn([{ t: h0, topeniW: 1000 }])[0];
+    check('bez dat TČ jen odhad', 'tcTopeniKwh' in bez, false);
+    state.tcSpotreba = { dny: [{ d: d0, topeni: 7.25, voda: 1.9, chlazeni: null }] };
+    const s = api.topeniSouhrn([{ t: h0, topeniW: 1000 }])[0];
+    check('  s daty TČ: topení, voda i odhad', [s.tcTopeniKwh, s.tcVodaKwh, s.topeniKwh].join(' '), '7.25 1.9 1');
+    delete state.tcSpotreba;
+  }
 
   const pred = state.topeni.zaznamy.length;
   api.topeniObnov({ zaznamy: [

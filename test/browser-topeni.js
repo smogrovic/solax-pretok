@@ -41,6 +41,11 @@ setTimeout(async () => {
   check('  celý den bez poznámky o hodinách', /h dat/.test(radky[1].textContent), false);
   check('  neúplný den řekne kolik hodin', /6 h dat/.test(radky[0].textContent), true);
   check('  chybějící teplota pomlčkou', /venku – ·/.test(radky[0].textContent), true);
+  topeniData.dny[1] = { d: '2026-10-05', hodin: 24, topeniKwh: 3, tcTopeniKwh: 7.25, tcVodaKwh: 1.9, venkuC: 4, pokojeC: 21 };
+  renderTopeni();
+  const tcRadek = document.querySelectorAll('#topeniList .wbsrc-row')[0];
+  check('změřené TČ místo odhadu', tcRadek.querySelector('.wbsrc-head').textContent.includes('TČ topení 7,3 kWh'), true);
+  check('  voda a odhad pod tím', /TČ voda 1,9 kWh · odhad ~3 kWh/.test(tcRadek.textContent), true);
   check('poznámka vysvětlí odhad', /400 W a večer \\(17–20 h\\) vaření 500 W/.test(document.getElementById('topeniPozn').textContent), true);
 
   // Kopírování: celá řada se stahuje až teď, se zámkem
