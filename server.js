@@ -2400,6 +2400,77 @@ function spotrebaPayload(now = Date.now()) {
   return { mesice, rucneDo: posledni || null, cenik: { ...CENIK, vtPodilCas: Math.round(HDO_VT_PODIL * 1000) / 1000 } };
 }
 
+// ---------- Týdenní report (neděle večer) ----------
+// V neděli ve 20:00 jedna notifikace za týden pondělí–neděle: celková spotřeba
+// (dům + bazén + auto) a srovnání s minulým týdnem, ze sítě, výroba FVE, kolik
+// ušetřila (vlastní spotřeba z FVE × průměrná cena podle ceníku), auto, TČ a sauna.
+// Neděle je do 20:00 — proti celému minulému týdnu to dělá ~2 %, na přehled stačí.
+// Denní řady drží 14 dní, takže minulý týden je vždycky celý; sauna jen 7 (bez srovnání).
+const TYDEN_REPORT_DEN = 0;           // neděle
+const TYDEN_REPORT_HODINA = 20;
+const TYDEN_REPORT_TIK_MS = 5 * 60000;
+
+function tydenDny(nedele) {
+  const [r, m, d] = nedele.split('-').map(Number);
+  return Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(r, m - 1, d - 6 + i)).toISOString().slice(0, 10));
+}
+
+function tydenSouhrn(dny) {
+  const v = new Set(dny);
+  const sum = (pole, f) => (state[pole] || []).filter(x => v.has(x.d)).reduce((a, x) => a + (f(x) || 0), 0);
+  const okruh = pole => ({ grid: sum(pole, x => x.grid), pv: sum(pole, x => x.pv) });
+  const dum = okruh('usageDays'), bazen = okruh('poolDays'), auto = okruh('wbDays');
+  const tc = ((state.tcSpotreba && state.tcSpotreba.dny) || []).filter(x => v.has(x.d));
+  const pokryto = ['usageDays', 'poolDays', 'wbDays'].some(p => (state[p] || []).some(x => v.has(x.d)));
+  return {
+    pokryto,
+    celkem: (dum.grid + dum.pv + bazen.grid + bazen.pv + auto.grid + auto.pv) / 1000,
+    sit: (dum.grid + bazen.grid + auto.grid) / 1000,
+    zFve: (dum.pv + bazen.pv + auto.pv) / 1000,
+    auto: (auto.grid + auto.pv) / 1000,
+    vyroba: sum('pvDays', x => x.actual),
+    sauna: sum('saunaDays', x => x.wh) / 1000,
+    tcTopeni: tc.reduce((a, x) => a + (x.topeni || 0), 0),
+    tcVoda: tc.reduce((a, x) => a + (x.voda || 0), 0),
+    tcDnu: tc.length
+  };
+}
+
+function tydenText(nedele) {
+  const dny = tydenDny(nedele);
+  const minule = tydenDny(new Date(Date.UTC(+nedele.slice(0, 4), +nedele.slice(5, 7) - 1, +nedele.slice(8, 10) - 7)).toISOString().slice(0, 10));
+  const t = tydenSouhrn(dny), m = tydenSouhrn(minule);
+  if (!t.pokryto) return null;
+  const kwh = v => Math.round(v).toLocaleString('cs-CZ').replace(/\s/g, ' ') + ' kWh';
+  const datum = d => Number(d.slice(8, 10)) + '. ' + Number(d.slice(5, 7)) + '.';
+  const podil = CENIK.vt * HDO_VT_PODIL + CENIK.nt * (1 - HDO_VT_PODIL);
+  const zmena = m.pokryto && m.celkem > 0 ? Math.round((t.celkem - m.celkem) / m.celkem * 100) : null;
+  const casti = [
+    `Spotřeba ${kwh(t.celkem)}` + (zmena === null ? '' : ` (${zmena > 0 ? '+' : zmena < 0 ? '−' : '±'}${Math.abs(zmena)} % proti minulému týdnu)`),
+    `ze sítě ${kwh(t.sit)}, z FVE ${kwh(t.zFve)}`,
+    `výroba FVE ${kwh(t.vyroba)}, ušetřeno ~${Math.round(t.zFve * podil / 10) * 10} Kč`
+  ];
+  const dalsi = [];
+  if (t.auto >= 1) dalsi.push(`auto ${kwh(t.auto)}`);
+  if (t.tcDnu) dalsi.push(`TČ ${kwh(t.tcTopeni + t.tcVoda)} (topení ${kwh(t.tcTopeni)}, voda ${kwh(t.tcVoda)})`);
+  if (t.sauna >= 1) dalsi.push(`sauna ${kwh(t.sauna)}`);
+  if (dalsi.length) casti.push(dalsi.join(', '));
+  return { titul: `📊 Týden ${datum(dny[0])} – ${datum(dny[6])}`, text: casti.join(' · ') + '.' };
+}
+
+async function tydenReportTik(now = Date.now()) {
+  const dnes = pragueDateString(now);
+  const den = new Date(dnes + 'T12:00:00Z').getUTCDay();
+  if (den !== TYDEN_REPORT_DEN || pragueTime(now).hour < TYDEN_REPORT_HODINA) return false;
+  if (state.tydenReport === dnes) return false;
+  const r = tydenText(dnes);
+  state.tydenReport = dnes;          // i bez dat — ať se to každých 5 min nezkouší znovu
+  if (!r) return false;
+  await sendPushToAll(r.titul, r.text);
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  return true;
+}
+
 // Odkud se běžící měsíc skládá — počítadla elektroměru nejsou tajná
 app.get('/api/spotreba/diagnostika', (req, res) => {
   const s = spotrebaStav();
@@ -12673,6 +12744,8 @@ function storeSnapshot() {
     rohlikOauth: state.rohlikOauth,
     // Cookies webu Rohlíku (schválené zařízení) — jen sem, nikdy do appky ani do logu
     rohlikWebCookies: state.rohlikWebCookies || null,
+    // Kdy odešel týdenní report — nasazení v neděli večer ho nesmí poslat podruhé
+    tydenReport: state.tydenReport || null,
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -12709,6 +12782,8 @@ function storeApplyPrimo(p) {
     }
   }
   if (Number.isFinite(p.rozvrhVerze) && p.rozvrhVerze > (state.rozvrhVerze || 0)) state.rozvrhVerze = p.rozvrhVerze;
+  if (typeof p.tydenReport === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.tydenReport)
+      && !(state.tydenReport >= p.tydenReport)) state.tydenReport = p.tydenReport;
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
   if (p.oznameni && typeof oznameniObnov === 'function') oznameniObnov(p.oznameni, now);
   if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
@@ -13110,6 +13185,8 @@ const server = app.listen(PORT, async () => {
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
   spotrebaPoStartu();
+  // Týdenní report v neděli večer
+  scheduleEvery(() => tydenReportTik().catch(() => {}), TYDEN_REPORT_TIK_MS, TYDEN_REPORT_TIK_MS);
   // Venkovní teplota pro stránku Spotřeba (archiv Open-Meteo), každých 6 h
   scheduleEvery(() => spotrebaTeplotyNacti().catch(() => {}), 6 * 3600000, 3 * 60000 + 40000);
   rozvrhMigrace();
