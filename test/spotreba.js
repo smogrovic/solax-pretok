@@ -155,6 +155,7 @@ nadpis('Payload');
     '22 2026-10 true 2026-11 true');
   check('  měsíc v ruční tabulce se ze serveru nebere', p.mesice.filter(r => r.m === '2026-09').length, 1);
   check('  ceník a podíl VT podle času', [p.cenik.nazev, p.cenik.vtPodilCas].join(' '), 'ČEZ D56d, jistič 3×25 A 0.167');
+  check('  zálohy 4 500 Kč a vyúčtování od září', [p.cenik.zaloha, p.cenik.obdobiOd].join(' '), '4500 9');
   const t = build({ state: { months: [], tcSpotreba: { dny: [{ d: '2026-10-01', venku: 8 }, { d: '2026-10-02', venku: 5 }, { d: '2025-01-03', venku: -2.35 }, { d: '2025-01-04' }] } } });
   const pt = t.api.spotrebaPayload(T('2026-11-15'));
   check('venkovní teplota měsíce i k ručním měsícům', [pt.mesice.find(r => r.m === '2026-10').venku, 'venku' in pt.mesice.find(r => r.m === '2025-02')].join(' '), '6.5 false');

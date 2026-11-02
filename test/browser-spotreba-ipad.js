@@ -21,7 +21,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await wait(150);
   check('široký displej', sirokyDisplej(), true);
   spotrebaData = { mesice: ${JSON.stringify(HISTORIE)}, rucneDo: '2026-10',
-    cenik: { vt: 4.32625, nt: 3.42394, mesicne: 850.47, nazev: 'ČEZ D56d', vtPodilCas: 0.167 } };
+    cenik: { vt: 4.32625, nt: 3.42394, mesicne: 850.47, nazev: 'ČEZ D56d', vtPodilCas: 0.167, zaloha: 4500, obdobiOd: 9 } };
   kalOtevri(false);
   const slides = [...sliderWrap.querySelectorAll('.slide:not([hidden])')];
   const i = slides.findIndex(s => s.id === 'spotrebaSlide');
@@ -39,6 +39,9 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const karty = [...slide.querySelectorAll('.page > .card')].map(k => k.getBoundingClientRect());
   check('  souhrn a graf vedle sebe, tabulka přes celou šířku pod nimi',
     Math.abs(karty[0].top - karty[1].top) < 2 && karty[1].left > karty[0].right && karty[2].top > karty[0].top && karty[2].width > karty[1].width, true);
+  const kk = [...slide.querySelectorAll('.page > .card')];
+  check('  graf stejně vysoký jako souhrn vedle', Math.abs(kk[0].getBoundingClientRect().height - kk[1].getBoundingClientRect().height) <= 2, true);
+  check('  a graf je vyšší než normálně', Number(slide.querySelector('.sp-pas').getAttribute('height')) > 180, true);
   const posun = document.getElementById('spGrafPosun');
   const sloupce = slide.querySelectorAll('.sp-sloupec');
   check('  graf na novou šířku: zase 12 viditelných', Math.round(posun.clientWidth / (posun.scrollWidth / sloupce.length)), 12);

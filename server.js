@@ -2242,7 +2242,9 @@ const SPOTREBA_MESICU = 14;
 // Ceník ČEZ „Elektřina – na 2 roky v akci“, sazba D56d (tepelné čerpadlo), ceny s DPH.
 // POZE se platí podle nižšího z obou výpočtů; podle jističe je 0 Kč, takže odpadá.
 // Měsíčně: stálá platba 163,35 + jistič 3×25 A 671,55 + nesíťová infrastruktura 15,57.
-const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 163.35 + 671.55 + 15.57, nazev: 'ČEZ D56d, jistič 3×25 A' };
+const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 163.35 + 671.55 + 15.57, nazev: 'ČEZ D56d, jistič 3×25 A',
+  // Zálohy a začátek zúčtovacího období (vyúčtování vždy od 1. 9.) — odhad doplatku na stránce Spotřeba
+  zaloha: 4500, obdobiOd: 9 };
 // Nízký tarif (HDO) — stejné časy každý den; VT jen 8–9, 12–13, 15–16 a 19–20 h
 const HDO_NT = [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]];
 function hdoNizky(at) {

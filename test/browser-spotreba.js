@@ -27,7 +27,7 @@ const HISTORIE = ${JSON.stringify(HISTORIE)};
 
   const BEZI = { m: '2026-11', celkova: 120, bazen: 0, sauna: 0, auto: 15, tcTopeni: 12, tcVoda: 8, b1: 0, b2: 0, voda: 8,
     zbytek: 85, sit: 52, pretok: 0, samo: true, bezi: true };
-  const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 850.47, nazev: 'ČEZ D56d, jistič 3×25 A', vtPodilCas: 0.167 };
+  const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 850.47, nazev: 'ČEZ D56d, jistič 3×25 A', vtPodilCas: 0.167, zaloha: 4500, obdobiOd: 9 };
   spotrebaData = { mesice: HISTORIE.map(r => ({ ...r, rucne: true, ...(r.m === '2026-10' ? { venku: 9.4 } : r.m === '2025-10' ? { venku: 10.1 } : {}) }))
     .concat([BEZI]), rucneDo: '2026-10', cenik: CENIK };
   slide.scrollIntoView();
@@ -39,6 +39,36 @@ const HISTORIE = ${JSON.stringify(HISTORIE)};
     '3 352 kWh');
   check('  ze sítě a přetok', /ze sítě 8 841 kWh/.test(souhrn.textContent) && /přetok 1 549 kWh/.test(souhrn.textContent), true);
   check('  pruh má 6 dílů', souhrn.querySelectorAll('.sp-pruh i').length, 6);
+  check('  i z FVE (celková − ze sítě)', /z FVE 9 183 kWh/.test(souhrn.querySelector('.sp-sit').textContent), true);
+  const vy = souhrn.querySelector('.sp-vyuct');
+  const dnesT = new Date();
+  const rokObd = dnesT.getFullYear() - (dnesT.getMonth() + 1 < 9 ? 1 : 0);
+  check('vyúčtování: období od 1. 9.', vy.querySelector('.sp-vyuct-h').textContent, 'Vyúčtování 1. 9. ' + rokObd + ' – 31. 8. ' + (rokObd + 1));
+  const vyR = [...vy.querySelectorAll('.stat-row')].map(r => r.children[0].textContent);
+  check('  řádky', vyR.map(t => t.replace(/\\(\\d+ měs\\.\\)/, '(n)')).join(' / '),
+    'Odhad nákladů za období / Zálohy 12 × 4 500 Kč / Zaplaceno zálohami zatím (n) / ' + (/doplatku/.test(vy.textContent) ? 'Odhad doplatku' : 'Odhad přeplatku') + ' / Doporučená záloha');
+  check('  zálohy celkem', vy.querySelectorAll('.stat-row')[1].children[1].textContent, '54 000 Kč');
+  check('  doplatek červeně, přeplatek zeleně', !!vy.querySelector('.sp-doplatek') !== !!vy.querySelector('.sp-preplatek'), true);
+
+  // Výpočet na malé sadě (Kč/kWh 4 a 2, VT podle času 50 %, stálé 100 Kč, záloha 1 000 Kč)
+  const C = { vt: 4, nt: 2, mesicne: 100, vtPodilCas: 0.5, zaloha: 1000, obdobiOd: 9 };
+  const sada = [
+    { m: '2025-11', celkova: 1000, sit: 800, auto: 0, sauna: 0, naklady: 1000 },
+    { m: '2026-07', celkova: 500, sit: 100, auto: 300, sauna: 0, naklady: 300 },
+    { m: '2026-09', celkova: 900, sit: 400, auto: 200, sauna: 50, naklady: 500 },
+    { m: '2026-10', celkova: 900, sit: 500, auto: 100, sauna: 150, naklady: 600 },
+    { m: '2026-11', celkova: 50, sit: 40, auto: 0, sauna: 0, naklady: 200, bezi: true }
+  ];
+  const v = spVyuctovani(sada, C, new Date(2026, 10, 15));
+  const p = m => Math.round(v.polozky.find(x => x.m === m).naklady);
+  check('výpočet: uzavřené měsíce podle skutečnosti', [p('2026-09'), p('2026-10')].join(' '), '500 600');
+  check('  běžící podle loňska + průměr auta 200 a sauny 100, ze sítě loňským podílem 80 %', p('2026-11'), 3220);
+  check('  léto: loni auto už bylo, sauna −10 %, ze sítě 20 %', p('2027-07'), 454);
+  check('  bez loňského měsíce průměr nákladů', p('2027-01'), 600);
+  check('  celkem, zálohy, rozdíl, doporučená, zaplaceno', [Math.round(v.celkem), v.zalohyCelkem, Math.round(v.rozdil), v.doporucena, v.zaplacenoMesicu].join(' '),
+    '9574 12000 -2426 800 3');
+  check('  leden: období od loňského září', spVyuctovani(sada, C, new Date(2027, 0, 10)).od, '2026-09');
+  check('  bez zálohy nic', spVyuctovani(sada, { ...C, zaloha: 0 }), null);
   const statky = [...souhrn.querySelectorAll('.sp-statky .stat-row')].map(r => r.children[0].textContent + ': ' + r.children[1].textContent);
   check('  výroba, soběstačnost, peníze, teplota, loňsko', statky.join(' / '),
     'Výroba FVE: 10 732 kWh / Soběstačnost: 51 % / Zaplaceno za elektřinu: ~41 809 Kč / Ušetřeno díky FVE: ~32 826 Kč / Měsíčně průměrně (na zálohy): ~3 500 Kč / Průměrně venku: 9,4 °C / Celkem proti loňsku (9 měs.): +24 % / TČ topení proti loňsku (9 měs.): −19 %');
