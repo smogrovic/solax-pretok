@@ -93,7 +93,7 @@ const uklid = () => { try { fs.unlinkSync(tmp); } catch {} };
 
     const prvni = await snapshot(3995);
     check('data jsou v prvním serveru', prvni.history.length, 2);
-    check('  i měsíce', prvni.months.length, 1);
+    check('  i měsíce', prvni.months.filter(r => r.m === '2026-07').length, 1);
     check('  i přepínač klimatizace', prvni.tempAuto.loznice, true);
 
     for (let i = 0; i < 40 && !setu; i++) await pauza(100);
@@ -117,7 +117,7 @@ const uklid = () => { try { fs.unlinkSync(tmp); } catch {} };
     const s = await snapshot(3997);
     check('historie přežila', s.history.length, 2);
     check('  se stejnými hodnotami', s.history.map(p => p.kw).join('/'), '2.5/1.5');
-    check('měsíce přežily', s.months[0] && s.months[0].sauna, 40000);
+    check('měsíce přežily', (s.months.find(r => r.m === '2026-07') || {}).sauna, 40000);
     check('dny sauny přežily', s.saunaDays[0] && s.saunaDays[0].wh, 8000);
     check('výroba po dnech přežila', s.pvDays[0] && s.pvDays[0].actual, 21);
     check('log přežil', s.log.some(e => e.msg === 'zkušební řádek'), true);

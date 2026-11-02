@@ -68,7 +68,7 @@ setTimeout(async () => {
 
   R.push('1) Ve full režimu je všechno jako dřív');
   pouzijRezim('full');
-  check('záložek je patnáct', zalozky().length, 15);
+  check('záložek je šestnáct', zalozky().length, 16);
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
   check('pole pro asistenta je vidět', vidim(document.getElementById('asstInput')), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
@@ -311,7 +311,7 @@ setTimeout(async () => {
   document.getElementById('potvrzAno').click();
   await pockej();
   check('správný kód přepne na full', rezimApky, 'full');
-  check('  a vrátí všechny záložky', zalozky().length, 15);
+  check('  a vrátí všechny záložky', zalozky().length, 16);
   check('  i pole pro asistenta', vidim(document.getElementById('asstInput')), true);
 
   // Kód se chce i OPAČNÝM směrem — jinak by stačilo přepnout tam a zpátky

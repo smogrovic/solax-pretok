@@ -3,7 +3,7 @@ const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('měsíce');
 
 const H = 3600000;
-const CODE = between('// ---------- Spotřeba po měsících', 'function emptyWh()');
+const CODE = between('// ---------- Spotřeba po měsících', '// ---------- Stránka Spotřeba (měsíční tabulka)');
 
 function build(mesic = '2026-08') {
   const state = { months: [] };
@@ -77,7 +77,7 @@ nadpis('1b) Rozpad na síť a FVE');
 {
   const h = build();
   check('MONTH_KEYS nese celky i rozpady', h.api.MONTH_KEYS.join(','),
-    'sauna,pool,wb,dum,poolGrid,poolPv,wbGrid,wbPv,dumGrid,dumPv,tc,tcTopeni,tcVoda');
+    'sauna,pool,wb,dum,poolGrid,poolPv,wbGrid,wbPv,dumGrid,dumPv,tc,tcTopeni,tcVoda,b1,b2,imp,feed');
 }
 
 nadpis('2) Přelom měsíce');

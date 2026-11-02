@@ -299,7 +299,8 @@ const state = {
   huumSyrove: null,  // poslední odpověď z HUUM tak, jak přišla — jen do diagnostiky
   heatpump: { error: null },  // tepelné čerpadlo bazénu (teplota vody, cíl, režim, příkon)
   months: [],        // { m: '2026-08', sauna, pool, wb } — spotřeba po měsících (Wh)
-  tcSpotreba: { dny: [], ts: 0, chyba: null },  // TČ Aquarea po dnech { d, topeni, voda, chlazeni } kWh
+  tcSpotreba: { dny: [], ts: 0, chyba: null },
+  spotreba: { citace: {}, pv: {} },  // stránka Spotřeba: počítadla elektroměru a výroba po dnech  // TČ Aquarea po dnech { d, topeni, voda, chlazeni } kWh
   assistantLog: [],  // { t, text } — co asistent provedl, za 24 h
   sensors: {},       // pokoj -> { tempC, humidity, battery, online, reportedAt, fetchedAt } (Shelly H&T)
   // teploty v pokojích za 24 h pro graf: temps = podle guid klimatizace, sens = Shelly čidla
@@ -564,6 +565,7 @@ function snapshot() {
     siteDny: state.siteDny,
     months: state.months,
     tcSpotreba: tcSpotrebaPayload(),
+    spotreba: spotrebaPayload(),
     timeline: state.timeline,
     // Rozvrh čerpadla jde do appky odsud, ať se popisek v kartě nemůže rozejít
     // se skutečnými časy
@@ -704,6 +706,9 @@ async function fetchSolax() {
     batterySoc,
     batPowerKw: batPower / 1000,
     yieldToday: typeof r.yieldtoday === 'number' ? r.yieldtoday : null, // skutečná výroba FVE za dnešek (kWh)
+    // Počítadla elektroměru (kWh celkem): odběr ze sítě a přetok — pro měsíční tabulku
+    citace: typeof r.consumeenergy === 'number' && typeof r.feedinenergy === 'number'
+      ? { imp: r.consumeenergy, feed: r.feedinenergy } : null,
     uploadTime: r.uploadTime,
     fetchedAt: new Date().toISOString()
   };
@@ -2162,7 +2167,9 @@ const MONTH_CELKEM = ['sauna', 'pool', 'wb', 'dum'];
 const MONTH_SPLIT = ['pool', 'wb', 'dum'];
 // Tepelné čerpadlo: měsíční součty z Comfort Cloudu (viz tcMesice), v „domu" jsou obsažené
 const MONTH_TC = ['tc', 'tcTopeni', 'tcVoda'];
-const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']), MONTH_TC);
+// Pro stránku Spotřeba: oba bojlery, odběr ze sítě a přetok (Wh ze vzorků)
+const MONTH_OSTATNI = ['b1', 'b2', 'imp', 'feed'];
+const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']), MONTH_TC, MONTH_OSTATNI);
 
 function pragueMonthString(at) {
   return pragueDateString(at).slice(0, 7);
@@ -2193,6 +2200,185 @@ function recordMonthSplit(kus, w, gridW, dtH) {
   rec[kus + 'Grid'] = (rec[kus + 'Grid'] || 0) + zeSite * dtH;
   rec[kus + 'Pv'] = (rec[kus + 'Pv'] || 0) + (w - zeSite) * dtH;
 }
+
+// ---------- Stránka Spotřeba (měsíční tabulka) ----------
+// Stejné sloupce jako ručně vedená tabulka: celková spotřeba, bazén, sauna, auto,
+// TČ topení / voda, dohřev bojleru 1 (Shelly), bojler 2 (Infigy), zbytek domu,
+// odběr ze sítě a přetok. Měsíce do října 2026 jsou z té tabulky (data/), další
+// se skládají samy:
+//  - ze sítě a přetok z počítadel elektroměru ve střídači (consumeenergy /
+//    feedinenergy, kWh celkem), bez nich z dvouminutových vzorků;
+//  - celková = výroba FVE (denní yieldtoday) + ze sítě − přetok, tak jako v appce
+//    Solax; bez výroby součet měřených okruhů;
+//  - zbytek domu = celková − všechno měřené.
+const SPOTREBA_HISTORIE = (() => {
+  try { return require('./data/spotreba-historie.json').mesice || []; } catch { return []; }
+})();
+const SPOTREBA_MESICU = 14;
+
+function spotrebaPredMesic(m) {
+  const d = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 2, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+function spotrebaStav() {
+  if (!state.spotreba || typeof state.spotreba !== 'object') state.spotreba = {};
+  const s = state.spotreba;
+  if (!s.citace || typeof s.citace !== 'object') s.citace = {};
+  if (!s.pv || typeof s.pv !== 'object') s.pv = {};
+  return s;
+}
+
+function spotrebaOrizni(obj) {
+  const klice = Object.keys(obj).sort();
+  for (const k of klice.slice(0, Math.max(0, klice.length - SPOTREBA_MESICU))) delete obj[k];
+}
+
+// Jednou za cyklus pollu: výroba dne a stav počítadel elektroměru
+function spotrebaVzorek(now = Date.now()) {
+  const s = spotrebaStav();
+  const sol = state.solax;
+  if (!sol || !cerstve(sol.fetchedAt)) return;
+  const den = pragueDateString(now);
+  const m = den.slice(0, 7);
+  if (typeof sol.yieldToday === 'number' && sol.yieldToday >= 0) {
+    const dny = s.pv[m] || (s.pv[m] = {});
+    // Maximum: po restartu Solax chvíli hlásí 0
+    dny[den.slice(8)] = Math.max(dny[den.slice(8)] || 0, sol.yieldToday);
+    spotrebaOrizni(s.pv);
+  }
+  const c = sol.citace;
+  if (!c || typeof c.imp !== 'number' || typeof c.feed !== 'number') return;
+  let rec = s.citace[m];
+  if (rec && (c.imp < rec.od.imp || c.feed < rec.od.feed)) rec = null;   // vynulované počítadlo
+  if (!rec) {
+    const pred = s.citace[spotrebaPredMesic(m)];
+    if (pred && pred.do && now - (pred.doTs || 0) < 6 * 3600000 && c.imp >= pred.do.imp && c.feed >= pred.do.feed) {
+      // Navazuje na konec minulého měsíce — přesně
+      rec = { od: { ...pred.do }, odhad: false };
+    } else {
+      // První čtení uprostřed měsíce: začátek se dopočítá z toho, co se v měsíci
+      // už nasčítalo ze vzorků
+      const mo = state.months.find(r => r.m === m) || {};
+      rec = { od: { imp: c.imp - (mo.imp || 0) / 1000, feed: c.feed - (mo.feed || 0) / 1000 }, odhad: true };
+    }
+    s.citace[m] = rec;
+    spotrebaOrizni(s.citace);
+  }
+  rec.do = { imp: c.imp, feed: c.feed };
+  rec.doTs = now;
+}
+
+// Po startu: měsíc, který ještě nemá vlastní součty sítě a bojlerů (první nasazení),
+// se doplní z denní řady a z dneška. Výroba z denní řady FVE.
+function spotrebaPoStartu(now = Date.now()) {
+  const s = spotrebaStav();
+  const dnes = pragueDateString(now);
+  const m = dnes.slice(0, 7);
+  let rec = state.months.find(r => r.m === m);
+  if (!rec) { rec = { m, sauna: 0, pool: 0, wb: 0, dum: 0 }; state.months.push(rec); }
+  // Jen jednou za měsíc (příznak jde do zálohy) — jinak by každé nasazení přičetlo
+  // denní řadu znovu
+  if (s.doplneno !== m) {
+    s.doplneno = m;
+    const sum = { imp: 0, feed: 0, b1: 0, b2: 0 };
+    for (const d of state.siteDny || []) {
+      if (!d.d.startsWith(m) || d.d >= dnes) continue;
+      sum.imp += d.imp || 0; sum.feed += d.feed || 0; sum.b1 += d.b1 || 0; sum.b2 += d.b2 || 0;
+    }
+    const wh = state.runtime && state.runtime.date === dnes ? state.runtime.wh || {} : {};
+    // Větší vyhrává: co už měsíc nasčítal sám, se nesníží
+    rec.imp = Math.max(rec.imp || 0, sum.imp + (wh.import || 0));
+    rec.feed = Math.max(rec.feed || 0, sum.feed + (wh.feed || 0));
+    rec.b1 = Math.max(rec.b1 || 0, sum.b1 + (wh.b1 || 0));
+    rec.b2 = Math.max(rec.b2 || 0, sum.b2 + (wh.b2 || 0));
+  }
+  const dny = s.pv[m] || (s.pv[m] = {});
+  for (const d of state.pvDays || []) {
+    if (d.d.startsWith(m) && typeof d.actual === 'number') dny[d.d.slice(8)] = Math.max(dny[d.d.slice(8)] || 0, d.actual);
+  }
+}
+
+// Jeden měsíc ze zapsaných dat (kWh, celá čísla)
+function spotrebaMesic(m, dnes = pragueDateString()) {
+  const s = spotrebaStav();
+  const mo = state.months.find(r => r.m === m);
+  if (!mo) return null;
+  const kwh = v => (typeof v === 'number' && Number.isFinite(v) ? v / 1000 : 0);
+  const c = s.citace[m];
+  let sit, pretok, zdrojSite;
+  if (c && c.do) {
+    sit = c.do.imp - c.od.imp; pretok = c.do.feed - c.od.feed; zdrojSite = c.odhad ? 'citace-odhad' : 'citace';
+  } else {
+    sit = kwh(mo.imp); pretok = kwh(mo.feed); zdrojSite = 'vzorky';
+  }
+  const bazen = kwh(mo.pool), sauna = kwh(mo.sauna), auto = kwh(mo.wb);
+  const tcTopeni = kwh(mo.tcTopeni), tcVoda = kwh(mo.tcVoda), b1 = kwh(mo.b1), b2 = kwh(mo.b2);
+  const pvDny = Object.values(s.pv[m] || {});
+  const pv = pvDny.reduce((a, b) => a + b, 0);
+  let celkova, zdrojCelkem;
+  if (pvDny.length && ('imp' in mo || (c && c.do))) {
+    celkova = pv + sit - pretok; zdrojCelkem = 'vyroba';
+  } else {
+    celkova = kwh(mo.dum) + bazen + sauna + auto + b1 + b2; zdrojCelkem = 'okruhy';
+  }
+  const voda = tcVoda + b1 + b2;
+  const r = Math.round;
+  const radek = {
+    m, celkova: r(celkova), bazen: r(bazen), sauna: r(sauna), auto: r(auto),
+    tcTopeni: r(tcTopeni), tcVoda: r(tcVoda), b1: r(b1), b2: r(b2), voda: r(voda),
+    sit: r(sit), pretok: r(pretok), vyroba: r(pv), zdroj: { site: zdrojSite, celkem: zdrojCelkem }, samo: true
+  };
+  radek.zbytek = Math.max(0, radek.celkova - radek.bazen - radek.sauna - radek.auto - radek.tcTopeni - radek.voda);
+  if (m === dnes.slice(0, 7)) radek.bezi = true;
+  return radek;
+}
+
+function spotrebaPayload(now = Date.now()) {
+  const dnes = pragueDateString(now);
+  const rucne = SPOTREBA_HISTORIE.map(x => ({ ...x, rucne: true }));
+  const posledni = rucne.length ? rucne[rucne.length - 1].m : '';
+  const samo = state.months.map(x => x.m).filter(m => m > posledni && m <= dnes.slice(0, 7)).sort()
+    .map(m => spotrebaMesic(m, dnes)).filter(Boolean);
+  return { mesice: rucne.concat(samo), rucneDo: posledni || null };
+}
+
+// Odkud se běžící měsíc skládá — počítadla elektroměru nejsou tajná
+app.get('/api/spotreba/diagnostika', (req, res) => {
+  const s = spotrebaStav();
+  const sol = state.solax || {};
+  const m = pragueMonthString();
+  res.json({ citaceZeStridace: sol.citace || null, mesic: m, citace: s.citace[m] || null,
+    dnuVyroby: Object.keys(s.pv[m] || {}).length, radek: spotrebaMesic(m) });
+});
+
+// Obnova počítadel a denní výroby po nasazení
+app.post('/api/spotreba/restore', (req, res) => {
+  const b = req.body || {};
+  const s = spotrebaStav();
+  const cislo = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  let zmena = false;
+  for (const [m, rec] of Object.entries(b.citace && typeof b.citace === 'object' ? b.citace : {})) {
+    if (!/^\d{4}-\d{2}$/.test(m) || s.citace[m] || !rec || !rec.od || !cislo(rec.od.imp) || !cislo(rec.od.feed)) continue;
+    const ok = rec.do && cislo(rec.do.imp) && cislo(rec.do.feed);
+    s.citace[m] = { od: { imp: rec.od.imp, feed: rec.od.feed }, odhad: !!rec.odhad,
+      ...(ok ? { do: { imp: rec.do.imp, feed: rec.do.feed }, doTs: cislo(rec.doTs) ? rec.doTs : 0 } : {}) };
+    zmena = true;
+  }
+  for (const [m, dny] of Object.entries(b.pv && typeof b.pv === 'object' ? b.pv : {})) {
+    if (!/^\d{4}-\d{2}$/.test(m) || !dny || typeof dny !== 'object') continue;
+    const cil = s.pv[m] || (s.pv[m] = {});
+    for (const [d, v] of Object.entries(dny)) {
+      if (!/^\d{2}$/.test(d) || !cislo(v) || v > 500) continue;
+      if (!(cil[d] >= v)) { cil[d] = v; zmena = true; }
+    }
+  }
+  if (typeof b.doplneno === 'string' && /^\d{4}-\d{2}$/.test(b.doplneno) && !(s.doplneno >= b.doplneno)) s.doplneno = b.doplneno;
+  spotrebaOrizni(s.citace);
+  spotrebaOrizni(s.pv);
+  if (zmena) broadcast('spotreba', { spotreba: spotrebaPayload() });
+  res.json({ ok: true });
+});
 
 function emptyWh() { return { feed: 0, import: 0, wb: 0, b1: 0, b2: 0 }; }
 
@@ -2322,6 +2508,9 @@ function updateRuntimes() {
   // Měsíční součty — každý okruh jen z čerstvého měření. Rozpad na síť a FVE se bere
   // z téhož řetězu jako denní karty, aby se ta dvě místa nikdy nerozešla.
   if (saunaW !== null) recordMonth('sauna', saunaW, dtH);
+  if (feedKw !== null) recordMonth(feedKw >= 0 ? 'feed' : 'imp', Math.abs(feedKw) * 1000, dtH);
+  if (boiler) recordMonth('b1', Math.max(0, b1W), dtH);
+  recordMonth('b2', Math.max(0, b2Kw) * 1000, dtH);
   if (podil) {
     recordMonthSplit('pool', poolW, podil.bazen, dtH);
     recordMonthSplit('wb', Math.max(0, wbW), podil.auto, dtH);
@@ -2334,6 +2523,7 @@ function updateRuntimes() {
 
   state.runtime.lastTs = now;
   recordPvDay();
+  spotrebaVzorek(now);
   backfillWallboxTimeline();
   pruneTimeline();
   broadcast('runtime', { runtime: runtimePayload() });
@@ -2344,6 +2534,7 @@ function updateRuntimes() {
   broadcast('usageDays', { usageDays: state.usageDays });
   if (saunaEnabled) broadcast('saunaDays', { saunaDays: state.saunaDays });
   broadcast('months', { months: state.months });
+  broadcast('spotreba', { spotreba: spotrebaPayload() });
 }
 
 // ---------- REST endpointy (stav se servíruje z centrálního stavu) ----------
@@ -12207,6 +12398,7 @@ const STORE_POSTS = [
   '/api/site-dny/restore',
   '/api/months/restore',
   '/api/aquarea/spotreba/restore',
+  '/api/spotreba/restore',
   '/api/solinator/restore',
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
@@ -12261,6 +12453,8 @@ function storeSnapshot() {
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
     '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts },
+    '/api/spotreba/restore': { citace: (state.spotreba || {}).citace || {}, pv: (state.spotreba || {}).pv || {},
+      doplneno: (state.spotreba || {}).doplneno || null },
     '/api/solinator/restore': { ...state.solinator },
     '/api/timers/restore': {
       savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers,
@@ -12745,6 +12939,7 @@ const server = app.listen(PORT, async () => {
   // Až po obnově: kdyby se nasadilo dřív, záloha by ho jen přepsala a při prvním
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
+  spotrebaPoStartu();
   rozvrhMigrace();
   rozvrhMigraceV6();
   rozvrhMigraceV7();
