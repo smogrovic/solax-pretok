@@ -1395,6 +1395,14 @@
   .sp-tabulka .c-voda{color:#2f8fd8;} .sp-tabulka .c-vodas{color:#5aa9e6;font-size:11px;}
   .sp-tabulka .c-sit{color:var(--red);} .sp-tabulka .c-pre{color:var(--green);}
   .sp-tabulka .c-dum{font-weight:700;}
+  .sp-statky{margin-top:6px;}
+  .sp-statky .stat-row span:first-child{min-width:0;}
+  .sp-statky .stat-val{text-align:right;}
+  .sp-zmena{display:block;font-size:10px;font-weight:600;color:var(--grey-text);line-height:1.1;}
+  .sp-zmena.vic{color:var(--red);} .sp-zmena.min{color:var(--green);}
+  .sp-graf .sp-t{fill:#c0392b;}
+  .sp-graf-leg{display:flex;align-items:center;gap:6px;justify-content:center;font-size:11px;color:var(--grey-text);margin-top:2px;}
+  .sp-graf-leg i{display:inline-block;width:16px;border-top:2px dashed #c0392b;}
   .sp-bezi-stitek{font-size:9px;font-weight:700;font-style:normal;color:var(--orange-dark);margin-left:4px;}
   .sbal-btn[hidden]{display:none;}
   .zk-sek{border-top:1px solid rgba(44,62,80,0.08);padding:8px 0 4px;}
@@ -10278,8 +10286,9 @@ async function maybeRestoreSaunaDays(server, local) {
 
 
 // ---------- Stránka Spotřeba ----------
-// Měsíční tabulka jako ta ručně vedená (stejné sloupce, kWh). Do října 2026 jsou
-// měsíce přepsané z ní, další skládá server sám (viz spotrebaMesic na serveru).
+// Měsíční tabulka jako ta ručně vedená (stejné sloupce, kWh) + výroba, soběstačnost,
+// srovnání s loňskem, venkovní teplota a cena podle ceníku (posílá ho server).
+// Do října 2026 jsou měsíce přepsané z ruční tabulky, další skládá server sám.
 let spotrebaData = null;
 const SP_DILY = [
   { k: 'zbytek', popis: 'Dům (zbytek)', barva: '#5d6d7e' },
@@ -10289,52 +10298,106 @@ const SP_DILY = [
   { k: 'bazen', popis: 'Bazén', barva: '#1fb5a8' },
   { k: 'sauna', popis: 'Sauna', barva: '#c0563b' }
 ];
+// `loni` = pod číslem srovnání se stejným měsícem loni; `fmt` = jiný než kWh formát
 const SP_SLOUPCE = [
-  { k: 'celkova', popis: 'Celková', cls: 'c-celk' },
+  { k: 'celkova', popis: 'Celková', cls: 'c-celk', loni: true },
   { k: 'bazen', popis: 'Bazén' },
   { k: 'sauna', popis: 'Sauna', cls: 'c-or' },
   { k: 'auto', popis: 'Auto' },
-  { k: 'tcTopeni', popis: 'TČ topení', cls: 'c-or' },
+  { k: 'tcTopeni', popis: 'TČ topení', cls: 'c-or', loni: true },
   { k: 'tcVoda', popis: 'TČ voda', cls: 'c-vodas' },
   { k: 'b1', popis: 'TČ dohřev bojler 1', cls: 'c-vodas' },
   { k: 'b2', popis: 'Bojler 2 (přídavný)', cls: 'c-vodas' },
   { k: 'voda', popis: 'Voda celkem', cls: 'c-voda' },
   { k: 'zbytek', popis: 'Dům zbytek', cls: 'c-dum' },
   { k: 'sit', popis: 'Ze sítě', cls: 'c-sit' },
-  { k: 'pretok', popis: 'Přetok', cls: 'c-pre' }
+  { k: 'pretok', popis: 'Přetok', cls: 'c-pre' },
+  { k: 'vyroba', popis: 'Výroba FVE', cls: 'c-pre' },
+  { k: 'sobestacnost', popis: 'Sobě­stač­nost', fmt: 'pct' },
+  { k: 'venku', popis: 'Venku', fmt: 'teplota' },
+  { k: 'naklady', popis: 'Náklady', fmt: 'kc', cls: 'c-sit' },
+  { k: 'uspora', popis: 'Ušetřeno FVE', fmt: 'kc', cls: 'c-pre' }
 ];
+const SP_SOUCTY = ['celkova', 'bazen', 'sauna', 'auto', 'tcTopeni', 'tcVoda', 'b1', 'b2', 'voda', 'zbytek', 'sit', 'pretok', 'vyroba', 'naklady', 'uspora'];
+// Zkratky měsíců — červen a červenec se jinak obě zkrátí na „čer"
+const SP_MES_ZKR = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+
 function spCislo(v) {
   return typeof v === 'number' && Number.isFinite(v) ? Math.round(v).toLocaleString('cs-CZ').replace(/\s/g, ' ') : '–';
 }
-// Zkratky měsíců — červen a červenec se jinak obě zkrátí na „čer"
-const SP_MES_ZKR = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+function spFormat(v, fmt) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return '–';
+  if (fmt === 'pct') return Math.round(v * 100) + ' %';
+  if (fmt === 'teplota') return v.toFixed(1).replace('.', ',') + ' °C';
+  if (fmt === 'kc') return spCislo(v) + ' Kč';
+  return spCislo(v);
+}
 function spMesicKratce(m) {
   const [r, mm] = m.split('-').map(Number);
   return SP_MES_ZKR[mm - 1] + ' ' + String(r).slice(2);
 }
-// Posledních 12 UZAVŘENÝCH měsíců (běžící by součet jen rozhodil)
-function spPoslednich12(mesice) {
-  const hotove = mesice.filter(r => !r.bezi);
-  const vyber = hotove.slice(-12);
-  const soucet = { m: '12', pocet: vyber.length, od: vyber[0] && vyber[0].m, do: vyber.length ? vyber[vyber.length - 1].m : null };
-  for (const s of SP_SLOUPCE) soucet[s.k] = vyber.reduce((a, r) => a + (Number(r[s.k]) || 0), 0);
-  return soucet;
+function spLoni(m) { return (Number(m.slice(0, 4)) - 1) + m.slice(4); }
+
+// Dopočty k měsíci: výroba, soběstačnost a cena podle ceníku. Ruční měsíce nemají
+// odběr rozdělený na VT/NT — vezme se podle času (4 h VT z 24) a je to odhad.
+function spDopocti(r, cenik, dnes = new Date()) {
+  const o = { ...r };
+  if (typeof o.vyroba !== 'number') o.vyroba = Math.max(0, (o.celkova || 0) - (o.sit || 0) + (o.pretok || 0));
+  o.sobestacnost = o.celkova > 0 ? Math.max(0, 1 - (o.sit || 0) / o.celkova) : null;
+  if (cenik) {
+    const podil = typeof o.vtPodil === 'number' ? o.vtPodil : cenik.vtPodilCas;
+    const cenaKwh = podil * cenik.vt + (1 - podil) * cenik.nt;
+    // Běžící měsíc: stálé platby jen za uplynulé dny
+    let mesicne = cenik.mesicne;
+    if (o.bezi) {
+      const dnu = new Date(dnes.getFullYear(), dnes.getMonth() + 1, 0).getDate();
+      mesicne = cenik.mesicne * dnes.getDate() / dnu;
+    }
+    o.naklady = (o.sit || 0) * cenaKwh + mesicne;
+    o.uspora = Math.max(0, (o.celkova || 0) - (o.sit || 0)) * cenaKwh;
+    o.cenaOdhad = typeof o.vtPodil !== 'number';
+  }
+  return o;
 }
+function spSoucet(radky) {
+  const s = { pocet: radky.length };
+  for (const k of SP_SOUCTY) s[k] = radky.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  s.sobestacnost = s.celkova > 0 ? Math.max(0, 1 - s.sit / s.celkova) : null;
+  const t = radky.filter(r => typeof r.venku === 'number');
+  s.venku = t.length ? t.reduce((a, r) => a + r.venku, 0) / t.length : null;
+  return s;
+}
+function spZmena(ted, loni) {
+  if (!(loni > 0) || typeof ted !== 'number') return null;
+  return (ted - loni) / loni;
+}
+function spZmenaHtml(z) {
+  if (z === null) return '';
+  const pct = Math.round(z * 100);
+  return '<small class="sp-zmena ' + (pct > 0 ? 'vic' : pct < 0 ? 'min' : '') + '">' + (pct > 0 ? '+' : pct < 0 ? '−' : '±') + Math.abs(pct) + ' %</small>';
+}
+
 function renderSpotreba() {
   const souhrnEl = document.getElementById('spSouhrn');
   if (!souhrnEl) return;
   const grafEl = document.getElementById('spGraf');
   const tabEl = document.getElementById('spTabulkaObal');
   const poznEl = document.getElementById('spPozn');
+  const cenik = spotrebaData && spotrebaData.cenik;
   const mesice = ((spotrebaData && spotrebaData.mesice) || []).filter(r => r && typeof r.m === 'string')
-    .sort((a, b) => a.m.localeCompare(b.m));
+    .sort((a, b) => a.m.localeCompare(b.m)).map(r => spDopocti(r, cenik));
   souhrnEl.textContent = ''; grafEl.textContent = ''; tabEl.textContent = '';
   if (!mesice.length) {
     souhrnEl.innerHTML = '<div class="wbsrc-empty">Data se načítají…</div>';
     return;
   }
-  // Souhrn
-  const s12 = spPoslednich12(mesice);
+  const podleM = new Map(mesice.map(r => [r.m, r]));
+
+  // Souhrn: posledních 12 UZAVŘENÝCH měsíců (běžící by součet jen rozhodil)
+  const vyber = mesice.filter(r => !r.bezi).slice(-12);
+  const s12 = spSoucet(vyber);
+  s12.od = vyber.length ? vyber[0].m : null;
+  s12.do = vyber.length ? vyber[vyber.length - 1].m : null;
   document.getElementById('spSouhrnTitul').textContent = s12.pocet >= 12 ? 'Posledních 12 měsíců'
     : 'Posledních ' + s12.pocet + ' měsíců';
   const celk = document.createElement('div');
@@ -10364,28 +10427,62 @@ function renderSpotreba() {
   const sit = document.createElement('div');
   sit.className = 'sp-sit';
   sit.innerHTML = '<span>ze sítě <b class="s">' + spCislo(s12.sit) + ' kWh</b></span><span>přetok <b class="p">'
-    + spCislo(s12.pretok) + ' kWh</b></span><span>soběstačnost <b>'
-    + (s12.celkova > 0 ? Math.max(0, Math.round((1 - s12.sit / s12.celkova) * 100)) : 0) + ' %</b></span>';
+    + spCislo(s12.pretok) + ' kWh</b></span>';
   souhrnEl.appendChild(sit);
+  // Výroba, soběstačnost, peníze, teplota, loňsko
+  const radky = [
+    ['Výroba FVE', spCislo(s12.vyroba) + ' kWh'],
+    ['Soběstačnost', spFormat(s12.sobestacnost, 'pct')]
+  ];
+  if (cenik) {
+    radky.push(['Zaplaceno za elektřinu', '~' + spFormat(s12.naklady, 'kc')]);
+    radky.push(['Ušetřeno díky FVE', '~' + spFormat(s12.uspora, 'kc')]);
+  }
+  if (typeof s12.venku === 'number') radky.push(['Průměrně venku', spFormat(s12.venku, 'teplota')]);
+  // Proti loňsku: jen měsíce, které mají loňský protějšek
+  const pary = vyber.filter(r => podleM.has(spLoni(r.m)));
+  if (pary.length) {
+    const ted = spSoucet(pary), loni = spSoucet(pary.map(r => podleM.get(spLoni(r.m))));
+    const pct = z => z === null ? '–' : (z > 0 ? '+' : z < 0 ? '−' : '±') + Math.abs(Math.round(z * 100)) + ' %';
+    const zaKolik = pary.length < 12 ? ' (' + pary.length + ' měs.)' : '';
+    radky.push(['Celkem proti loňsku' + zaKolik, pct(spZmena(ted.celkova, loni.celkova))]);
+    radky.push(['TČ topení proti loňsku' + zaKolik, pct(spZmena(ted.tcTopeni, loni.tcTopeni))]);
+  }
+  const statky = document.createElement('div');
+  statky.className = 'sp-statky';
+  for (const [k, v] of radky) {
+    const r = document.createElement('div');
+    r.className = 'stat-row';
+    r.innerHTML = '<span></span><span class="stat-val"></span>';
+    r.firstChild.textContent = k;
+    r.lastChild.textContent = v;
+    statky.appendChild(r);
+  }
+  souhrnEl.appendChild(statky);
 
-  // Graf: skládané sloupce po měsících
-  const W = 400, H = 170, dole = 18, nahore = 6, vlevo = 26;
+  // Graf: skládané sloupce po měsících + venkovní teplota čárou (pravá osa)
+  const W = 400, H = 180, dole = 18, nahore = 8, vlevo = 30, vpravo = 24;
   const max = Math.max(1, ...mesice.map(r => SP_DILY.reduce((a, d) => a + Math.max(0, r[d.k] || 0), 0)));
   // Hezký krok osy (4 dílky), ať graf nemá nahoře prázdno
   const krok = [100, 200, 250, 400, 500, 600, 750, 1000, 1500, 2000].find(k => k * 4 >= max) || Math.ceil(max / 4000) * 1000;
   const vyska = H - dole - nahore;
-  const sirka = (W - vlevo) / mesice.length;
+  const sirka = (W - vlevo - vpravo) / mesice.length;
+  const tMin = -10, tMax = 30;
+  const yT = t => H - dole - (t - tMin) / (tMax - tMin) * vyska;
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Spotřeba po měsících">';
-  for (let y = 0; y <= krok * 4; y += krok) {
-    const yy = H - dole - y / (krok * 4) * vyska;
-    svg += '<line x1="' + vlevo + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '" stroke="rgba(44,62,80,0.08)"/>'
-      + '<text x="' + (vlevo - 3) + '" y="' + (yy + 3) + '" text-anchor="end">' + (y >= 1000 ? (y / 1000).toFixed(1).replace('.', ',') + 'k' : y) + '</text>';
+  for (let i = 0; i <= 4; i++) {
+    const y = krok * i;
+    const yy = H - dole - i / 4 * vyska;
+    svg += '<line x1="' + vlevo + '" x2="' + (W - vpravo) + '" y1="' + yy + '" y2="' + yy + '" stroke="rgba(44,62,80,0.08)"/>'
+      + '<text x="' + (vlevo - 3) + '" y="' + (yy + 3) + '" text-anchor="end">' + (y >= 1000 ? (y / 1000).toFixed(1).replace('.', ',') + 'k' : y) + '</text>'
+      + '<text x="' + (W - vpravo + 3) + '" y="' + (yy + 3) + '" class="sp-t">' + (tMin + i * 10) + '°</text>';
   }
+  const body = [];
   mesice.forEach((r, i) => {
     let y = H - dole;
     const x = vlevo + i * sirka + sirka * 0.15;
     const bw = sirka * 0.7;
-    const titul = mesicNadpis(r.m) + ': ' + spCislo(r.celkova) + ' kWh';
+    const titul = mesicNadpis(r.m) + ': ' + spCislo(r.celkova) + ' kWh' + (typeof r.venku === 'number' ? ', venku ' + spFormat(r.venku, 'teplota') : '');
     svg += '<g class="sp-sloupec" data-m="' + r.m + '"' + (r.bezi ? ' opacity="0.45"' : '') + '><title>' + titul + '</title>';
     for (const d of SP_DILY) {
       const v = Math.max(0, r[d.k] || 0);
@@ -10395,25 +10492,38 @@ function renderSpotreba() {
       svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + d.barva + '"/>';
     }
     svg += '</g>';
+    if (typeof r.venku === 'number') body.push([x + bw / 2, yT(Math.max(tMin, Math.min(tMax, r.venku)))]);
     const [rok, mm] = r.m.split('-').map(Number);
     if (mesice.length <= 14 || mm % 3 === 1) {
       svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle">'
         + (mm === 1 ? String(rok) : SP_MES_ZKR[mm - 1]) + '</text>';
     }
   });
+  if (body.length > 1) {
+    svg += '<polyline class="sp-teplota" fill="none" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3 2" points="'
+      + body.map(([x, y]) => x.toFixed(1) + ',' + y.toFixed(1)).join(' ') + '"/>';
+  }
+  svg += body.map(([x, y]) => '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="1.8" fill="#c0392b"/>').join('');
   svg += '</svg>';
   grafEl.className = 'sp-graf';
-  grafEl.innerHTML = svg;
+  grafEl.innerHTML = svg + (body.length ? '<div class="sp-graf-leg"><i></i>průměrná venkovní teplota (pravá osa)</div>' : '');
 
   // Tabulka: nejnovější nahoře, součet 12 měsíců první
   const t = document.createElement('table');
   t.className = 'sp-tabulka';
   let html = '<thead><tr><th></th>' + SP_SLOUPCE.map(c => '<th>' + c.popis + '</th>').join('') + '</tr></thead><tbody>';
-  const radek = (r, cls, nazev) => '<tr class="' + cls + '" data-m="' + r.m + '"><td>' + nazev + '</td>'
-    + SP_SLOUPCE.map(c => '<td class="' + (c.cls || '') + '">' + spCislo(r[c.k]) + '</td>').join('') + '</tr>';
-  html += radek(s12, 'sp-12', s12.pocet >= 12 ? '12 měsíců' : s12.pocet + ' měs.');
+  const radek = (r, cls, nazev, loni) => '<tr class="' + cls + '" data-m="' + (r.m || '') + '"><td>' + nazev + '</td>'
+    + SP_SLOUPCE.map(c => {
+      const zmena = c.loni && loni ? spZmenaHtml(spZmena(r[c.k], loni[c.k])) : '';
+      const odhad = c.fmt === 'kc' && r.cenaOdhad ? '~' : '';
+      return '<td class="' + (c.cls || '') + '">' + odhad + spFormat(r[c.k], c.fmt) + zmena + '</td>';
+    }).join('') + '</tr>';
+  const pary12 = vyber.filter(r => podleM.has(spLoni(r.m)));
+  const loni12 = pary12.length === vyber.length && vyber.length ? spSoucet(vyber.map(r => podleM.get(spLoni(r.m)))) : null;
+  html += radek({ ...s12, cenaOdhad: vyber.some(r => r.cenaOdhad) }, 'sp-12', s12.pocet >= 12 ? '12 měsíců' : s12.pocet + ' měs.', loni12);
   for (const r of [...mesice].reverse()) {
-    html += radek(r, r.bezi ? 'sp-bezi' : '', spMesicKratce(r.m) + (r.bezi ? '<span class="sp-bezi-stitek">běží</span>' : ''));
+    html += radek(r, r.bezi ? 'sp-bezi' : '', spMesicKratce(r.m) + (r.bezi ? '<span class="sp-bezi-stitek">běží</span>' : ''),
+      r.bezi ? null : podleM.get(spLoni(r.m)));
   }
   t.innerHTML = html + '</tbody>';
   tabEl.appendChild(t);
@@ -10421,7 +10531,9 @@ function renderSpotreba() {
   const GEN = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince'];
   const doKdy = rucneDo ? GEN[+rucneDo.slice(5, 7) - 1] + ' ' + rucneDo.slice(0, 4) : '';
   poznEl.textContent = (rucneDo ? 'Do ' + doKdy + ' z ručně vedené tabulky, další měsíce se zapisují samy'
-    : 'Měsíce se zapisují samy') + ' (Solax, Panasonic, Shelly, Infigy). Běžící měsíc je kurzívou.';
+    : 'Měsíce se zapisují samy') + ' (Solax, Panasonic, Shelly, Infigy). Běžící měsíc je kurzívou. Pod číslem změna proti stejnému měsíci loni.'
+    + (cenik ? ' Ceny podle současného ceníku (' + cenik.nazev + ', s DPH, včetně stálých plateb); ~ = rozdělení na VT/NT jen podle času.' : '')
+    + ' Výroba u ručních měsíců = celková − ze sítě + přetok.';
 }
 
 // ---------- Spotřeba po měsících (sauna, bazén, wallbox) ----------

@@ -77,7 +77,7 @@ nadpis('1b) Rozpad na síť a FVE');
 {
   const h = build();
   check('MONTH_KEYS nese celky i rozpady', h.api.MONTH_KEYS.join(','),
-    'sauna,pool,wb,dum,poolGrid,poolPv,wbGrid,wbPv,dumGrid,dumPv,tc,tcTopeni,tcVoda,b1,b2,imp,feed');
+    'sauna,pool,wb,dum,poolGrid,poolPv,wbGrid,wbPv,dumGrid,dumPv,tc,tcTopeni,tcVoda,b1,b2,imp,feed,impVt,impNt');
 }
 
 nadpis('2) Přelom měsíce');

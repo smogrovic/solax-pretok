@@ -2168,7 +2168,7 @@ const MONTH_SPLIT = ['pool', 'wb', 'dum'];
 // Tepelné čerpadlo: měsíční součty z Comfort Cloudu (viz tcMesice), v „domu" jsou obsažené
 const MONTH_TC = ['tc', 'tcTopeni', 'tcVoda'];
 // Pro stránku Spotřeba: oba bojlery, odběr ze sítě a přetok (Wh ze vzorků)
-const MONTH_OSTATNI = ['b1', 'b2', 'imp', 'feed'];
+const MONTH_OSTATNI = ['b1', 'b2', 'imp', 'feed', 'impVt', 'impNt'];
 const MONTH_KEYS = MONTH_CELKEM.concat(MONTH_SPLIT.flatMap(k => [k + 'Grid', k + 'Pv']), MONTH_TC, MONTH_OSTATNI);
 
 function pragueMonthString(at) {
@@ -2215,6 +2215,20 @@ const SPOTREBA_HISTORIE = (() => {
   try { return require('./data/spotreba-historie.json').mesice || []; } catch { return []; }
 })();
 const SPOTREBA_MESICU = 14;
+
+// Ceník ČEZ „Elektřina – na 2 roky v akci“, sazba D56d (tepelné čerpadlo), ceny s DPH.
+// POZE se platí podle nižšího z obou výpočtů; podle jističe je 0 Kč, takže odpadá.
+// Měsíčně: stálá platba 163,35 + jistič 3×25 A 671,55 + nesíťová infrastruktura 15,57.
+const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 163.35 + 671.55 + 15.57, nazev: 'ČEZ D56d, jistič 3×25 A' };
+// Nízký tarif (HDO) — stejné časy každý den; VT jen 8–9, 12–13, 15–16 a 19–20 h
+const HDO_NT = [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]];
+function hdoNizky(at) {
+  const { hour, minute } = pragueTime(at);
+  const h = hour + minute / 60;
+  return HDO_NT.some(([od, doo]) => h >= od && h < doo);
+}
+// Podíl VT na odběru ze sítě, když ho měsíc nemá změřený (ruční tabulka): podle času
+const HDO_VT_PODIL = (24 - HDO_NT.reduce((a, [od, doo]) => a + doo - od, 0)) / 24;
 
 function spotrebaPredMesic(m) {
   const d = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 2, 1));
@@ -2329,6 +2343,7 @@ function spotrebaMesic(m, dnes = pragueDateString()) {
     tcTopeni: r(tcTopeni), tcVoda: r(tcVoda), b1: r(b1), b2: r(b2), voda: r(voda),
     sit: r(sit), pretok: r(pretok), vyroba: r(pv), zdroj: { site: zdrojSite, celkem: zdrojCelkem }, samo: true
   };
+  if ((mo.impVt || 0) + (mo.impNt || 0) > 0) radek.vtPodil = Math.round(mo.impVt / (mo.impVt + mo.impNt) * 1000) / 1000;
   radek.zbytek = Math.max(0, radek.celkova - radek.bazen - radek.sauna - radek.auto - radek.tcTopeni - radek.voda);
   if (m === dnes.slice(0, 7)) radek.bezi = true;
   return radek;
@@ -2340,7 +2355,19 @@ function spotrebaPayload(now = Date.now()) {
   const posledni = rucne.length ? rucne[rucne.length - 1].m : '';
   const samo = state.months.map(x => x.m).filter(m => m > posledni && m <= dnes.slice(0, 7)).sort()
     .map(m => spotrebaMesic(m, dnes)).filter(Boolean);
-  return { mesice: rucne.concat(samo), rucneDo: posledni || null };
+  // Průměrná venkovní teplota měsíce z denních údajů tepelného čerpadla
+  const teploty = new Map();
+  for (const d of (state.tcSpotreba && state.tcSpotreba.dny) || []) {
+    if (typeof d.venku !== 'number') continue;
+    const t = teploty.get(d.d.slice(0, 7)) || { s: 0, n: 0 };
+    t.s += d.venku; t.n++;
+    teploty.set(d.d.slice(0, 7), t);
+  }
+  const mesice = rucne.concat(samo).map(r => {
+    const t = teploty.get(r.m);
+    return t && t.n ? { ...r, venku: Math.round(t.s / t.n * 10) / 10 } : r;
+  });
+  return { mesice, rucneDo: posledni || null, cenik: { ...CENIK, vtPodilCas: Math.round(HDO_VT_PODIL * 1000) / 1000 } };
 }
 
 // Odkud se běžící měsíc skládá — počítadla elektroměru nejsou tajná
@@ -2509,6 +2536,8 @@ function updateRuntimes() {
   // z téhož řetězu jako denní karty, aby se ta dvě místa nikdy nerozešla.
   if (saunaW !== null) recordMonth('sauna', saunaW, dtH);
   if (feedKw !== null) recordMonth(feedKw >= 0 ? 'feed' : 'imp', Math.abs(feedKw) * 1000, dtH);
+  // Odběr ze sítě podle tarifu (HDO) — kvůli ceně na stránce Spotřeba
+  if (feedKw !== null && feedKw < 0) recordMonth(hdoNizky(now) ? 'impNt' : 'impVt', -feedKw * 1000, dtH);
   if (boiler) recordMonth('b1', Math.max(0, b1W), dtH);
   recordMonth('b2', Math.max(0, b2Kw) * 1000, dtH);
   if (podil) {
@@ -7447,7 +7476,9 @@ if (panasonicEnabled) {
 // dataMode 1 = jeden záznam za každý den měsíce z `date`). Živý příkon cloud nemá,
 // dnešek se doplňuje zhruba po hodinách. -255 = den, který ještě data nemá.
 const TC_SPOTREBA_API = '/remote/v1/api/consumption';
-const TC_SPOTREBA_DNU = 400;
+// Dva roky: venkovní teplota a TČ ke srovnání se stejným měsícem loni
+const TC_SPOTREBA_DNU = 800;
+const TC_HISTORIE_OD = '2025-01';
 const TC_SPOTREBA_TIK_MS = 60 * 60 * 1000;
 const TC_NEZNAMO = -255;
 
@@ -7489,6 +7520,9 @@ function aquareaSpotrebaRozeber(j) {
     if (!m) continue;
     const den = { d: `${m[1]}-${m[2]}-${m[3]}`, topeni: kwh(z.heatConsumption), voda: kwh(z.tankConsumption), chlazeni: kwh(z.coolConsumption) };
     if (den.topeni === null && den.voda === null && den.chlazeni === null) continue;
+    // Průměrná venkovní teplota dne, jak ji změřila jednotka
+    const t = typeof z.outdoorTemp === 'string' && z.outdoorTemp.trim() !== '' ? Number(z.outdoorTemp) : z.outdoorTemp;
+    if (typeof t === 'number' && Number.isFinite(t) && t > -60 && t < 60) den.venku = Math.round(t * 10) / 10;
     dny.push(den);
   }
   return dny.sort((a, b) => a.d.localeCompare(b.d));
@@ -7589,6 +7623,23 @@ function tcMesiceKNacteni(now = Date.now()) {
   return out;
 }
 
+// Jednou: starší měsíce (od ledna 2025) kvůli venkovní teplotě a srovnání s loňskem.
+// Od nejnovějšího dozadu; dva prázdné měsíce za sebou = dál cloud nic nemá.
+async function tcHistorieDotahni(guid, now = Date.now()) {
+  const t = state.tcSpotreba;
+  let m = spotrebaPredMesic(spotrebaPredMesic(pragueDateString(now).slice(0, 7)));
+  let prazdnych = 0;
+  while (m >= TC_HISTORIE_OD && prazdnych < 2) {
+    const dny = aquareaSpotrebaRozeber(await aquareaSpotrebaNacti(guid, m + '-15'));
+    tcSpotrebaSluc(dny);
+    prazdnych = dny.length ? 0 : prazdnych + 1;
+    m = spotrebaPredMesic(m);
+    if (typeof delay === 'function') await delay(2000);
+  }
+  t.historie = true;
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+}
+
 let tcSpotrebaBezi = false;
 async function tcSpotrebaPoll() {
   if (!panasonicEnabled || tcSpotrebaBezi) return;
@@ -7605,6 +7656,7 @@ async function tcSpotrebaPoll() {
     t.ts = Date.now();
     if (tcMesice()) broadcast('months', { months: state.months });
     if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+    if (!t.historie) await tcHistorieDotahni(aq.guid);
   } catch (err) {
     const text = String(err.message || err).replace(aq.guid, '…').slice(0, 160);
     if (!t.chyba) addLog('Tepelné čerpadlo: spotřebu se nepodařilo načíst — ' + text, 'error');
@@ -7647,6 +7699,7 @@ app.get('/api/aquarea/spotreba/diagnostika', async (req, res) => {
 app.post('/api/aquarea/spotreba/restore', (req, res) => {
   const dny = req.body && Array.isArray(req.body.dny) ? req.body.dny : null;
   if (!dny) return res.status(400).json({ error: 'Chybí dny.' });
+  if (req.body.historie === true) state.tcSpotreba.historie = true;
   const kwh = v => (v === null || v === undefined ? null : typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 500 ? v : undefined);
   const dnes = pragueDateString();
   let pridano = 0;
@@ -7654,6 +7707,7 @@ app.post('/api/aquarea/spotreba/restore', (req, res) => {
     if (!z || typeof z.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(z.d) || z.d > dnes) continue;
     const den = { d: z.d, topeni: kwh(z.topeni), voda: kwh(z.voda), chlazeni: kwh(z.chlazeni) };
     if ([den.topeni, den.voda, den.chlazeni].some(v => v === undefined)) continue;
+    if (typeof z.venku === 'number' && Number.isFinite(z.venku) && z.venku > -60 && z.venku < 60) den.venku = z.venku;
     if (den.topeni === null && den.voda === null && den.chlazeni === null) continue;
     if (state.tcSpotreba.dny.some(r => r.d === den.d)) continue;
     state.tcSpotreba.dny.push(den);
@@ -12452,7 +12506,7 @@ function storeSnapshot() {
     '/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
-    '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts },
+    '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts, historie: !!state.tcSpotreba.historie },
     '/api/spotreba/restore': { citace: (state.spotreba || {}).citace || {}, pv: (state.spotreba || {}).pv || {},
       doplneno: (state.spotreba || {}).doplneno || null },
     '/api/solinator/restore': { ...state.solinator },

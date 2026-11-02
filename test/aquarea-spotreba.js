@@ -3,7 +3,7 @@
 const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('aquarea-spotreba');
 
-const CODE = ['const MONTHS_MAX = 13;', "const MONTH_TC = ['tc', 'tcTopeni', 'tcVoda'];",
+const CODE = ['const MONTHS_MAX = 13;', "const MONTH_TC = ['tc', 'tcTopeni', 'tcVoda'];", fn('function spotrebaPredMesic('),
   fn('function pragueTime('), fn('function pragueDateString('),
   between('// ---------- Spotřeba tepelného čerpadla (Aquarea)', "app.post('/api/aircon/set'")].join('\n');
 
@@ -31,7 +31,7 @@ function build(o = {}) {
   });
   const api = new Function('app', 'requireAuth', 'broadcast', 'addLog', 'pccQueued', 'pccApiFetch', 'state', 'panasonicEnabled', 'storeUlozBrzy',
     CODE + '\n; return { tcPosunPrahy, tcSpotrebaTelo, tcOdmitnuti, aquareaSpotrebaRozeber, tcSpotrebaSluc, tcMesice, tcSpotrebaPayload,'
-      + ' aquareaSpotrebaNacti, tcMesiceKNacteni, tcSpotrebaPoll };')(
+      + ' aquareaSpotrebaNacti, tcMesiceKNacteni, tcSpotrebaPoll, tcHistorieDotahni };')(
     { get: (c, h) => { routy.get[c] = h; }, post: (c, h) => { routy.post[c] = h; } },
     (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push(u), t => logy.push(t), f => f(), pccApiFetch, state, o.vypnuto ? false : true, () => { ulozeno++; });
@@ -80,7 +80,8 @@ function build(o = {}) {
     const h = build();
     const dny = h.api.aquareaSpotrebaRozeber(ODPOVED);
     check('dny seřazené, prázdné a nesmysly vynechané', dny.map(d => d.d).join(' '), '2026-10-13 2026-10-14 2026-10-15');
-    check('-255 = neznámo, text = číslo', JSON.stringify(dny[1]) + ' ' + dny[2].topeni, '{"d":"2026-10-14","topeni":7.25,"voda":1.9,"chlazeni":null} 3.1');
+    check('-255 = neznámo, text = číslo', JSON.stringify(dny[1]) + ' ' + dny[2].topeni, '{"d":"2026-10-14","topeni":7.25,"voda":1.9,"chlazeni":null,"venku":8} 3.1');
+    check('  bez venkovní teploty pole chybí', 'venku' in dny[2], false);
     check('bez seznamu nic', h.api.aquareaSpotrebaRozeber({}).length + h.api.aquareaSpotrebaRozeber(null).length, 0);
     check('záporné = neznámo', h.api.aquareaSpotrebaRozeber({ historyDataList: [{ dataTime: '20261001', heatConsumption: -3 }] }).length, 0);
     h.api.tcSpotrebaSluc(dny, '2026-10-20');
@@ -129,7 +130,7 @@ function build(o = {}) {
   {
     const h = build();
     await h.api.tcSpotrebaPoll();
-    check('načetlo se a uložilo', [h.state.tcSpotreba.dny.length > 0, h.state.tcSpotreba.ts > 0, h.ulozeno()].join(' '), 'true true 1');
+    check('načetlo se a uložilo (i po dotažení historie)', [h.state.tcSpotreba.dny.length > 0, h.state.tcSpotreba.ts > 0, h.ulozeno()].join(' '), 'true true 2');
     check('poslalo spotřebu i měsíce', [h.zpravy.includes('tcSpotreba'), h.zpravy.includes('months')].join(' '), 'true true');
     check('  dotazovalo se na guid čerpadla', h.dotazy[0].telo.bodyParam.gwid, 'GW-TAJNE-1');
 
@@ -145,6 +146,27 @@ function build(o = {}) {
     const vyp = build({ vypnuto: true });
     await vyp.api.tcSpotrebaPoll();
     check('bez Comfort Cloudu se neptá', vyp.dotazy.length, 0);
+  }
+
+  nadpis('Starší měsíce (jednou)');
+  {
+    // Cloud má data jen do srpna 2026, dál prázdno
+    const h = build({ fetch: async (c, o) => {
+      const d = JSON.parse(o.body).bodyParam.date;
+      h.dotazy.push(d);
+      return d >= '20260801' ? { historyDataList: [{ dataTime: d.slice(0, 6) + '10', heatConsumption: 1, tankConsumption: 1, coolConsumption: 0, outdoorTemp: 5 }] } : {};
+    } });
+    await h.api.tcHistorieDotahni('GW-1', Date.UTC(2026, 10, 2, 12));
+    check('od předminulého měsíce dozadu, po 2 prázdných konec', h.dotazy.join(' '), '20260915 20260815 20260715 20260615');
+    check('  dny uložené, příznak hotovo', h.state.tcSpotreba.dny.map(d => d.d).join(' ') + ' ' + h.state.tcSpotreba.historie, '2026-08-10 2026-09-10 true');
+    const plne = build();
+    await plne.api.tcHistorieDotahni('GW-1', Date.UTC(2025, 3, 10, 12));
+    check('  nejdál do ledna 2025', plne.dotazy.map(d => d.telo.bodyParam.date).join(' '), '20250215 20250115');
+    const p = build();
+    await p.api.tcSpotrebaPoll();
+    const pocet = p.dotazy.length;
+    await p.api.tcSpotrebaPoll();
+    check('  podruhé už se historie netahá', p.dotazy.length - pocet <= 2, true);
   }
 
   nadpis('Diagnostika a obnova');
@@ -168,10 +190,11 @@ function build(o = {}) {
       { d: '2099-01-01', topeni: 1, voda: 1 },
       { d: '2026-10-03', topeni: 'x', voda: 1 },
       { d: '2026-10-04', topeni: 9999, voda: 1 },
-      { d: '2026-10-05' }]});
+      { d: '2026-10-05' }, { d: '2026-10-06', topeni: 1, voda: 0, venku: 4.5 }, { d: '2026-10-07', topeni: 1, voda: 0, venku: 99 }], historie: true });
     check('obnova: přidá jen nové platné dny', [o.out.pridano, r.state.tcSpotreba.dny.map(d => d.d + ':' + d.topeni).join(' ')].join(' | '),
-      '1 | 2026-10-01:5 2026-10-02:9');
-    check('  razítko a měsíce', [r.state.tcSpotreba.ts, r.state.months[0].tc].join(' '), '7 24000');
+      '3 | 2026-10-01:5 2026-10-02:9 2026-10-06:1 2026-10-07:1');
+    check('  venku jen rozumné, příznak historie', [r.state.tcSpotreba.dny[2].venku, 'venku' in r.state.tcSpotreba.dny[3], r.state.tcSpotreba.historie].join(' '), '4.5 false true');
+    check('  razítko a měsíce', [r.state.tcSpotreba.ts, r.state.months[0].tc].join(' '), '7 26000');
     check('  bez dny = 400', (await r.volej('post', '/api/aquarea/spotreba/restore', {})).kod, 400);
   }
   konec();

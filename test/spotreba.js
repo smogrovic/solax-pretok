@@ -12,7 +12,8 @@ function build(o = {}) {
   const routy = {}, zpravy = [];
   const state = Object.assign({ months: [], solax: null, siteDny: [], pvDays: [], runtime: { date: '', wh: {} } }, o.state || {});
   const api = new Function('require', 'state', 'cerstve', 'app', 'broadcast',
-    CODE + '\n; return { spotrebaVzorek, spotrebaPoStartu, spotrebaMesic, spotrebaPayload, spotrebaPredMesic, SPOTREBA_HISTORIE };')(
+    CODE + '\n; return { spotrebaVzorek, spotrebaPoStartu, spotrebaMesic, spotrebaPayload, spotrebaPredMesic, SPOTREBA_HISTORIE,'
+      + ' hdoNizky, HDO_VT_PODIL, CENIK };')(
     p => require(path.join(__dirname, '..', p)), state, () => o.cerstve !== false,
     { post: (c, h) => { routy[c] = h; }, get: (c, h) => { routy[c] = h; } }, u => zpravy.push(u));
   const volej = (cesta, body) => {
@@ -131,6 +132,19 @@ nadpis('Měsíc');
   check('neznámý měsíc', h.api.spotrebaMesic('2020-01'), null);
 }
 
+nadpis('Tarif D56d');
+{
+  const h = build();
+  const v = (hod, min = 0) => h.api.hdoNizky(Date.UTC(2026, 10, 2, hod - 1, min));   // Praha v zimě = UTC+1
+  check('NT v noci, VT jen 8–9, 12–13, 15–16, 19–20', [v(3), v(8), v(8, 59), v(9), v(12, 30), v(14), v(15, 10), v(19, 30), v(23, 59)].join(' '),
+    'true false false true false true false false true');
+  check('VT podle času = 4 h z 24', Math.round(h.api.HDO_VT_PODIL * 1000) / 1000, 0.167);
+  check('ceník s DPH, POZE 0, měsíčně stálá + jistič 3×25 A + infrastruktura', [h.api.CENIK.vt, h.api.CENIK.nt, h.api.CENIK.mesicne.toFixed(2)].join(' '), '4.32625 3.42394 850.47');
+  const st = build({ state: { months: [{ m: '2026-11', sauna: 0, pool: 0, wb: 0, dum: 0, imp: 100000, impVt: 25000, impNt: 75000 }] } });
+  check('podíl VT z měřeného odběru', st.api.spotrebaMesic('2026-11', '2026-11-20').vtPodil, 0.25);
+  check('  bez rozdělení není', 'vtPodil' in build({ state: { months: [{ m: '2026-11', sauna: 0, pool: 0, wb: 0, dum: 0 }] } }).api.spotrebaMesic('2026-11'), false);
+}
+
 nadpis('Payload');
 {
   const h = build({ state: { months: [{ m: '2026-09', sauna: 1, pool: 0, wb: 0, dum: 0 }, { m: '2026-11', sauna: 0, pool: 0, wb: 0, dum: 5000 }] } });
@@ -138,6 +152,10 @@ nadpis('Payload');
   check('ruční měsíce + samy skládané po nich', [p.mesice.length, p.rucneDo, p.mesice[20].rucne, p.mesice[21].m, p.mesice[21].samo].join(' '),
     '22 2026-10 true 2026-11 true');
   check('  měsíc v ruční tabulce se ze serveru nebere', p.mesice.filter(r => r.m === '2026-09').length, 1);
+  check('  ceník a podíl VT podle času', [p.cenik.nazev, p.cenik.vtPodilCas].join(' '), 'ČEZ D56d, jistič 3×25 A 0.167');
+  const t = build({ state: { months: [], tcSpotreba: { dny: [{ d: '2026-10-01', venku: 8 }, { d: '2026-10-02', venku: 5 }, { d: '2025-01-03', venku: -2.35 }, { d: '2025-01-04' }] } } });
+  const pt = t.api.spotrebaPayload(T('2026-11-15'));
+  check('venkovní teplota měsíce i k ručním měsícům', [pt.mesice.find(r => r.m === '2026-10').venku, 'venku' in pt.mesice.find(r => r.m === '2025-02')].join(' '), '6.5 false');
 }
 
 nadpis('Obnova');
