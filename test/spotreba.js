@@ -11,11 +11,12 @@ const HISTORIE = require('../data/spotreba-historie.json').mesice;
 function build(o = {}) {
   const routy = {}, zpravy = [];
   const state = Object.assign({ months: [], solax: null, siteDny: [], pvDays: [], runtime: { date: '', wh: {} } }, o.state || {});
-  const api = new Function('require', 'state', 'cerstve', 'app', 'broadcast',
+  const api = new Function('require', 'state', 'cerstve', 'app', 'broadcast', 'fetch', 'WEATHER_LAT', 'WEATHER_LON',
     CODE + '\n; return { spotrebaVzorek, spotrebaPoStartu, spotrebaMesic, spotrebaPayload, spotrebaPredMesic, SPOTREBA_HISTORIE,'
-      + ' hdoNizky, HDO_VT_PODIL, CENIK };')(
+      + ' hdoNizky, HDO_VT_PODIL, CENIK, spotrebaTeplotyRozeber, spotrebaTeplotyNacti };')(
     p => require(path.join(__dirname, '..', p)), state, () => o.cerstve !== false,
-    { post: (c, h) => { routy[c] = h; }, get: (c, h) => { routy[c] = h; } }, u => zpravy.push(u));
+    { post: (c, h) => { routy[c] = h; }, get: (c, h) => { routy[c] = h; } }, u => zpravy.push(u),
+    o.fetch || (async () => { throw new Error('bez sítě'); }), 49.7, 14.6);
   const volej = (cesta, body) => {
     let out, kod = 200;
     const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -26,6 +27,7 @@ function build(o = {}) {
 }
 const T = (d, h = 12) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), h - 1);   // Praha v zimě
 
+(async () => {
 nadpis('Ručně vedená tabulka');
 {
   check('21 měsíců, únor 2025 – říjen 2026', HISTORIE.length + ' ' + HISTORIE[0].m + ' ' + HISTORIE[HISTORIE.length - 1].m, '21 2025-02 2026-10');
@@ -158,6 +160,27 @@ nadpis('Payload');
   check('venkovní teplota měsíce i k ručním měsícům', [pt.mesice.find(r => r.m === '2026-10').venku, 'venku' in pt.mesice.find(r => r.m === '2025-02')].join(' '), '6.5 false');
 }
 
+nadpis('Venkovní teplota z archivu');
+{
+  const h = build();
+  const r = h.api.spotrebaTeplotyRozeber({ daily: { time: ['2025-01-30', '2025-01-31', '2025-02-01', 'x', '2025-02-02'], temperature_2m_mean: [-2, 1, 3.5, 9, null] } });
+  check('rozbor po měsících (součet a počet dní)', JSON.stringify(r), '{"2025-01":{"s":-1,"n":2},"2025-02":{"s":3.5,"n":1}}');
+  let url = '';
+  const n = build({ state: { months: [], tcSpotreba: { dny: [{ d: '2026-10-01', venku: 15 }, { d: '2025-02-10', venku: 7 }] } },
+    fetch: async u => { url = u; return { ok: true, json: async () => ({ daily: { time: ['2025-02-01', '2025-02-02'], temperature_2m_mean: [1, 2] } }) }; } });
+  check('stáhne se a uloží', await n.api.spotrebaTeplotyNacti(T('2026-11-02')), true);
+  check('  dotaz: od ledna 2025 do včerejška, denní průměr', /start_date=2025-01-01&end_date=2026-11-01&daily=temperature_2m_mean/.test(url) && /latitude=49.7&longitude=14.6/.test(url), true);
+  const p = n.api.spotrebaPayload(T('2026-11-02'));
+  check('  archiv má přednost, jinak teplota z TČ', [p.mesice.find(x => x.m === '2025-02').venku, p.mesice.find(x => x.m === '2026-10').venku].join(' '), '1.5 15');
+  const chyba = build({ fetch: async () => ({ ok: false, status: 500 }) });
+  let e = null;
+  try { await chyba.api.spotrebaTeplotyNacti(); } catch (x) { e = x.message; }
+  check('  chyba serveru', e, 'Open-Meteo HTTP 500');
+  const o = build();
+  o.volej('/api/spotreba/restore', { citace: {}, pv: {}, teploty: { '2025-03': { s: 120, n: 31 }, '2025-04': { s: 'x', n: 3 }, bad: { s: 1, n: 1 } } });
+  check('  obnova teplot ze zálohy', JSON.stringify(o.state.spotreba.teploty), '{"2025-03":{"s":120,"n":31}}');
+}
+
 nadpis('Obnova');
 {
   const h = build();
@@ -172,4 +195,4 @@ nadpis('Obnova');
   check('  co server má, nepřepíše (výroba bere větší)', [h.state.spotreba.citace['2026-11'].od.imp, h.state.spotreba.pv['2026-11']['01']].join(' '), '1 3.5');
   check('  pošle tabulku do appky', h.zpravy.includes('spotreba'), true);
 }
-konec();
+})().then(konec);

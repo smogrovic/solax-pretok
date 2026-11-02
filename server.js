@@ -2355,7 +2355,9 @@ function spotrebaPayload(now = Date.now()) {
   const posledni = rucne.length ? rucne[rucne.length - 1].m : '';
   const samo = state.months.map(x => x.m).filter(m => m > posledni && m <= dnes.slice(0, 7)).sort()
     .map(m => spotrebaMesic(m, dnes)).filter(Boolean);
-  // Průměrná venkovní teplota měsíce z denních údajů tepelného čerpadla
+  // Průměrná venkovní teplota měsíce: přednostně z archivu Open-Meteo (stejný zdroj
+  // pro všechny měsíce, dá se srovnávat), jinak z denních údajů tepelného čerpadla
+  // (Comfort Cloud ji drží jen pár měsíců zpátky)
   const teploty = new Map();
   for (const d of (state.tcSpotreba && state.tcSpotreba.dny) || []) {
     if (typeof d.venku !== 'number') continue;
@@ -2363,7 +2365,10 @@ function spotrebaPayload(now = Date.now()) {
     t.s += d.venku; t.n++;
     teploty.set(d.d.slice(0, 7), t);
   }
+  const archiv = (state.spotreba && state.spotreba.teploty) || {};
   const mesice = rucne.concat(samo).map(r => {
+    const a = archiv[r.m];
+    if (a && a.n) return { ...r, venku: Math.round(a.s / a.n * 10) / 10 };
     const t = teploty.get(r.m);
     return t && t.n ? { ...r, venku: Math.round(t.s / t.n * 10) / 10 } : r;
   });
@@ -2378,6 +2383,35 @@ app.get('/api/spotreba/diagnostika', (req, res) => {
   res.json({ citaceZeStridace: sol.citace || null, mesic: m, citace: s.citace[m] || null,
     dnuVyroby: Object.keys(s.pv[m] || {}).length, radek: spotrebaMesic(m) });
 });
+
+// Venkovní teplota po dnech z archivu Open-Meteo (zdarma, bez klíče) → součty po měsících.
+// Archiv má zpoždění pár dní; běžící měsíc se doplňuje postupně.
+const SPOTREBA_TEPLOTY_OD = '2025-01-01';
+function spotrebaTeplotyRozeber(j) {
+  const dny = (j && j.daily && Array.isArray(j.daily.time)) ? j.daily.time : [];
+  const hodnoty = (j && j.daily && Array.isArray(j.daily.temperature_2m_mean)) ? j.daily.temperature_2m_mean : [];
+  const out = {};
+  dny.forEach((d, i) => {
+    const v = hodnoty[i];
+    if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d) || typeof v !== 'number' || !Number.isFinite(v)) return;
+    const m = d.slice(0, 7);
+    const t = out[m] || (out[m] = { s: 0, n: 0 });
+    t.s = Math.round((t.s + v) * 10) / 10; t.n++;
+  });
+  return out;
+}
+async function spotrebaTeplotyNacti(now = Date.now()) {
+  const vcera = pragueDateString(now - 86400000);
+  const url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + WEATHER_LAT + '&longitude=' + WEATHER_LON
+    + '&start_date=' + SPOTREBA_TEPLOTY_OD + '&end_date=' + vcera + '&daily=temperature_2m_mean&timezone=Europe%2FPrague';
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error('Open-Meteo HTTP ' + res.status);
+  const nove = spotrebaTeplotyRozeber(await res.json());
+  if (!Object.keys(nove).length) return false;
+  spotrebaStav().teploty = nove;
+  broadcast('spotreba', { spotreba: spotrebaPayload() });
+  return true;
+}
 
 // Obnova počítadel a denní výroby po nasazení
 app.post('/api/spotreba/restore', (req, res) => {
@@ -2399,6 +2433,13 @@ app.post('/api/spotreba/restore', (req, res) => {
       if (!/^\d{2}$/.test(d) || !cislo(v) || v > 500) continue;
       if (!(cil[d] >= v)) { cil[d] = v; zmena = true; }
     }
+  }
+  if (b.teploty && typeof b.teploty === 'object' && !Object.keys(s.teploty || {}).length) {
+    const t = {};
+    for (const [m, v] of Object.entries(b.teploty)) {
+      if (/^\d{4}-\d{2}$/.test(m) && v && typeof v.s === 'number' && Number.isFinite(v.s) && Number.isInteger(v.n) && v.n > 0 && v.n <= 31) t[m] = { s: v.s, n: v.n };
+    }
+    if (Object.keys(t).length) { s.teploty = t; zmena = true; }
   }
   if (typeof b.doplneno === 'string' && /^\d{4}-\d{2}$/.test(b.doplneno) && !(s.doplneno >= b.doplneno)) s.doplneno = b.doplneno;
   spotrebaOrizni(s.citace);
@@ -12508,7 +12549,7 @@ function storeSnapshot() {
     '/api/months/restore': { months: state.months },
     '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts, historie: !!state.tcSpotreba.historie },
     '/api/spotreba/restore': { citace: (state.spotreba || {}).citace || {}, pv: (state.spotreba || {}).pv || {},
-      doplneno: (state.spotreba || {}).doplneno || null },
+      doplneno: (state.spotreba || {}).doplneno || null, teploty: (state.spotreba || {}).teploty || {} },
     '/api/solinator/restore': { ...state.solinator },
     '/api/timers/restore': {
       savedAt: Date.now(), relay: relayTimers, blinds: blindTimers, aircon: airconTimers,
@@ -12994,6 +13035,8 @@ const server = app.listen(PORT, async () => {
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
   spotrebaPoStartu();
+  // Venkovní teplota pro stránku Spotřeba (archiv Open-Meteo), každých 6 h
+  scheduleEvery(() => spotrebaTeplotyNacti().catch(() => {}), 6 * 3600000, 3 * 60000 + 40000);
   rozvrhMigrace();
   rozvrhMigraceV6();
   rozvrhMigraceV7();
