@@ -4,7 +4,7 @@ const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
 let v = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 v = v.replace('</head>', '<style>.slide{display:none!important}'
-  + '.slide[data-title="Logika automatiky"]{display:block!important}'
+  + '.slide[data-title="Log/Nastavení"]{display:block!important}'
   + '.card.lock-panel{display:none!important}</style></head>');
 
 const DRIVER = `
@@ -23,7 +23,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
  try {
   await wait(150);
-  const page = document.querySelector('.slide[data-title="Logika automatiky"]');
+  const page = document.querySelector('.slide[data-title="Log/Nastavení"]');
   const sekce = [...page.querySelectorAll('.logic-h')].map(e => e.textContent);
   const li = [...page.querySelectorAll('.logic-list li')];
 

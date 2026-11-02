@@ -24,7 +24,7 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
   // záložku a přepíná celou obrazovku (viz browser-kalendar)
   const tabs = Array.from(document.querySelectorAll('#pageTabs .page-tab:not(.page-tab-kal)')).map(t => t.textContent);
   check('záložky jdou v zadaném pořadí', tabs.join(' · '),
-    'Asistent · FVE · Spotřeba · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Závlaha · Připomínky · Recepty/Nákup · Přehled · Log · Logika automatiky');
+    'Asistent · FVE · Spotřeba · Klima · Žaluzie · Žaluzie 2 · Ovládání · Wallbox · Bazén · Sauna · Závlaha · Připomínky · Recepty/Nákup · Log/Nastavení');
   const slides = Array.from(document.querySelectorAll('.slide')).map(s => s.dataset.title);
   check('  a stejně i stránky', slides.join(' · ') === tabs.join(' · '), 'true');
   // Kalendář není stránka v pásu, jeho záložka stojí hned za Připomínkami
@@ -40,39 +40,14 @@ const radky = el => Array.from(el.querySelectorAll('.wbsrc-row')).map(r => r.tex
     FVE_PANELS.findIndex(p => p.label === 'Wallbox (kW)')
     - FVE_PANELS.findIndex(p => p.label === 'Baterie (%)'), 1);
 
-  OUT.push('\\n3) Měsíce: jen uzavřené');
+  OUT.push('\\n3) Měsíce jsou jen na stránce Spotřeba');
   const d = new Date();
-  const ted = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   const minuly = new Date(d.getFullYear(), d.getMonth() - 1, 15);
-  const predminuly = new Date(d.getFullYear(), d.getMonth() - 2, 15);
   const kl = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0');
-  monthsData = [
-    { m: kl(predminuly), sauna: 32000, pool: 120000, wb: 210000 },
-    { m: kl(minuly), sauna: 41200, pool: 98000, wb: 305000 },
-    { m: ted, sauna: 5000, pool: 4000, wb: 9000 }
-  ];
-  renderMonths();
-  const s = radky(saunaMonths);
-  check('běžící měsíc se neukazuje', s.some(r => /5,0 kWh/.test(r)), 'false');
-  check('  uzavřené ano, nejnovější nahoře', /41,2 kWh/.test(s[0]) && /32,0 kWh/.test(s[1]), 'true');
-  check('  s českým názvem měsíce', /\\d{4}/.test(s[0]) && /[a-zěščřžýáíé]{3,}/.test(s[0]), 'true');
-  check('  a součtem na konci', /Celkem \\(2 měsíců\\)/.test(s[2]) && /73,2 kWh/.test(s[2]), 'true');
-  check('bazén má svoje čísla', /98,0 kWh/.test(radky(poolMonths)[0]), 'true');
-  check('wallbox taky', /305,0 kWh/.test(radky(wbMonths)[0]), 'true');
-  // Tepelné čerpadlo uvnitř domu: rozpad u měsíce i v součtu
-  monthsData = [
-    { m: kl(predminuly), sauna: 0, pool: 0, wb: 0, dum: 400000, tc: 150000, tcTopeni: 120000, tcVoda: 30000 },
-    { m: kl(minuly), sauna: 0, pool: 0, wb: 0, dum: 300000 }
-  ];
-  renderMonths();
-  const tcR = [...dumMonths.querySelectorAll('.wbsrc-tc')].map(e => e.textContent);
-  check('TČ jen u měsíce, který ho má, a v součtu', tcR.length, 2);
-  check('  rozpad a dům bez TČ', tcR[0], 'z toho tepelné čerpadlo 150,0 kWh (topení 120,0 kWh · voda 30,0 kWh) · dům bez TČ 250,0 kWh');
-  check('  v jiných kartách TČ není', saunaMonths.querySelectorAll('.wbsrc-tc').length + poolMonths.querySelectorAll('.wbsrc-tc').length, 0);
-  check('slučování TČ drží', (mergeMonths([{ m: kl(minuly), tc: 5 }], [{ m: kl(minuly), tc: 9, tcTopeni: 7 }])[0] || {}).tc, 9);
-  monthsData = [];
-  renderMonths();
-  check('bez uzavřeného měsíce to řekne', /Zatím žádný celý měsíc/.test(saunaMonths.textContent), 'true');
+  check('karty po měsících na sauně, bazénu, wallboxu ani FVE nejsou',
+    ['saunaMonths', 'poolMonths', 'wbMonths', 'dumMonths'].filter(id => document.getElementById(id)).join(',') || 'žádná', 'žádná');
+  check('slučování TČ a sítě drží (záloha pro server)', JSON.stringify((mergeMonths([{ m: kl(minuly), tc: 5, imp: 3 }], [{ m: kl(minuly), tc: 9, imp: 1, impVt: 2 }])[0] || {})),
+    JSON.stringify({ m: kl(minuly), sauna: 0, pool: 0, wb: 0, dum: 0, tc: 9, imp: 3, impVt: 2 }));
 
   OUT.push('\\n4) Sauna: jen součet za 7 dní');
   check('rozpis po dnech je pryč', document.getElementById('saunaList'), 'null');

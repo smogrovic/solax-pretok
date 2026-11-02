@@ -96,7 +96,7 @@ setTimeout(() => {
   // z časů, podle kterých server opravdu spíná; ručně opsaný text by se rozešel.
   check('v kartě čerpadla rozvrh není', !!karta.querySelector('#obehPlan'), false);
   check('  a je ve vysvětlení automatiky',
-    !!document.querySelector('.slide[data-title="Logika automatiky"] #obehPlan'), true);
+    !!document.querySelector('.slide[data-title="Log/Nastavení"] #obehPlan'), true);
   renderObehPlan({ pracovni: [['06:15', '07:15'], ['18:45', '19:30']], vikend: [['18:30', '19:30']] });
   check('  s časy ze serveru', document.getElementById('obehPlan').textContent,
     'Jezdí po–pá 6:15–7:15 a 18:45–19:30, o víkendu 18:30–19:30.');

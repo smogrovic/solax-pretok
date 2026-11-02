@@ -137,30 +137,8 @@ setTimeout(() => {
   check('  ze sítě', /ze sítě 3,0 kWh/.test(src.textContent), 'true');
   check('  i podíl z FVE', /9,0 kWh z FVE \\(75 %\\)/.test(src.textContent), 'true');
 
-  R.push('\\n7) Měsíční rozpad');
-  monthsData = [
-    { m: '2026-06', pool: 10000, poolGrid: 2000, poolPv: 8000 },
-    { m: '2026-07', pool: 20000 }
-  ];
-  renderMonths();
-  const mes = document.getElementById('poolMonths');
-  check('měsíc s rozpadem ho ukáže', /ze sítě 2,0 kWh/.test(mes.textContent), 'true');
-  // Starší měsíce rozpad nemají a nesmí se dokreslit jako nula — „nevíme" není „nic ze sítě"
-  const radky = [...mes.querySelectorAll('.wbsrc-row')];
-  // Pozor: „červenec" začíná na „červen", takže se musí porovnávat celý popisek
-  const podleMesice = jm => radky.find(x => {
-    const d = x.querySelector('.wbsrc-day');
-    return d && d.textContent.trim().startsWith(jm + ' ');
-  });
-  const cerven = podleMesice('červen');
-  const cervenec = podleMesice('červenec');
-  check('  a je u správného měsíce', !!cerven.querySelector('.wbsrc-bar'), 'true');
-  check('měsíc bez rozpadu zůstane bez pruhu', !!cervenec.querySelector('.wbsrc-bar'), 'false');
-  check('  ale celkové kWh ukáže', /20,0 kWh/.test(cervenec.textContent), 'true');
-  // Součtový pruh smí sčítat jen měsíce, které rozpad mají
-  const soucet = radky.find(x => x.classList.contains('wbsrc-total'));
-  check('součet bere jen měsíce s rozpadem', /ze sítě 2,0 kWh/.test(soucet.textContent), 'true');
-  check('  a celkem je za všechny', /30,0 kWh/.test(soucet.textContent), 'true');
+  R.push('\\n7) Měsíce jsou na stránce Spotřeba');
+  check('karta měsíců na bazénu není', document.getElementById('poolMonths'), null);
 
   R.push('\\n8) Bazén v grafu na FVE není vůbec');
   // Teplota vody patří na kartu tepelného čerpadla a panel s ODBĚREM okruhů

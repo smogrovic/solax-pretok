@@ -25,7 +25,7 @@ setTimeout(() => {
 
   const slepene = [];
   const stranky = Array.from(document.querySelectorAll('.slide'));
-  check('stránek je šestnáct', stranky.length, 16);
+  check('stránek je čtrnáct', stranky.length, 14);
 
   for (const slide of stranky) {
     const karty = Array.from(slide.querySelectorAll('.page > .card')).filter(viditelna);
@@ -52,9 +52,9 @@ setTimeout(() => {
   for (const btn of document.querySelectorAll('.sbal-btn[data-sbal]')) sbalNastav(btn.dataset.sbal, false);
   const sauna = stranky.find(s => s.dataset.title === 'Sauna');
   const saunaKarty = Array.from(sauna.querySelectorAll('.page > .card')).filter(viditelna);
-  // Šest: kamna, měřák, stav jednotky, měření nahřívání a dvě karty spotřeby.
+  // Pět: kamna, měřák, stav jednotky, měření nahřívání a karta spotřeby (měsíce jsou na Spotřebě).
   // Karty s topením a světlem jsou do prvního snímku ze serveru schované.
-  check('sauna má šest karet', saunaKarty.length, 6);
+  check('sauna má pět karet', saunaKarty.length, 5);
   check('  a měřák má mezeru od kamen', mezera(saunaKarty[1]) >= 12, true);
 
   // Grafy si drží svých 10 px — obecné pravidlo je nesmí přebít
@@ -74,8 +74,8 @@ setTimeout(() => {
   check('Bazén se se zbytkem srovná', mezera(prvniViditelna('Bazén')), 0);
 
   // První karta na stránce okraj z obecného pravidla nedostane
-  const log = stranky.find(s => s.dataset.title === 'Log');
-  check('jediná karta na Logu nemá okraj navíc',
+  const log = stranky.find(s => s.dataset.title === 'Log/Nastavení');
+  check('první karta logu (pod tlačítkem Log) nemá okraj navíc',
     mezera(log.querySelector('.page > .card')), 0);
 
   R.push('\\nSbalené přehledy');
@@ -83,14 +83,14 @@ setTimeout(() => {
   // dívá jednou za měsíc. Výchozí stav je proto zavřeno.
   const klice = [...document.querySelectorAll('.sbal-btn[data-sbal]')].map(b => b.dataset.sbal);
   check('tlačítka jsou na všech stránkách, kde mají být',
-    // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Přehled
+    // v pořadí stránek: FVE, Klima, Žaluzie, Wallbox, Bazén, Sauna, Závlaha, Log/Nastavení
     klice.join(', '),
     // a k tomu každý časovač (casovac-…), ten ukazuje nastavené i sbalený
-    'fve, topeni, aqprogram, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
-    + 'wallbox, bazen, solinator, casovac-huumTimerCard, nahrev, sauna, zavlaha, prehled, odhad');
-  // Na Přehledu jdou pod jedno tlačítko oba boxy — dnešek i týden
-  check('Přehled sbalí oba boxy',
-    document.querySelectorAll('[data-sbal-obsah="prehled"]').length, 2);
+    'fve, odhad, topeni, aqprogram, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
+    + 'wallbox, bazen, solinator, casovac-huumTimerCard, nahrev, sauna, zavlaha, log');
+  // Přehled spotřeby na FVE: odkud šla spotřeba, dnešek i týden (z bývalé stránky Přehled)
+  check('Přehled spotřeby na FVE sbalí tři boxy',
+    document.querySelectorAll('.card[data-sbal-obsah="fve"]').length, 3);
   check('  a u závlahy je srozumitelný název',
     document.querySelector('.sbal-btn[data-sbal="zavlaha"]').textContent.trim(),
     'Přehled zavlažování▾');
@@ -100,13 +100,13 @@ setTimeout(() => {
   check('bez volby je všechno sbalené',
     klice.filter(k => obsah(k).some(el => !el.hidden)).join(', ') || 'nic', 'nic');
   sbalNastav('fve', false);
-  check('rozbalení ukáže obě karty naráz', obsah('fve').filter(el => !el.hidden).length, 2);
+  check('rozbalení ukáže všechny tři karty naráz', obsah('fve').filter(el => !el.hidden).length, 3);
   check('  a tlačítko to dá najevo',
     document.querySelector('.sbal-btn[data-sbal="fve"]').classList.contains('otevreno'), true);
   check('  a sousedi zůstanou sbalení', obsah('wallbox').some(el => !el.hidden), false);
   check('volba se pamatuje', localStorage.getItem('sbaleno:fve'), 'ne');
   sbalPripoj();
-  check('  a přežije nové načtení', obsah('fve').filter(el => !el.hidden).length, 2);
+  check('  a přežije nové načtení', obsah('fve').filter(el => !el.hidden).length, 3);
   sbalNastav('fve', true);
   check('zavření zase schová', obsah('fve').some(el => !el.hidden), false);
 

@@ -10,7 +10,7 @@
 // víme, je to, co hlídá tahle sada. Hlavně: chybová hláška musí říct, CO se
 // stalo (špatné heslo × výpadek × nesmyslná odpověď), protože podle ní se pak
 // ladí naslepo — a nesmí v ní být heslo, ten výpis se posílá dál.
-const { between, suite } = require('./zdroj');
+const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('HUUM');
 
 const CODE = between('// ---------- Kamna HUUM (UKU WiFi) ----------',
@@ -63,7 +63,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'broadcast', 'scheduleEvery', 'POLL_INTERVAL_MS', 'requireAuth', 'addLog', 'sendPushToAll',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
-    'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive',
+    'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive', 'predpovedTeplota',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
@@ -102,7 +102,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     ts => { const d = new Date(ts); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); },
     ts => !!ts,
     async zdroj => { h.pripravy.push(zdroj); return ['Světlo v sauně svítí.']; },
-    () => !!h.pryc
+    () => !!h.pryc,
+    ms => (h.predpoved ? h.predpoved(ms) : null)
   );
   return h;
 }
@@ -923,6 +924,46 @@ nadpis('Saunování podle kamen a světla');
   h.state.saunaRelace = { od: 0, konec: 0 };
   sl({ error: null }, { heating: false, light: 0 }, 6000);
   check('po restartu vypnutá sauna nic nezačne', JSON.stringify(h.state.saunaRelace), '{"od":0,"konec":0}');
+}
+
+nadpis('19) Časovač počítá s teplotou v době zapnutí (předpověď)');
+{
+  const pt = new Function(fn('function predpovedTeplota(') + '; return predpovedTeplota;')();
+  const H = 3600000, sl = [{ ms: 0, t: 20 }, { ms: 3 * H, t: 14 }, { ms: 6 * H, t: 8 }];
+  check('předpověď: mezi sloty lineárně', [pt(0, sl), pt(1.5 * H, sl), pt(4 * H, sl)].join(' '), '20 17 12');
+  check('  kousek za posledním platí poslední, dál nic', [pt(8 * H, sl), pt(10 * H, sl), pt(1, [])].join(' '), '8  ');
+
+  // V poledne 20 °C, večer podle předpovědi 6 °C: studená sauna vychladne s okolím
+  const jdu = Date.UTC(2026, 8, 24, 19);
+  const nastaveno = jdu - 7 * 3600000;
+  const bez = build();
+  bez.state.weather = { tempC: 20 };
+  bez.state.huum = { temperature: 22, heating: false, fetchedAt: new Date().toISOString(), error: null };
+  bez.api.saunaTimerPridej('19:00', 80, nastaveno);
+  const s = build();
+  s.state.weather = { tempC: 20 };
+  s.state.huum = { temperature: 22, heating: false, fetchedAt: new Date().toISOString(), error: null };
+  s.predpoved = () => 6;
+  s.api.saunaTimerPridej('19:00', 80, nastaveno);
+  const tb = bez.api.casovace()[0], ts = s.api.casovace()[0];
+  check('s večerním ochlazením se zapne dřív', ts.zapneV < tb.zapneV, true);
+  check('  počítá s 6 °C venku a ochlazenou saunou (22 − 14 = 8 °C)', [ts.nabeh.venkuC, ts.nabeh.odC, ts.nabeh.zPredpovedi].join(' '), '6 8 true');
+  check('  odhad sedí s modelem', ts.nabeh.minut, Math.ceil(s.api.odhadNabehu(6, 8, 80).minut));
+  check('bez předpovědi jako dřív', [tb.nabeh.venkuC, tb.nabeh.odC, tb.nabeh.zPredpovedi].join(' '), '20 22 false');
+  // Vyhřátá sauna (po topení) se ochlazením venku nepočítá — drží svou teplotu
+  const v = build();
+  v.state.weather = { tempC: 20 };
+  v.state.huum = { temperature: 50, heating: false, fetchedAt: new Date().toISOString(), error: null };
+  v.predpoved = () => 6;
+  v.api.saunaTimerPridej('19:00', 80, nastaveno);
+  check('teplá sauna drží svou teplotu', v.api.casovace()[0].nabeh.odC, 50);
+  // Zapnutí za chvíli: platí aktuální teplota, předpověď se nebere
+  const k = build();
+  k.state.weather = { tempC: 20 };
+  k.state.huum = { temperature: 22, heating: false, fetchedAt: new Date().toISOString(), error: null };
+  k.predpoved = () => 6;
+  k.api.saunaTimerPridej('19:00', 80, jdu - 60 * MINUTA);
+  check('zapnutí hned: bez předpovědi', k.api.casovace()[0].nabeh.zPredpovedi, false);
 }
 
 konec();

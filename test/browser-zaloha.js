@@ -16,8 +16,8 @@ setTimeout(() => {
   const el = document.getElementById('storeNote');
   const T = new Date(); T.setHours(12, 34, 0, 0);
   check('řádek na stránce Log existuje', !!el, true);
-  check('je uvnitř stránky Log',
-    el.closest('.slide').dataset.title, 'Log');
+  check('je uvnitř stránky Log/Nastavení',
+    el.closest('.slide').dataset.title, 'Log/Nastavení');
 
   renderStore({ enabled: false });
   check('vypnutá záloha to řekne', /vypnutá/.test(el.textContent), true);

@@ -123,14 +123,7 @@ setTimeout(() => {
     wb: 200000, wbGrid: 50000, wbPv: 150000, dum: 300000, dumGrid: 100000, dumPv: 200000 }], []);
   check('slučování měsíců drží dům', mm[0].dum, 300000);
   check('  i rozpad', mm[0].dumGrid + '/' + mm[0].dumPv, '100000/200000');
-  const c = mesicCelek(mm[0]);
-  check('měsíc celého domu', c.celek, 600000);
-  check('  rozpad sečtený', c.celekGrid + '/' + c.celekPv, '190000/410000');
-  check('bez rozpadu u jednoho okruhu se nedokreslí', 'celekGrid' in mesicCelek({ m: 'x', dum: 5, dumGrid: 1, dumPv: 4, wb: 3 }), false);
-  monthsData = mm;
-  renderMonths();
-  check('měsíční karta ukazuje celý dům', /600,0 kWh/.test(document.getElementById('dumMonths').textContent), true);
-  check('  s pruhem síť/FVE', /ze sítě 190,0 kWh/.test(document.getElementById('dumMonths').textContent), true);
+  check('měsíční karta domu je pryč (měsíce jsou na Spotřebě)', document.getElementById('dumMonths'), null);
 
   // 5) karta wallboxu zůstala nedotčená
   wbDaysData = [{ d: den(0), grid: 1000, pv: 3000 }];

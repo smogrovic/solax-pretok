@@ -191,7 +191,7 @@ check('každé ID má svou proměnnou', bezPromenne.join(', ') || 'ano', 'ano');
 // Míchat je do jedné kontroly nejde, ale ani jedno nesmí propadnout bez kontroly.
 const tuyaId = podleJmena.TUYA_HEATPUMP_ID || '';
 const shellyIdcka = idcka.filter(id => id !== tuyaId);
-check('Shelly zařízení je šestnáct', shellyIdcka.length, 16);
+check('Shelly zařízení je sedmnáct (s nočním světlem v koupelně)', shellyIdcka.length, 17);
 check('  a všechna mají dvanáct hex znaků',
   shellyIdcka.filter(id => !/^[0-9a-f]{12}$/.test(id)).join(', ') || 'ano', 'ano');
 check('Tuya čerpadlo má dvacet hex znaků', /^[0-9a-f]{20}$/.test(tuyaId), true);

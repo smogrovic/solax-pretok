@@ -68,7 +68,7 @@ setTimeout(async () => {
 
   R.push('1) Ve full režimu je všechno jako dřív');
   pouzijRezim('full');
-  check('záložek je šestnáct', zalozky().length, 16);
+  check('záložek je čtrnáct', zalozky().length, 14);
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
   check('pole pro asistenta je vidět', vidim(document.getElementById('asstInput')), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
@@ -157,7 +157,7 @@ setTimeout(async () => {
   pouzijRezim('miky');
   check('zbydou jeho záložky a Připomínky', zalozky().join(' · '),
     // Nákup vidí i děti — ať můžou připsat, co chtějí koupit
-    'Asistent · Žaluzie · Ovládání · Bazén · Připomínky · Recepty/Nákup · Logika automatiky');
+    'Asistent · Žaluzie · Ovládání · Bazén · Připomínky · Recepty/Nákup · Log/Nastavení');
   // Asistent umí zapnout bojler i odemknout dům — do dětské ruky nepatří
   check('pole pro asistenta zmizí', vidim(document.getElementById('asstInput')), false);
   check('  i scénáře', vidim(document.getElementById('asstScenes')), false);
@@ -311,7 +311,7 @@ setTimeout(async () => {
   document.getElementById('potvrzAno').click();
   await pockej();
   check('správný kód přepne na full', rezimApky, 'full');
-  check('  a vrátí všechny záložky', zalozky().length, 16);
+  check('  a vrátí všechny záložky', zalozky().length, 14);
   check('  i pole pro asistenta', vidim(document.getElementById('asstInput')), true);
 
   // Kód se chce i OPAČNÝM směrem — jinak by stačilo přepnout tam a zpátky

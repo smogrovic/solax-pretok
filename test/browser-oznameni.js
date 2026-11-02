@@ -66,7 +66,7 @@ setTimeout(async () => {
 
   // Logika automatiky: text → potvrzení → odeslání
   const vstup = document.getElementById('oznameniVstup');
-  check('pole je v Logice automatiky', !!vstup.closest('.slide[data-title="Logika automatiky"]'), true);
+  check('pole je v Logice automatiky', !!vstup.closest('.slide[data-title="Log/Nastavení"]'), true);
   dotazy = [];
   vstup.value = '';
   document.getElementById('oznameniPoslat').click();

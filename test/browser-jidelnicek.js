@@ -50,7 +50,8 @@ setTimeout(async () => {
   check('  výživa orientačně', [...prvni.querySelectorAll('.jid-meta')].some(e => /orientačně/.test(e.textContent)), true);
   const vlastni = [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Cottage pomazánka'));
   jidelnicekData = { ...VZOR, recepty: [...VZOR.recepty, { ...VZOR.recepty[3], nazev: 'Zbylé jídlo', zMinula: '2026-10-26' }] }; renderJidelnicek();
-  check('převedené jídlo: z minulého týdne', [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Zbylé jídlo')).querySelector('.jid-typ').textContent, 'pracovní večeře · z minulého týdne');
+  check('převedené jídlo: z minulého týdne', [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Zbylé jídlo')).querySelector('.jid-typ').textContent, 'z minulého týdne');
+  check('  ostatní jídla bez řádku s typem (pracovní večeře…)', [...karta.querySelectorAll('details.jid-recept summary .jid-typ')].length, 1);
   jidelnicekData = VZOR; renderJidelnicek();
   check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
 

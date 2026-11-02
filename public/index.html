@@ -1363,7 +1363,6 @@
   .aq-spotreba-cisla span{white-space:nowrap;}
   .aq-spotreba-cisla b{font-weight:700;}
   .aq-spotreba .aq-pozn{white-space:normal;margin-top:2px;}
-  .wbsrc-tc{font-size:12px;color:var(--grey-text);margin-top:3px;}
   /* Stránka Spotřeba */
   .sp-karta{min-width:0;}
   .sp-celkem{display:flex;align-items:baseline;justify-content:center;gap:6px;margin:2px 0 8px;}
@@ -1372,7 +1371,6 @@
   .sp-pruh{display:flex;height:14px;border-radius:7px;overflow:hidden;background:rgba(44,62,80,0.06);}
   .sp-pruh i{display:block;height:100%;}
   .sp-legenda{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;margin-top:10px;font-size:13px;}
-  @media (min-width:700px){.sp-legenda{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px;}}
   .sp-leg{display:flex;align-items:center;gap:6px;min-width:0;}
   .sp-leg i{flex:0 0 10px;width:10px;height:10px;border-radius:3px;}
   .sp-leg span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--grey-text);}
@@ -1381,15 +1379,24 @@
   .sp-sit{display:flex;justify-content:space-between;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid rgba(44,62,80,0.06);font-size:13px;color:var(--grey-text);flex-wrap:wrap;}
   .sp-sit b{font-weight:700;}
   .sp-sit .s{color:var(--red);} .sp-sit .p{color:var(--green);}
-  .sp-graf svg{display:block;width:100%;height:auto;}
+  .sp-graf svg{display:block;flex:0 0 auto;}
+  .sp-graf-obal{display:flex;align-items:stretch;}
+  .sp-graf-posun{flex:1;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;scrollbar-width:none;}
+  .sp-graf-posun::-webkit-scrollbar{display:none;}
+  .sp-graf .sp-rok{font-weight:700;fill:var(--navy);}
   .sp-graf text{font-size:9px;fill:var(--grey-text);}
   .sp-tabulka-obal{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;margin:0 -4px;touch-action:pan-x pan-y;}
   .sp-tabulka{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;}
   .sp-tabulka th,.sp-tabulka td{padding:6px 7px;text-align:right;border-bottom:1px solid rgba(44,62,80,0.07);}
-  .sp-tabulka th{font-size:10px;font-weight:700;color:var(--grey-text);text-transform:uppercase;letter-spacing:.02em;line-height:1.2;white-space:normal;min-width:62px;vertical-align:bottom;}
+  .sp-tabulka th{font-size:10px;font-weight:700;color:var(--grey-text);text-transform:uppercase;letter-spacing:.02em;line-height:1.2;white-space:normal;min-width:72px;vertical-align:bottom;}
   .sp-tabulka th:first-child,.sp-tabulka td:first-child{position:sticky;left:0;background:var(--card);text-align:left;font-weight:700;color:var(--navy);z-index:1;box-shadow:1px 0 0 rgba(44,62,80,0.08);}
   .sp-tabulka tr.sp-12 td{font-weight:800;background:#f5f7fa;}
   .sp-tabulka tr.sp-12 td:first-child{background:#f5f7fa;}
+  .sp-tabulka tr.sp-rok td{font-weight:700;background:#fafbfc;}
+  .sp-tabulka tr.sp-rok td:first-child{background:#fafbfc;}
+  .sp-tabulka tr.sp-rok:last-of-type td,.sp-tabulka tr.sp-rok + tr:not(.sp-rok) td{border-top:0;}
+  .sp-tabulka tr.sp-skupiny th{font-size:9px;letter-spacing:.06em;color:var(--navy);text-align:center;border-bottom:2px solid rgba(44,62,80,0.12);padding:4px 6px;}
+  .sp-tabulka tr.sp-skupiny th + th{border-left:1px solid rgba(44,62,80,0.08);}
   .sp-tabulka tr.sp-bezi td{font-style:italic;opacity:.75;}
   .sp-tabulka .c-celk{color:var(--red);} .sp-tabulka .c-or{color:var(--orange-dark);}
   .sp-tabulka .c-voda{color:#2f8fd8;} .sp-tabulka .c-vodas{color:#5aa9e6;font-size:11px;}
@@ -1403,6 +1410,16 @@
   .sp-graf .sp-t{fill:#c0392b;}
   .sp-graf-leg{display:flex;align-items:center;gap:6px;justify-content:center;font-size:11px;color:var(--grey-text);margin-top:2px;}
   .sp-graf-leg i{display:inline-block;width:16px;border-top:2px dashed #c0392b;}
+  /* Spotřeba přes celou obrazovku (iPad, počítač): souhrn a graf vedle sebe, tabulka pod nimi */
+  .sp-zavrit{display:none;}
+  body.sp-cela #spotrebaSlide{position:fixed;inset:0;z-index:60;width:auto;height:auto;background:var(--bg);box-shadow:none;
+    padding:max(12px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));}
+  body.sp-cela .sp-zavrit{display:block;align-self:flex-end;border:none;background:var(--card);color:var(--navy);font:inherit;font-weight:700;
+    font-size:14px;padding:8px 14px;border-radius:12px;box-shadow:0 2px 8px rgba(44,62,80,0.1);cursor:pointer;margin-bottom:8px;}
+  body.sp-cela #spotrebaSlide .page{max-width:1500px;display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:12px;align-items:start;}
+  body.sp-cela #spotrebaSlide .page > .card{margin-top:0;}
+  body.sp-cela #spotrebaSlide .page > .card:nth-of-type(3){grid-column:1 / -1;}
+  body.sp-cela .sp-graf text{font-size:11px;}
   .sp-bezi-stitek{font-size:9px;font-weight:700;font-style:normal;color:var(--orange-dark);margin-left:4px;}
   .sbal-btn[hidden]{display:none;}
   .zk-sek{border-top:1px solid rgba(44,62,80,0.08);padding:8px 0 4px;}
@@ -1626,6 +1643,8 @@
   .rohlik-odkazy button{border:none;background:none;padding:0;font:inherit;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .rohlik-info{font-size:12px;color:var(--muted);margin-top:6px;}
   .nakup-karta{text-align:left;}
+  /* Nadpis první karty nesmí zajíždět pod rozmazaný pruh záložek */
+  #nakupSlide .page{padding-top:10px;}
   .nakup-seznam li.nakup-kat{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;color:var(--grey-text);padding:12px 2px 4px;}
   .nakup-mnozstvi{flex:0 0 auto;font-size:12px;color:var(--grey-text);}
   .nakup-znacka{flex:0 0 auto;font-size:10px;font-weight:800;border-radius:8px;padding:2px 6px;}
@@ -1663,6 +1682,8 @@
   .jid-recept summary::-webkit-details-marker{display:none;}
   .jid-nazev{font-size:15px;font-weight:700;color:var(--navy);}
   .jid-typ{font-size:11px;color:var(--grey-text);}
+  .zk-pokyn{font-size:11px;color:var(--grey-text);margin-top:2px;}
+  .zk-pokyn code{font-size:11px;}
   .jid-makra{font-size:11px;color:var(--grey-text);opacity:0.85;}
   .jid-napoveda{font-size:12px;color:var(--grey-text);background:rgba(44,62,80,0.05);border-radius:10px;padding:8px 10px;margin-top:8px;}
   .jid-recept.nahradni .jid-hlava{opacity:0.5;}
@@ -2660,6 +2681,8 @@
   }
   .sbal-btn i{font-style:normal;font-size:11px;transition:transform 0.15s;}
   .sbal-btn.otevreno i{transform:rotate(180deg);}
+  /* Rozbalovací tlačítko jako první na stránce (Log nahoře na Log/Nastavení) sedí jako první karta */
+  .page > .sbal-btn:first-child{margin-top:0;margin-bottom:12px;}
   .card[hidden]{display:none;}
   /* Záloha, když schránka není povolená — dá se z ní aspoň označit a zkopírovat */
   .diag-zaloha{
@@ -2925,6 +2948,25 @@
         <div class="timeline-legend" id="boilerLegend"></div>
       </div>
 
+      <div class="card stats-card">
+        <div class="graph-title">Kdy co běželo (0:00–24:00)</div>
+        <canvas id="timelineChart"></canvas>
+        <div class="timeline-legend" id="timelineLegend"></div>
+      </div>
+
+      <div class="card boilers-card" id="prodCard">
+        <div class="boiler-cell">
+          <div class="boiler-name">Odhad výroby (Infigy)</div>
+          <div class="boiler-temp" id="prodForecast">– kWh</div>
+        </div>
+        <div class="boiler-sep"></div>
+        <div class="boiler-cell">
+          <div class="boiler-name">Skutečnost (Solax)</div>
+          <div class="boiler-temp" id="prodActual">– kWh</div>
+        </div>
+      </div>
+
+
       <button class="sbal-btn" data-sbal="fve" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="fve">
         <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
@@ -2933,9 +2975,34 @@
       </div>
 
       <div class="card stats-card" data-sbal-obsah="fve">
-        <div class="graph-title">Spotřeba celého domu po měsících</div>
-        <div class="wbsrc-list" id="dumMonths"></div>
+        <div class="graph-title">Dnes</div>
+        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
+        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
+        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
+        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolToday">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Today">– kWh</span></div>
+        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Today">– kWh</span></div>
+        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaToday">– kWh</span></div>
       </div>
+
+      <div class="card stats-card" data-sbal-obsah="fve">
+        <div class="graph-title">Posledních 7 dní</div>
+        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
+        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
+        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
+        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolYest">– kWh</span></div>
+        <div class="stat-row"><span>Ohřev vody miko TČ</span><span class="stat-val" id="statBojleryTyden">– kWh</span></div>
+        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaYest">– kWh</span></div>
+        <div class="wbsrc-note" id="tydenNote"></div>
+      </div>
+
+      <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="odhad">
+        <div class="pv-avg" id="pvAvg"></div>
+        <canvas id="pvChart"></canvas>
+        <div class="timeline-legend" id="pvLegend"></div>
+      </div>
+
 
       <!-- Podklad pro analýzu topení: server každou hodinu zapíše průměr venku,
            v pokojích a odhad topení ze spotřeby domu. Tady se jen ukazuje. -->
@@ -2956,6 +3023,8 @@
   </div>
   <!-- Stránka: Spotřeba — měsíční tabulka jako ručně vedená, dál se plní sama -->
   <div class="slide" data-title="Spotřeba" id="spotrebaSlide" data-rezim="full">
+    <!-- Na iPadu/počítači: druhé klepnutí na záložku otevře stránku přes celou obrazovku -->
+    <button class="sp-zavrit" id="spZavrit" type="button">✕ Zavřít</button>
     <div class="page">
       <div class="card stats-card sp-karta" data-emoji="📊">
         <div class="graph-title" id="spSouhrnTitul">Posledních 12 měsíců</div>
@@ -2966,7 +3035,7 @@
         <div id="spGraf"></div>
       </div>
       <div class="card stats-card sp-karta">
-        <div class="graph-title">Tabulka (kWh)</div>
+        <div class="graph-title">Tabulka (MWh)</div>
         <div class="sp-tabulka-obal" id="spTabulkaObal"></div>
         <div class="wbsrc-note" id="spPozn"></div>
       </div>
@@ -3421,11 +3490,6 @@
         <div class="wbsrc-list" id="wbSrcList"></div>
         <div class="wbsrc-note">Odhad ze vzorků po 2 min: ze sítě se počítá to menší z odběru ze sítě a výkonu nabíječky, zbytek jako FVE (i když zrovna teklo z baterky).</div>
       </div>
-
-      <div class="card stats-card" data-sbal-obsah="wallbox">
-        <div class="graph-title">Spotřeba po měsících</div>
-        <div class="wbsrc-list" id="wbMonths"></div>
-      </div>
     </div>
   </div>
 
@@ -3518,11 +3582,6 @@
       <button class="sbal-btn jen-full" data-sbal="solinator" type="button" aria-expanded="false">Jak vyšel čas solinátoru<i>▾</i></button>
       <div class="card stats-card jen-full" data-sbal-obsah="solinator">
         <div id="solinatorCalc"></div>
-      </div>
-
-      <div class="card stats-card jen-full" data-sbal-obsah="bazen">
-        <div class="graph-title">Spotřeba bazénu po měsících</div>
-        <div class="wbsrc-list" id="poolMonths"></div>
       </div>
     </div>
   </div>
@@ -3642,11 +3701,6 @@
         <div class="wbsrc-list" id="saunaDnyList"></div>
         <div class="wbsrc-note">Sauna visí na stejném jističi jako bazén a solinátor. Když topí, appka je vypne a nechá vypnuté ještě 30 min po dotopení — jistič to jinak nemusí unést. Pro rychlé vypnutí to samé hlídá i skript přímo v Shelly.</div>
       </div>
-
-      <div class="card stats-card" data-sbal-obsah="sauna">
-        <div class="graph-title">Spotřeba po měsících</div>
-        <div class="wbsrc-list" id="saunaMonths"></div>
-      </div>
     </div>
   </div>
 
@@ -3741,84 +3795,23 @@
     </div>
   </div>
 
-  <!-- Stránka: Přehled -->
-  <div class="slide" data-title="Přehled" data-rezim="full">
+  <!-- Stránka: Log/Nastavení (dřív Logika automatiky; log je nahoře pod rozbalením) -->
+  <div class="slide" data-title="Log/Nastavení">
     <div class="page">
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <div class="card stats-card">
-        <div class="graph-title">Kdy co běželo (0:00–24:00)</div>
-        <canvas id="timelineChart"></canvas>
-        <div class="timeline-legend" id="timelineLegend"></div>
-      </div>
-
-      <div class="card boilers-card" id="prodCard">
-        <div class="boiler-cell">
-          <div class="boiler-name">Odhad výroby (Infigy)</div>
-          <div class="boiler-temp" id="prodForecast">– kWh</div>
-        </div>
-        <div class="boiler-sep"></div>
-        <div class="boiler-cell">
-          <div class="boiler-name">Skutečnost (Solax)</div>
-          <div class="boiler-temp" id="prodActual">– kWh</div>
-        </div>
-      </div>
-
-      <button class="sbal-btn" data-sbal="prehled" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
-      <div class="card stats-card" data-sbal-obsah="prehled">
-        <div class="graph-title">Dnes</div>
-        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
-        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
-        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
-        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolToday">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Today">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Today">– kWh</span></div>
-        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaToday">– kWh</span></div>
-      </div>
-
-      <div class="card stats-card" data-sbal-obsah="prehled">
-        <div class="graph-title">Posledních 7 dní</div>
-        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
-        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
-        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
-        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolYest">– kWh</span></div>
-        <div class="stat-row"><span>Ohřev vody miko TČ</span><span class="stat-val" id="statBojleryTyden">– kWh</span></div>
-        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaYest">– kWh</span></div>
-        <div class="wbsrc-note" id="tydenNote"></div>
-      </div>
-
-      <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
-      <div class="card stats-card" data-sbal-obsah="odhad">
-        <div class="pv-avg" id="pvAvg"></div>
-        <canvas id="pvChart"></canvas>
-        <div class="timeline-legend" id="pvLegend"></div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Stránka: Log -->
-  <div class="slide" data-title="Log" data-rezim="full">
-    <div class="page">
-      <div class="card log-card">
+      <button class="sbal-btn jen-full" data-sbal="log" type="button" aria-expanded="false">Log<i>▾</i></button>
+      <div class="card log-card jen-full" data-sbal-obsah="log">
         <div class="log-list" id="logList">
           <div class="log-empty">Zatím žádné záznamy</div>
         </div>
       </div>
 
       <!-- Výpis asistenta patří k ostatním výpisům, ne mezi ovládání -->
-      <div class="card lockable asst-log-card" id="asstLogCard" style="display:none;">
+      <div class="card lockable asst-log-card jen-full" data-sbal-obsah="log" id="asstLogCard" style="display:none;">
         <div class="asst-log-title">Co asistent udělal</div>
         <div class="asst-log" id="asstLog"></div>
       </div>
 
-      <div class="card log-card">
+      <div class="card log-card jen-full" data-sbal-obsah="log">
         <div class="graph-title">Výpadky</div>
         <div class="log-list" id="outageList">
           <div class="log-empty">Zatím žádné výpadky</div>
@@ -3826,17 +3819,12 @@
       </div>
 
       <!-- Všechno, co je potřeba k hledání chyby, na jedno klepnutí -->
-      <button class="sbal-btn" id="diagBtn" type="button">Zkopírovat diagnostiku<i id="diagStav">▾</i></button>
-      <textarea class="diag-zaloha" id="diagZaloha" readonly hidden></textarea>
+      <button class="sbal-btn jen-full" data-sbal-obsah="log" id="diagBtn" type="button">Zkopírovat diagnostiku<i id="diagStav">▾</i></button>
+      <textarea class="diag-zaloha jen-full" id="diagZaloha" readonly hidden></textarea>
 
-      <button class="notif-btn" id="notifBtn">🔔 Zapnout notifikace</button>
-      <div class="store-note" id="storeNote"></div>
-    </div>
-  </div>
+      <button class="notif-btn jen-full" data-sbal-obsah="log" id="notifBtn">🔔 Zapnout notifikace</button>
+      <div class="store-note jen-full" data-sbal-obsah="log" id="storeNote"></div>
 
-  <!-- Stránka: Logika automatiky -->
-  <div class="slide" data-title="Logika automatiky">
-    <div class="page">
       <!-- Přepínač je vidět ve všech režimech — jinak by z dětského nebyla cesta zpět -->
       <div class="card">
         <div class="rezim-karta">
@@ -8040,14 +8028,17 @@ function renderZkratky() {
       zk.disabled = false;
     });
     obsah(s);
+    // Co musí zkratka poslat, aby se spustilo právě tohle
+    const pk = el('div', 'zk-pokyn', s);
+    pk.innerHTML = 'Ve zkratce: <code>"udalost": "' + udalost + '"</code>';
     const p = z.posledni && z.posledni[udalost];
     el('div', 'zk-posledni', s, p ? `Naposledy: ${zkratkyKdy(p.kdy)}${p.kdo ? ' (' + p.kdo + ')' : ''} — ${p.vysledek}` : 'Zatím nepřišel.');
   };
   sekce('spanek', 'Jdu spát', s => {
-    zaskrtnout(s, 'zhasnout noční světla', z.spanek.nocniSvetla, v => { const n = nastaveni(); n.spanek.nocniSvetla = v; uloz(n); });
+    zaskrtnout(s, 'zhasnout noční světla (i v koupelně)', z.spanek.nocniSvetla, v => { const n = nastaveni(); n.spanek.nocniSvetla = v; uloz(n); });
   });
   sekce('probuzeni', 'Probuzení / budík', s => {
-    zaskrtnout(s, 'rozsvítit noční světla', z.probuzeni.nocniSvetla, v => { const n = nastaveni(); n.probuzeni.nocniSvetla = v; uloz(n); });
+    zaskrtnout(s, 'rozsvítit noční světla (i v koupelně)', z.probuzeni.nocniSvetla, v => { const n = nastaveni(); n.probuzeni.nocniSvetla = v; uloz(n); });
     const l = el('label', 'zk-volba', s);
     el('span', '', l, 'oběhové čerpadlo');
     const sel = el('select', 'timer-select', l);
@@ -8060,7 +8051,7 @@ function renderZkratky() {
     zaskrtnout(s, 'zatáhnout všechny žaluzie', z.zamceni.zaluzie, v => { const n = nastaveni(); n.zamceni.zaluzie = v; uloz(n); });
   });
   sekce('odemceni', 'Odemčení', s => {
-    zaskrtnout(s, 'rozsvítit noční světla', z.odemceni.nocniSvetla, v => { const n = nastaveni(); n.odemceni.nocniSvetla = v; uloz(n); });
+    zaskrtnout(s, 'rozsvítit noční světla (i v koupelně)', z.odemceni.nocniSvetla, v => { const n = nastaveni(); n.odemceni.nocniSvetla = v; uloz(n); });
   });
   const navod = el('div', 'zk-navod', zkratkyObsahEl);
   navod.innerHTML = 'Zkratka: <b>Načíst obsah URL</b> → <code>' + location.origin + '/api/zkratka</code>, metoda POST, '
@@ -9783,7 +9774,10 @@ function renderHuumTimers() {
     const txt = document.createElement('span');
     txt.className = 'timer-row-text';
     txt.textContent = `${t.teplota} °C · ` + (t.zapnuto ? 'topí'
-      : (typeof t.zapneV === 'number' ? `zapne se v ${fmtSolTime(t.zapneV)}` : 'zapne se podle odhadu'));
+      : (typeof t.zapneV === 'number' ? `zapne se v ${fmtSolTime(t.zapneV)}` : 'zapne se podle odhadu')
+        // Čas zapnutí se průběžně přepočítává podle teploty v době zapnutí (předpověď)
+        + (!t.zapnuto && t.nabeh && t.nabeh.zPredpovedi && typeof t.nabeh.venkuC === 'number'
+          ? ` · počítá s ${Math.round(t.nabeh.venkuC)} °C venku` : ''));
     const x = document.createElement('button');
     x.className = 'timer-del';
     x.type = 'button';
@@ -10300,27 +10294,30 @@ const SP_DILY = [
 ];
 // `loni` = pod číslem srovnání se stejným měsícem loni; `fmt` = jiný než kWh formát
 const SP_SLOUPCE = [
-  { k: 'celkova', popis: 'Celková', cls: 'c-celk', loni: true },
-  { k: 'bazen', popis: 'Bazén' },
-  { k: 'sauna', popis: 'Sauna', cls: 'c-or' },
-  { k: 'auto', popis: 'Auto' },
-  { k: 'tcTopeni', popis: 'TČ topení', cls: 'c-or', loni: true },
-  { k: 'tcVoda', popis: 'TČ voda', cls: 'c-vodas' },
-  { k: 'b1', popis: 'TČ dohřev bojler 1', cls: 'c-vodas' },
-  { k: 'b2', popis: 'Bojler 2 (přídavný)', cls: 'c-vodas' },
-  { k: 'voda', popis: 'Voda celkem', cls: 'c-voda' },
-  { k: 'zbytek', popis: 'Dům zbytek', cls: 'c-dum' },
-  { k: 'sit', popis: 'Ze sítě', cls: 'c-sit' },
-  { k: 'pretok', popis: 'Přetok', cls: 'c-pre' },
-  { k: 'vyroba', popis: 'Výroba FVE', cls: 'c-pre' },
-  { k: 'sobestacnost', popis: 'Sobě­stač­nost', fmt: 'pct' },
-  { k: 'venku', popis: 'Venku', fmt: 'teplota' },
-  { k: 'naklady', popis: 'Náklady', fmt: 'kc', cls: 'c-sit' },
-  { k: 'uspora', popis: 'Ušetřeno FVE', fmt: 'kc', cls: 'c-pre' }
+  { k: 'celkova', popis: 'Celková', cls: 'c-celk', loni: true, sk: 'sp' },
+  { k: 'bazen', popis: 'Bazén', sk: 'sp' },
+  { k: 'sauna', popis: 'Sauna', cls: 'c-or', sk: 'sp' },
+  { k: 'auto', popis: 'Auto', sk: 'sp' },
+  { k: 'tcTopeni', popis: 'TČ topení', cls: 'c-or', loni: true, sk: 'sp' },
+  { k: 'tcVoda', popis: 'TČ voda', cls: 'c-vodas', sk: 'voda' },
+  { k: 'b1', popis: 'TČ dohřev bojler 1', cls: 'c-vodas', sk: 'voda' },
+  { k: 'b2', popis: 'Bojler 2 (přídavný)', cls: 'c-vodas', sk: 'voda' },
+  { k: 'voda', popis: 'Voda celkem', cls: 'c-voda', sk: 'voda' },
+  { k: 'zbytek', popis: 'Dům zbytek', cls: 'c-dum', sk: 'dum' },
+  { k: 'sit', popis: 'Ze sítě', cls: 'c-sit', sk: 'sit' },
+  { k: 'pretok', popis: 'Přetok', cls: 'c-pre', sk: 'sit' },
+  { k: 'vyroba', popis: 'Výroba FVE', cls: 'c-pre', sk: 'fve' },
+  { k: 'sobestacnost', popis: 'Sobě­stač­nost', fmt: 'pct', sk: 'fve' },
+  { k: 'venku', popis: 'Venku', fmt: 'teplota', sk: 'poc' },
+  { k: 'naklady', popis: 'Náklady', fmt: 'kc', cls: 'c-sit', sk: 'kc' },
+  { k: 'uspora', popis: 'Ušetřeno FVE', fmt: 'kc', cls: 'c-pre', sk: 'kc' }
 ];
+// Skupiny sloupců (řádek záhlaví nad nimi)
+const SP_SKUPINY = { sp: 'Spotřeba', voda: 'Teplá voda', dum: 'Dům', sit: 'Síť', fve: 'FVE', poc: 'Počasí', kc: 'Peníze' };
 const SP_SOUCTY = ['celkova', 'bazen', 'sauna', 'auto', 'tcTopeni', 'tcVoda', 'b1', 'b2', 'voda', 'zbytek', 'sit', 'pretok', 'vyroba', 'naklady', 'uspora'];
 // Zkratky měsíců — červen a červenec se jinak obě zkrátí na „čer"
 const SP_MES_ZKR = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+const SP_MES_GEN = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince'];
 
 function spCislo(v) {
   return typeof v === 'number' && Number.isFinite(v) ? Math.round(v).toLocaleString('cs-CZ').replace(/\s/g, ' ') : '–';
@@ -10330,6 +10327,7 @@ function spFormat(v, fmt) {
   if (fmt === 'pct') return Math.round(v * 100) + ' %';
   if (fmt === 'teplota') return v.toFixed(1).replace('.', ',') + ' °C';
   if (fmt === 'kc') return spCislo(v) + ' Kč';
+  if (fmt === 'mwh') return (v / 1000).toFixed(2).replace('.', ',');
   return spCislo(v);
 }
 function spMesicKratce(m) {
@@ -10375,6 +10373,20 @@ function spZmenaHtml(z) {
   if (z === null) return '';
   const pct = Math.round(z * 100);
   return '<small class="sp-zmena ' + (pct > 0 ? 'vic' : pct < 0 ? 'min' : '') + '">' + (pct > 0 ? '+' : pct < 0 ? '−' : '±') + Math.abs(pct) + ' %</small>';
+}
+
+// Celá obrazovka jen na širokém displeji; na telefonu je stránka celá i tak
+function spCelaObrazovka(zap) {
+  const byla = document.body.classList.contains('sp-cela');
+  const ma = !!zap && sirokyDisplej();
+  if (byla === ma) return;
+  document.body.classList.toggle('sp-cela', ma);
+  bezpecne(renderSpotreba);     // graf si přepočítá šířku sloupců
+}
+{
+  const z = document.getElementById('spZavrit');
+  if (z) z.addEventListener('click', () => spCelaObrazovka(false));
+  window.addEventListener('resize', () => { if (!sirokyDisplej()) spCelaObrazovka(false); bezpecne(renderSpotreba); });
 }
 
 function renderSpotreba() {
@@ -10437,6 +10449,8 @@ function renderSpotreba() {
   if (cenik) {
     radky.push(['Zaplaceno za elektřinu', '~' + spFormat(s12.naklady, 'kc')]);
     radky.push(['Ušetřeno díky FVE', '~' + spFormat(s12.uspora, 'kc')]);
+    // Na zálohy: průměr za měsíc, zaokrouhlený na stovky
+    if (s12.pocet) radky.push(['Měsíčně průměrně (na zálohy)', '~' + spFormat(Math.round(s12.naklady / s12.pocet / 100) * 100, 'kc')]);
   }
   if (typeof s12.venku === 'number') radky.push(['Průměrně venku', spFormat(s12.venku, 'teplota')]);
   // Proti loňsku: jen měsíce, které mají loňský protějšek
@@ -10460,27 +10474,33 @@ function renderSpotreba() {
   }
   souhrnEl.appendChild(statky);
 
-  // Graf: skládané sloupce po měsících + venkovní teplota čárou (pravá osa)
-  const W = 400, H = 180, dole = 18, nahore = 8, vlevo = 30, vpravo = 24;
+  // Graf: skládané sloupce po měsících + venkovní teplota čárou (pravá osa).
+  // Vidět je posledních 12 měsíců, starší se posouvají do boku. Osy stojí na místě
+  // (vlastní úzká SVG), posouvá se jen pás se sloupci.
+  const H = 180, dole = 18, nahore = 8, vlevo = 30, vpravo = 26;
+  const sirkaKarty = Math.max(240, grafEl.clientWidth || 340);
+  const sirka = (sirkaKarty - vlevo - vpravo) / Math.min(12, mesice.length);
+  const pas = Math.round(sirka * mesice.length);
   const max = Math.max(1, ...mesice.map(r => SP_DILY.reduce((a, d) => a + Math.max(0, r[d.k] || 0), 0)));
   // Hezký krok osy (4 dílky), ať graf nemá nahoře prázdno
   const krok = [100, 200, 250, 400, 500, 600, 750, 1000, 1500, 2000].find(k => k * 4 >= max) || Math.ceil(max / 4000) * 1000;
   const vyska = H - dole - nahore;
-  const sirka = (W - vlevo - vpravo) / mesice.length;
   const tMin = -10, tMax = 30;
   const yT = t => H - dole - (t - tMin) / (tMax - tMin) * vyska;
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Spotřeba po měsících">';
+  const osa = (w, obsah) => '<svg class="sp-osa" width="' + w + '" height="' + H + '" viewBox="0 0 ' + w + ' ' + H + '">' + obsah + '</svg>';
+  let osaL = '', osaP = '';
+  let svg = '<svg class="sp-pas" width="' + pas + '" height="' + H + '" viewBox="0 0 ' + pas + ' ' + H + '" role="img" aria-label="Spotřeba po měsících">';
   for (let i = 0; i <= 4; i++) {
     const y = krok * i;
     const yy = H - dole - i / 4 * vyska;
-    svg += '<line x1="' + vlevo + '" x2="' + (W - vpravo) + '" y1="' + yy + '" y2="' + yy + '" stroke="rgba(44,62,80,0.08)"/>'
-      + '<text x="' + (vlevo - 3) + '" y="' + (yy + 3) + '" text-anchor="end">' + (y >= 1000 ? (y / 1000).toFixed(1).replace('.', ',') + 'k' : y) + '</text>'
-      + '<text x="' + (W - vpravo + 3) + '" y="' + (yy + 3) + '" class="sp-t">' + (tMin + i * 10) + '°</text>';
+    svg += '<line x1="0" x2="' + pas + '" y1="' + yy + '" y2="' + yy + '" stroke="rgba(44,62,80,0.08)"/>';
+    osaL += '<text x="' + (vlevo - 3) + '" y="' + (yy + 3) + '" text-anchor="end">' + (y >= 1000 ? (y / 1000).toFixed(1).replace('.', ',') + 'k' : y) + '</text>';
+    osaP += '<text x="3" y="' + (yy + 3) + '" class="sp-t">' + (tMin + i * 10) + '°</text>';
   }
   const body = [];
   mesice.forEach((r, i) => {
     let y = H - dole;
-    const x = vlevo + i * sirka + sirka * 0.15;
+    const x = i * sirka + sirka * 0.15;
     const bw = sirka * 0.7;
     const titul = mesicNadpis(r.m) + ': ' + spCislo(r.celkova) + ' kWh' + (typeof r.venku === 'number' ? ', venku ' + spFormat(r.venku, 'teplota') : '');
     svg += '<g class="sp-sloupec" data-m="' + r.m + '"' + (r.bezi ? ' opacity="0.45"' : '') + '><title>' + titul + '</title>';
@@ -10494,10 +10514,9 @@ function renderSpotreba() {
     svg += '</g>';
     if (typeof r.venku === 'number') body.push([x + bw / 2, yT(Math.max(tMin, Math.min(tMax, r.venku)))]);
     const [rok, mm] = r.m.split('-').map(Number);
-    if (mesice.length <= 14 || mm % 3 === 1) {
-      svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle">'
-        + (mm === 1 ? String(rok) : SP_MES_ZKR[mm - 1]) + '</text>';
-    }
+    // Popisek u každého měsíce (vejde se jich 12), leden ukáže rok
+    svg += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle"' + (mm === 1 ? ' class="sp-rok"' : '') + '>'
+      + (mm === 1 ? String(rok) : SP_MES_ZKR[mm - 1]) + '</text>';
   });
   if (body.length > 1) {
     svg += '<polyline class="sp-teplota" fill="none" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3 2" points="'
@@ -10506,21 +10525,47 @@ function renderSpotreba() {
   svg += body.map(([x, y]) => '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="1.8" fill="#c0392b"/>').join('');
   svg += '</svg>';
   grafEl.className = 'sp-graf';
-  grafEl.innerHTML = svg + (body.length ? '<div class="sp-graf-leg"><i></i>průměrná venkovní teplota (pravá osa)</div>' : '');
+  grafEl.innerHTML = '<div class="sp-graf-obal">' + osa(vlevo, osaL) + '<div class="sp-graf-posun" id="spGrafPosun">' + svg + '</div>'
+    + osa(vpravo, osaP) + '</div>'
+    + (body.length ? '<div class="sp-graf-leg"><i></i>průměrná venkovní teplota (pravá osa)</div>' : '')
+    + (mesice.length > 12 ? '<div class="sp-graf-leg">← starší měsíce posunem do boku</div>' : '');
+  // Nejnovější měsíce vpravo
+  const posun = document.getElementById('spGrafPosun');
+  if (posun) posun.scrollLeft = posun.scrollWidth;
 
   // Tabulka: nejnovější nahoře, součet 12 měsíců první
   const t = document.createElement('table');
   t.className = 'sp-tabulka';
-  let html = '<thead><tr><th></th>' + SP_SLOUPCE.map(c => '<th>' + c.popis + '</th>').join('') + '</tr></thead><tbody>';
+  // Dva řádky záhlaví: skupiny (Spotřeba, Teplá voda…) a pod nimi sloupce
+  const skup = [];
+  for (const c of SP_SLOUPCE) {
+    const z = skup[skup.length - 1];
+    if (z && z.sk === c.sk) z.n++; else skup.push({ sk: c.sk, n: 1 });
+  }
+  let html = '<thead><tr class="sp-skupiny"><th></th>' + skup.map(g => '<th colspan="' + g.n + '" class="sk-' + g.sk + '">' + SP_SKUPINY[g.sk] + '</th>').join('')
+    + '</tr><tr><th></th>' + SP_SLOUPCE.map(c => '<th>' + c.popis + '</th>').join('') + '</tr></thead><tbody>';
   const radek = (r, cls, nazev, loni) => '<tr class="' + cls + '" data-m="' + (r.m || '') + '"><td>' + nazev + '</td>'
     + SP_SLOUPCE.map(c => {
       const zmena = c.loni && loni ? spZmenaHtml(spZmena(r[c.k], loni[c.k])) : '';
       const odhad = c.fmt === 'kc' && r.cenaOdhad ? '~' : '';
-      return '<td class="' + (c.cls || '') + '">' + odhad + spFormat(r[c.k], c.fmt) + zmena + '</td>';
+      return '<td class="' + (c.cls || '') + '">' + odhad + spFormat(r[c.k], c.fmt || 'mwh') + zmena + '</td>';
     }).join('') + '</tr>';
   const pary12 = vyber.filter(r => podleM.has(spLoni(r.m)));
   const loni12 = pary12.length === vyber.length && vyber.length ? spSoucet(vyber.map(r => podleM.get(spLoni(r.m)))) : null;
   html += radek({ ...s12, cenaOdhad: vyber.some(r => r.cenaOdhad) }, 'sp-12', s12.pocet >= 12 ? '12 měsíců' : s12.pocet + ' měs.', loni12);
+  // Součty za kalendářní roky, nejnovější nahoře; neúplný rok se tak i jmenuje
+  const roky = [...new Set(mesice.map(r => r.m.slice(0, 4)))].sort().reverse();
+  for (const rok of roky) {
+    const vRoce = mesice.filter(r => r.m.startsWith(rok));
+    const soucet = spSoucet(vRoce);
+    soucet.cenaOdhad = vRoce.some(r => r.cenaOdhad);
+    const prvni = vRoce[0].m.slice(5, 7);
+    const neuplny = vRoce.some(r => r.bezi) || vRoce.length < 12;
+    const nazev = 'rok ' + rok + (neuplny ? (prvni !== '01' ? ' (od ' + SP_MES_GEN[+prvni - 1] + ')' : ' (zatím)') : '');
+    const pary = vRoce.filter(r => !r.bezi && podleM.has(spLoni(r.m)));
+    const loniRok = pary.length && pary.length === vRoce.filter(r => !r.bezi).length ? spSoucet(pary.map(r => podleM.get(spLoni(r.m)))) : null;
+    html += radek(soucet, 'sp-rok', nazev, loniRok);
+  }
   for (const r of [...mesice].reverse()) {
     html += radek(r, r.bezi ? 'sp-bezi' : '', spMesicKratce(r.m) + (r.bezi ? '<span class="sp-bezi-stitek">běží</span>' : ''),
       r.bezi ? null : podleM.get(spLoni(r.m)));
@@ -10528,45 +10573,17 @@ function renderSpotreba() {
   t.innerHTML = html + '</tbody>';
   tabEl.appendChild(t);
   const rucneDo = spotrebaData.rucneDo;
-  const GEN = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince'];
-  const doKdy = rucneDo ? GEN[+rucneDo.slice(5, 7) - 1] + ' ' + rucneDo.slice(0, 4) : '';
+  const doKdy = rucneDo ? SP_MES_GEN[+rucneDo.slice(5, 7) - 1] + ' ' + rucneDo.slice(0, 4) : '';
   poznEl.textContent = (rucneDo ? 'Do ' + doKdy + ' z ručně vedené tabulky, další měsíce se zapisují samy'
     : 'Měsíce se zapisují samy') + ' (Solax, Panasonic, Shelly, Infigy). Běžící měsíc je kurzívou. Pod číslem změna proti stejnému měsíci loni.'
     + (cenik ? ' Ceny podle současného ceníku (' + cenik.nazev + ', s DPH, včetně stálých plateb); ~ = rozdělení na VT/NT jen podle času.' : '')
     + ' Výroba u ručních měsíců = celková − ze sítě + přetok.';
 }
 
-// ---------- Spotřeba po měsících (sauna, bazén, wallbox) ----------
-// Server sčítá Wh do měsíčních přihrádek; tady se ukazují jen UZAVŘENÉ měsíce,
-// nejnovější nahoře. Běžící měsíc by jen mátl — čísla by rostla před očima.
-// `split` = má měsíc i rozpad na síť a FVE. Sauna ho nemá: sedí uvnitř „domu"
-// a vlastní místo v řetězu dělení odběru ze sítě nedostala.
-const MESIC_KARTY = [
-  { el: document.getElementById('saunaMonths'), kus: 'sauna', split: false },
-  { el: document.getElementById('poolMonths'), kus: 'pool', split: true },
-  { el: document.getElementById('wbMonths'), kus: 'wb', split: true },
-  // Celý dům: dům + bazén + auto, stejně jako sedmidenní karta nad ní
-  { el: document.getElementById('dumMonths'), kus: 'celek', split: true }
-];
+// ---------- Měsíční součty (záloha pro server) ----------
+// Měsíce se ukazují na stránce Spotřeba. Tady zůstává jen kopie v telefonu, ze které
+// si server po nasazení doplní, co mu chybí (vyšší hodnota vyhrává).
 const MESIC_KUSY = ['sauna', 'pool', 'wb', 'dum'];
-const CELEK_KUSY = ['dum', 'pool', 'wb'];
-// Měsíc za celý dům. Rozpad síť/FVE jen když ho mají všechny tři okruhy, které
-// v měsíci něco braly — jinak by se nevědomé „nevíme" sečetlo jako „samé slunce".
-function mesicCelek(r) {
-  const out = { ...r, celek: 0 };
-  let grid = 0, pv = 0, rozpad = true;
-  for (const k of CELEK_KUSY) {
-    const v = Number(r[k]) || 0;
-    if (!(v > 0)) continue;
-    out.celek += v;
-    if (typeof r[k + 'Grid'] === 'number' && typeof r[k + 'Pv'] === 'number') {
-      grid += r[k + 'Grid'];
-      pv += r[k + 'Pv'];
-    } else rozpad = false;
-  }
-  if (rozpad && out.celek > 0) { out.celekGrid = grid; out.celekPv = pv; }
-  return out;
-}
 const MESICE_CZ = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen',
   'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
 let monthsData = [];
@@ -10574,122 +10591,6 @@ let monthsData = [];
 function mesicNadpis(m) {
   const [r, mm] = m.split('-').map(Number);
   return `${MESICE_CZ[mm - 1]} ${r}`;
-}
-function tentoMesic() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-// Pruh „ze sítě / z FVE" pod měsícem. Stejná grafika jako u sedmidenní karty,
-// ať se to nikde neučí dvakrát.
-function pruhSitFve(grid, pv) {
-  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
-  const box = document.createDocumentFragment();
-  const total = grid + pv;
-  const bar = document.createElement('div');
-  bar.className = 'wbsrc-bar';
-  const g = document.createElement('i');
-  g.className = 'wbsrc-grid';
-  g.style.width = (total > 0 ? grid / total * 100 : 0) + '%';
-  const p = document.createElement('i');
-  p.className = 'wbsrc-pv';
-  p.style.width = (total > 0 ? pv / total * 100 : 0) + '%';
-  bar.appendChild(g);
-  bar.appendChild(p);
-  const leg = document.createElement('div');
-  leg.className = 'wbsrc-legend';
-  const ls = document.createElement('span');
-  ls.className = 'g';
-  ls.innerHTML = `ze sítě <b>${kwh(grid)}</b>`;
-  const lp = document.createElement('span');
-  lp.className = 'p';
-  lp.innerHTML = `<b>${kwh(pv)}</b> z FVE (${total > 0 ? Math.round(pv / total * 100) : 0} %)`;
-  leg.appendChild(ls);
-  leg.appendChild(lp);
-  box.appendChild(bar);
-  box.appendChild(leg);
-  return box;
-}
-
-// Tepelné čerpadlo uvnitř „domu": kolik bralo a kolik zbylo na zbytek domu (Wh)
-function tcRadek(tc, topeni, voda, dum) {
-  const kwh = wh => ((wh || 0) / 1000).toFixed(1).replace('.', ',') + ' kWh';
-  const d = document.createElement('div');
-  d.className = 'wbsrc-tc';
-  d.textContent = 'z toho tepelné čerpadlo ' + kwh(tc) + ' (topení ' + kwh(topeni) + ' · voda ' + kwh(voda) + ')'
-    + ' · dům bez TČ ' + kwh(Math.max(0, (dum || 0) - tc));
-  return d;
-}
-
-function renderMonths() {
-  const bezici = tentoMesic();
-  const hotove = (monthsData || [])
-    .filter(r => r && typeof r.m === 'string' && r.m < bezici)
-    .sort((a, b) => b.m.localeCompare(a.m))
-    .map(mesicCelek);
-  for (const { el, kus, split } of MESIC_KARTY) {
-    if (!el) continue;
-    el.textContent = '';
-    if (!hotove.length) {
-      const prazdno = document.createElement('div');
-      prazdno.className = 'wbsrc-empty';
-      prazdno.textContent = 'Zatím žádný celý měsíc — první přibude po jeho konci.';
-      el.appendChild(prazdno);
-      continue;
-    }
-    const frag = document.createDocumentFragment();
-    let celkem = 0, celkemGrid = 0, celkemPv = 0, seRozpadem = 0;
-    let tcCelkem = 0, tcTopeniCelkem = 0, tcVodaCelkem = 0, tcDumCelkem = 0;
-    for (const r of hotove) {
-      celkem += r[kus] || 0;
-      const row = document.createElement('div');
-      row.className = 'wbsrc-row';
-      const head = document.createElement('div');
-      head.className = 'wbsrc-head';
-      const den = document.createElement('span');
-      den.className = 'wbsrc-day';
-      den.textContent = mesicNadpis(r.m);
-      const val = document.createElement('span');
-      val.textContent = (r[kus] || 0) > 0 ? ((r[kus] / 1000).toFixed(1).replace('.', ',') + ' kWh') : '–';
-      head.appendChild(den);
-      head.appendChild(val);
-      row.appendChild(head);
-      // Rozpad na síť a FVE. Měsíce z doby, kdy se ještě nepočítal, ho NEMAJÍ a nesmí
-      // se dokreslit jako nula — „nevíme" a „nic ze sítě" jsou dvě různé věci.
-      const grid = r[kus + 'Grid'], pv = r[kus + 'Pv'];
-      if (split && (r[kus] || 0) > 0 && typeof grid === 'number' && typeof pv === 'number') {
-        row.appendChild(pruhSitFve(grid, pv));
-        celkemGrid += grid;
-        celkemPv += pv;
-        seRozpadem += r[kus] || 0;
-      }
-      if (kus === 'celek' && (r.tc || 0) > 0) {
-        row.appendChild(tcRadek(r.tc, r.tcTopeni, r.tcVoda, r.dum));
-        tcCelkem += r.tc; tcTopeniCelkem += r.tcTopeni || 0; tcVodaCelkem += r.tcVoda || 0; tcDumCelkem += r.dum || 0;
-      }
-      frag.appendChild(row);
-    }
-    if (hotove.length > 1) {
-      const row = document.createElement('div');
-      row.className = 'wbsrc-row wbsrc-total';
-      const head = document.createElement('div');
-      head.className = 'wbsrc-head';
-      const den = document.createElement('span');
-      den.className = 'wbsrc-day';
-      den.textContent = `Celkem (${hotove.length} měsíců)`;
-      const val = document.createElement('span');
-      val.textContent = (celkem / 1000).toFixed(1).replace('.', ',') + ' kWh';
-      head.appendChild(den);
-      head.appendChild(val);
-      row.appendChild(head);
-      // Součtový pruh jen z měsíců, které rozpad mají — jinak by vyšel podíl z FVE
-      // vyšší, než ve skutečnosti byl (starší měsíce by se tvářily jako samé slunce)
-      if (split && seRozpadem > 0) row.appendChild(pruhSitFve(celkemGrid, celkemPv));
-      if (kus === 'celek' && tcCelkem > 0) row.appendChild(tcRadek(tcCelkem, tcTopeniCelkem, tcVodaCelkem, tcDumCelkem));
-      frag.appendChild(row);
-    }
-    el.appendChild(frag);
-  }
 }
 
 // Záloha v telefonu — server po deployi začíná měsíc od nuly
@@ -10719,8 +10620,9 @@ function mergeMonths(a, b) {
         }
       }
     }
-    // Tepelné čerpadlo (z Comfort Cloudu): bere se větší, jako u ostatních součtů
-    for (const k of ['tc', 'tcTopeni', 'tcVoda']) {
+    // Tepelné čerpadlo (z Comfort Cloudu), bojlery a síť pro stránku Spotřeba:
+    // bere se větší, jako u ostatních součtů
+    for (const k of ['tc', 'tcTopeni', 'tcVoda', 'b1', 'b2', 'imp', 'feed', 'impVt', 'impNt']) {
       if (typeof r[k] === 'number' && r[k] >= (m[k] || 0)) m[k] = r[k];
     }
     mapa.set(r.m, m);
@@ -12438,7 +12340,6 @@ function applySnapshot(snap) {
   bezpecne(renderHeatpump);
   {
     monthsData = mergeMonths(snap.months || [], loadMonthsLocal());
-    bezpecne(renderMonths);
     spotrebaData = snap.spotreba || null;
     bezpecne(renderSpotreba);
     saveMonthsLocal();
@@ -12908,7 +12809,6 @@ function connectStream() {
   });
   es.addEventListener('months', e => {
     monthsData = mergeMonths(JSON.parse(e.data).months || [], monthsData);
-    renderMonths();
     saveMonthsLocal();
   });
   es.addEventListener('rohlik', e => {
@@ -14412,7 +14312,7 @@ function renderJidelnicek() {
     if (!r.nahradni) tlac('nakup-odskrt', r.hotovo ? '✓' : '', (r.hotovo ? 'Vrátit: ' : 'Uvařeno: ') + r.nazev, () => jidHotovo(index, !r.hotovo));
     const hlava = jidEl('span', 'jid-hlava', sum);
     jidEl('span', 'jid-nazev', hlava, r.nazev);
-    jidEl('span', 'jid-typ', hlava, (JID_TYPY[r.typ] || '') + (r.zMinula ? ' · z minulého týdne' : ''));
+    if (r.zMinula) jidEl('span', 'jid-typ', hlava, 'z minulého týdne');
     const v = r.vyziva || {};
     if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
     if (vyber && r.nahradni) tlac('jid-aktivovat', 'Aktivovat', 'Aktivovat: ' + r.nazev, () => jidReceptAkce(index, r.nazev, 'aktivovat'));
@@ -15830,6 +15730,13 @@ function rebuildDots() {
     tab.className = 'page-tab';
     tab.textContent = slide.dataset.title || `Stránka ${i + 1}`;
     tab.addEventListener('click', () => {
+      // Spotřeba: když už je vidět, další klepnutí ji otevře přes celou obrazovku
+      if (slide.id === 'spotrebaSlide' && sirokyDisplej() && tab.classList.contains('active')
+          && !document.body.classList.contains('sp-cela') && (!kalPanelEl || kalPanelEl.hidden)) {
+        spCelaObrazovka(true);
+        return;
+      }
+      spCelaObrazovka(false);
       kalOtevri(false);
       sliderWrap.scrollTo({ left: stranaNaStred(i), behavior: 'smooth' });
     });
@@ -15842,7 +15749,7 @@ function rebuildDots() {
     kal.className = 'page-tab page-tab-kal';
     kal.textContent = 'Kalendář/WX';
     // Zavřený → kalendář; otevřený → další klepnutí přepíná kalendář a počasí (WX)
-    kal.addEventListener('click', () => { if (kalPanelEl.hidden) kalOtevri(true); else kalPrepniPocasi(); });
+    kal.addEventListener('click', () => { spCelaObrazovka(false); if (kalPanelEl.hidden) kalOtevri(true); else kalPrepniPocasi(); });
     const za = [...pageTabsEl.querySelectorAll('.page-tab')].find(t => t.textContent === 'Připomínky');
     if (za) za.after(kal); else pageTabsEl.appendChild(kal);
   }
@@ -15894,6 +15801,7 @@ function kalJeNaDnesku() {
 
 function ipadVychozi(now = Date.now()) {
   if (!sirokyDisplej() || ipadDrzi()) return;
+  spCelaObrazovka(false);
   const i = ipadSaunaIndex();
   if (!saunaBezi(now) || i < 0) { kalNaDnesek(); kalOtevri(true); return; }
   kalOtevri(false);

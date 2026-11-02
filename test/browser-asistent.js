@@ -141,8 +141,8 @@ setTimeout(async () => {
   // Výpis patří k ostatním výpisům, ne mezi ovládání
   const logKarta = document.getElementById('asstLogCard');
   check('„Co asistent udělal" je pryč z Asistenta', slide.contains(logKarta), false);
-  const logSlide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Log');
-  check('  a stojí na stránce Log', logSlide.contains(logKarta), true);
+  const logSlide = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Log/Nastavení');
+  check('  a stojí na stránce Log/Nastavení', logSlide.contains(logKarta), true);
   const logKarty = [...logSlide.querySelectorAll(':scope > .page > .card')];
   const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
   check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);

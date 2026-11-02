@@ -44,7 +44,7 @@ nadpis('2) Co se do logu NEPÍŠE');
 nadpis('3) Světla');
 {
   check('existuje seznam světel', /const LIGHT_KEYS = \[/.test(SRC), true);
-  check('  a jsou v něm čtyři', (SRC.match(/const LIGHT_KEYS = \[([^\]]*)\]/) || [])[1].split(',').length, 4);
+  check('  a je jich pět (i noční světlo v koupelně)', (SRC.match(/const LIGHT_KEYS = \[([^\]]*)\]/) || [])[1].split(',').length, 5);
   // Ruční i časovačem/asistentem — obojí musí u světel mlčet
   check('ruční přepnutí světla se neloguje', (SRC.match(/if \(!jeSvetlo\(key\)\) \{/g) || []).length, 2);
 }

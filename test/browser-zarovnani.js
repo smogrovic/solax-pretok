@@ -35,7 +35,8 @@ setTimeout(() => {
     const o = odsazeni();
     const vzor = o['FVE'] !== undefined ? o['FVE'] : o[Object.keys(o)[0]];
     R.push('\\n' + rezim + ': vzor ' + vzor + ' px');
-    for (const [t, px] of Object.entries(o)) check(t, px, vzor);
+    // Recepty jsou schválně o 10 px níž: nadpis nesmí zajíždět pod rozmazaný pruh záložek
+    for (const [t, px] of Object.entries(o)) check(t, px, t === 'Recepty/Nákup' ? vzor + 10 : vzor);
   };
   projdi('full');
   projdi('miky');
@@ -47,9 +48,9 @@ setTimeout(() => {
   const druha = tc.nextElementSibling;
   check('Bazén s TČ: druhý box 12 px pod prvním', Math.round(druha.getBoundingClientRect().top - tc.getBoundingClientRect().bottom), 12);
   tc.hidden = true;
-  const prehled = [...document.querySelectorAll('.slide')].find(s => s.dataset.title === 'Přehled');
-  const k = [...prehled.querySelector('.page').children].filter(x => x.getBoundingClientRect().height > 0);
-  check('Přehled: druhý box 12 px pod prvním', Math.round(k[1].getBoundingClientRect().top - k[0].getBoundingClientRect().bottom), 12);
+  // Bývalý Přehled je teď na FVE: „Kdy co běželo" 12 px pod grafem dne
+  const casova = document.getElementById('timelineChart').closest('.card');
+  check('FVE: časová osa 12 px pod grafem', Math.round(casova.getBoundingClientRect().top - casova.previousElementSibling.getBoundingClientRect().bottom), 12);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message); }
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const ok = R.filter(r => r.startsWith('  OK')).length;

@@ -254,7 +254,7 @@ setTimeout(async () => {
 
   // Úprava v Logice automatiky
   const ns = document.getElementById('oblibeneSeznam');
-  check('nastavení je v Logice automatiky', !!ns.closest('.slide[data-title="Logika automatiky"]'), true);
+  check('nastavení je v Logice automatiky', !!ns.closest('.slide[data-title="Log/Nastavení"]'), true);
   renderOblibeneNastaveni();
   check('  ukazuje seznam', [...ns.querySelectorAll('.nazev')].map(n => n.textContent).join(' | '), '🥚 Vajíčka | 🥛 Mléko | 🧻 Toaletní papír');
   {

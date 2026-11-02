@@ -1,4 +1,4 @@
-// Přehled: boxy „Dnes" a „Posledních 7 dní" a karta „Odhad vs. skutečnost".
+// Bývalý Přehled (teď na FVE): boxy „Dnes" a „Posledních 7 dní" a karta „Odhad vs. skutečnost".
 //
 // Ta druhá je schválně podle RANNÍHO
 // odhadu. Večerní je poslední hodnota dne, do večera se stáhne ke skutečnosti —
@@ -18,7 +18,7 @@ window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: tr
 setTimeout(() => {
  try {
   const karta = document.getElementById('pvChart').closest('.card');
-  check('karta je na Přehledu', karta.closest('.slide').dataset.title, 'Přehled');
+  check('karta je na FVE (bývalý Přehled)', karta.closest('.slide').dataset.title, 'FVE');
   check('přepínač odhadů je pryč', !!document.getElementById('pvTabs'), false);
   check('  ani tlačítka nezbyla', document.querySelectorAll('.pv-tab').length, 0);
   // Nadpis se přestěhoval do sbalovacího tlačítka nad kartou

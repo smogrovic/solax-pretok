@@ -88,6 +88,9 @@ const LIGHT_ZAHRADA_DOLE_ID   = process.env.LIGHT_ZAHRADA_DOLE_ID   || '34b7dacb
 const LIGHT_ZAHRADA_NAHORE_ID = process.env.LIGHT_ZAHRADA_NAHORE_ID || '34b7daca6dc8';
 const LIGHT_BAZEN_ID          = process.env.LIGHT_BAZEN_ID          || '34b7daca4150';
 const LIGHT_NOCNI_ID          = process.env.LIGHT_NOCNI_ID          || 'dcda0cea454c';
+// Noční světlo v koupelně (Shelly 1 Mini Gen3) — vlastní vypínač v appce nemá,
+// přepíná se vždy spolu s nočními světly (viz SPOLU)
+const LIGHT_KOUPELNA_ID       = process.env.LIGHT_KOUPELNA_ID       || 'e4b323254078';
 
 // Teplotní čidla (Shelly H&T) — jen ke čtení, proto stranou od DEVICES: nemají ON/OFF
 // endpointy ani stav relé. Klíč pokoje je stejný jako v TEMP_AUTO_RULES.
@@ -113,6 +116,7 @@ const DEVICES = {
   lightNahore: { apiPath: '/api/light/zahradanahore', serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_ZAHRADA_NAHORE_ID },
   lightBazen:  { apiPath: '/api/light/bazen',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_BAZEN_ID },
   lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID },
+  lightKoupelna: { apiPath: '/api/light/koupelna',    serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_KOUPELNA_ID },
   obeh:        { apiPath: '/api/obeh',                serverUri: OBEH_SERVER_URI,      deviceId: OBEH_DEVICE_ID }
 };
 
@@ -188,13 +192,32 @@ const DEVICE_LABELS = {
   lightNahore: 'Zahrada nahoře',
   lightBazen: 'Světlo bazén',
   lightNocni: 'Noční světla',
+  lightKoupelna: 'Noční světlo koupelna',
   obeh: 'Oběhové čerpadlo'
 };
 
 // Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
 // Jejich stav je vidět na Ovládání, běh na časové ose.
-const LIGHT_KEYS = ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni'];
+const LIGHT_KEYS = ['lightDole', 'lightNahore', 'lightBazen', 'lightNocni', 'lightKoupelna'];
 const jeSvetlo = key => LIGHT_KEYS.includes(key);
+// Relé, která jdou vždy s jiným: noční světlo v koupelně s nočními světly.
+// Přepne se po hlavním; jeho chyba hlavní povel nezruší, jen se zapíše do logu.
+const SPOLU = { lightNocni: ['lightKoupelna'] };
+async function spoluPrepni(key, stateOn, reason) {
+  for (const k of SPOLU[key] || []) {
+    const dev = DEVICES[k];
+    if (!dev || !dev.serverUri || !dev.deviceId) continue;
+    try {
+      await setShellyState(dev.serverUri, dev.deviceId, stateOn ? 'on' : 'off');
+      const prev = state.devices[k] || {};
+      state.devices[k] = { ...prev, online: true, isOn: stateOn, fetchedAt: new Date().toISOString() };
+      noteCmd(k, stateOn ? 'on' : 'off');
+      broadcast('device', { key: k, status: devicePayload(k) });
+    } catch (err) {
+      addLog(`${DEVICE_LABELS[k]}: ${stateOn ? 'zapnutí' : 'vypnutí'} se nepovedlo${reason ? ` (${reason})` : ''} — ${String(err.message).slice(0, 80)}`, 'error');
+    }
+  }
+}
 
 const state = {
   solax: null,       // poslední úspěšná data ze střídače
@@ -2704,6 +2727,7 @@ function registerSetEndpoint(key) {
       }
 
       res.json({ success: true, turn });
+      await spoluPrepni(key, turn === 'on', 'ručně');
 
       // Za chvíli ověříme skutečný stav ze Shelly cloudu
       setTimeout(() => { pollDevice(key); }, 1500);
@@ -4214,6 +4238,26 @@ async function fetchWeather() {
 // (zbylý slot ve 20:00). Proto se drží JEDNOTLIVÉ SLOTY: co v odpovědi je, se přepíše
 // (budoucnost se smí revidovat), co z ní vypadlo, si podrží poslední známou hodnotu.
 let forecastCache = { ts: 0, slots: {} };   // 'YYYY-MM-DD' -> { '14': 26.1, '17': 24 }
+// Všechny sloty předpovědi bez omezení na hodiny solinátoru — pro časovač sauny,
+// který potřebuje teplotu ve chvíli zapnutí (typicky večer)
+let forecastVse = [];                        // [{ ms, t }] podle času
+
+// Teplota podle předpovědi v daném okamžiku: lineárně mezi sloty po 3 h.
+// Mimo rozsah předpovědi (nebo bez ní) null.
+function predpovedTeplota(ms, sloty = forecastVse) {
+  if (!Array.isArray(sloty) || !sloty.length || !Number.isFinite(ms)) return null;
+  for (let i = 0; i < sloty.length; i++) {
+    const b = sloty[i];
+    if (b.ms === ms) return b.t;
+    if (b.ms > ms) {
+      const a = sloty[i - 1];
+      if (!a) return ms >= b.ms - 3 * 3600000 ? b.t : null;   // kousek před prvním slotem
+      return a.t + (b.t - a.t) * (ms - a.ms) / (b.ms - a.ms);
+    }
+  }
+  const z = sloty[sloty.length - 1];
+  return ms <= z.ms + 3 * 3600000 ? z.t : null;
+}
 const FORECAST_TTL_MS = 60 * 60 * 1000;
 
 function forecastMaxFor(dateStr) {
@@ -4255,6 +4299,10 @@ async function refreshForecast() {
       slots[d][String(hour)] = t;
     }
     forecastCache = { ts: Date.now(), slots };
+    forecastVse = data.list
+      .filter(x => x && typeof x.dt === 'number' && x.main && typeof x.main.temp === 'number')
+      .map(x => ({ ms: x.dt * 1000, t: x.main.temp }))
+      .sort((a, b) => a.ms - b.ms);
     pocasiSlotyUloz(data.list, dnes);
     pocasiDnesObnov();
   } catch {
@@ -6397,6 +6445,7 @@ async function actuateRelay(key, stateOn, reason) {
   if (!jeSvetlo(key)) {
     addLog(`${DEVICE_LABELS[key]}: ${stateOn ? 'zapnuto' : 'vypnuto'}${reason ? ` (${reason})` : ''}`);
   }
+  await spoluPrepni(key, stateOn, reason);
   setTimeout(() => pollDevice(key), 1500);
 }
 
@@ -9246,22 +9295,46 @@ function saunaTimerPridej(time, teplota, now = Date.now(), obnova = null) {
   return timer;
 }
 
-// Kolik minut před příchodem pustit kamna — a z čeho se to spočítalo
-function saunaTimerNabeh(cil, now = Date.now()) {
-  const venkuC = state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null;
+// Kolik minut před příchodem pustit kamna — a z čeho se to spočítalo.
+// Počítá se s teplotou VE CHVÍLI ZAPNUTÍ, ne s tou teď: časovač nastavený v poledne
+// na večer by jinak počítal s teplým odpolednem. Venku se bere z předpovědi; studená
+// sauna (bez topení sleduje okolí) se ochladí o stejný kus jako venek. Čas zapnutí
+// závisí na odhadu a odhad na čase zapnutí — proto pár kol.
+const SAUNA_STUDENA_C = 15;        // sauna do 15 °C nad venkem = netopená, sleduje okolí
+function saunaTimerNabeh(cil, now = Date.now(), jdu = null) {
+  const venkuTed = state.weather && typeof state.weather.tempC === 'number' ? state.weather.tempC : null;
   const h = state.huum || {};
   const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
-  const odC = vSaune !== null ? vSaune : venkuC;
-  let o = odhadNabehu(venkuC, odC, cil, now);
-  if (o && !o.dosazitelne) o = odhadNabehu(venkuC, odC, SAUNA_NEDOSAZ_CIL, now);
-  const minut = o && typeof o.minut === 'number' ? Math.ceil(o.minut) : SAUNA_REZERVA_MIN;
-  return { minut, odC, venkuC, zModelu: !!(o && typeof o.minut === 'number') };
+  const spocitej = (venkuC, odC) => {
+    let o = odhadNabehu(venkuC, odC, cil, now);
+    if (o && !o.dosazitelne) o = odhadNabehu(venkuC, odC, SAUNA_NEDOSAZ_CIL, now);
+    return o && typeof o.minut === 'number' ? o : null;
+  };
+  let venkuC = venkuTed;
+  let odC = vSaune !== null ? vSaune : venkuTed;
+  let o = spocitej(venkuC, odC);
+  let zPredpovedi = false;
+  if (Number.isFinite(jdu) && venkuTed !== null) {
+    for (let kolo = 0; kolo < 3; kolo++) {
+      const zapnuti = Math.max(now, jdu - (o ? o.minut : SAUNA_REZERVA_MIN) * 60000);
+      const p = typeof predpovedTeplota === 'function' ? predpovedTeplota(zapnuti) : null;
+      if (p === null || zapnuti - now < 30 * 60000) break;    // za chvíli = platí aktuální teplota
+      zPredpovedi = true;
+      venkuC = p;
+      const studena = vSaune === null || vSaune - venkuTed < SAUNA_STUDENA_C;
+      odC = vSaune === null ? p : (studena && p < venkuTed ? Math.max(p, vSaune + (p - venkuTed)) : vSaune);
+      o = spocitej(venkuC, odC);
+    }
+  }
+  const minut = o ? Math.ceil(o.minut) : SAUNA_REZERVA_MIN;
+  const zaokr = v => (typeof v === 'number' ? Math.round(v * 10) / 10 : v);
+  return { minut, odC: zaokr(odC), venkuC: zaokr(venkuC), zModelu: !!o, zPredpovedi };
 }
 
 // Přepočítá čas zapnutí. Vrací true, když se posunul o minutu a víc.
 function saunaTimerPlan(t, now = Date.now()) {
   if (t.zapnuto) return false;
-  const n = saunaTimerNabeh(t.teplota, now);
+  const n = saunaTimerNabeh(t.teplota, now, t.jdu);
   const zapneV = Math.round((t.jdu - n.minut * 60000) / 60000) * 60000;
   const zmena = t.zapneV === null || Math.abs(zapneV - t.zapneV) >= 60000;
   t.zapneV = zapneV;
@@ -9281,7 +9354,7 @@ app.post('/api/sauna/timer', (req, res) => {
   const t = saunaTimerPridej(time, cil);
   const n = t.nabeh;
   addLog(`Sauna: časovač — půjdeš v ${t.time}, zapnu v ${fmtPragueTime(t.zapneV)} (odhad ${n.minut} min`
-    + (n.zModelu ? ` z ${Math.round(n.odC)} °C, venku ${Math.round(n.venkuC)} °C)` : ', bez venkovní teploty)')
+    + (n.zModelu ? ` z ${Math.round(n.odC)} °C, venku ${Math.round(n.venkuC)} °C${n.zPredpovedi ? ' podle předpovědi na dobu zapnutí' : ''})` : ', bez venkovní teploty)')
     + `, ${t.teplota} °C`);
   broadcast('saunaTimers', { timers: saunaTimers });
   res.json({ timers: saunaTimers });

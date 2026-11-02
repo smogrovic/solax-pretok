@@ -20,9 +20,13 @@ setTimeout(async () => {
   const text = el => radky(el).map(r => r.textContent);
 
   check('karta výpadků je pod logem', !!document.getElementById('outageList'), true);
-  const karty = Array.from(document.querySelectorAll('.slide[data-title="Log"] .page > .card'));
+  const karty = Array.from(document.querySelectorAll('.slide[data-title="Log/Nastavení"] .page > .card[data-sbal-obsah="log"]'));
   // Tři výpisy pod sebou: co se dělo, co udělal asistent, a co vypadlo
   check('  a je to samostatná karta', karty.length, 3);
+  const strana = document.querySelector('.slide[data-title="Log/Nastavení"] .page');
+  check('log je úplně nahoře na Log/Nastavení pod rozbalovacím tlačítkem',
+    strana.firstElementChild.matches('.sbal-btn[data-sbal="log"]') && strana.firstElementChild.textContent.trim(), 'Log▾');
+  check('  stránka Log samostatně není', !!document.querySelector('.slide[data-title="Log"]'), false);
   check('  výpadky nejsou promíchané s logem',
     document.getElementById('outageList').closest('.card')
       .contains(document.getElementById('logList')), false);

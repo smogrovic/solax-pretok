@@ -313,7 +313,7 @@ setTimeout(async () => {
   // kdy se s ním dá něco opravit
   const naLogice = document.getElementById('rozvrhVychoziLogika');
   check('tlačítko je na stránce Logika automatiky',
-    naLogice.closest('.slide').dataset.title, 'Logika automatiky');
+    naLogice.closest('.slide').dataset.title, 'Log/Nastavení');
   poslano.length = 0;
   naLogice.click();
   // S pravidly v rozvrhu se to napřed zeptá — přepsalo by je to všechna
