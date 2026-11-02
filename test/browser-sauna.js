@@ -169,25 +169,34 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('hláška o vybavení je pryč', /Osazeno/.test(huumHint.textContent), 'false');
   check('  a při připojených kamnech je hint prázdný', huumHint.textContent, '');
 
-  OUT.push('\\n7b) Časovač vypnutí');
-  const vyp = document.getElementById('huumVypnout');
-  check('když topí, je vidět „Vypnout za"', vyp.hidden, false);
-  check('  tlačítka 5–30 min po 5', [...vyp.querySelectorAll('#huumVypnoutBtns button')].map(b => b.dataset.minut).join(','), '5,10,15,20,25,30');
+  OUT.push('\\n7b) Saunu vypnout za');
+  const vypK = document.getElementById('huumVypnoutCard');
+  check('karta je hned pod „Půjdu do sauny v"', !vypK.hidden && vypK.previousElementSibling.id, 'huumTimerCard');
+  check('  obě bez rozbalovacího tlačítka', [vypK, document.getElementById('huumTimerCard')]
+    .every(k => !k.classList.contains('sbaleno') && !(k.previousElementSibling && k.previousElementSibling.classList.contains('sbal-btn'))), true);
+  check('  v kartě kamen už řádek není', !!document.querySelector('#huumTopeniCard #huumVypnoutBtn, #huumVypnout'), false);
+  const sel = document.getElementById('huumVypnoutMin');
+  const vBtn = document.getElementById('huumVypnoutBtn');
+  check('  výběr 5–30 po 5, výchozí 15', [...sel.options].map(o => o.value).join(',') + ' ' + sel.value, '5,10,15,20,25,30 15');
+  check('  když topí, jde aktivovat', vBtn.disabled + ' ' + vBtn.textContent, 'false Vypnout za 15 min');
   const puvodniFetch = window.fetch;
   let poslano = null;
   window.fetch = async (adresa, opts) => {
     poslano = { adresa, telo: JSON.parse(opts.body) };
-    return { ok: true, status: 200, json: async () => ({ ok: true, huum: { ...huumData, vypnoutV: Date.now() + 15 * MIN } }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, huum: { ...huumData, vypnoutV: poslano.telo.minut ? Date.now() + 25 * MIN : null } }) };
   };
-  vyp.querySelector('#huumVypnoutBtns button[data-minut="15"]').click();
+  sel.value = '25';
+  sel.dispatchEvent(new Event('change'));
+  check('  text tlačítka sleduje výběr', vBtn.textContent, 'Vypnout za 25 min');
+  vBtn.click();
   await wait(50);
-  check('klepnutí pošle minuty', poslano && poslano.adresa + ' ' + poslano.telo.minut, '/api/sauna/vypnout-za 15');
+  check('tlačítko pošle zvolené minuty', poslano && poslano.adresa + ' ' + poslano.telo.minut, '/api/sauna/vypnout-za 25');
   const stav = document.getElementById('huumVypnoutStav');
-  check('  pak ukáže čas a odpočet', !stav.hidden && /^Vypne se v \\d{1,2}:\\d{2} \\(za 15 min\\)Zrušit$/.test(stav.textContent), true);
-  check('  tlačítka minut zmizí', document.getElementById('huumVypnoutBtns').hidden, true);
+  check('  pak ukáže čas, odpočet a Zrušit', !stav.hidden && /^Vypne se v \\d{1,2}:\\d{2} \\(za 25 min\\)Zrušit$/.test(stav.textContent), true);
+  check('  výběr se schová', vBtn.parentElement.hidden, true);
   stav.querySelector('button').click();
   await wait(50);
-  check('Zrušit pošle nulu', poslano.telo.minut, 0);
+  check('Zrušit pošle nulu a vrátí výběr', poslano.telo.minut + ' ' + vBtn.parentElement.hidden, '0 false');
   window.fetch = puvodniFetch;
   huumData = { ...huumData, vypnoutV: null };
   renderHuum();
@@ -199,7 +208,8 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   renderHuum();
   check('teplota zůstane', huumTemp.textContent, '78 °C');
   check('semafor zhasne', huumLight.className, 'traffic-light off');
-  check('netopí → „Vypnout za" schované', document.getElementById('huumVypnout').hidden, true);
+  check('netopí → tlačítko vypnuté s poznámkou', document.getElementById('huumVypnoutBtn').disabled + ' ' + document.getElementById('huumVypnoutPozn').hidden
+    + ' ' + document.getElementById('huumVypnoutPozn').textContent, 'true false Jde nastavit, když kamna topí.');
   check('prázdné řádky se po připojení schovají', vidi('end'), 'false');
   check('  ale dveře zůstanou', vidi('door'), 'true');
   huumData = { ...huumData, doorClosed: false };
@@ -226,7 +236,8 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Zapínání patří hned pod teploty — je to jedna věc
   check('  zap\u00edn\u00e1n\u00ed hned pod nimi', karty[1].id, 'huumTopeniCard');
   check('  \u010dasova\u010d hned za n\u00edm', karty[2].id, 'huumTimerCard');
-  check('  m\u011b\u0159\u00e1k 3EM a\u017e \u010dtvrt\u00fd', karty[3].contains(saunaLight), 'true');
+  check('  pod ním „Saunu vypnout za"', karty[3].id, 'huumVypnoutCard');
+  check('  m\u011b\u0159\u00e1k 3EM a\u017e p\u00e1t\u00fd', karty[4].contains(saunaLight), 'true');
   // „33 °C" se lámalo mezi číslo a jednotku a stupeň zůstával viset níž
   // Cíl z karty zmizel — nastavuje ho číselník pod ní a psát ho dvakrát nemá smysl
   check('c\u00edl u\u017e na kart\u011b nen\u00ed', !!document.getElementById('huumTarget'), 'false');

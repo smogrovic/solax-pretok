@@ -1420,12 +1420,8 @@
   /* Spotřeba přes celou obrazovku (iPad, počítač): souhrn a graf vedle sebe, tabulka pod nimi */
   .sp-zavrit{display:none;}
   .zaloha-btns{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
-  .huum-vypnout{margin-top:10px;}
-  .huum-vypnout-h{font-size:12px;font-weight:700;color:var(--grey-text);margin-bottom:6px;text-align:center;}
-  .huum-vypnout-btns{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;}
-  .huum-vypnout-btns[hidden],.huum-vypnout-stav[hidden],.huum-vypnout[hidden]{display:none;}
-  .huum-vypnout-btns .mode-btn{padding:8px 2px;font-size:12px;}
-  .huum-vypnout-stav{display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;font-weight:700;color:var(--navy);}
+  .huum-vypnout-stav{display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;font-weight:700;color:var(--navy);margin-top:8px;}
+  .huum-vypnout-stav[hidden],#huumVypnoutCard .timer-form-row[hidden]{display:none;}
   .huum-vypnout-stav .mode-btn{padding:6px 12px;font-size:12px;}
   body.sp-cela #spotrebaSlide{position:fixed;inset:0;z-index:60;width:auto;height:auto;background:var(--bg);box-shadow:none;
     padding:max(12px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));}
@@ -3650,12 +3646,6 @@
         </div>
         <!-- Odhad náběhu podle modelu (teplota v sauně + venku) -->
         <div class="huum-odhad" id="huumOdhad"></div>
-        <!-- Časovač vypnutí: jen když kamna topí -->
-        <div class="huum-vypnout" id="huumVypnout" hidden>
-          <div class="huum-vypnout-h">Vypnout za</div>
-          <div class="huum-vypnout-btns" id="huumVypnoutBtns"></div>
-          <div class="huum-vypnout-stav" id="huumVypnoutStav" hidden></div>
-        </div>
         <div class="tempauto-thr-hint" id="huumTopeniHint"></div>
         <!-- Světlo patří ke kamnům, ne na vlastní kartu — je to ta samá věc,
              jen druhý vypínač. Oddělovač nahoře ho odděluje od číselníku. -->
@@ -3672,13 +3662,27 @@
         </div>
       </div>
 
-      <div class="card lockable timer-card" id="huumTimerCard" hidden>
+      <div class="card lockable timer-card" id="huumTimerCard" data-nesbalovat hidden>
         <div class="graph-title">Půjdu do sauny v</div>
         <div class="timer-form-row">
           <input type="time" id="huumTimerTime" class="timer-time" value="18:00">
           <button class="timer-add-btn" id="huumTimerAdd" type="button">Přidat časovač</button>
         </div>
         <div class="timer-list" id="huumTimerList"></div>
+      </div>
+
+      <!-- Časovač vypnutí: používá se často, proto vlastní karta bez rozbalování -->
+      <div class="card lockable timer-card" id="huumVypnoutCard" data-nesbalovat hidden>
+        <div class="graph-title">Saunu vypnout za</div>
+        <div class="timer-form-row">
+          <select id="huumVypnoutMin" class="timer-select">
+            <option value="5">5 min</option><option value="10">10 min</option><option value="15" selected>15 min</option>
+            <option value="20">20 min</option><option value="25">25 min</option><option value="30">30 min</option>
+          </select>
+          <button class="timer-add-btn" id="huumVypnoutBtn" type="button">Vypnout za 15 min</button>
+        </div>
+        <div class="huum-vypnout-stav" id="huumVypnoutStav" hidden></div>
+        <div class="rezim-hint" id="huumVypnoutPozn" hidden>Jde nastavit, když kamna topí.</div>
       </div>
 
 
@@ -4297,7 +4301,7 @@ function sbalNastav(klic, sbaleno) {
 // rozbalovací tlačítko s jejím nadpisem
 function casovaceSbal() {
   document.querySelectorAll('.timer-card').forEach((karta, i) => {
-    if (karta.id === 'rozvrhCard' || karta.dataset.sbalCasovac) return;
+    if (karta.id === 'rozvrhCard' || karta.dataset.sbalCasovac || 'nesbalovat' in karta.dataset) return;
     // Klíč z id karty nebo jejího seznamu — pořadí karet se může změnit
     const seznam = karta.querySelector('.timer-list[id]');
     const klic = 'casovac-' + (karta.id || karta.dataset.sbalKlic || (seznam && seznam.id) || i);
@@ -6736,8 +6740,7 @@ function renderTahomaSvetla() {
     // posílá poslední povel z appky; vypínač na zdi ani ovladač Somfy ale nezná.
     const pozn = document.createElement('div');
     pozn.className = 'light-odhad';
-    pozn.textContent = b.onState === null || b.onState === undefined ? 'stav světlo nehlásí'
-      : (b.onStateOdhad ? 'podle posledního povelu z appky' : '');
+    pozn.textContent = b.onState === null || b.onState === undefined ? 'stav světlo nehlásí' : '';
     const btns = document.createElement('div');
     btns.className = 'power-buttons';
     for (const [popis, povel, trida] of [['ON', 'on', 'on-btn'], ['OFF', 'off', 'off-btn']]) {
@@ -9688,6 +9691,8 @@ function renderHuumTopeni(d, cerstve) {
   e.karta.hidden = !zapojeno;
   const timerKarta = document.getElementById('huumTimerCard');
   if (timerKarta) timerKarta.hidden = !zapojeno;
+  const vypKarta = document.getElementById('huumVypnoutCard');
+  if (vypKarta) vypKarta.hidden = !zapojeno;
 
   // Meze si hlásí sama jednotka — natvrdo napsaný rozsah by u jiných kamen lhal
   const l = (d && d.limits) || {};
@@ -9709,28 +9714,28 @@ function renderHuumTopeni(d, cerstve) {
   bezpecne(ipadKontrola);
 }
 
-// Časovač vypnutí: tlačítka 5–30 min, po nastavení čas a Zrušit
-const HUUM_VYPNOUT_MIN = [5, 10, 15, 20, 25, 30];
+// Časovač vypnutí (karta „Saunu vypnout za"): výběr 5–30 min a tlačítko; nastaveno →
+// čas a Zrušit. Nastavit jde jen při topení — jinak je tlačítko vypnuté s poznámkou.
 function renderHuumVypnout(d, now = Date.now()) {
-  const box = document.getElementById('huumVypnout');
-  if (!box) return;
-  const btns = document.getElementById('huumVypnoutBtns');
+  const btn = document.getElementById('huumVypnoutBtn');
+  if (!btn) return;
+  const sel = document.getElementById('huumVypnoutMin');
   const stav = document.getElementById('huumVypnoutStav');
-  box.hidden = huumTopiTed !== true;
-  if (!btns.childElementCount) {
-    for (const m of HUUM_VYPNOUT_MIN) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'mode-btn';
-      b.dataset.minut = m;
-      b.textContent = m + ' min';
-      b.addEventListener('click', () => huumVypnoutZa(m));
-      btns.appendChild(b);
-    }
+  const pozn = document.getElementById('huumVypnoutPozn');
+  const radek = btn.parentElement;
+  if (!btn.dataset.pripojeno) {
+    btn.dataset.pripojeno = '1';
+    btn.addEventListener('click', () => huumVypnoutZa(Number(sel.value)));
+    sel.addEventListener('change', () => { btn.textContent = `Vypnout za ${sel.value} min`; });
   }
+  btn.textContent = `Vypnout za ${sel.value} min`;
+  const topi = huumTopiTed === true;
   const v = d && typeof d.vypnoutV === 'number' ? d.vypnoutV : null;
+  btn.disabled = !topi;
+  if (!topi) pozn.textContent = 'Jde nastavit, když kamna topí.';
+  pozn.hidden = topi || !!v;
+  radek.hidden = !!v;
   stav.hidden = !v;
-  btns.hidden = !!v;
   if (v) {
     const zbyva = Math.max(0, Math.ceil((v - now) / 60000));
     stav.textContent = '';
@@ -9746,7 +9751,7 @@ function renderHuumVypnout(d, now = Date.now()) {
   }
 }
 async function huumVypnoutZa(minut) {
-  const hint = huumTopeniEls.hint;
+  const hint = document.getElementById('huumVypnoutPozn');
   try {
     const res = await fetch('/api/sauna/vypnout-za', {
       method: 'POST',
@@ -9757,9 +9762,8 @@ async function huumVypnoutZa(minut) {
     if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
     if (data && data.huum) { huumData = data.huum; renderHuum(); }
     if (!res.ok) throw new Error(data.error || 'Nepodařilo se.');
-    if (hint) hint.textContent = '';
   } catch (err) {
-    if (hint) hint.textContent = err.message;
+    if (hint) { hint.textContent = err.message; hint.hidden = false; }
   }
 }
 // Odpočet minut se obnovuje i bez nové zprávy ze serveru

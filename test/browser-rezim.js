@@ -138,7 +138,7 @@ setTimeout(async () => {
   document.querySelector('#tahomaSvetla .power-btn.on-btn').click();
   await pockej();
   check('  po ON svítí hned zeleně', kontrolka(), 'traffic-light on');
-  check('    s poznámkou, že je to odhad', pozn(), 'podle posledního povelu z appky');
+  check('    bez poznámky pod tlačítkem', pozn(), '');
   document.querySelector('#tahomaSvetla .power-btn.off-btn').click();
   await pockej();
   check('  po OFF červeně', kontrolka(), 'traffic-light off');

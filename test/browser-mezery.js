@@ -87,7 +87,7 @@ setTimeout(() => {
     klice.join(', '),
     // a k tomu každý časovač (casovac-…), ten ukazuje nastavené i sbalený
     'fve, odhad, topeni, aqprogram, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
-    + 'wallbox, bazen, solinator, casovac-huumTimerCard, nahrev, sauna, zavlaha, log');
+    + 'wallbox, bazen, solinator, nahrev, sauna, zavlaha, log');
   // Přehled spotřeby na FVE: odkud šla spotřeba, dnešek i týden (z bývalé stránky Přehled)
   check('Přehled spotřeby na FVE sbalí tři boxy',
     document.querySelectorAll('.card[data-sbal-obsah="fve"]').length, 3);

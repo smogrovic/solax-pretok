@@ -27,8 +27,8 @@ setTimeout(() => {
     document.querySelector('.sbal-btn[data-sbal="rozvrh"]').getClientRects().length > 0, true);
   check('rozvrh žaluzií své tlačítko nedostal',
     !!document.querySelector('.sbal-btn[data-sbal="casovac-rozvrhCard"]'), false);
-  const vsechny = document.querySelectorAll('.timer-card:not(#rozvrhCard)');
-  check('každá karta časovače má tlačítko',
+  const vsechny = document.querySelectorAll('.timer-card:not(#rozvrhCard):not([data-nesbalovat])');
+  check('každá karta časovače (kromě sauny a rozvrhu) má tlačítko',
     [...vsechny].every(k => k.dataset.sbalCasovac && document.querySelector('.sbal-btn[data-sbal="' + k.dataset.sbalCasovac + '"]')), true);
 
   const klice = [...vsechny].map(k => k.dataset.sbalCasovac);
@@ -59,13 +59,12 @@ setTimeout(() => {
   btn.click();
   check('druhý klik sbalí', karta.classList.contains('sbaleno'), true);
 
-  // Sauna: skrytá karta schová i své tlačítko
+  // Sauna: „Půjdu do sauny v" a „Saunu vypnout za" se používají často — bez rozbalování
+  check('saunové karty nemají rozbalovací tlačítko',
+    !!document.querySelector('.sbal-btn[data-sbal="casovac-huumTimerCard"], .sbal-btn[data-sbal="casovac-huumVypnoutCard"]'), false);
   const huum = document.getElementById('huumTimerCard');
-  const hBtn = document.querySelector('.sbal-btn[data-sbal="casovac-huumTimerCard"]');
-  huum.hidden = true;
-  check('skrytá karta sauny schová tlačítko', vidi(hBtn), false);
   huum.hidden = false;
-  check('viditelná karta sauny tlačítko ukáže', vidi(hBtn), true);
+  check('  a karta je vidět celá', huum.classList.contains('sbaleno'), false);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
