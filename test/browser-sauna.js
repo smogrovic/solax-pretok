@@ -619,6 +619,10 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumData = { ...huumData, fetchedAt: new Date().toISOString() };
   renderHuum();
   check('  i s rozjezdem kamen (cíl 60 → ~45 min)', Math.round(odhadNabehuJs(model, 14.94, 27, 60).minut), 45);
+  // Nový model s dojezdem: konstantní minuty na konci se přičtou (shodně se serverem)
+  const model2 = { rozjezd: 5.3, tau: 109.4, a: 134.5, b: 0.3, termostat: 90, dojezd: 8 };
+  check('  s dojezdem: z 20 °C na 80 °C při 10 °C venku 91,5 min', odhadNabehuJs(model2, 10, 20, 80).minut.toFixed(1), '91.5');
+  check('  dojezd = rozdíl proti modelu bez něj', (odhadNabehuJs(model2, 10, 20, 80).minut - odhadNabehuJs({ ...model2, dojezd: 0 }, 10, 20, 80).minut).toFixed(1), '8.0');
   jezdec.value = '90'; jezdec.dispatchEvent(new Event('input'));
   check('  c\u00edl 90 je nad mo\u017enostmi kamen', odhadEl.textContent, 'Nad mo\u017enosti kamen');
   check('  vzorec sedí i pro mráz (−20 → 85 °C ~157 min)',

@@ -1365,19 +1365,21 @@ const NAHREV_STROP_MS = 4 * 3600000;
 // ---- Model náběhu sauny ----
 // Přefitováno z měření: po zapnutí chvíli trvá, než kamna začnou hřát (rozjezd),
 // pak se teplota exponenciálně blíží stropu, který závisí na venkovní teplotě.
-// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 28. 10. 2026;
+// Na konci se přičte dojezd (poslední stupně, než se teplota ustálí na cíli).
+// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 4. 11. 2026;
 // B je zatím odhad, upřesní zimní data.
 //   T_max = A + B · venkuC
-//   t     = rozjezd + τ · ln((T_max − T_start) / (T_max − T_cíl))
+//   t     = rozjezd + τ · ln((T_max − T_start) / (T_max − T_cíl)) + dojezd
 const saunaEnvNum = (klic, vychozi) => {
   const v = process.env[klic];
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
 };
-const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.4);
-const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 108.6);
-const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 133.9);
+const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.3);
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 109.4);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 134.5);
 const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.3);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
+const SAUNA_DOJEZD_MIN = saunaEnvNum('SAUNA_DOJEZD_MIN', 8);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
 
 // → { minut, hotovoV, dosazitelne }, nebo null, když chybí vstup. Nikdy nepadá.
@@ -1389,7 +1391,8 @@ function odhadNabehu(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin = SAUNA
   if (cilC <= tStartC) return { minut: 0, hotovoV: naMinutu(now), dosazitelne: true };
   const tMax = SAUNA_TMAX_A + SAUNA_TMAX_B * venkuC;
   if (cilC >= SAUNA_TERMOSTAT || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = Math.max(0, rozjezdMin) + SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC));
+  const minut = Math.max(0, rozjezdMin) + SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC))
+    + Math.max(0, SAUNA_DOJEZD_MIN);
   return { minut, hotovoV: naMinutu(now + minut * 60000), dosazitelne: true };
 }
 
@@ -1399,7 +1402,8 @@ function saunaOdhad(now = Date.now()) {
   const h = state.huum || {};
   const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
   const tStartC = vSaune !== null ? vSaune : venkuC;
-  const model = { rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT };
+  const model = { rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT,
+    dojezd: SAUNA_DOJEZD_MIN };
   const out = { venkuC, tStartC, model, cile: [] };
   if (!h.heating) return out;
   const b = state.saunaNahrev && state.saunaNahrev.bezici;

@@ -9644,13 +9644,14 @@ function huumBarvaTeploty(t) {
 
 // ---- Odhad náběhu ----
 // Stejný model jako na serveru (konstanty chodí z něj v huumData.odhad.model):
-//   T_max = a + b · venku,  t = τ · ln((T_max − start) / (T_max − cíl))
+//   T_max = a + b · venku,  t = rozjezd + τ · ln((T_max − start) / (T_max − cíl)) + dojezd
 function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
   if (!m || typeof venkuC !== 'number' || typeof tStartC !== 'number' || typeof cilC !== 'number') return null;
   if (cilC <= tStartC) return { minut: 0, hotovoV: now, dosazitelne: true };
   const tMax = m.a + m.b * venkuC;
   if (cilC >= m.termostat || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC));
+  const minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC))
+    + (typeof m.dojezd === 'number' ? m.dojezd : 0);
   return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
 }
 
