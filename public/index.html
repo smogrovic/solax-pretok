@@ -1686,7 +1686,8 @@
   .pruvodce-zmenit{flex:0 0 auto;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .pruvodce-soucet{font-size:13px;font-weight:800;color:var(--navy);padding:10px 0 2px;border-top:1px solid rgba(44,62,80,0.15);}
   .jid-tyden{font-size:12px;color:var(--grey-text);text-align:center;margin-top:2px;}
-  .jid-pozor{font-size:12px;color:#8a5a00;background:rgba(255,210,63,0.18);border-radius:10px;padding:8px 10px;margin-top:8px;}
+  .jid-pozor{font-size:12px;color:#8a5a00;background:rgba(255,210,63,0.18);border-radius:10px;padding:6px 10px 6px 24px;margin:8px 0 0;}
+  .jid-pozor li{margin:1px 0;}
   .jid-sekce{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--orange);margin:14px 0 2px;}
   .jid-recept{border-top:1px solid rgba(44,62,80,0.08);}
   .jid-recept summary{display:flex;flex-direction:column;padding:8px 2px;cursor:pointer;list-style:none;}
@@ -1703,6 +1704,13 @@
   .jid-aktivovat{flex:0 0 auto;border:none;border-radius:12px;padding:7px 12px;font:inherit;font-size:12px;font-weight:700;background:#e3f1ff;color:#0b4a7f;cursor:pointer;opacity:1;}
   .jid-potvrdit{width:100%;margin-top:14px;border:none;border-radius:14px;padding:12px;font:inherit;font-size:15px;font-weight:800;background:#2e9d57;color:#fff;cursor:pointer;}
   .jid-potvrdit:disabled{opacity:0.4;}
+  .jid-kosik{flex:0 0 auto;border:none;border-radius:12px;padding:6px 10px;font:inherit;font-size:12px;font-weight:700;background:#e6f5ea;color:#1f6e3c;cursor:pointer;white-space:nowrap;}
+  .jid-kosik.nic{background:rgba(44,62,80,0.07);color:var(--grey-text);}
+  .jid-sur-vse{display:flex;justify-content:center;gap:18px;margin-top:6px;}
+  .jid-sur-vse button{border:none;background:none;padding:0;font:inherit;font-size:12px;color:#1b6fb8;text-decoration:underline;cursor:pointer;}
+  .jid-sur-radek{display:flex;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid rgba(44,62,80,0.08);font-size:14px;color:var(--navy);cursor:pointer;}
+  .jid-sur-radek input{width:20px;height:20px;flex:0 0 auto;accent-color:#2e9d57;}
+  .jid-sur-mn{margin-left:auto;font-size:12px;color:var(--grey-text);white-space:nowrap;}
   .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
   .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
   a.jid-zdroj{color:#1b6fb8;}
@@ -4179,6 +4187,18 @@
     <button type="button" class="jid-tisk-akce" id="jidReceptHotovo">Uvařeno ✓</button>
   </div>
   <div class="jid-recept-papir" id="jidReceptPapir"></div>
+</div>
+<div class="potvrz" id="jidSurOkno" hidden role="dialog" aria-labelledby="jidSurNadpis">
+  <div class="potvrz-box rohlik-box">
+    <div class="potvrz-nadpis" id="jidSurNadpis">🛒 Co koupit</div>
+    <div class="potvrz-text" id="jidSurJidlo"></div>
+    <div class="jid-sur-vse"><button type="button" id="jidSurVse">vybrat vše</button><button type="button" id="jidSurNic">nic</button></div>
+    <div class="rohlik-seznam" id="jidSurSeznam"></div>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="jidSurZpet" type="button">Zpět</button>
+      <button class="potvrz-ano" id="jidSurUlozit" type="button">Uložit</button>
+    </div>
+  </div>
 </div>
 <div class="potvrz" id="pruvodceOkno" hidden>
   <div class="potvrz-box rohlik-box">
@@ -14551,6 +14571,58 @@ async function jidPotvrdit() {
   } catch (err) { jidZprava(err.message); }
 }
 
+// Okno se surovinami: co na dané jídlo koupit. Nová jídla mají vybráno vše,
+// jídla z minulého týdne nic (nakoupeno už je) — dokud to uživatel nezmění.
+const JID_DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
+const jidKlicC = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const jidKupovatelne = r => (r.suroviny || []).filter(s => !JID_DOMA.includes(jidKlicC(s.nazev)));
+function jidVybrane(r) {
+  const k = jidKupovatelne(r);
+  if (Array.isArray(r.nakupit)) return k.filter(s => r.nakupit.includes(s.nazev));
+  return r.zMinula ? [] : k;
+}
+const jidSurOknoEl = document.getElementById('jidSurOkno');
+let jidSurIndex = null;
+function jidSurOtevri(index) {
+  const r = jidelnicekData && jidelnicekData.recepty[index];
+  if (!jidSurOknoEl || !r) return;
+  jidSurIndex = index;
+  document.getElementById('jidSurJidlo').textContent = r.nazev + (r.zMinula ? '\nZ minulého týdne — zaškrtni, co už nemáš.' : '\nOdškrtni, co už máš doma.');
+  const seznam = document.getElementById('jidSurSeznam');
+  seznam.textContent = '';
+  const vybrane = new Set(jidVybrane(r).map(s => s.nazev));
+  for (const s of jidKupovatelne(r)) {
+    const l = jidEl('label', 'jid-sur-radek', seznam);
+    const cb = jidEl('input', '', l);
+    cb.type = 'checkbox';
+    cb.value = s.nazev;
+    cb.checked = vybrane.has(s.nazev);
+    jidEl('span', '', l, s.nazev);
+    jidEl('span', 'jid-sur-mn', l, jidMnozstvi(s));
+  }
+  jidSurOknoEl.hidden = false;
+}
+function jidSurZavri() { if (jidSurOknoEl) jidSurOknoEl.hidden = true; jidSurIndex = null; }
+async function jidSurUloz() {
+  const r = jidelnicekData && jidelnicekData.recepty[jidSurIndex];
+  if (!r) return jidSurZavri();
+  const nakupit = [...document.querySelectorAll('#jidSurSeznam input:checked')].map(cb => cb.value);
+  const index = jidSurIndex;
+  jidSurZavri();
+  jidZprava('');
+  try {
+    const d = await jidPost('/api/jidelnicek/nakup-jidla', { index, nazev: r.nazev, nakupit });
+    if (d.pridano) jidZprava(`Na nákupní seznam přidáno ${d.pridano} ${d.pridano === 1 ? 'položka' : d.pridano < 5 ? 'položky' : 'položek'}.`);
+  } catch (err) { jidZprava(err.message); }
+}
+if (jidSurOknoEl) {
+  document.getElementById('jidSurZpet').addEventListener('click', jidSurZavri);
+  document.getElementById('jidSurUlozit').addEventListener('click', jidSurUloz);
+  const vse = on => document.querySelectorAll('#jidSurSeznam input').forEach(cb => { cb.checked = on; });
+  document.getElementById('jidSurVse').addEventListener('click', () => vse(true));
+  document.getElementById('jidSurNic').addEventListener('click', () => vse(false));
+}
+
 function renderJidelnicek() {
   if (!jidKartaEl) return;
   const j = jidelnicekData;
@@ -14586,6 +14658,10 @@ function renderJidelnicek() {
     if (r.zMinula) jidEl('span', 'jid-typ', hlava, 'z minulého týdne');
     const v = r.vyziva || {};
     if (v.kcal !== null && v.kcal !== undefined) jidEl('span', 'jid-makra', hlava, `${Math.round(v.kcal)} kcal · B: ${v.bilkoviny ?? '?'} g · S: ${v.sacharidy ?? '?'} g · T: ${v.tuky ?? '?'} g`);
+    if (!r.nahradni && !r.hotovo && jidKupovatelne(r).length) {
+      const n = jidVybrane(r).length, vse = jidKupovatelne(r).length;
+      tlac('jid-kosik' + (n ? '' : ' nic'), n ? `🛒 ${n}/${vse}` : '🛒 nekupuji', 'Suroviny do košíku: ' + r.nazev, () => jidSurOtevri(index));
+    }
     if (vyber && r.nahradni) tlac('jid-aktivovat', 'Aktivovat', 'Aktivovat: ' + r.nazev, () => jidReceptAkce(index, r.nazev, 'aktivovat'));
     else if (vyber && !r.zMinula) {
       tlac('jid-smazat', '✕', 'Smazat: ' + r.nazev, async () => {
@@ -14610,10 +14686,13 @@ function renderJidelnicek() {
       jidEl('div', 'jid-sekce jid-sekce-nahradni', obsah, 'Náhradní jídla');
       for (const { r, index } of nahr) radek(r, index, obsah);
     }
-    const pocet = j.recepty.filter(r => !r.nahradni && !r.zMinula).length;
-    const b = jidEl('button', 'jid-potvrdit', obsah, `🛒 Přidat na nákupní seznam (${pocet} ${pocet === 1 ? 'jídlo' : pocet < 5 && pocet > 1 ? 'jídla' : 'jídel'})`);
+    // Počítají se jídla, na která je vybraná aspoň jedna surovina
+    const pocet = j.recepty.filter(r => !r.nahradni && !r.hotovo && jidVybrane(r).length).length;
+    const b = jidEl('button', 'jid-potvrdit', obsah, pocet
+      ? `🛒 Přidat na nákupní seznam (${pocet} ${pocet === 1 ? 'jídlo' : pocet < 5 ? 'jídla' : 'jídel'})`
+      : '✓ Potvrdit výběr (nic se nekupuje)');
     b.type = 'button';
-    b.disabled = !pocet;
+    b.disabled = !j.recepty.some(r => !r.nahradni);
     b.addEventListener('click', jidPotvrdit);
   } else if (j.nakup && j.nakup.length) {
     // Zůstává i po přidání — kdyby se seznam smazal, jde to přidat znovu
@@ -14622,11 +14701,11 @@ function renderJidelnicek() {
     b.addEventListener('click', jidPotvrdit);
   }
   if (jidReceptOknoEl && !jidReceptOknoEl.hidden) renderJidReceptOkno();
-  // Upozornění a nesplněné body kontroly až pod jídly
-  const pozor = [...(j.upozorneni || []), ...(j.kontrola || []).filter(k => !k.ok).map(k => 'Nesplněno: ' + k.bod + (k.poznamka ? ' — ' + k.poznamka : ''))];
+  // Jen nezbytná upozornění, krátké body pod jídly
+  const pozor = (j.upozorneni || []).slice(0, 3);
   if (pozor.length) {
-    const box = jidEl('div', 'jid-pozor', obsah);
-    for (const p of pozor) jidEl('div', '', box, '⚠️ ' + p);
+    const box = jidEl('ul', 'jid-pozor', obsah);
+    for (const p of pozor) jidEl('li', '', box, p);
   }
 }
 
@@ -14635,6 +14714,7 @@ function renderJidelnicek() {
 function ipadDrzi() {
   return !!(document.querySelector('#jidObsah details.jid-recept[open]')
     || (jidReceptOknoEl && !jidReceptOknoEl.hidden)
+    || (jidSurOknoEl && !jidSurOknoEl.hidden)
     || (document.getElementById('pruvodceOkno') && !document.getElementById('pruvodceOkno').hidden));
 }
 

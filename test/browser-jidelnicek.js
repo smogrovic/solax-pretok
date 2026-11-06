@@ -8,6 +8,7 @@ v = v.replace('</head>', '<style>.slide{display:none!important}.slide[data-title
 const VZOR = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'jidelnicek-vzor.json'), 'utf8'));
 VZOR.vytvoreno = Date.UTC(2026, 9, 30, 5, 0);
 VZOR.kontrola.push({ bod: 'Obsahuje veganské jídlo 25–30 g bílkovin na porci?', ok: false, poznamka: 'má 24 g' });
+VZOR.upozorneni = ['Vegan má 24 g bílkovin.', 'Bez ryby.', 'Tortilly menší balení.', 'Čtvrté navíc'];
 
 const DRIVER = `
 const R = [];
@@ -37,7 +38,8 @@ setTimeout(async () => {
   check('s jídelníčkem vidět', vidi(karta), true);
   check('sekce bez dnů v týdnu', [...karta.querySelectorAll('.jid-sekce')].map(e => e.textContent).join(','), 'Večeře,Pečení,Snídaně');
   check('devět receptů', karta.querySelectorAll('details.jid-recept').length, 9);
-  check('nesplněný bod kontroly je vidět', karta.querySelector('.jid-pozor').textContent.includes('Nesplněno: Obsahuje veganské jídlo'), true);
+  check('žlutý box: jen upozornění, nejvýš 3 krátké body', [...karta.querySelectorAll('.jid-pozor li')].map(e => e.textContent).join(' | '), 'Vegan má 24 g bílkovin. | Bez ryby. | Tortilly menší balení.');
+  check('  nesplněné body kontroly se neukazují', karta.querySelector('.jid-pozor').textContent.includes('Nesplněno'), false);
   check('  žlutý box až pod jídly', karta.querySelector('#jidObsah').lastElementChild.classList.contains('jid-pozor'), true);
   const prvni = karta.querySelector('details.jid-recept');
   check('  zavřený na začátku', prvni.open, false);
@@ -52,6 +54,9 @@ setTimeout(async () => {
   jidelnicekData = { ...VZOR, recepty: [...VZOR.recepty, { ...VZOR.recepty[3], nazev: 'Zbylé jídlo', zMinula: '2026-10-26' }] }; renderJidelnicek();
   check('převedené jídlo: z minulého týdne', [...karta.querySelectorAll('details.jid-recept')].find(d => d.textContent.includes('Zbylé jídlo')).querySelector('.jid-typ').textContent, 'z minulého týdne');
   check('  ostatní jídla bez řádku s typem (pracovní večeře…)', [...karta.querySelectorAll('details.jid-recept summary .jid-typ')].length, 1);
+  const kosJ = jm => [...karta.querySelectorAll('details.jid-recept')].find(d => d.querySelector('.jid-nazev').textContent === jm).querySelector('.jid-kosik');
+  check('košík: nové jídlo má vybráno vše (bez oleje? olej se kupuje)', kosJ(VZOR.recepty[0].nazev).textContent, '🛒 4/4');
+  check('  jídlo z minulého týdne nic', kosJ('Zbylé jídlo').textContent + ' ' + kosJ('Zbylé jídlo').classList.contains('nic'), '🛒 nekupuji true');
   jidelnicekData = VZOR; renderJidelnicek();
   check('vlastní recept označený', vlastni.querySelector('.jid-zdroj').textContent, 'Vlastní recept');
 
@@ -82,6 +87,47 @@ setTimeout(async () => {
   karta.querySelector('.jid-potvrdit').click();
   await pockej(30);
   check('  znovu přidá', dotazy.slice(-1)[0].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam znovu přidáno 27 položek.');
+
+  R.push('\\n1c) Okno se surovinami');
+  const zbyle = { ...JSON.parse(JSON.stringify(VZOR.recepty[0])), nazev: 'Zbylé tortilly', zMinula: '2026-10-26' };
+  zbyle.suroviny.push({ nazev: 'Sůl', mnozstvi: null, jednotka: '' });
+  jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), recepty: [zbyle, ...JSON.parse(JSON.stringify(VZOR.recepty))], nakupPotvrzeno: false };
+  renderJidelnicek();
+  const surOkno = document.getElementById('jidSurOkno');
+  check('okno zavřené', surOkno.hidden, true);
+  check('tlačítko na přidání počítá jen jídla se surovinami (zbylé ne)', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (9 jídel)');
+  const otevrenoPred = karta.querySelector('details.jid-recept').open;
+  karta.querySelector('details.jid-recept .jid-kosik').click();
+  const cbs = () => [...surOkno.querySelectorAll('input[type=checkbox]')];
+  check('klik otevře okno, recept se nerozbalí ani nezavře', !surOkno.hidden && karta.querySelector('details.jid-recept').open === otevrenoPred, true);
+  check('  suroviny bez soli, z minulého týdne nezaškrtnuté', cbs().map(c => c.value + (c.checked ? '+' : '-')).join(','), 'Kuřecí prsa-,Tortilly-,Paprika-,Olivový olej-');
+  check('  s množstvím', surOkno.querySelector('.jid-sur-mn').textContent, '600 g');
+  cbs()[1].checked = true; cbs()[2].checked = true;
+  odpoved = (url, telo) => url === '/api/jidelnicek/nakup-jidla'
+    ? { ok: true, pridano: 0, jidelnicek: { ...jidelnicekData, recepty: jidelnicekData.recepty.map((r, i) => i === telo.index ? { ...r, nakupit: telo.nakupit } : r) } } : { ok: true };
+  document.getElementById('jidSurUlozit').click();
+  await pockej(50);
+  check('Uložit pošle vybrané', JSON.stringify(dotazy.slice(-1)[0].telo), JSON.stringify({ index: 0, nazev: 'Zbylé tortilly', nakupit: ['Tortilly', 'Paprika'] }));
+  check('  okno se zavře, u jídla 2/4', surOkno.hidden + ' ' + karta.querySelector('details.jid-recept .jid-kosik').textContent, 'true 🛒 2/4');
+  check('  tlačítko teď počítá i zbylé', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (10 jídel)');
+  const druhy = [...karta.querySelectorAll('details.jid-recept')][1];
+  druhy.querySelector('.jid-kosik').click();
+  check('nové jídlo: vše zaškrtnuté', cbs().every(c => c.checked) && cbs().length > 0, true);
+  document.getElementById('jidSurNic').click();
+  check('  „nic" odškrtne vše', cbs().some(c => c.checked), false);
+  document.getElementById('jidSurVse').click();
+  check('  „vybrat vše" zaškrtne', cbs().every(c => c.checked), true);
+  const pocetDotazu = dotazy.length;
+  document.getElementById('jidSurZpet').click();
+  check('  Zpět nic neposílá', surOkno.hidden + ' ' + dotazy.length, 'true ' + pocetDotazu);
+  odpoved = () => ({ ok: true, pridano: 3 });
+  druhy.querySelector('.jid-kosik').click();
+  document.getElementById('jidSurUlozit').click();
+  await pockej(50);
+  check('po potvrzení: hned přidané se ohlásí', document.getElementById('jidZprava').textContent, 'Na nákupní seznam přidáno 3 položky.');
+  jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), recepty: VZOR.recepty.map(r => ({ ...r, hotovo: Date.now() })) };
+  renderJidelnicek();
+  check('uvařená jídla bez košíku', karta.querySelectorAll('.jid-kosik').length, 0);
   jidelnicekData = VZOR; renderJidelnicek();
 
   R.push('\\n2) Seznam: kategorie, množství, víme/nevíme');

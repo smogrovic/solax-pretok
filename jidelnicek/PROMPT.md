@@ -156,8 +156,14 @@ Neopakuj stejnou luštěninu ve více hlavních jídlech.
 Střídej přílohy.
 Střídej druhy zeleniny.
 Neopakuj stále stejné kombinace surovin.
+Nezařazuj podobná jídla, například dvoje tacos, tacos a wrapy, dvě rizota nebo dvě kari.
+Jídlo s tortillou je v týdnu jen jedno.
 Drobné dochucovadla, jako olej, sůl, pepř a bylinky, se opakovat mohou.
-Při sestavování jídelníčku kontroluj také návaznost na předchozí týdny, aby se jídla zbytečně neopakovala.
+
+Návaznost na předchozí týden
+
+Neopakuj jídla, hlavní zdroj bílkovin, luštěninu ani přílohy z minulého týdne.
+Starší týdny se opakovat mohou.
 
 
 5. RYCHLÁ VEČEŘE BEZ VAŘENÍ
@@ -167,12 +173,16 @@ Každý týden připrav jeden samostatný návrh plnohodnotné rychlé večeře 
 Může jít například o:
 
 Pomazánku.
-Tortilla wrapy.
 Studený salát.
 Sýrový talíř.
 Luštěninovou pomazánku.
 Pečivo s kvalitním zdrojem bílkovin.
 Večeře musí být vhodná pro všechny členy rodiny a obsahovat dostatek bílkovin.
+
+Nic se nevaří ani nepeče: žádná trouba, plotna ani panev.
+
+Recept nemusí být z povolených webů. Klidně ho vyhledej kdekoli na internetu.
+Pokud nic vhodného nenajdeš, vymysli vlastní.
 
 Uveď přesné množství surovin pro 3 dospělé a 2 děti.
 
@@ -273,6 +283,7 @@ Buchta v troubě
 Recepty od Aničky
 Karolina Four
 Nepoužívej jiné receptové weby bez výslovného souhlasu uživatele.
+Výjimka: rychlá večeře bez vaření smí být z libovolného webu nebo vlastní (sekce 5).
 
 Pracovní večeře rozděluj mezi více uvedených zdrojů. Nevybírej všechny recepty pouze z jednoho webu.
 
@@ -455,12 +466,17 @@ Před odevzdáním každého jídelníčku proveď kontrolu:
 ☐ Jsou brambory maximálně jednou týdně?
 ☐ Jsou zařazeny mozzarella, cottage a tvaroh?
 ☐ Neopakují se zbytečně hlavní suroviny a luštěniny?
-☐ Jsou všechny recepty z povolených webů?
+☐ Nejsou v týdnu dvě podobná jídla (např. 2× tacos)?
+☐ Neopakuje se nic z minulého týdne (jídlo, bílkovina, luštěnina, příloha)?
+☐ Jsou všechny recepty z povolených webů (kromě večeře bez vaření)?
+☐ Večeře bez vaření se opravdu nevaří ani nepeče?
 ☐ Jsou všechny odkazy skutečně ověřené?
 ☐ Odpovídají gramáže počtu strávníků?
 ☐ Je správně započítána krabička pro manžela?
 ☐ Jsou výživové hodnoty realistické a označené jako orientační?
 ☐ Odpovídá nákupní seznam přesnému součtu receptů?
 Pokud některá podmínka není splněna, oprav jídelníček před jeho odevzdáním.
+
+Upozornění piš jen nezbytná, nejvýš 3, každé jedním krátkým bodem.
 
 Nikdy neobětuj přesnost kvůli tomu, abys za každou cenu vytvořil kompletní výstup. Raději přiznej, co se nepodařilo ověřit, než abys uváděl vymyšlené recepty, odkazy nebo gramáže.

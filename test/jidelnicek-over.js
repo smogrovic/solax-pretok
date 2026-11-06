@@ -69,8 +69,32 @@ check('minulý týden ryba → teď ne', chyby(kopie(), [{ tyden: '2026-10-26', 
   najdi(p, 'Losos s bramborami').stitky = ['brambory'];
   check('minulý týden bez ryby → teď jedna', chyby(p, [{ tyden: '2026-10-26', ryba: false, nazvy: [] }]).some(c => c.startsWith('Minulý týden ryba nebyla')), true);
 }
-check('opakování z historie je upozornění', zkontroluj(kopie(), [{ tyden: '2026-10-19', ryba: false, nazvy: ['Švestková buchta'] }]).varovani
-  .includes('Švestková buchta: bylo v některém z minulých týdnů.'), true);
+check('jídlo z minulého týdne se opakovat nesmí', chyby(kopie(), [{ tyden: '2026-10-26', ryba: false, nazvy: ['Švestková buchta'] }])
+  .includes('Švestková buchta: bylo minulý týden — vyber jiné.'), true);
+check('  starší týdny nevadí', chyby(kopie(), [{ tyden: '2026-10-26', ryba: false, nazvy: [] }, { tyden: '2026-10-19', ryba: false, nazvy: ['Švestková buchta'] }])
+  .some(c => c.includes('Švestková buchta')), false);
+{
+  const t = kopie();
+  najdi(t, 'Hovězí s rýží a mrkví').nazev = 'Hovězí tacos';
+  check('dvě podobná jídla s tortillou (2× tacos) → chyba', chyby(t).some(c => c.startsWith('Podobná jídla s tortillou')), true);
+  const r = kopie();
+  const prac = r.recepty.filter(x => x.typ === 'pracovni');
+  prac[0].nazev = 'Houbové rizoto'; prac[1].nazev = 'Dýňové rizoto';
+  check('dvě rizota → chyba', chyby(r).some(c => c.startsWith('Podobná jídla (rizoto)')), true);
+  const bv = kopie();
+  const b = bv.recepty.find(x => x.typ === 'bez_vareni');
+  b.postup = ['Těstoviny uvaříme a necháme vychladnout.'];
+  check('bez vaření s vařením → chyba', chyby(bv).some(c => c.includes('nesmí nic vařit')), true);
+  b.postup = ['Pečivo namažeme pomazánkou.'];
+  check('  pečivo vařením není', chyby(bv).some(c => c.includes('nesmí nic vařit')), false);
+  b.vlastni = false; b.zdroj = { web: 'Jiný', url: 'https://www.jiny-web.cz/pomazanka' };
+  check('bez vaření smí mít odkaz odjinud', chyby(bv).some(c => c.includes(b.nazev + ': odkaz')), false);
+  const u = kopie();
+  u.upozorneni = ['a', 'b', 'c', 'd'];
+  check('upozornění nejvýš 3', chyby(u).some(c => c.startsWith('Upozornění nejvýš 3')), true);
+  u.upozorneni = ['x'.repeat(101)];
+  check('  a krátká', chyby(u).some(c => c.startsWith('Upozornění je dlouhé')), true);
+}
 
 check('jídlo, které zůstává z minula, se nesmí opakovat', chyby(kopie(), [], ['Švestková buchta']).includes('Švestková buchta: v jídelníčku už zůstává z minula — vyber jiné.'), true);
 

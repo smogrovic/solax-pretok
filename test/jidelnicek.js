@@ -222,6 +222,60 @@ nadpis('Odškrtnutá jídla');
   check('  čas z budoucnosti zahodí', 'hotovo' in c.state.jidelnicek.recepty[1], false);
 }
 
+nadpis('Okno se surovinami: co koupit na jídlo');
+{
+  const h = build();
+  h.volej('POST /api/jidelnicek/import', kopie());
+  const j = () => h.state.jidelnicek;
+  const idx = n => j().recepty.findIndex(r => r.nazev === n);
+  const T = 'Zapečené těstoviny s mozzarellou';
+  const tr = () => j().recepty[idx(T)];
+  check('nové jídlo: bez výběru se kupuje všechno (výchozí)', 'nakupit' in tr(), false);
+  const r0 = h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: [] });
+  check('odškrtnout všechno = na jídlo nenakupovat', r0.kod + ' ' + JSON.stringify(tr().nakupit), '200 []');
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('  při potvrzení se na něj nekupuje (mozzarella jen z něj)', h.state.nakup.some(x => x.nazev === 'Mozzarella') + ' ' + /nakupuje se na 8/.test(h.logy.slice(-1)[0]), 'false true');
+  const pred = h.state.nakup.length;
+  const r1 = h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella', 'Neexistuje'] });
+  check('po potvrzení nově zaškrtnuté rovnou na seznam (jen ty z receptu)', r1.out.pridano + ' ' + (h.state.nakup.length - pred) + ' ' + JSON.stringify(tr().nakupit), '1 1 ["Mozzarella"]');
+  check('  znovu stejný výběr nic nepřidá', h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'] }).out.pridano, 0);
+  h.state.nakup = [];
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('„přidat znovu" vezme u jídla jen vybrané', h.state.nakup.some(x => x.nazev === 'Mozzarella')
+    + ' ' + tr().suroviny.filter(x => x.nazev !== 'Mozzarella' && !j().recepty.some(o => o.nazev !== T && o.suroviny.some(y => y.nazev === x.nazev))).some(x => h.state.nakup.some(n => n.nazev === x.nazev)), 'true false');
+  check('špatný název → 404', h.volej('POST /api/jidelnicek/nakup-jidla', { index: 0, nazev: 'x', nakupit: [] }).kod, 404);
+  check('bez výběru → 400', h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T }).kod, 400);
+  check('zamčeno → 401', build({ zamceno: true }).volej('POST /api/jidelnicek/nakup-jidla', { index: 0, nazev: 'x', nakupit: [] }).kod, 401);
+
+  // Další týden: jídlo z minula se výchozí nekupuje, jde vybrat co dokoupit
+  const p2 = kopie(); p2.tyden = '2026-11-09';
+  p2.recepty.forEach(r => { r.nazev = 'Nové ' + r.nazev; });
+  h.volej('POST /api/jidelnicek/import', p2);
+  const zm = () => j().recepty.find(r => r.zMinula && r.nazev === T);
+  check('z minula: výběr načisto (výchozí nic)', !!zm() && !('nakupit' in zm()), true);
+  const prvni = zm().suroviny.find(x => x.nazev !== 'Mozzarella').nazev;
+  h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: [prvni] });
+  h.state.nakup = [];
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('  při potvrzení: 9 nových + 1 z minula s výběrem (ostatní z minula ne)', h.state.nakup.some(x => x.nazev === prvni) + ' ' + /nakupuje se na 10,/.test(h.logy.slice(-1)[0]), 'true true');
+}
+
+nadpis('Rychlá večeře bez vaření a upozornění');
+{
+  const h = build();
+  const p = kopie();
+  const bv = p.recepty.find(r => r.typ === 'bez_vareni');
+  bv.vlastni = false; bv.zdroj = { web: 'Jiný web', url: 'https://www.jinyweb.cz/recept/wrap' };
+  p.upozorneni = ['jedna', 'dvě', 'tři', 'čtyři'];
+  const r = h.volej('POST /api/jidelnicek/import', p);
+  check('bez vaření smí mít odkaz na jiný web', r.kod + ' ' + h.state.jidelnicek.recepty.find(x => x.typ === 'bez_vareni').zdroj.url, '200 https://www.jinyweb.cz/recept/wrap');
+  check('upozornění nejvýš 3', h.state.jidelnicek.upozorneni.length, 3);
+  const p2 = kopie();
+  const prac = p2.recepty.find(x => x.typ === 'pracovni');
+  prac.zdroj = { web: 'Jiný web', url: 'https://www.jinyweb.cz/recept/x' }; prac.vlastni = false;
+  check('ostatní jídla dál jen z povolených webů', build().volej('POST /api/jidelnicek/import', p2).kod, 400);
+}
+
 nadpis('Známé suroviny pro úlohu');
 {
   const h = build({ vyber: { mozzarella: { productId: 1, nazev: 'Miil Mozzarella light', text: 'Mozzarella' }, mleko: { productId: 2, nazev: 'M' } },

@@ -12315,6 +12315,7 @@ const JIDELNICEK_NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Ml
 const JIDELNICEK_RECEPTU_MAX = 20;
 const JIDELNICEK_NAKUP_MAX = 120;
 const JIDELNICEK_HISTORIE_TYDNU = 6;
+const JIDELNICEK_UPOZORNENI_MAX = 3;
 const JIDELNICEK_HOTOVO_SKRYT_MS = 12 * 3600000;   // odškrtnuté jídlo zmizí z appky po 12 h
 // Doma je vždycky — na nákupní seznam nepatří
 const JIDELNICEK_DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
@@ -12327,13 +12328,15 @@ const jidText = (v, max) => (typeof v === 'string' ? v.trim().replace(/[ \t]+/g,
 const jidCislo = v => (Number.isFinite(v) && v >= 0 && v < 100000 ? Math.round(v * 10) / 10 : null);
 
 // Odkaz jen na povolené weby (i www.). Kvůli MaruškaVeg i http — jiný její web nemá.
-function jidelnicekUrl(u) {
+// `kdekoli`: rychlá večeře bez vaření smí být i z jiného webu (na povolených
+// webech jich je málo) — pořád jen http(s) odkaz, žádné jiné schéma
+function jidelnicekUrl(u, { kdekoli = false } = {}) {
   if (typeof u !== 'string' || u.length > 400) return null;
   let url;
   try { url = new URL(u); } catch { return null; }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
   const host = url.hostname.toLowerCase().replace(/^www\./, '');
-  return JIDELNICEK_WEBY.includes(host) ? url.href : null;
+  return kdekoli || JIDELNICEK_WEBY.includes(host) ? url.href : null;
 }
 
 // Fotka receptu: jen z povolených webů (a jejich CDN na subdoménách) a z obrázků Bloggeru (MaruškaVeg)
@@ -12414,7 +12417,7 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now(), maxReceptu = J
     const vlastni = r.vlastni === true;
     let zdroj = null;
     if (!vlastni) {
-      const url = jidelnicekUrl(r.zdroj && r.zdroj.url);
+      const url = jidelnicekUrl(r.zdroj && r.zdroj.url, { kdekoli: r.typ === 'bez_vareni' });
       const bez = bezOdkazu && r.zdroj && !r.zdroj.url && jidText(r.zdroj.web, 60);
       if (!url && !bez) return { chyba: `${nazev}: odkaz musí vést na jeden z povolených webů (${JIDELNICEK_WEBY.join(', ')}).` };
       zdroj = { web: jidText(r.zdroj.web, 60), autor: jidText(r.zdroj.autor, 60), url: url || null };
@@ -12432,6 +12435,9 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now(), maxReceptu = J
       ...(Number.isFinite(r.hotovo) && r.hotovo > 0 && r.hotovo <= now ? { hotovo: r.hotovo } : {}),
       ...(jidelnicekFotoUrl(r.foto) ? { foto: jidelnicekFotoUrl(r.foto) } : {}),
       ...(r.nahradni === true ? { nahradni: true } : {}),
+      // Které suroviny jídla koupit (okno se surovinami u jídla). Bez výběru platí
+      // výchozí: nové jídlo všechny, jídlo z minulého týdne žádnou.
+      ...(Array.isArray(r.nakupit) ? { nakupit: r.nakupit.filter(x => typeof x === 'string').map(x => jidText(x, 120)).filter(Boolean).slice(0, 40) } : {}),
       ...(typeof r.zMinula === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.zMinula) ? { zMinula: r.zMinula } : {}),
       ...(Number.isFinite(r.fotoPokus) && r.fotoPokus > 0 && r.fotoPokus <= now ? { fotoPokus: r.fotoPokus } : {})
     });
@@ -12448,7 +12454,8 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now(), maxReceptu = J
   }
   const kontrola = (Array.isArray(b.kontrola) ? b.kontrola : []).slice(0, 40)
     .map(k => ({ bod: jidText(k && k.bod, 160), ok: !!(k && k.ok === true), poznamka: jidText(k && k.poznamka, 300) })).filter(k => k.bod);
-  const upozorneni = (Array.isArray(b.upozorneni) ? b.upozorneni : []).slice(0, 15).map(x => jidText(x, 400)).filter(Boolean);
+  // Žlutý box v appce: jen to nejnutnější, pár krátkých bodů
+  const upozorneni = (Array.isArray(b.upozorneni) ? b.upozorneni : []).map(x => jidText(x, 160)).filter(Boolean).slice(0, JIDELNICEK_UPOZORNENI_MAX);
   return { plan: { tyden, recepty, nakup, kontrola, upozorneni, ...(nakupHotovo ? { nakupHotovo: true } : {}),
     ...(b.nakupPotvrzeno === false && !nakupHotovo ? { nakupPotvrzeno: false } : {}) } };
 }
@@ -12476,6 +12483,22 @@ function jidelnicekNaSeznam(plan, now = Date.now()) {
   broadcast('nakup', { nakup: state.nakup });
 }
 
+// Přidat položky k tomu, co na seznamu je (bez odebírání) — dokoupení surovin
+function jidelnicekPridejNaSeznam(polozky, now = Date.now()) {
+  let t = now, pridano = 0;
+  for (const n of polozky) {
+    if (state.nakup.filter(x => !x.koupeno).length >= NAKUP_MAX || state.nakup.length >= NAKUP_CELKEM_MAX) break;
+    let id;
+    while (!id || state.nakup.some(x => x.id === id)) id = 'n_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+    const mnozstvi = jidelnicekMnozstvi(n);
+    state.nakup.push({ id, text: (n.nazev + (mnozstvi ? ' ' + mnozstvi : '')).slice(0, NAKUP_TEXT_MAX), t: t++,
+      nazev: n.nazev, mnozstvi, kategorie: n.kategorie, zdroj: 'jidelnicek' });
+    pridano++;
+  }
+  if (pridano) broadcast('nakup', { nakup: state.nakup });
+  return pridano;
+}
+
 // Neuvařená jídla z minulého jídelníčku zůstávají (nakoupeno na ně už je) a nová
 // přibudou před ně. Starší než 14 dní se dál nevláčí. Stejný týden = oprava, přepíše vše.
 const JIDELNICEK_PREVOD_DNI = 14;
@@ -12484,7 +12507,8 @@ function jidelnicekZbyva(plan) {
   if (!st || st.tyden === plan.tyden) return [];
   const den = t => Date.parse(t + 'T12:00:00Z') / 86400000;
   return st.recepty.filter(r => !r.hotovo && !r.nahradni)
-    .map(r => ({ ...r, zMinula: r.zMinula || st.tyden }))
+    // Nový týden: výběr surovin k dokoupení začíná načisto
+    .map(({ nakupit, ...r }) => ({ ...r, zMinula: r.zMinula || st.tyden }))
     .filter(r => den(plan.tyden) - den(r.zMinula) <= JIDELNICEK_PREVOD_DNI);
 }
 
@@ -12535,6 +12559,19 @@ function jidelnicekSecti(recepty, nakupUlohy = []) {
   });
 }
 
+// Suroviny jídla, které se mají koupit: výběr z okna u jídla, jinak výchozí —
+// nové jídlo všechny, jídlo z minulého týdne (na to už je nakoupeno) žádnou.
+function jidelnicekVybraneSuroviny(r) {
+  if (Array.isArray(r.nakupit)) return r.suroviny.filter(x => r.nakupit.includes(x.nazev));
+  return r.zMinula ? [] : r.suroviny;
+}
+// Co jde na nákup: vybrané suroviny neuvařených jídel. Náhradní a uvařená nikdy.
+function jidelnicekKNakupu(recepty) {
+  return recepty.filter(r => !r.nahradni && !r.hotovo)
+    .map(r => ({ ...r, suroviny: jidelnicekVybraneSuroviny(r) }))
+    .filter(r => r.suroviny.length);
+}
+
 const jidelnicekNepotvrzeny = res => {
   const j = state.jidelnicek;
   if (!j) { res.status(404).json({ error: 'Jídelníček není.' }); return null; }
@@ -12560,6 +12597,31 @@ app.post('/api/jidelnicek/recept', (req, res) => {
 });
 
 // „Přidat na nákupní seznam": suroviny vybraných nových jídel na seznam, náhradní pryč
+// Okno se surovinami u jídla: které koupit. Platí i po potvrzení výběru — nově
+// zaškrtnuté suroviny se pak rovnou přidají na seznam (k tomu, co tam je).
+app.post('/api/jidelnicek/nakup-jidla', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const j = state.jidelnicek;
+  if (!j) return res.status(404).json({ error: 'Jídelníček není.' });
+  const b = req.body || {};
+  const r = Number.isInteger(b.index) ? j.recepty[b.index] : null;
+  if (!r || r.nazev !== b.nazev) return res.status(404).json({ error: 'Recept se mezitím změnil — obnov stránku.' });
+  if (r.nahradni) return res.status(400).json({ error: 'Náhradní jídlo nejdřív aktivuj.' });
+  if (!Array.isArray(b.nakupit)) return res.status(400).json({ error: 'Chybí výběr surovin.' });
+  const nazvy = new Set(r.suroviny.map(x => x.nazev));
+  const vyber = [...new Set(b.nakupit.filter(x => typeof x === 'string' && nazvy.has(x)))];
+  const predtim = new Set(jidelnicekVybraneSuroviny(r).map(x => x.nazev));
+  r.nakupit = vyber;
+  let pridano = 0;
+  const nove = vyber.filter(x => !predtim.has(x));
+  if (j.nakupPotvrzeno !== false && nove.length && !r.hotovo) {
+    pridano = jidelnicekPridejNaSeznam(jidelnicekSecti([{ ...r, suroviny: r.suroviny.filter(x => nove.includes(x.nazev)) }], j.nakup));
+  }
+  broadcast('jidelnicek', { jidelnicek: j });
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  res.json({ ok: true, pridano, jidelnicek: j });
+});
+
 app.post('/api/jidelnicek/potvrdit', (req, res) => {
   if (!requireAuth(req, res)) return;
   const j0 = state.jidelnicek;
@@ -12567,9 +12629,12 @@ app.post('/api/jidelnicek/potvrdit', (req, res) => {
   // protože jidelnicekNaSeznam nejdřív odebere nekoupené položky jídelníčku
   if (j0 && j0.nakupPotvrzeno !== false) {
     if (!j0.nakup || !j0.nakup.length) return res.status(400).json({ error: 'V jídelníčku nejsou suroviny k přidání.' });
-    // Přepočítat jen z neuvařených jídel — na uvařená (s fajfkou) se už nekupuje
-    const nakup = jidelnicekSecti(j0.recepty.filter(r => !r.nahradni && !r.zMinula && !r.hotovo), j0.nakup);
-    if (!nakup.length) return res.status(400).json({ error: 'Všechna jídla jsou uvařená — není co přidat.' });
+    // Přepočítat jen z vybraných neuvařených jídel — na uvařená (s fajfkou) se už nekupuje
+    const nakup = jidelnicekSecti(jidelnicekKNakupu(j0.recepty), j0.nakup);
+    if (!nakup.length) {
+      const vse = j0.recepty.filter(r => !r.nahradni).every(r => r.hotovo);
+      return res.status(400).json({ error: vse ? 'Všechna jídla jsou uvařená — není co přidat.' : 'Není vybrané žádné jídlo k nákupu.' });
+    }
     jidelnicekNaSeznam({ nakup }, Date.now());
     if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
     return res.json({ ok: true, polozek: nakup.length, znovu: true, jidelnicek: j0 });
@@ -12577,7 +12642,8 @@ app.post('/api/jidelnicek/potvrdit', (req, res) => {
   const j = jidelnicekNepotvrzeny(res);
   if (!j) return;
   const nove = j.recepty.filter(r => !r.nahradni && !r.zMinula);
-  const nakup = jidelnicekSecti(nove, j.nakup);
+  const vybrane = jidelnicekKNakupu(j.recepty);
+  const nakup = jidelnicekSecti(vybrane, j.nakup);
   j.recepty = j.recepty.filter(r => !r.nahradni);
   j.nakup = nakup;
   j.nakupPotvrzeno = true;
@@ -12585,7 +12651,7 @@ app.post('/api/jidelnicek/potvrdit', (req, res) => {
   jidelnicekNaSeznam({ nakup }, Date.now());
   broadcast('jidelnicek', { jidelnicek: j });
   if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
-  addLog(`Jídelníček: vybráno ${nove.length} jídel, ${nakup.length} položek na nákupní seznam`);
+  addLog(`Jídelníček: vybráno ${nove.length} jídel, nakupuje se na ${vybrane.length}, ${nakup.length} položek na nákupní seznam`);
   res.json({ ok: true, polozek: nakup.length, jidelnicek: j });
 });
 

@@ -8,6 +8,13 @@ const NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Mléčné vý
 const SKLADBA = [['vecere', 'pracovni', 4], ['vecere', 'vikend', 1], ['vecere', 'bez_vareni', 1],
   ['peceni', 'peceni', 1], ['snidane', 'pracovni_snidane', 1], ['snidane', 'vikend_snidane', 1]];
 const PREVOD = { kg: ['g', 1000], l: ['ml', 1000], dl: ['ml', 100] };
+// Podobná jídla — v jednom týdnu nejvýš jedno (klíč je bez diakritiky, malými)
+const PODOBNE_TORTILLY = /taco|tortil|wrap|burrit|quesadil|fajit|enchilad|nachos/;
+const PODOBNE = [[/rizot/, 'rizoto'], [/lasagn/, 'lasagne'], [/curry|kari\b/, 'kari/curry'], [/pizz/, 'pizza'],
+  [/burger/, 'burger'], [/gulas/, 'guláš'], [/polevk|vyvar/, 'polévka'], [/bowl|miska/, 'miska/bowl']];
+// Slova, která v postupu „bez vaření" nemají co dělat
+const VARENI = /\b(uvar|vari|varte|povar|pec(?!iv)|upec|zapec|smaz|osmaz|restuj|orestuj|griluj|dus(?!led)|podus|trou|panvi|panev|rozpal)/;
+const UPOZORNENI_MAX = 3, UPOZORNENI_DELKA = 100;
 // Doma je vždycky — v receptu ano, na nákupní seznam ne
 const DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
 
@@ -42,6 +49,18 @@ function zkontroluj(plan, historie = [], zbyva = []) {
     if (!(b >= 25 && b <= 30)) varovani.push(`${r.nazev}: veganské jídlo má mít 25–30 g bílkovin na porci (má ${b ?? '?'}).`);
   }
   if (!recepty.some(r => s(r, 'tortilla'))) chyby.push('Chybí jídlo s tortillami.');
+  // Tortilly právě jednou — a žádná dvě podobná jídla (2× tacos, wrap + burrito…)
+  const tortilly = recepty.filter(r => s(r, 'tortilla') || PODOBNE_TORTILLY.test(klic(r.nazev)));
+  if (tortilly.length > 1) chyby.push(`Podobná jídla s tortillou (tacos, wrapy, burrito…) jen jednou týdně, jsou ${tortilly.length}×: ${tortilly.map(r => r.nazev).join(', ')}.`);
+  for (const [vzor, popis] of PODOBNE) {
+    const stejne = recepty.filter(r => vzor.test(klic(r.nazev)));
+    if (stejne.length > 1) chyby.push(`Podobná jídla (${popis}) jen jednou týdně: ${stejne.map(r => r.nazev).join(', ')}.`);
+  }
+  // Rychlá večeře bez vaření: nic se nevaří ani nepeče
+  for (const r of recepty.filter(r => r.typ === 'bez_vareni')) {
+    const text = klic((r.postup || []).join(' ') + ' ' + (r.cas || ''));
+    if (VARENI.test(text)) chyby.push(`${r.nazev}: rychlá večeře bez vaření nesmí nic vařit, péct ani smažit.`);
+  }
   const brambory = hlavni.filter(r => s(r, 'brambory')).length;
   if (brambory > 1) chyby.push(`Brambory nejvýš 1× týdně, jsou ${brambory}×.`);
   for (const x of ['mozzarella', 'cottage', 'tvaroh']) if (!recepty.some(r => s(r, x))) chyby.push(`Chybí ${x}.`);
@@ -61,21 +80,23 @@ function zkontroluj(plan, historie = [], zbyva = []) {
   for (const r of vsechny.filter(r => r.typ === 'pracovni_snidane')) {
     if ((r.suroviny || []).some(x => /vejce|vajic/.test(klic(x.nazev)))) chyby.push(`${r.nazev}: pracovní snídaně je bez vajec.`);
   }
-  // Opakování z minulých týdnů
-  const dřív = new Set((historie || []).flatMap(h => (h.nazvy || []).map(klic)));
+  // Opakování: jen proti minulému týdnu (starší týdny nevadí)
+  const dřív = new Set(((minule && minule.nazvy) || []).map(klic));
   const zustava = new Set((zbyva || []).map(klic));
   for (const r of vsechny) if (zustava.has(klic(r.nazev))) chyby.push(`${r.nazev}: v jídelníčku už zůstává z minula — vyber jiné.`);
   const nazvy = vsechny.map(r => klic(r.nazev));
   if (new Set(nazvy).size !== nazvy.length) chyby.push('Některé jídlo je v jídelníčku dvakrát (i mezi náhradními).');
-  for (const r of vsechny) if (!zustava.has(klic(r.nazev)) && dřív.has(klic(r.nazev))) varovani.push(`${r.nazev}: bylo v některém z minulých týdnů.`);
+  for (const r of vsechny) if (!zustava.has(klic(r.nazev)) && dřív.has(klic(r.nazev))) chyby.push(`${r.nazev}: bylo minulý týden — vyber jiné.`);
 
   // Zdroje a údaje u receptů (i náhradních)
   for (const r of vsechny) {
     const kde = r.nazev || '(bez názvu)';
     if (r.vlastni !== true) {
-      let host = '';
-      try { host = new URL(r.zdroj && r.zdroj.url).hostname.replace(/^www\./, ''); } catch { /* níž */ }
-      if (!WEBY.includes(host)) chyby.push(`${kde}: odkaz musí vést na ${WEBY.join(', ')} (nebo vlastni: true).`);
+      let host = '', proto = '';
+      try { const u = new URL(r.zdroj && r.zdroj.url); host = u.hostname.replace(/^www\./, ''); proto = u.protocol; } catch { /* níž */ }
+      // Rychlá večeře bez vaření smí být z jakéhokoli webu (na povolených jich je málo)
+      if (r.typ === 'bez_vareni') { if (!/^https?:$/.test(proto)) chyby.push(`${kde}: chybí platný odkaz (nebo vlastni: true).`); }
+      else if (!WEBY.includes(host)) chyby.push(`${kde}: odkaz musí vést na ${WEBY.join(', ')} (nebo vlastni: true).`);
     }
     if (!Array.isArray(r.suroviny) || !r.suroviny.length) chyby.push(`${kde}: chybí suroviny.`);
     for (const x of r.suroviny || []) if (!DOMA.includes(klic(x.nazev)) && (!x.nazev || !Number.isFinite(x.mnozstvi) || !x.jednotka)) chyby.push(`${kde}: surovina „${x.nazev || '?'}" bez přesného množství a jednotky.`);
@@ -115,6 +136,10 @@ function zkontroluj(plan, historie = [], zbyva = []) {
   for (const [k] of vNakupu) if (!soucet.has(k)) chyby.push(`Nákup: ${k.split('|')[0]} není v žádném receptu.`);
 
   for (const k of plan.kontrola || []) if (!k.ok) varovani.push(`Kontrola nesplněna: ${k.bod}${k.poznamka ? ' — ' + k.poznamka : ''}`);
+  // Žlutý box v appce: jen nezbytné minimum, krátké body
+  const upoz = Array.isArray(plan.upozorneni) ? plan.upozorneni : [];
+  if (upoz.length > UPOZORNENI_MAX) chyby.push(`Upozornění nejvýš ${UPOZORNENI_MAX} (je ${upoz.length}) — nech jen to nezbytné.`);
+  for (const u of upoz) if (String(u).length > UPOZORNENI_DELKA) chyby.push(`Upozornění je dlouhé (${String(u).length} znaků, max ${UPOZORNENI_DELKA}): zkrať na krátký bod.`);
   return { chyby, varovani };
 }
 

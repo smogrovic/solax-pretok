@@ -1,6 +1,6 @@
 # Úloha: jídelníček na příští týden
 
-Spouští se v pátek ráno jako naplánovaná úloha (a kdykoli ručně). Výsledek se pošle do
+Spouští se v pátek ve 12:00 jako naplánovaná úloha (a kdykoli ručně). Výsledek se pošle do
 appky Solinátor. Appka ho ukáže na stránce Nákup a jeho suroviny dá na nákupní seznam.
 
 Pravidla jídelníčku jsou v `jidelnicek/PROMPT.md`. Platí bez výjimek. Formát výstupu
@@ -10,11 +10,14 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 ## Postup
 
 1. **Historie:** `curl -s https://solax-pretok.onrender.com/api/jidelnicek/historie > /tmp/historie.json`.
-   Obsahuje názvy jídel z posledních týdnů a příznak `ryba`, dále `zname` (suroviny, ke kterým
+   Obsahuje názvy jídel z posledních týdnů (první záznam = minulý týden) a příznak `ryba`, dále `zname` (suroviny, ke kterým
    appka zná konkrétní výrobek na Rohlíku) a `doma` (sůl, pepř).
    `zbyva` jsou neuvařená jídla, která v jídelníčku zůstávají (nakoupeno na ně je) — nová jídla
-   je nesmí opakovat a do `nakup` za ně nic nepatří. Nový jídelníček má i tak plnou skladbu. Jídla se nemají opakovat a ryba
-   má být jednou za 14 dní: když byla minulý týden, teď žádná, jinak právě jedna.
+   je nesmí opakovat a do `nakup` za ně nic nepatří. Nový jídelníček má i tak plnou skladbu.
+   **Neopakuj nic z minulého týdne:** jídla, hlavní zdroj bílkovin, luštěninu ani přílohy (starší týdny nevadí).
+   **Žádná podobná jídla** v jednom týdnu: jen jedno jídlo s tortillou (tacos, wrap, burrito, quesadilla…),
+   nejvýš jedno rizoto, kari, polévka, miska apod. Ryba má být jednou za 14 dní: když byla minulý týden,
+   teď žádná, jinak právě jedna.
    Pokud appka neodpoví (Render se probouzí), zkus to znovu za minutu, nejvýš 3×.
 2. **Recepty:** hledej (WebSearch) a hlavně **otevři** (WebFetch) konkrétní recepty jen na:
    `maruskaveg.com`, `buchtavtroube.cz`, `receptyodanicky.cz`, `karolinafour.cz`.
@@ -22,6 +25,9 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
    Pracovní večeře ber z více webů. Každý převzatý recept musí být otevřený a zkontrolovaný
    (název, suroviny, postup, porce). Když se recept dohledat nedá, vezmi jiný, nebo napiš
    vlastní (`vlastni: true`, bez odkazu). Odkazy nikdy nevymýšlej.
+   **Výjimka — večeře bez vaření (`bez_vareni`):** smí být z jakéhokoli webu (vyhledej WebSearch, otevři
+   WebFetch), a když nic nenajdeš, vymysli vlastní (`vlastni: true`). Nesmí se nic vařit ani péct —
+   v postupu ani v čase nepiš vaření, pečení, smažení, restování, troubu ani panev.
    Pokud jsou weby nedostupné (síť prostředí je nepovoluje), **nic neposílej** a skonči se
    zprávou, které domény je potřeba povolit. Nic si nevymýšlej.
 3. **Přepočet:** suroviny přepočítej na porce podle promptu (pracovní večeře 4 + 1 krabička,
@@ -50,7 +56,7 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
   }],
   "nakup": [{ "kategorie": "Mléčné výrobky a sýry", "nazev": "Mozzarella", "mnozstvi": 250, "jednotka": "g", "odhad": false, "poznamka": "" }],
   "kontrola": [{ "bod": "Je přesně 5 hlavních jídel?", "ok": true, "poznamka": "" }],
-  "upozorneni": ["Co se nepodařilo ověřit nebo splnit."]
+  "upozorneni": ["Krátký bod, jen to nejnutnější."]
 }
 ```
 
@@ -72,7 +78,9 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 - **Nákup** je přesný součet surovin. Položka se jmenuje **stejně** jako surovina v receptech
   (stejné názvy napříč recepty, jinak se nesečtou) a má stejnou jednotku (kg/g a l/ml se převádí).
   Kategorie jsou přesně ty z promptu (sekce 13). Bez čísla jen s `"odhad": true`.
-- `kontrola` = body ze sekce 15 promptu, poctivě vyplněné.
+- `kontrola` = body ze sekce 15 promptu, poctivě vyplněné (appka je neukazuje, slouží ke kontrole).
+- `upozorneni`: **jen nezbytné minimum**, nejvýš 3 krátké body (do 100 znaků). Nic, co je v pořádku,
+  a nic, co je vidět z receptů. Když není co hlásit, dej prázdné pole.
 
 5. **Kontrola:** `node jidelnicek/over.js /tmp/plan.json /tmp/historie.json`.
    Každou `CHYBA` oprav a spusť znovu, dokud nevypíše OK. `UPOZORNĚNÍ` buď vyřeš, nebo ho
