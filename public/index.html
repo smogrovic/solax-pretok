@@ -14767,7 +14767,8 @@ async function pruvodceOtevri(jenPolozka = null, { vse = false } = {}) {
   pruvodce.radky.forEach((r, i) => {
     const p = r.polozka;
     r.vyber = p.vyprodano ? null : (p.vyber || rohlikZname[rohlikKlicPolozky(p)] || null);
-    r.mnozstvi = p.kusu || 1;
+    r.mnozstvi = (p.kusuRucne && p.kusu) || (r.vyber && pruvodceSpocitej(p, r.vyber)) || p.kusu || 1;
+    r.rucne = !!(p.kusuRucne && p.kusu);
     r.znamy = !!r.vyber;
     if (!r.vyber || pruvodce.jen || p.vyprodano) pruvodce.kroky.push(i);
   });
@@ -14794,6 +14795,36 @@ function pruvodceJdi(krok) {
   pruvodceHledej();
 }
 
+// Kolik balení objednat, aby to odpovídalo receptům: potřeba (z položky seznamu,
+// např. „2,3 plechovky" nebo „700 g") / velikost balení výrobku („400 g", „4 x 125 g").
+// Desetiny do ,3 dolů, od ,4 nahoru (2,3 → 2; 2,4 → 3), vždy aspoň 1.
+// Když se to spočítat nedá (neznámá velikost, lžíce…), vrátí null.
+const BALENI_JEDNOTKY = /^(plech|konzerv|balen|bal\.?$|sklenic|kelim|kelím|sacek|sáček|sáčk|sack|krabic|tub|lahev|láhev|lahv|láhv|svaz|hlav|kostk|bochn|bal$)/;
+function baleniZaokrouhli(x) {
+  const n = Math.floor(x + 1e-9);
+  return Math.max(1, Math.min(20, x - n > 0.3 + 1e-9 ? n + 1 : n));
+}
+function baleniVelikost(t) {
+  const s = String(t || '').toLowerCase().replace(/(\d),(\d)/g, '$1.$2');
+  const m = s.match(/(?:(\d+)\s*[x×]\s*)?(\d+(?:\.\d+)?)\s*(kg|g|ml|l|ks)(?![a-zá-ž])/);
+  if (!m) return null;
+  const v = Number(m[2]) * (m[1] ? Number(m[1]) : 1);
+  return { kg: [v * 1000, 'g'], g: [v, 'g'], l: [v * 1000, 'ml'], ml: [v, 'ml'], ks: [v, 'ks'] }[m[3]];
+}
+function pruvodceSpocitej(polozka, vyrobek) {
+  const t = String((polozka && polozka.mnozstvi) || '').trim().replace(/(\d),(\d)/g, '$1.$2');
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+  if (!m || !vyrobek) return null;
+  const kolik = Number(m[1]), jedn = m[2].toLowerCase().trim();
+  if (!(kolik > 0)) return null;
+  const bal = baleniVelikost(vyrobek.jednotka) || baleniVelikost(vyrobek.nazev);
+  if (BALENI_JEDNOTKY.test(jedn)) return baleniZaokrouhli(kolik);   // 2,3 plechovky = 2 plechovky
+  const potreba = baleniVelikost(t);
+  if (potreba && potreba[1] === 'ks') return baleniZaokrouhli(bal && bal[1] === 'ks' ? kolik / bal[0] : kolik);
+  if (!potreba || !bal || bal[1] !== potreba[1] || !(bal[0] > 0)) return null;
+  return baleniZaokrouhli(potreba[0] / bal[0]);
+}
+
 const pruvodceCena = c => c.toFixed(2).replace('.', ',') + ' Kč';
 
 function pruvodcePocet(r, rodic) {
@@ -14801,8 +14832,8 @@ function pruvodcePocet(r, rodic) {
   const minus = jidEl('button', '', mn, '−'); minus.type = 'button';
   jidEl('span', 'rohlik-pocet', mn, r.mnozstvi + '×');
   const plus = jidEl('button', '', mn, '+'); plus.type = 'button';
-  minus.addEventListener('click', () => { r.mnozstvi = Math.max(1, r.mnozstvi - 1); pruvodceUloz(r); renderPruvodce(); });
-  plus.addEventListener('click', () => { r.mnozstvi = Math.min(20, r.mnozstvi + 1); pruvodceUloz(r); renderPruvodce(); });
+  minus.addEventListener('click', () => { r.mnozstvi = Math.max(1, r.mnozstvi - 1); r.rucne = true; pruvodceUloz(r); renderPruvodce(); });
+  plus.addEventListener('click', () => { r.mnozstvi = Math.min(20, r.mnozstvi + 1); r.rucne = true; pruvodceUloz(r); renderPruvodce(); });
 }
 
 // Výběr a počet kusů se hned uloží k položce seznamu — zavřením okna se nic neztratí
@@ -14811,8 +14842,9 @@ function pruvodceUloz(r) {
   const vyber = { productId: r.vyber.productId, nazev: r.vyber.nazev, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null,
     obrazek: r.vyber.obrazek || null, jednotka: r.vyber.jednotka || null };
   r.polozka.vyber = vyber; r.polozka.kusu = r.mnozstvi; delete r.polozka.vyprodano;
+  if (r.rucne) r.polozka.kusuRucne = true; else delete r.polozka.kusuRucne;
   fetch('/api/nakup/' + encodeURIComponent(r.polozka.id) + '/vyber', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ vyber, kusu: r.mnozstvi }) }).catch(() => {});
+    body: JSON.stringify({ vyber, kusu: r.mnozstvi, rucne: !!r.rucne }) }).catch(() => {});
   bezpecne(renderNakup);
 }
 
@@ -14852,7 +14884,7 @@ function renderPruvodce() {
     for (const v of (r.vysledky || []).slice(0, 6)) {
       if (ukazane.has(String(v.productId))) continue;
       if (r.polozka.vyprodano && v.nazev === r.polozka.vyprodano) continue;
-      vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; pruvodceUloz(r); renderPruvodce(); }));
+      vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; const n = pruvodceSpocitej(r.polozka, v); if (n) { r.mnozstvi = n; r.rucne = false; } pruvodceUloz(r); renderPruvodce(); }));
     }
     const info = r.hledam ? 'Hledám…' : r.chyba ? r.chyba : (r.vysledky && !r.vysledky.length ? 'Nic se nenašlo — přeskoč, nebo dokup jinde.' : '');
     if (info) jidEl('div', 'rohlik-info', pruvodceObsahEl, info);
@@ -14906,7 +14938,7 @@ function renderPruvodce() {
 async function pruvodcePridej() {
   const radky = pruvodce.radky.filter(r => r.vyber && !r.preskocit && !r.smazano);
   const polozky = radky.map(r => ({ nakupId: r.polozka.id, productId: r.vyber.productId, nazev: r.vyber.nazev,
-    obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, mnozstvi: r.mnozstvi }));
+    obrazek: r.vyber.obrazek || null, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null, jednotka: r.vyber.jednotka || null, mnozstvi: r.mnozstvi }));
   if (!polozky.length) return;
   document.getElementById('pruvodceDal').disabled = true;
   pruvodceStavEl.textContent = 'Přidávám…';

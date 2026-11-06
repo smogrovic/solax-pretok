@@ -196,13 +196,14 @@ setTimeout(async () => {
   check('souhrn: všechny položky', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_ruc00001,n_jid00001,n_jid00002,n_jid00003');
   check('  známá s puntíkem a výrobkem', obsah.querySelector('.pruvodce-radek[data-id="n_jid00003"]').textContent.includes('🟢 Mozzarella · 250 g') && obsah.textContent.includes('Galbani Mozzarella 125 g'), true);
   check('  přeskočená', obsah.querySelector('.pruvodce-radek[data-id="n_jid00001"]').classList.contains('preskoceno'), true);
-  check('  cena z Rohlíku sečtená', obsah.querySelector('.pruvodce-soucet').textContent, 'Orientačně 79,90 Kč podle cen na Rohlíku');
+  check('  cena z Rohlíku sečtená', obsah.querySelector('.pruvodce-soucet').textContent, 'Orientačně 109,80 Kč podle cen na Rohlíku');
   check('  tlačítko počítá', dal.textContent, 'Přidat do košíku (3)');
   dotazy = [];
   dal.click(); await pockej(60);
   const kos = dotazy.find(d => d.url === '/api/rohlik/kosik');
   check('do košíku správné výrobky a počty', JSON.stringify(kos.telo.polozky.map(p => [p.nakupId, p.productId, p.mnozstvi])),
-    JSON.stringify([['n_ruc00001', 1402, 2], ['n_jid00002', 1101, 1], ['n_jid00003', 11, 1]]));
+    JSON.stringify([['n_ruc00001', 1402, 2], ['n_jid00002', 1101, 1], ['n_jid00003', 11, 2]]));
+  check('  mozzarella 250 g z balení 125 g → 2× (spočítáno podle receptu)', kos.telo.polozky.find(p => p.nakupId === 'n_jid00003').mnozstvi, 2);
   check('  hláška, objednávka se neodesílá', document.getElementById('pruvodceStav').textContent, 'Přidáno 3 položek. Objednávku dokonči v appce Rohlík.');
   check('  zbude jen přeskočený tvaroh', [...obsah.querySelectorAll('.pruvodce-radek')].map(r => r.dataset.id).join(), 'n_jid00001');
   document.getElementById('pruvodceZavrit').click();
@@ -217,6 +218,21 @@ setTimeout(async () => {
   for (let k = 0; k < 3; k++) { obsah.querySelector('.pruvodce-preskocit').click(); await pockej(30); }
   check('  známá mozzarella je předvybraná', obsah.querySelector('.pruvodce-titul').textContent + ' ' + obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Galbani'), 'Mozzarella250 g true');
   document.getElementById('pruvodceZavrit').click();
+
+  R.push('\\n3d) Počet balení podle receptu (do ,3 dolů, od ,4 nahoru)');
+  const sp = (m, v) => pruvodceSpocitej({ mnozstvi: m }, v);
+  check('2,3 plechovky → 2', sp('2,3 plechovky', { nazev: 'Rajčata 400 g' }), 2);
+  check('2,4 plechovky → 3', sp('2,4 plechovky', { nazev: 'Rajčata' }), 3);
+  check('0,2 plechovky → aspoň 1', sp('0,2 plechovky', { nazev: 'x' }), 1);
+  check('700 g z 500 g (1,4) → 2', sp('700 g', { nazev: 'Kuřecí prsa', jednotka: '500 g' }), 2);
+  check('650 g z 500 g (1,3) → 1', sp('650 g', { nazev: 'Kuřecí prsa 500 g' }), 1);
+  check('1,4 kg z 1 kg → 2', sp('1,4 kg', { nazev: 'Mouka hladká 1 kg' }), 2);
+  check('375 g z 4 × 125 g → 1', sp('375 g', { nazev: 'Mozzarella 4 x 125 g' }), 1);
+  check('1,5 l z 1 l → 2', sp('1,5 l', { nazev: 'Mléko 1 l' }), 2);
+  check('300 ml z 250 ml (1,2) → 1', sp('300 ml', { jednotka: '250 ml' }), 1);
+  check('3 ks na kusy → 3', sp('3 ks', { nazev: 'Paprika červená' }), 3);
+  check('14 ks vajec z 10 ks → 2', sp('14 ks', { nazev: 'Vejce 10 ks' }), 2);
+  check('lžíce ani neznámá velikost se nepočítá', JSON.stringify([sp('2 lžíce', { nazev: 'Olej 1 l' }), sp('500 g', { nazev: 'Tvaroh' }), sp('', { nazev: 'x 1 kg' })]), '[null,null,null]');
 
   R.push('\\n3c) Pamatování výběru, Nekupovat, vyprodané');
   const nakupPred = nakupData;
@@ -233,7 +249,8 @@ setTimeout(async () => {
   obsah.querySelectorAll('.rohlik-mnozstvi button')[1].click();
   await pockej(30);
   const ulozeni = dotazy.filter(d => d.url === '/api/nakup/n_ruc00001/vyber');
-  check('výběr i počet se hned uloží na server', ulozeni.length + ' ' + JSON.stringify(ulozeni.pop().telo.kusu), '2 2');
+  check('  výběr výrobku: počet spočítaný, ne ruční', JSON.stringify(ulozeni[0] && ulozeni[0].telo.rucne), 'false');
+  check('výběr i počet se hned uloží na server (+ = ruční)', ulozeni.length + ' ' + JSON.stringify(ulozeni.slice(-1)[0].telo.kusu) + ' ' + ulozeni.slice(-1)[0].telo.rucne, '2 2 true');
   document.getElementById('pruvodceZavrit').click();
   check('  na seznamu značka vybráno', document.querySelector('#nakupSeznam li[data-id="n_ruc00001"] .nakup-znacka').textContent, 'vybráno');
   document.getElementById('rohlikKosikBtn').click();

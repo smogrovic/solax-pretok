@@ -2009,6 +2009,7 @@ function nakupObnov(b, now = Date.now()) {
     const v = nakupVyberOver(x.vyber);
     if (v) p.vyber = v;
     if (Number.isInteger(x.kusu) && x.kusu >= 1 && x.kusu <= 20) p.kusu = x.kusu;
+    if (p.kusu && x.kusuRucne === true) p.kusuRucne = true;
     if (typeof x.vyprodano === 'string') p.vyprodano = x.vyprodano.slice(0, 120);
     // Položky z jídelníčku nesou název bez množství (klíč pro Rohlík), množství a kategorii
     if (x.zdroj === 'jidelnicek' && typeof x.nazev === 'string' && x.nazev.trim()) {
@@ -2125,6 +2126,9 @@ function nakupVyber(id, b) {
   const k = b && b.kusu;
   if (Number.isInteger(k) && k >= 1 && k <= 20) x.kusu = k;
   else if (k !== undefined) return { kod: 400, chyba: 'Počet kusů 1–20.' };
+  // Počet změněný ručně (+/−) má přednost před výpočtem podle receptu
+  if (b && b.rucne === true && x.kusu) x.kusuRucne = true;
+  else if (b && b.rucne === false) delete x.kusuRucne;
   broadcast('nakup', { nakup: state.nakup });
   return { kod: 200 };
 }
@@ -13988,7 +13992,8 @@ function rohlikZapamatuj(text, v, now = Date.now()) {
   if (!k || !v || (typeof v.productId !== 'number' && typeof v.productId !== 'string')) return;
   state.rohlikVyber[k] = { productId: v.productId, nazev: String(v.nazev || '').slice(0, 120), text: String(text).trim().slice(0, 80),
     obrazek: typeof v.obrazek === 'string' && /^https:\/\//.test(v.obrazek) ? v.obrazek : null,
-    cena: typeof v.cena === 'number' ? v.cena : null, kdy: now };
+    cena: typeof v.cena === 'number' ? v.cena : null,
+    jednotka: typeof v.jednotka === 'string' ? v.jednotka.slice(0, 30) : null, kdy: now };
   const klice = Object.keys(state.rohlikVyber);
   if (klice.length > ROHLIK_VYBER_MAX) {
     klice.sort((a, b) => state.rohlikVyber[a].kdy - state.rohlikVyber[b].kdy);

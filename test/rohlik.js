@@ -200,7 +200,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     const h = build(f);
     h.state.nakup.push({ id: 'n_aaaa1111', text: 'Mléko ', t: 1 }, { id: 'n_bbbb2222', text: 'chleba', t: 2 });
     const r = await h.volej('POST /api/rohlik/kosik', { body: { polozky: [
-      { nakupId: 'n_aaaa1111', productId: 1349777, nazev: 'Kunín Mléko', cena: 24.9, obrazek: 'https://cdn/1.jpg', mnozstvi: 2 },
+      { nakupId: 'n_aaaa1111', productId: 1349777, nazev: 'Kunín Mléko', cena: 24.9, obrazek: 'https://cdn/1.jpg', jednotka: '1 l', mnozstvi: 2 },
       { nakupId: 'n_bbbb2222', productId: 55, nazev: 'Chléb', mnozstvi: 99 }] } });
     const volani = f.log.filter(x => x.telo.method === 'tools/call').pop();
     check('jedním voláním se všemi položkami', JSON.stringify(volani.telo.params), JSON.stringify({ name: 'add_items_to_cart', arguments: { items: [{ productId: 1349777, quantity: 2 }, { productId: 55, quantity: 1 }] } }));
@@ -209,6 +209,7 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  appka se dozví', h.zpravy.some(z => z.u === 'nakup'), true);
     check('  výběr se zapamatuje (bez diakritiky a velikosti)', h.state.rohlikVyber['mleko'] && h.state.rohlikVyber['mleko'].productId, 1349777);
     check('  i s obrázkem a cenou', h.state.rohlikVyber['mleko'].obrazek + ' ' + h.state.rohlikVyber['mleko'].cena, 'https://cdn/1.jpg 24.9');
+    check('  i s velikostí balení (na výpočet počtu)', h.state.rohlikVyber['mleko'].jednotka + ' ' + h.state.rohlikVyber['chleba'].jednotka, '1 l null');
     check('  objednávka se neodesílá (žádný jiný nástroj)', f.log.filter(x => x.telo.method === 'tools/call').every(x => /cart|search/.test(x.telo.params.name)), true);
     const v = await h.volej('GET /api/rohlik/vyber');
     check('výběry jdou přečíst', Object.keys(v.out.vyber).sort().join(), 'chleba,mleko');

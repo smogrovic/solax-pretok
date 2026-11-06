@@ -304,6 +304,13 @@ nadpis('N) Nákupní seznam');
     check('rozpracovaný výběr se uloží', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M', cena: 99.9, obrazek: 'http://x/y.jpg' }, kusu: 2 }).status
       + ' ' + JSON.stringify([w.state.nakup[0].vyber.productId, w.state.nakup[0].vyber.obrazek, w.state.nakup[0].kusu]), '200 [14,null,2]');
     check('  neplatný výrobek 400', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { nazev: 'bez id' } }).status, 400);
+    w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M' }, kusu: 3, rucne: true });
+    check('  ručně změněný počet se označí', w.state.nakup[0].kusu + ' ' + w.state.nakup[0].kusuRucne, '3 true');
+    const zr = build();
+    zr.api.nakupObnov(JSON.parse(JSON.stringify({ nakup: w.state.nakup })));
+    check('    záloha ho ponechá', zr.state.nakup[0].kusuRucne, true);
+    w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M' }, kusu: 2, rucne: false });
+    check('    spočítaný počet ho zruší', w.state.nakup[0].kusu + ' ' + ('kusuRucne' in w.state.nakup[0]), '2 false');
     check('  kusů jen 1–20', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 1 }, kusu: 50 }).status, 400);
     check('  neznámá položka 404', w.zavolej('/api/nakup/:id/vyber', { id: 'n_xxxxxxxx' }, { vyber: null }).status, 404);
     w.state.nakup[0].vyprodano = 'Vejce M';
