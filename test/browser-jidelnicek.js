@@ -82,11 +82,11 @@ setTimeout(async () => {
   await pockej(30);
   check('Přidat na nákupní seznam', dotazy[2] && dotazy[2].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam přidáno 25 položek.');
   check('  potom bez ✕ a náhradních', karta.querySelectorAll('.jid-smazat, details.nahradni, .jid-napoveda').length, 0);
-  check('  tlačítko zůstane jako „Přidat znovu"', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat znovu na nákupní seznam');
+  check('  tlačítko zůstane (stejný název, bez „znovu")', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam');
   odpoved = url => url === '/api/jidelnicek/potvrdit' ? { ok: true, polozek: 27, znovu: true } : { ok: true };
   karta.querySelector('.jid-potvrdit').click();
   await pockej(30);
-  check('  znovu přidá', dotazy.slice(-1)[0].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam znovu přidáno 27 položek.');
+  check('  znovu přidá', dotazy.slice(-1)[0].url + ' ' + document.getElementById('jidZprava').textContent, '/api/jidelnicek/potvrdit Na nákupní seznam přidáno 27 položek.');
 
   R.push('\\n1c) Okno se surovinami');
   const zbyle = { ...JSON.parse(JSON.stringify(VZOR.recepty[0])), nazev: 'Zbylé tortilly', zMinula: '2026-10-26' };
@@ -120,11 +120,14 @@ setTimeout(async () => {
   const pocetDotazu = dotazy.length;
   document.getElementById('jidSurZpet').click();
   check('  Zpět nic neposílá', surOkno.hidden + ' ' + dotazy.length, 'true ' + pocetDotazu);
-  odpoved = () => ({ ok: true, pridano: 3 });
-  druhy.querySelector('.jid-kosik').click();
+  jidelnicekData.nakupPotvrzeno = true; renderJidelnicek();
+  odpoved = () => ({ ok: true });
+  const pred = dotazy.length;
+  [...karta.querySelectorAll('details.jid-recept')][1].querySelector('.jid-kosik').click();
   document.getElementById('jidSurUlozit').click();
   await pockej(50);
-  check('po potvrzení: hned přidané se ohlásí', document.getElementById('jidZprava').textContent, 'Na nákupní seznam přidáno 3 položky.');
+  check('po potvrzení: Uložit jen uloží, na seznam nic nejde', dotazy.slice(pred).map(d => d.url).join() + ' | ' + document.getElementById('jidZprava').textContent,
+    '/api/jidelnicek/nakup-jidla | Uloženo — na seznam to přidá tlačítko „Přidat na nákupní seznam".');
   jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), recepty: VZOR.recepty.map(r => ({ ...r, hotovo: Date.now() })) };
   renderJidelnicek();
   check('uvařená jídla bez košíku', karta.querySelectorAll('.jid-kosik').length, 0);

@@ -3821,7 +3821,7 @@
         <!-- Do košíku na Rohlíku: rovnou podle minula, nebo s výběrem výrobků (fotky) -->
         <div class="rohlik-tlacitka" id="rohlikTlacitka" hidden>
           <button class="rohlik-btn rohlik-btn-smazat" id="nakupSmazatBtn" type="button">🗑️ Smazat</button>
-          <button class="rohlik-btn" id="rohlikKosikBtn" type="button">🛒 Přidat do košíku</button>
+          <button class="rohlik-btn" id="rohlikKosikBtn" type="button">🛒 Poslat na Rohlík.cz</button>
           <button class="rohlik-btn rohlik-btn-krok" id="rohlikKrokBtn" type="button">🧭 Krok po kroku</button>
         </div>
       </div>
@@ -14567,7 +14567,7 @@ async function jidPotvrdit() {
   jidZprava('');
   try {
     const d = await jidPost('/api/jidelnicek/potvrdit', {});
-    jidZprava(`Na nákupní seznam ${d.znovu ? 'znovu ' : ''}přidáno ${d.polozek} položek.`);
+    jidZprava(`Na nákupní seznam přidáno ${d.polozek} ${d.polozek === 1 ? 'položka' : d.polozek > 1 && d.polozek < 5 ? 'položky' : 'položek'}.`);
   } catch (err) { jidZprava(err.message); }
 }
 
@@ -14611,8 +14611,8 @@ async function jidSurUloz() {
   jidSurZavri();
   jidZprava('');
   try {
-    const d = await jidPost('/api/jidelnicek/nakup-jidla', { index, nazev: r.nazev, nakupit });
-    if (d.pridano) jidZprava(`Na nákupní seznam přidáno ${d.pridano} ${d.pridano === 1 ? 'položka' : d.pridano < 5 ? 'položky' : 'položek'}.`);
+    await jidPost('/api/jidelnicek/nakup-jidla', { index, nazev: r.nazev, nakupit });
+    if (jidelnicekData && jidelnicekData.nakupPotvrzeno !== false) jidZprava('Uloženo — na seznam to přidá tlačítko „Přidat na nákupní seznam".');
   } catch (err) { jidZprava(err.message); }
 }
 if (jidSurOknoEl) {
@@ -14695,8 +14695,8 @@ function renderJidelnicek() {
     b.disabled = !j.recepty.some(r => !r.nahradni);
     b.addEventListener('click', jidPotvrdit);
   } else if (j.nakup && j.nakup.length) {
-    // Zůstává i po přidání — kdyby se seznam smazal, jde to přidat znovu
-    const b = jidEl('button', 'jid-potvrdit', obsah, '🛒 Přidat znovu na nákupní seznam');
+    // Zůstává i po přidání — po změně výběru u jídel (nebo smazaném seznamu) přidá aktuální výběr
+    const b = jidEl('button', 'jid-potvrdit', obsah, '🛒 Přidat na nákupní seznam');
     b.type = 'button';
     b.addEventListener('click', jidPotvrdit);
   }

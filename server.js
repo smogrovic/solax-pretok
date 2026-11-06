@@ -12483,21 +12483,6 @@ function jidelnicekNaSeznam(plan, now = Date.now()) {
   broadcast('nakup', { nakup: state.nakup });
 }
 
-// Přidat položky k tomu, co na seznamu je (bez odebírání) — dokoupení surovin
-function jidelnicekPridejNaSeznam(polozky, now = Date.now()) {
-  let t = now, pridano = 0;
-  for (const n of polozky) {
-    if (state.nakup.filter(x => !x.koupeno).length >= NAKUP_MAX || state.nakup.length >= NAKUP_CELKEM_MAX) break;
-    let id;
-    while (!id || state.nakup.some(x => x.id === id)) id = 'n_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0');
-    const mnozstvi = jidelnicekMnozstvi(n);
-    state.nakup.push({ id, text: (n.nazev + (mnozstvi ? ' ' + mnozstvi : '')).slice(0, NAKUP_TEXT_MAX), t: t++,
-      nazev: n.nazev, mnozstvi, kategorie: n.kategorie, zdroj: 'jidelnicek' });
-    pridano++;
-  }
-  if (pridano) broadcast('nakup', { nakup: state.nakup });
-  return pridano;
-}
 
 // Neuvařená jídla z minulého jídelníčku zůstávají (nakoupeno na ně už je) a nová
 // přibudou před ně. Starší než 14 dní se dál nevláčí. Stejný týden = oprava, přepíše vše.
@@ -12610,16 +12595,11 @@ app.post('/api/jidelnicek/nakup-jidla', (req, res) => {
   if (!Array.isArray(b.nakupit)) return res.status(400).json({ error: 'Chybí výběr surovin.' });
   const nazvy = new Set(r.suroviny.map(x => x.nazev));
   const vyber = [...new Set(b.nakupit.filter(x => typeof x === 'string' && nazvy.has(x)))];
-  const predtim = new Set(jidelnicekVybraneSuroviny(r).map(x => x.nazev));
+  // Jen se uloží — na nákupní seznam to jde až tlačítkem „Přidat na nákupní seznam"
   r.nakupit = vyber;
-  let pridano = 0;
-  const nove = vyber.filter(x => !predtim.has(x));
-  if (j.nakupPotvrzeno !== false && nove.length && !r.hotovo) {
-    pridano = jidelnicekPridejNaSeznam(jidelnicekSecti([{ ...r, suroviny: r.suroviny.filter(x => nove.includes(x.nazev)) }], j.nakup));
-  }
   broadcast('jidelnicek', { jidelnicek: j });
   if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
-  res.json({ ok: true, pridano, jidelnicek: j });
+  res.json({ ok: true, jidelnicek: j });
 });
 
 app.post('/api/jidelnicek/potvrdit', (req, res) => {

@@ -237,8 +237,9 @@ nadpis('Okno se surovinami: co koupit na jídlo');
   check('  při potvrzení se na něj nekupuje (mozzarella jen z něj)', h.state.nakup.some(x => x.nazev === 'Mozzarella') + ' ' + /nakupuje se na 8/.test(h.logy.slice(-1)[0]), 'false true');
   const pred = h.state.nakup.length;
   const r1 = h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella', 'Neexistuje'] });
-  check('po potvrzení nově zaškrtnuté rovnou na seznam (jen ty z receptu)', r1.out.pridano + ' ' + (h.state.nakup.length - pred) + ' ' + JSON.stringify(tr().nakupit), '1 1 ["Mozzarella"]');
-  check('  znovu stejný výběr nic nepřidá', h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'] }).out.pridano, 0);
+  check('po potvrzení zaškrtnutí jen uloží výběr (jen suroviny z receptu), seznam beze změny', (h.state.nakup.length - pred) + ' ' + JSON.stringify(tr().nakupit) + ' ' + h.state.nakup.some(x => x.nazev === 'Mozzarella'), '0 ["Mozzarella"] false');
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  check('  na seznam až tlačítkem, bez zdvojení', h.state.nakup.filter(x => x.nazev === 'Mozzarella').length + ' ' + h.state.nakup.filter(x => x.nazev === 'Mozzarella' || !x.koupeno).length, '1 ' + h.state.nakup.length);
   h.state.nakup = [];
   h.volej('POST /api/jidelnicek/potvrdit', {});
   check('„přidat znovu" vezme u jídla jen vybrané', h.state.nakup.some(x => x.nazev === 'Mozzarella')
