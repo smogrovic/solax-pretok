@@ -36,7 +36,7 @@ setTimeout(async () => {
   jidelnicekData = VZOR; renderJidelnicek();
   check('s jídelníčkem vidět', vidi(karta), true);
   check('sekce bez dnů v týdnu', [...karta.querySelectorAll('.jid-sekce')].map(e => e.textContent).join(','), 'Večeře,Pečení,Snídaně');
-  check('deset receptů', karta.querySelectorAll('details.jid-recept').length, 10);
+  check('devět receptů', karta.querySelectorAll('details.jid-recept').length, 9);
   check('nesplněný bod kontroly je vidět', karta.querySelector('.jid-pozor').textContent.includes('Nesplněno: Obsahuje veganské jídlo'), true);
   check('  žlutý box až pod jídly', karta.querySelector('#jidObsah').lastElementChild.classList.contains('jid-pozor'), true);
   const prvni = karta.querySelector('details.jid-recept');
@@ -58,15 +58,15 @@ setTimeout(async () => {
   R.push('\\n1b) Výběr před nákupem');
   jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), nakupPotvrzeno: false }; renderJidelnicek();
   check('nápověda nahoře', karta.querySelector('#jidObsah').firstElementChild.classList.contains('jid-napoveda'), true);
-  check('✕ u aktivních (10), náhradní sekce se 4', karta.querySelectorAll('.jid-smazat').length + ' ' + karta.querySelectorAll('details.nahradni').length, '10 4');
+  check('✕ u aktivních (9), náhradní sekce se 4', karta.querySelectorAll('.jid-smazat').length + ' ' + karta.querySelectorAll('details.nahradni').length, '9 4');
   check('  náhradní dole, šedé, s Aktivovat', [...karta.querySelectorAll('.jid-sekce')].pop().textContent + ' ' + getComputedStyle(karta.querySelector('details.nahradni .jid-hlava')).opacity + ' ' + karta.querySelectorAll('.jid-aktivovat').length, 'Náhradní jídla 0.5 4');
   check('  náhradní bez odškrtávání', karta.querySelector('details.nahradni .nakup-odskrt'), null);
-  check('tlačítko na seznam', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (10 jídel)');
+  check('tlačítko na seznam', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (9 jídel)');
   dotazy = [];
   odpoved = (url, telo) => url === '/api/jidelnicek/recept' ? { ok: true } : url === '/api/jidelnicek/potvrdit' ? { ok: true, polozek: 25, jidelnicek: { ...VZOR, recepty: VZOR.recepty.filter(r => !r.nahradni), nakupPotvrzeno: true } } : { ok: true };
   karta.querySelector('details.nahradni .jid-aktivovat').click();
   await pockej(30);
-  check('Aktivovat pošle akci s názvem', JSON.stringify(dotazy[0] && dotazy[0].telo), JSON.stringify({ index: 10, nazev: 'Krůtí rizoto s hráškem', akce: 'aktivovat' }));
+  check('Aktivovat pošle akci s názvem', JSON.stringify(dotazy[0] && dotazy[0].telo), JSON.stringify({ index: 9, nazev: 'Krůtí rizoto s hráškem', akce: 'aktivovat' }));
   karta.querySelector('.jid-smazat').click();
   await pockej(30);
   check('✕ se nejdřív zeptá', !document.getElementById('potvrzOkno') || !document.getElementById('potvrzOkno').hidden, true);
@@ -251,7 +251,7 @@ setTimeout(async () => {
   jidelnicekData.recepty[3].hotovo = Date.now() - 11 * 3600000; renderJidelnicek();
   check('po 11 h ještě vidět', !!det(), true);
   jidelnicekData.recepty[3].hotovo = Date.now() - 13 * 3600000; renderJidelnicek();
-  check('po 12 h zmizí', !!det() + ' ' + document.querySelectorAll('#jidKarta details.jid-recept').length, 'false 9');
+  check('po 12 h zmizí', !!det() + ' ' + document.querySelectorAll('#jidKarta details.jid-recept').length, 'false 8');
   jidelnicekData.recepty.filter(r => r.kategorie === 'peceni').forEach(r => { r.hotovo = 1; }); renderJidelnicek();
   check('prázdná sekce se schová', [...document.querySelectorAll('#jidKarta .jid-sekce')].map(e => e.textContent).join(), 'Večeře,Snídaně');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }

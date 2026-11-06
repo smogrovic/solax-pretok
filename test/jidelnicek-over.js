@@ -33,6 +33,9 @@ nadpis('Skladba týdne');
   const v = kopie();
   najdi(v, 'Tvarohová miska s jablkem').suroviny.push({ nazev: 'Vejce', mnozstvi: 2, jednotka: 'ks' });
   check('pracovní snídaně s vejci', chyby(v).some(c => c.includes('pracovní snídaně je bez vajec')), true);
+  const dve = kopie();
+  dve.recepty.push({ ...JSON.parse(JSON.stringify(najdi(dve, 'Tvarohová miska s jablkem'))), nazev: 'Druhá tvarohová miska' });
+  check('pracovní snídaně jen jedna', chyby(dve).some(c => c.startsWith('snidane/pracovni_snidane: má být 1, je 2')), true);
   const pon = kopie(); pon.tyden = '2026-11-03';
   check('týden musí začínat pondělím', chyby(pon).includes('tyden 2026-11-03 není pondělí.'), true);
 }

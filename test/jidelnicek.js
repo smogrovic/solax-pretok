@@ -35,20 +35,20 @@ nadpis('Příjem');
 {
   const h = build({ nakup: [{ id: 'n_ruc00001', text: 'Toaletní papír', t: 1 }] });
   const r = h.volej('POST /api/jidelnicek/import', kopie());
-  check('vzor se přijme (10 jídel + 4 náhradní)', r.kod + ' ' + JSON.stringify(r.out), '200 {"ok":true,"receptu":14,"polozek":27}');
+  check('vzor se přijme (9 jídel + 4 náhradní)', r.kod + ' ' + JSON.stringify(r.out), '200 {"ok":true,"receptu":13,"polozek":25}');
   check('  uložen s časem, čeká na výběr', h.state.jidelnicek.tyden + ' ' + (h.state.jidelnicek.vytvoreno > 0) + ' ' + h.state.jidelnicek.nakupPotvrzeno, '2026-11-02 true false');
   check('  na seznam zatím nic', h.state.nakup.length + ' ' + h.zpravy.join(), '1 jidelnicek');
   check('  notifikace', h.push[0], '🍽️ Jídelníček na příští týden | 6 večeří je hotových — vyber jídla a přidej je na nákupní seznam.');
   check('  záloha se uloží hned', h.ulozeni.length, 1);
-  check('  log', h.logy[0], 'Jídelníček na týden od 2026-11-02: 10 jídel + 4 náhradních, čeká na výběr');
+  check('  log', h.logy[0], 'Jídelníček na týden od 2026-11-02: 9 jídel + 4 náhradních, čeká na výběr');
   const pt = h.volej('POST /api/jidelnicek/potvrdit', {});
-  check('přidat na seznam: suroviny 10 jídel', pt.kod + ' ' + pt.out.polozek + ' ' + h.state.jidelnicek.recepty.length + ' ' + h.state.jidelnicek.nakupPotvrzeno, '200 27 10 true');
+  check('přidat na seznam: suroviny 9 jídel', pt.kod + ' ' + pt.out.polozek + ' ' + h.state.jidelnicek.recepty.length + ' ' + h.state.jidelnicek.nakupPotvrzeno, '200 25 9 true');
   check('  appka se dozví', h.zpravy.slice(-2).join(), 'nakup,jidelnicek');
   const moz = h.state.nakup.find(x => x.nazev === 'Mozzarella');
   check('položka na seznamu: název, množství, kategorie', JSON.stringify([moz.text, moz.mnozstvi, moz.kategorie, moz.zdroj]),
     JSON.stringify(['Mozzarella 250 g', '250 g', 'Mléčné výrobky a sýry', 'jidelnicek']));
-  check('  mléko 0,5 l s desetinnou čárkou', h.state.nakup.find(x => x.nazev === 'Mléko').text, 'Mléko 0,5 l');
-  check('  ruční položka zůstala první', h.state.nakup[0].text + ' ' + h.state.nakup.length, 'Toaletní papír 28');
+  check('  mléko 0,2 l s desetinnou čárkou', h.state.nakup.find(x => x.nazev === 'Mléko').text, 'Mléko 0,2 l');
+  check('  ruční položka zůstala první', h.state.nakup[0].text + ' ' + h.state.nakup.length, 'Toaletní papír 26');
 
   // Další týden: staré nekoupené z jídelníčku pryč, odškrtnuté (máme doma) a ruční zůstanou
   h.state.nakup.find(x => x.nazev === 'Cukr').koupeno = Date.now();
@@ -56,7 +56,7 @@ nadpis('Příjem');
   p2.nakup = p2.nakup.filter(n => n.nazev !== 'Mozzarella');
   p2.recepty.forEach(r => { r.suroviny = r.suroviny.filter(s => s.nazev !== 'Mozzarella'); });
   h.vloz(p2);
-  check('nový týden nahradí staré položky', h.state.nakup.filter(x => x.nazev === 'Mozzarella').length + ' ' + h.state.nakup.filter(x => x.zdroj === 'jidelnicek' && !x.koupeno).length, '0 26');
+  check('nový týden nahradí staré položky', h.state.nakup.filter(x => x.nazev === 'Mozzarella').length + ' ' + h.state.nakup.filter(x => x.zdroj === 'jidelnicek' && !x.koupeno).length, '0 24');
   check('  odškrtnuté a ruční zůstanou', h.state.nakup.filter(x => x.koupeno).length + ' ' + h.state.nakup.some(x => x.text === 'Toaletní papír'), '1 true');
   check('historie: nejnovější první', h.state.jidelnicekHistorie.map(x => x.tyden).join(), '2026-11-09,2026-11-02');
   check('  ryba se pamatuje', h.state.jidelnicekHistorie[0].ryba, true);
@@ -77,7 +77,7 @@ nadpis('Výběr: ✕ smazat, aktivovat náhradní, přidat na seznam');
   const j = () => h.state.jidelnicek;
   const idx = n => j().recepty.findIndex(r => r.nazev === n);
   const akce = (nazev, a, x = {}) => h.volej('POST /api/jidelnicek/recept', { index: idx(nazev), nazev, akce: a, ...x });
-  check('smazat jídlo', akce('Zapečené těstoviny s mozzarellou', 'smazat').kod + ' ' + j().recepty.length, '200 13');
+  check('smazat jídlo', akce('Zapečené těstoviny s mozzarellou', 'smazat').kod + ' ' + j().recepty.length, '200 12');
   check('aktivovat náhradní', akce('Krůtí rizoto s hráškem', 'aktivovat').kod + ' ' + ('nahradni' in j().recepty[idx('Krůtí rizoto s hráškem')]), '200 false');
   check('  aktivovat aktivní nejde', akce('Krůtí rizoto s hráškem', 'aktivovat').kod, 400);
   check('jiný název na indexu → 404 (posun)', h.volej('POST /api/jidelnicek/recept', { index: 0, nazev: 'Něco jiného', akce: 'smazat' }).kod, 404);
@@ -92,7 +92,7 @@ nadpis('Výběr: ✕ smazat, aktivovat náhradní, přidat na seznam');
   check('  rýže 300 g + 0,3 kg sečtena', nak('Rýže').mnozstvi, '600 g');
   check('  kategorie ze suroviny', nak('Krůtí prsa').kategorie, 'Maso, ryby, tofu a další bílkoviny');
   check('  sůl ne, ruční zůstala', !!nak('Sůl') + ' ' + h.state.nakup.some(x => x.text === 'Kafe'), 'false true');
-  check('náhradní zmizí, výběr potvrzený', j().recepty.length + ' ' + j().recepty.some(x => x.nahradni) + ' ' + j().nakupPotvrzeno + ' ' + r.out.polozek, '10 false true 25');
+  check('náhradní zmizí, výběr potvrzený', j().recepty.length + ' ' + j().recepty.some(x => x.nahradni) + ' ' + j().nakupPotvrzeno + ' ' + r.out.polozek, '9 false true 23');
   check('  historie s vybranými', h.state.jidelnicekHistorie[0].nazvy.includes('Krůtí rizoto s hráškem') + ' ' + h.state.jidelnicekHistorie[0].nazvy.includes('Zapečené těstoviny s mozzarellou'), 'true false');
   check('po potvrzení ✕ už nejde (409)', akce('Krůtí rizoto s hráškem', 'smazat').kod, 409);
   const pocet = h.state.nakup.length;
@@ -100,7 +100,7 @@ nadpis('Výběr: ✕ smazat, aktivovat náhradní, přidat na seznam');
   check('přidat znovu: bez duplicit', z2.kod + ' ' + z2.out.znovu + ' ' + h.state.nakup.length, '200 true ' + pocet);
   h.state.nakup = [{ id: 'n_ruc00031', text: 'Kafe', t: 1 }];
   h.volej('POST /api/jidelnicek/potvrdit', {});
-  check('  po smazání seznamu vrátí suroviny, ruční zůstane', h.state.nakup.length + ' ' + h.state.nakup.some(x => x.text === 'Kafe'), '26 true');
+  check('  po smazání seznamu vrátí suroviny, ruční zůstane', h.state.nakup.length + ' ' + h.state.nakup.some(x => x.text === 'Kafe'), '24 true');
   // Uvařené jídlo (fajfka) se při opakovaném přidání vynechá
   const koIdx = j().recepty.findIndex(x => x.nazev === 'Švestková buchta');
   h.volej('POST /api/jidelnicek/hotovo', { index: koIdx, hotovo: true });
@@ -126,7 +126,7 @@ nadpis('Výběr: ✕ smazat, aktivovat náhradní, přidat na seznam');
   sm.volej('POST /api/jidelnicek/import', p2);
   const zm = sm.state.jidelnicek.recepty.find(x => x.zMinula);
   check('jídlo z minula smazat nejde', sm.volej('POST /api/jidelnicek/recept', { index: sm.state.jidelnicek.recepty.indexOf(zm), nazev: zm.nazev, akce: 'smazat' }).kod, 400);
-  check('  a náhradní se nepřevádí', sm.state.jidelnicek.recepty.filter(x => x.zMinula).length, 9);
+  check('  a náhradní se nepřevádí', sm.state.jidelnicek.recepty.filter(x => x.zMinula).length, 8);
 }
 
 nadpis('Nový týden: neuvařená jídla zůstanou');
@@ -137,7 +137,7 @@ nadpis('Nový týden: neuvařená jídla zůstanou');
   h.volej('POST /api/jidelnicek/hotovo', { index: 1, hotovo: true });
   // Ruční položka připsaná před generováním i po něm zůstane; staré nekoupené z jídelníčku pryč (nakoupeno)
   h.state.nakup.push({ id: 'n_ruc00011', text: 'Pečivo na víkend', t: 1 });
-  check('zbyva pro úlohu: neuvařená', h.volej('GET /api/jidelnicek/historie').out.zbyva.length, 8);
+  check('zbyva pro úlohu: neuvařená', h.volej('GET /api/jidelnicek/historie').out.zbyva.length, 7);
   const p2 = kopie(); p2.tyden = '2026-11-09';
   p2.recepty.forEach(r => { r.nazev = 'Nové ' + r.nazev; });
   p2.recepty = p2.recepty.filter(r => !r.nahradni);
@@ -145,20 +145,20 @@ nadpis('Nový týden: neuvařená jídla zůstanou');
   p2.recepty.forEach(r => { if (!r.suroviny.length) r.suroviny = [{ nazev: 'Paprika', mnozstvi: 1, jednotka: 'ks', kategorie: 'Zelenina' }]; });
   h.vloz(p2);
   const rec = h.state.jidelnicek.recepty;
-  check('nová jídla první, pak neuvařená z minula', rec.length + ' ' + rec[0].nazev.startsWith('Nové') + ' ' + rec.slice(10).every(r => r.zMinula === '2026-11-02'), '18 true true');
+  check('nová jídla první, pak neuvařená z minula', rec.length + ' ' + rec[0].nazev.startsWith('Nové') + ' ' + rec.slice(9).every(r => r.zMinula === '2026-11-02'), '16 true true');
   check('  uvařená se nepřevedou', rec.some(r => r.nazev === VZOR.recepty[0].nazev || r.nazev === VZOR.recepty[1].nazev), false);
-  check('  historie týdne jen s novými', h.state.jidelnicekHistorie[0].nazvy.length, 10);
+  check('  historie týdne jen s novými', h.state.jidelnicekHistorie[0].nazvy.length, 9);
   check('na seznam jen suroviny nových jídel', h.state.nakup.filter(x => x.zdroj === 'jidelnicek').length, 3);
   check('  ruční zůstala', h.state.nakup.some(x => x.text === 'Pečivo na víkend'), true);
   const b = build();
   b.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: h.state.jidelnicek })));
-  check('záloha s 18 recepty se obnoví i se zMinula', b.state.jidelnicek && b.state.jidelnicek.recepty.length + ' ' + b.state.jidelnicek.recepty[17].zMinula, '18 2026-11-02');
+  check('záloha s 16 recepty se obnoví i se zMinula', b.state.jidelnicek && b.state.jidelnicek.recepty.length + ' ' + b.state.jidelnicek.recepty[15].zMinula, '16 2026-11-02');
   const p3 = kopie(); p3.tyden = '2026-11-09';
   h.vloz(p3);
-  check('stejný týden znovu (oprava): nic se nepřevádí', h.state.jidelnicek.recepty.length, 10);
+  check('stejný týden znovu (oprava): nic se nepřevádí', h.state.jidelnicek.recepty.length, 9);
   const p4 = kopie(); p4.tyden = '2026-11-30';
   h.vloz(p4);
-  check('starší než 14 dní se nepřevádí', h.state.jidelnicek.recepty.length, 10);
+  check('starší než 14 dní se nepřevádí', h.state.jidelnicek.recepty.length, 9);
 }
 
 nadpis('Ověření');
@@ -185,7 +185,7 @@ nadpis('MaruškaVeg, sůl a pepř, ruční týden');
   check('  cizí web přes http ne', zkus(p => { p.recepty[2].zdroj.url = 'http://www.toprecepty.cz/x/'; }).kod, 400);
   check('  ftp ne', zkus(p => { p.recepty[2].zdroj.url = 'ftp://www.maruskaveg.com/x'; }).kod, 400);
   zkus(p => { p.nakup.push({ kategorie: 'Dochucovadla a ostatní', nazev: 'Sůl', mnozstvi: 1, jednotka: 'lžička' }, { kategorie: 'Dochucovadla a ostatní', nazev: 'pepř', mnozstvi: null, jednotka: '', odhad: true }); });
-  check('sůl a pepř na seznam nejdou', h.state.nakup.some(x => /^(sůl|pepř)$/i.test(x.nazev)) + ' ' + h.state.jidelnicek.nakup.length, 'false 27');
+  check('sůl a pepř na seznam nejdou', h.state.nakup.some(x => /^(sůl|pepř)$/i.test(x.nazev)) + ' ' + h.state.jidelnicek.nakup.length, 'false 25');
   check('bez odkazu u úlohy neprojde', zkus(p => { p.recepty[0].zdroj.url = ''; }).kod, 400);
 
   // Ruční týden: už nakoupeno → na seznam nic, staré nekoupené z minulého jídelníčku pryč
@@ -260,7 +260,7 @@ const fotkyTest = (async () => {
   const g = build({ fetch: async () => { throw new Error('síť'); } });
   g.volej('POST /api/jidelnicek/import', kopie());
   await new Promise(r => setTimeout(r, 20));
-  check('chyba sítě nic nerozbije', g.state.jidelnicek.recepty.length + ' ' + g.state.jidelnicek.recepty.some(r => r.foto), '14 false');
+  check('chyba sítě nic nerozbije', g.state.jidelnicek.recepty.length + ' ' + g.state.jidelnicek.recepty.some(r => r.foto), '13 false');
   const z = build();
   z.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: f.state.jidelnicek })));
   check('fotka přežije zálohu', z.state.jidelnicek.recepty.filter(r => r.foto).length, sKaroli.length);
@@ -281,7 +281,7 @@ nadpis('Záloha');
   const b = build();
   b.volej('POST /api/jidelnicek/restore', JSON.parse(JSON.stringify({ jidelnicek: a.state.jidelnicek, historie: a.state.jidelnicekHistorie })));
   check('obnova jídelníčku i historie', b.state.jidelnicek.recepty.length + ' ' + b.state.jidelnicek.vytvoreno + ' ' + b.state.jidelnicekHistorie.length,
-    '14 ' + a.state.jidelnicek.vytvoreno + ' 1');
+    '13 ' + a.state.jidelnicek.vytvoreno + ' 1');
   const c = build();
   c.volej('POST /api/jidelnicek/import', kopie());
   const pred = c.state.jidelnicek.vytvoreno;

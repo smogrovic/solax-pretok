@@ -417,6 +417,13 @@
      "jednotka": "ks",
      "poznamka": "",
      "kategorie": "Ovoce"
+    },
+    {
+     "nazev": "Mléko",
+     "mnozstvi": 0.2,
+     "jednotka": "l",
+     "poznamka": "na rozmíchání tvarohu",
+     "kategorie": "Mléčné výrobky a sýry"
     }
    ],
    "postup": [
@@ -436,58 +443,6 @@
    "stitky": [
     "tvaroh"
    ]
-  },
-  {
-   "kategorie": "snidane",
-   "typ": "pracovni_snidane",
-   "nazev": "Overnight oats s hruškou",
-   "vlastni": false,
-   "zdroj": {
-    "web": "Recepty od Aničky",
-    "autor": "Anna Částková",
-    "url": "https://www.receptyodanicky.cz/test-vzor/366/"
-   },
-   "upraveno": null,
-   "porce": "4 + 1 do krabičky",
-   "cas": "30 min",
-   "suroviny": [
-    {
-     "nazev": "Ovesné vločky",
-     "mnozstvi": 250,
-     "jednotka": "g",
-     "poznamka": "",
-     "kategorie": "Mouky, vločky a suché potraviny"
-    },
-    {
-     "nazev": "Mléko",
-     "mnozstvi": 0.5,
-     "jednotka": "l",
-     "poznamka": "",
-     "kategorie": "Mléčné výrobky a sýry"
-    },
-    {
-     "nazev": "Hrušky",
-     "mnozstvi": 2,
-     "jednotka": "ks",
-     "poznamka": "",
-     "kategorie": "Ovoce"
-    }
-   ],
-   "postup": [
-    "Krok 1.",
-    "Krok 2."
-   ],
-   "predem": "Ano",
-   "skladovani": "Lednice 2 dny",
-   "ohrev": "Mikrovlnka",
-   "forma": "",
-   "vyziva": {
-    "kcal": 550,
-    "bilkoviny": 35,
-    "sacharidy": 50,
-    "tuky": 20
-   },
-   "stitky": []
   },
   {
    "kategorie": "snidane",
@@ -898,30 +853,6 @@
    "poznamka": ""
   },
   {
-   "kategorie": "Mouky, vločky a suché potraviny",
-   "nazev": "Ovesné vločky",
-   "mnozstvi": 250,
-   "jednotka": "g",
-   "odhad": false,
-   "poznamka": ""
-  },
-  {
-   "kategorie": "Mléčné výrobky a sýry",
-   "nazev": "Mléko",
-   "mnozstvi": 0.5,
-   "jednotka": "l",
-   "odhad": false,
-   "poznamka": ""
-  },
-  {
-   "kategorie": "Ovoce",
-   "nazev": "Hrušky",
-   "mnozstvi": 2,
-   "jednotka": "ks",
-   "odhad": false,
-   "poznamka": ""
-  },
-  {
    "kategorie": "Mléčné výrobky a sýry",
    "nazev": "Vejce",
    "mnozstvi": 10,
@@ -934,6 +865,14 @@
    "nazev": "Máslo",
    "mnozstvi": 30,
    "jednotka": "g",
+   "odhad": false,
+   "poznamka": ""
+  },
+  {
+   "kategorie": "Mléčné výrobky a sýry",
+   "nazev": "Mléko",
+   "mnozstvi": 0.2,
+   "jednotka": "l",
    "odhad": false,
    "poznamka": ""
   }

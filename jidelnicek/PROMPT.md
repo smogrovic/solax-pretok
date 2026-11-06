@@ -48,14 +48,14 @@ Navíc každý týden připrav:
 
 1 samostatný recept na velmi rychlou večeři bez vaření.
 1 sladké pečení na snídani nebo svačinu.
-Přesně 2 sladké recepty na pracovní snídaně bez vajec.
+Přesně 1 sladký recept na pracovní snídaně bez vajec.
 1 společnou víkendovou snídani pro celou rodinu. Vejce jsou povolena.
 Výsledná skladba tedy obsahuje:
 
 5 hlavních jídel.
 1 rychlou večeři bez vaření.
 1 sladké pečení.
-2 pracovní sladké snídaně bez vajec.
+1 pracovní sladkou snídani bez vajec.
 1 víkendovou rodinnou snídani.
 Páteční pizzu jako pravidelnou rodinnou večeři mimo plánovaných 5 hlavních jídel.
 
@@ -181,7 +181,7 @@ Uveď přesné množství surovin pro 3 dospělé a 2 děti.
 
 Každý týden připrav přesně:
 
-Dvě sladké pracovní snídaně bez vajec
+Jedna sladká pracovní snídaně bez vajec
 
 Mohou to být například:
 
@@ -371,7 +371,7 @@ PEČENÍ
 Jeden sladký recept.
 SNÍDANĚ
 
-Dvě sladké pracovní snídaně bez vajec.
+Jedna sladká pracovní snídaně bez vajec.
 Jedna společná víkendová snídaně.
 DŮLEŽITÉ:
 
@@ -444,7 +444,7 @@ Před odevzdáním každého jídelníčku proveď kontrolu:
 ☐ Jsou zahrnuty 4 pracovní večeře a 1 víkendové jídlo?
 ☐ Je páteční pizza ponechána mimo plánovaných 5 jídel?
 ☐ Je navíc jedna rychlá večeře bez vaření?
-☐ Jsou přesně 2 sladké pracovní snídaně bez vajec?
+☐ Je přesně 1 sladká pracovní snídaně bez vajec?
 ☐ Je jedna společná víkendová snídaně?
 ☐ Je jedno sladké pečení?
 ☐ Jsou přesně 2 hlavní jídla s masem?

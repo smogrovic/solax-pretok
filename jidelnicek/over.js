@@ -6,7 +6,7 @@ const WEBY = ['maruskaveg.com', 'buchtavtroube.cz', 'receptyodanicky.cz', 'karol
 const NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Mléčné výrobky a sýry', 'Zelenina', 'Ovoce',
   'Pečivo a přílohy', 'Mouky, vločky a suché potraviny', 'Ořechy, semínka a sladké suroviny', 'Dochucovadla a ostatní'];
 const SKLADBA = [['vecere', 'pracovni', 4], ['vecere', 'vikend', 1], ['vecere', 'bez_vareni', 1],
-  ['peceni', 'peceni', 1], ['snidane', 'pracovni_snidane', 2], ['snidane', 'vikend_snidane', 1]];
+  ['peceni', 'peceni', 1], ['snidane', 'pracovni_snidane', 1], ['snidane', 'vikend_snidane', 1]];
 const PREVOD = { kg: ['g', 1000], l: ['ml', 1000], dl: ['ml', 100] };
 // Doma je vždycky — v receptu ano, na nákupní seznam ne
 const DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
@@ -30,7 +30,7 @@ function zkontroluj(plan, historie = [], zbyva = []) {
     const pocet = recepty.filter(r => r.kategorie === kat && r.typ === typ).length;
     if (pocet !== n) chyby.push(`${kat}/${typ}: má být ${n}, je ${pocet}.`);
   }
-  if (recepty.length !== SKLADBA.reduce((a, x) => a + x[2], 0)) chyby.push(`Receptů má být 10, je ${recepty.length}.`);
+  if (recepty.length !== SKLADBA.reduce((a, x) => a + x[2], 0)) chyby.push(`Receptů má být ${SKLADBA.reduce((a, x) => a + x[2], 0)}, je ${recepty.length}.`);
   const hlavni = recepty.filter(r => r.typ === 'pracovni' || r.typ === 'vikend');
   const maso = hlavni.filter(r => s(r, 'maso')).length;
   if (maso !== 2) chyby.push(`Hlavní jídla s masem: mají být přesně 2, jsou ${maso}.`);

@@ -55,8 +55,8 @@ VEČEŘE / PEČENÍ / SNÍDANĚ, odškrtávací nákupní seznam a tiskovou verz
 ```
 
 - `tyden` je pondělí příštího týdne (pražský čas).
-- Receptů je přesně 10: 4× `pracovni`, 1× `vikend`, 1× `bez_vareni` (vše `vecere`), 1× `peceni`,
-  2× `pracovni_snidane` a 1× `vikend_snidane` (obě `snidane`). Pizza se nepíše.
+- Receptů je přesně 9: 4× `pracovni`, 1× `vikend`, 1× `bez_vareni` (vše `vecere`), 1× `peceni`,
+  1× `pracovni_snidane` a 1× `vikend_snidane` (obě `snidane`). Pizza se nepíše.
 - **Náhradní recepty navíc:** přidej 4 recepty s `"nahradni": true` — 2 hlavní jídla (`vecere`, typ
   `pracovni` nebo `vikend`), 1 `peceni` a 1 `snidane`. Platí pro ně stejná pravidla (povolené weby, ověřené
   odkazy, gramáže, výživa), nesmí opakovat ostatní jídla ani `zbyva`. Do skladby týdne ani do `nakup` se
