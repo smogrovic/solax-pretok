@@ -400,6 +400,30 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// ---------- Otisk verze (lišta „nová verze" v appce) ----------
+// Build krok appka nemá, takže otisk vzniká při startu serveru = při každém nasazení:
+// prvních 12 znaků SHA-256 obsahu index.html. Mění se jen při skutečné změně stránky.
+// Do stránky jde jako window.APP_BUILD, na /version.json jako {"build": …}.
+// Appka si version.json stahuje a při rozdílu nabídne „Načíst".
+const APP_HTML_CESTA = path.join(__dirname, 'public', 'index.html');
+function appVerzeNacti() {
+  const html = require('fs').readFileSync(APP_HTML_CESTA, 'utf8');
+  const build = crypto.createHash('sha256').update(html).digest('hex').slice(0, 12);
+  return { build, html: html.replace('</head>', `<script>window.APP_BUILD = "${build}";</script>\n</head>`) };
+}
+let appVerze = null;
+try { appVerze = appVerzeNacti(); } catch (err) { console.error('index.html se nepodařilo načíst:', err.message); }
+const BEZ_CACHE = 'no-cache, no-store, must-revalidate';
+app.get(['/', '/index.html'], (req, res, next) => {
+  if (!appVerze) return next();
+  res.setHeader('Cache-Control', BEZ_CACHE);
+  res.type('html').send(appVerze.html);
+});
+app.get('/version.json', (req, res) => {
+  res.setHeader('Cache-Control', BEZ_CACHE);
+  res.json({ build: appVerze ? appVerze.build : null });
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   // HTML a service worker nikdy necachovat, ať se po deployi appka vždy načte čerstvá
   setHeaders: (res, filePath) => {

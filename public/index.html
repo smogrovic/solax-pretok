@@ -1553,6 +1553,14 @@
   .prazdniny-btn:disabled{opacity:0.5;}
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
+  .nova-verze{position:fixed;left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:9500;
+    max-width:520px;margin:0 auto;box-sizing:border-box;display:flex;align-items:center;gap:12px;
+    padding:10px 10px 10px 16px;border-radius:16px;background:#e2781c;color:#fff;
+    font-size:15px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,0.25);}
+  .nova-verze span{flex:1;min-width:0;}
+  .nova-verze button{flex:0 0 auto;border:none;border-radius:11px;padding:9px 16px;background:#fff;color:#c4620f;
+    font:inherit;font-weight:800;cursor:pointer;}
+  .nova-verze button:disabled{opacity:0.6;}
   .potvrz{
     position:fixed;
     inset:0;
@@ -16289,6 +16297,56 @@ if (kalPanelEl) {
     else kalZpetNaStranky();
   });
 }
+
+// ---------- Nová verze appky ----------
+// Server při každém nasazení spočítá otisk stránky (window.APP_BUILD) a dává ho na
+// version.json. Appka z ikony na ploše (iPad, iPhone) se sama nezavře, takže se
+// version.json ptáme: 20 s po spuštění, při každém návratu do appky a každých 5 min.
+// Při rozdílu jednou ukážeme dole lištu s „Načíst". Bez service workeru.
+(function () {
+  const mam = window.APP_BUILD;
+  if (!mam) return;   // lokální vývoj (stránka bez otisku)
+  let ukazano = false, bezi = false;
+  const text = (document.documentElement.lang || 'cs').toLowerCase().startsWith('cs')
+    ? { zprava: 'Je nová verze aplikace.', tlacitko: 'Načíst' }
+    : { zprava: 'App update available.', tlacitko: 'Reload' };
+  async function nacist() {
+    try { await fetch('./', { cache: 'reload' }); } catch { /* obnovit i tak */ }
+    location.reload();
+  }
+  function ukaz() {
+    if (ukazano) return;
+    ukazano = true;
+    const lista = document.createElement('div');
+    lista.className = 'nova-verze';
+    lista.setAttribute('role', 'status');
+    const t = document.createElement('span');
+    t.textContent = text.zprava;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = text.tlacitko;
+    b.addEventListener('click', () => { b.disabled = true; nacist(); });
+    lista.append(t, b);
+    document.body.appendChild(lista);
+  }
+  async function zkontroluj() {
+    if (ukazano || bezi) return;
+    bezi = true;
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && typeof j.build === 'string' && j.build && j.build !== mam) ukaz();
+      }
+    } catch { /* síť: zkusí se příště */ }
+    bezi = false;
+  }
+  setTimeout(zkontroluj, 20000);
+  setInterval(zkontroluj, 5 * 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') zkontroluj(); });
+  window.addEventListener('focus', zkontroluj);
+  window.novaVerzeZkontroluj = zkontroluj;   // pro testy
+})();
 </script>
 </body>
 </html>
