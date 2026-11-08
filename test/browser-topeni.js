@@ -47,6 +47,17 @@ setTimeout(async () => {
   check('změřené TČ místo odhadu', tcRadek.querySelector('.wbsrc-head').textContent.includes('TČ topení 7,3 kWh'), true);
   check('  voda a odhad pod tím', /TČ voda 1,9 kWh · odhad ~3 kWh/.test(tcRadek.textContent), true);
   check('poznámka vysvětlí odhad', /400 W a večer \\(17–20 h\\) vaření 500 W/.test(document.getElementById('topeniPozn').textContent), true);
+  const an = document.getElementById('topeniAnalyza');
+  check('bez rozboru skrytý', an.hidden, true);
+  topeniData.analyza = { zdroj: 'tc', dnu: 30, kwhNaK: 2.3, bodZlomuC: 16.4, wNaK: 96, regreseDnu: 28,
+    tyden: { dnu: 7, kwhDen: 31.5, venkuC: 2.1, kwhNaDenostupen: 1.98 }, minuly: { dnu: 7, kwhDen: 25, venkuC: 6, kwhNaDenostupen: 2.2 } };
+  topeniData.model.zakladW = 310; topeniData.model.zakladZDat = true;
+  renderTopeni();
+  const anR = [...an.children].map(e => e.textContent);
+  check('rozbor: kWh na °C, bod zlomu, zdroj', anR[0], 'Každý °C venku chladněji = +2,3 kWh topení za den (96 W/K) · topit začíná pod 16,4 °C · 28 dní, změřeno TČ');
+  check('  týden proti minulému na denostupeň', anR[1], 'Týden: 31,5 kWh/den při 2,1 °C venku = 1,98 kWh/denostupeň (minulý 2,20, −10 %)'.replace('−', '-'));
+  check('  zlepšení zeleně', an.querySelector('.lepsi') && an.querySelector('.lepsi').textContent, '-10 %');
+  check('  poznámka: stálý odběr z dat', /310 W \\(spočítaný z nočních hodin\\)/.test(document.getElementById('topeniPozn').textContent), true);
 
   // Kopírování: celá řada se stahuje až teď, se zámkem
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: async t => { schranka = t; } }, configurable: true });

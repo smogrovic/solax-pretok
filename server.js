@@ -1082,11 +1082,26 @@ const TOPENI_MIN_VZORKU = 10;     // hodina s menším pokrytím (výpadek, rest
 const TOPENI_SOUHRN_DNU = 14;
 const TOPENI_POKOJE = ['obyvak', 'loznice', 'elenka', 'miky'];
 
-function topeniOdhadW(dumW, bojleryW, saunaW, hodina) {
+function topeniOdhadW(dumW, bojleryW, saunaW, hodina, zakladW = TOPENI_ZAKLAD_W) {
   if (typeof dumW !== 'number' || !Number.isFinite(dumW)) return null;
   const vareni = hodina >= TOPENI_VARENI_OD && hodina < TOPENI_VARENI_DO ? TOPENI_VARENI_W : 0;
-  return Math.max(0, Math.round(dumW - (bojleryW || 0) - (saunaW || 0) - TOPENI_ZAKLAD_W - vareni));
+  return Math.max(0, Math.round(dumW - (bojleryW || 0) - (saunaW || 0) - zakladW - vareni));
 }
+
+// Stálý odběr domu z naměřených dat místo pevných 400 W: noční hodiny (0–5 Praha)
+// bez bojlerů a sauny, 10. percentil spotřeby — v takové hodině čerpadlo stojí
+// nebo jen dobíhá. Málo nocí → pevný odhad.
+const TOPENI_ZAKLAD_MIN_HODIN = 20;
+function topeniZaklad(zaznamy = state.topeni.zaznamy) {
+  const noc = zaznamy.filter(z => typeof z.dumW === 'number' && !(z.bojleryW > 50) && !(z.saunaW > 50)
+    && pragueTime(z.t).hour < 5).map(z => z.dumW).sort((a, b) => a - b);
+  if (noc.length < TOPENI_ZAKLAD_MIN_HODIN) return { w: TOPENI_ZAKLAD_W, zDat: false, hodin: noc.length };
+  const w = noc[Math.floor(noc.length * 0.1)];
+  return { w: Math.round(Math.min(800, Math.max(150, w))), zDat: true, hodin: noc.length };
+}
+// Odhad topení hodiny s aktuálním stálým odběrem (starší záznamy mají topeniW se starým)
+const topeniHodinaW = (z, zakladW) => (typeof z.dumW === 'number'
+  ? topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(z.t).hour, zakladW) : z.topeniW);
 
 // Volá se z updateRuntimes s tím, co se tam zrovna spočítalo. Nevědět se smí cokoli —
 // chybějící hodnota se do průměru prostě nepočítá.
@@ -1121,7 +1136,19 @@ function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
     if (aq) pridej('tcVenkuC', aq.venku);
     const zona = aq && Array.isArray(aq.zones) ? (aq.zones.find(z => z.pouzita !== false) || aq.zones[0]) : null;
     if (zona) { pridej('tcVodaC', zona.temp); pridej('tcPosun', zona.target); }
+    // Nádrž na teplou vodu: teplota a cíl; nárůst teploty během hodiny = ohřev vody čerpadlem
+    if (aq) {
+      pridej('tcNadrzC', aq.tankTemp);
+      pridej('tcNadrzCil', aq.tankTarget);
+      if (typeof aq.tankTemp === 'number' && Number.isFinite(aq.tankTemp)) {
+        if (b.nadrzPrvni === undefined) b.nadrzPrvni = aq.tankTemp;
+        b.nadrzPosledni = aq.tankTemp;
+      }
+    }
   }
+  // Výroba FVE jako míra oslunění (sluneční teplo okny)
+  const sx = state.solax;
+  if (sx && cerstve(sx.fetchedAt) && typeof sx.fveKw === 'number') pridej('fveW', Math.max(0, sx.fveKw * 1000));
 }
 
 function topeniUzavri() {
@@ -1148,11 +1175,14 @@ function topeniUzavri() {
   if (klima !== null) z.klimaTopi = zaokr(klima, 10);
   const aq = prumer('aqTopi');
   if (aq !== null) z.aqTopi = zaokr(aq, 100);
-  for (const k of ['tcVenkuC', 'tcVodaC', 'tcPosun']) {
+  for (const k of ['tcVenkuC', 'tcVodaC', 'tcPosun', 'tcNadrzC', 'tcNadrzCil']) {
     const v = prumer(k);
     if (v !== null) z[k] = zaokr(v, 10);
   }
-  z.topeniW = topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(b.t).hour);
+  if (typeof b.nadrzPrvni === 'number') z.tcNadrzNarust = zaokr(b.nadrzPosledni - b.nadrzPrvni, 10);
+  const fve = prumer('fveW');
+  if (fve !== null) z.fveW = Math.round(fve);
+  z.topeniW = topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(b.t).hour, topeniZaklad(t.zaznamy).w);
   t.zaznamy.push(z);
   const od = Date.now() - TOPENI_DNU * 86400000;
   t.zaznamy = t.zaznamy.filter(r => r.t >= od);
@@ -1165,12 +1195,14 @@ function topeniUzavri() {
 // až tlačítkem (GET /api/topeni)
 function topeniSouhrn(zaznamy = state.topeni.zaznamy) {
   const dny = new Map();
+  const zakladW = topeniZaklad(zaznamy).w;
   for (const z of zaznamy) {
     const d = pragueDateString(z.t);
     let r = dny.get(d);
     if (!r) { r = { d, hodin: 0, wh: 0, venku: [], pokoje: [] }; dny.set(d, r); }
     r.hodin++;
-    if (typeof z.topeniW === 'number') r.wh += z.topeniW;
+    const w = topeniHodinaW(z, zakladW);
+    if (typeof w === 'number') r.wh += w;
     if (typeof z.venkuC === 'number') r.venku.push(z.venkuC);
     const p = Object.values(z.pokoje || {});
     if (p.length) r.pokoje.push(p.reduce((a, b) => a + b, 0) / p.length);
@@ -1200,8 +1232,72 @@ function topeniTcDny() {
   });
 }
 
+// Hodinové záznamy do exportu: topeniW s aktuálním stálým odběrem a hodinová
+// spotřeba TČ z Comfort Cloudu, pokud ji pro tu hodinu máme
+function topeniExportZaznamy() {
+  const zakladW = topeniZaklad().w;
+  const hod = new Map(((state.tcSpotreba && state.tcSpotreba.hodiny) || []).map(x => [x.k, x]));
+  return state.topeni.zaznamy.map(z => {
+    const o = { ...z, topeniW: topeniHodinaW(z, zakladW) };
+    const tc = hod.get(pragueDateString(z.t) + ' ' + String(pragueTime(z.t).hour).padStart(2, '0'));
+    if (tc && typeof tc.topeni === 'number') o.tcTopeniWh = Math.round(tc.topeni * 1000);
+    if (tc && typeof tc.voda === 'number') o.tcVodaWh = Math.round(tc.voda * 1000);
+    return o;
+  });
+}
+
 function topeniModel() {
-  return { zakladW: TOPENI_ZAKLAD_W, vareniW: TOPENI_VARENI_W, vareniOd: TOPENI_VARENI_OD, vareniDo: TOPENI_VARENI_DO };
+  const z = topeniZaklad();
+  return { zakladW: z.w, zakladZDat: z.zDat, zakladHodin: z.hodin,
+    vareniW: TOPENI_VARENI_W, vareniOd: TOPENI_VARENI_OD, vareniDo: TOPENI_VARENI_DO };
+}
+
+// Rozbor po dnech: kolik kWh topení přibude na každý stupeň chladněji, od jaké
+// venkovní teploty se topí, a týden proti minulému přepočtený na denostupně.
+// Přednostně změřená spotřeba TČ (Comfort Cloud, teplota z čidla TČ), jinak odhad.
+const TOPENI_ANALYZA_DNU = 60, TOPENI_DENOSTUPNE_ZAKLAD = 18;
+function topeniAnalyza(now = Date.now()) {
+  const dnes = pragueDateString(now);
+  const od = pragueDateString(now - TOPENI_ANALYZA_DNU * 86400000);
+  let dny = ((state.tcSpotreba && state.tcSpotreba.dny) || [])
+    .filter(x => x.d >= od && x.d < dnes && typeof x.topeni === 'number' && typeof x.venku === 'number')
+    .map(x => ({ d: x.d, kwh: x.topeni, venku: x.venku }));
+  let zdroj = 'tc';
+  if (dny.length < 5) {
+    zdroj = 'odhad';
+    dny = topeniSouhrn().filter(x => x.d < dnes && x.hodin >= 20 && typeof x.venkuC === 'number')
+      .map(x => ({ d: x.d, kwh: x.topeniKwh, venku: x.venkuC }));
+  }
+  const out = { zdroj, dnu: dny.length };
+  // Regrese jen přes dny, kdy se opravdu topí (teplé dny by přímku zploštily)
+  const r = dny.filter(x => x.venku < 15 && x.kwh > 0);
+  if (r.length >= 5) {
+    const n = r.length, sx = r.reduce((a, x) => a + x.venku, 0), sy = r.reduce((a, x) => a + x.kwh, 0);
+    const sxx = r.reduce((a, x) => a + x.venku * x.venku, 0), sxy = r.reduce((a, x) => a + x.venku * x.kwh, 0);
+    const jm = n * sxx - sx * sx;
+    if (jm > 0) {
+      const sklon = (n * sxy - sx * sy) / jm, posun = (sy - sklon * sx) / n;
+      if (sklon < 0) {
+        out.kwhNaK = Math.round(-sklon * 100) / 100;
+        out.bodZlomuC = Math.round(-posun / sklon * 10) / 10;
+        out.wNaK = Math.round(-sklon * 1000 / 24);
+        out.regreseDnu = n;
+      }
+    }
+  }
+  const tyden = (odDni, doDni) => {
+    const a = pragueDateString(now - odDni * 86400000), b = pragueDateString(now - doDni * 86400000);
+    const t = dny.filter(x => x.d >= a && x.d < b);
+    if (t.length < 4) return null;
+    const kwh = t.reduce((s, x) => s + x.kwh, 0);
+    const ds = t.reduce((s, x) => s + Math.max(0, TOPENI_DENOSTUPNE_ZAKLAD - x.venku), 0);
+    return { dnu: t.length, kwhDen: Math.round(kwh / t.length * 10) / 10,
+      venkuC: Math.round(t.reduce((s, x) => s + x.venku, 0) / t.length * 10) / 10,
+      kwhNaDenostupen: ds > 0 ? Math.round(kwh / ds * 100) / 100 : null };
+  };
+  out.tyden = tyden(7, 0);
+  out.minuly = tyden(14, 7);
+  return out;
 }
 
 // Návod pro AI, které dostane zkopírovaná data. Čísla se berou z modelu, ať text
@@ -1211,9 +1307,9 @@ function topeniNavod() {
   return [
     'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
     'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
-    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). tcNadrzC / tcNadrzCil = teplota a cíl nádrže na teplou vodu; tcNadrzNarust = o kolik °C nádrž za hodinu stoupla (kladné = čerpadlo ohřívalo vodu, ne dům — takové hodiny z topení vyřaď nebo oprav). fveW = výroba FVE (míra oslunění: sluneční teplo okny snižuje potřebu topení, hlavně odpoledne). tcTopeniWh / tcVodaWh = elektřina TČ v té hodině podle Comfort Cloudu, pokud ji cloud po hodinách dává (přesné, má přednost před odhadem). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
     'SKUTEČNÁ SPOTŘEBA TČ: `tcDny` = elektřina tepelného čerpadla po dnech podle Comfort Cloudu (měřené jednotkou), i zpětně za dobu, kdy hodinové záznamy ještě nebyly: topeniKwh = topení, vodaKwh = ohřev teplé vody, venkuC = průměrná venkovní teplota dne z čidla TČ. Kde jsou, mají přednost před odhadem topeniW. Dnešek je neúplný.',
-    'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0. Obě konstanty jsou hrubé odhady (viz `model`). Klidně je přepočítej ze surových dumW/bojleryW/saunaW — např. stálý odběr urči z nočních hodin teplých dnů, kdy se netopí (aqTopi = 0, klimaTopi = 0).',
+    'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Stálý odběr je ' + (m.zakladZDat ? 'spočítaný z dat (10. percentil spotřeby v ' + m.zakladHodin + ' nočních hodinách 0–5 h bez bojlerů a sauny)' : 'pevný odhad (zatím málo nočních hodin k výpočtu)') + '. Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0 — hrubý odhad. topeniW v exportu je přepočítaný s aktuálním stálým odběrem. Klidně ho přepočítej ze surových dumW/bojleryW/saunaW.',
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
     'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
     'POZOR: topeniW je ELEKTRICKÝ příkon, ne teplo. Teplo = příkon × COP (u vzduch-voda zhruba 2–5, klesá s venkovní teplotou), takže skutečná tepelná ztráta domu je vyšší. Odečet stálého odběru a vaření je hrubý, denní součty jsou spolehlivější než hodiny.'
@@ -1221,7 +1317,7 @@ function topeniNavod() {
 }
 
 function topeniPayload() {
-  return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel() };
+  return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel(), analyza: topeniAnalyza() };
 }
 
 // Sloučení ze zálohy podle hodiny. Nic se neubírá; stejná hodina ve dvou verzích →
@@ -3219,7 +3315,7 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
   // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
-  res.json({ navod: topeniNavod(), model: topeniModel(), tcDny: topeniTcDny(), zaznamy: state.topeni.zaznamy });
+  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
@@ -7692,6 +7788,60 @@ function tcSpotrebaTelo(guid, datum) {
   };
 }
 
+// Hodinová spotřeba: dataMode 0 = hodiny jednoho dne. Comfort Cloud ji dávat nemusí —
+// co nejde rozebrat jako hodiny daného dne, se zahodí. Klíč 'YYYY-MM-DD HH' (Praha).
+const TC_HODINY_DNU = 40;
+function tcSpotrebaHodinyTelo(guid, datum) {
+  const t = tcSpotrebaTelo(guid, datum);
+  return { ...t, bodyParam: { ...t.bodyParam, dataMode: 0 } };
+}
+function aquareaHodinyRozeber(j, datum) {
+  const kwh = v => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    return typeof n === 'number' && Number.isFinite(n) && n !== TC_NEZNAMO && n >= 0 && n < 50 ? Math.round(n * 1000) / 1000 : null;
+  };
+  const seznam = j && Array.isArray(j.historyDataList) ? j.historyDataList : [];
+  const out = [];
+  seznam.forEach((z, i) => {
+    const dt = String((z && z.dataTime) || '');
+    let h = null, m;
+    if ((m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(dt))) { if (`${m[1]}-${m[2]}-${m[3]}` === datum) h = +m[4]; }
+    else if (/^\d{1,2}$/.test(dt)) h = +dt;
+    else if (!dt && seznam.length === 24) h = i;
+    if (h === null || h < 0 || h > 23) return;
+    const topeni = kwh(z.heatConsumption), voda = kwh(z.tankConsumption);
+    if (topeni === null && voda === null) return;
+    out.push({ k: datum + ' ' + String(h).padStart(2, '0'), topeni, voda });
+  });
+  return out;
+}
+function tcHodinySluc(nove, now = Date.now()) {
+  const t = state.tcSpotreba;
+  const od = pragueDateString(now - TC_HODINY_DNU * 86400000);
+  const mapa = new Map((t.hodiny || []).map(x => [x.k, x]));
+  for (const x of nove) mapa.set(x.k, x);
+  t.hodiny = [...mapa.values()].filter(x => x.k >= od).sort((a, b) => a.k.localeCompare(b.k));
+}
+// Dnešek každou hodinu, včerejšek jednou (ať se dopíše jeho konec)
+async function tcHodinyPoll(guid, now = Date.now()) {
+  const t = state.tcSpotreba;
+  const dnes = pragueDateString(now), vcera = pragueDateString(now - 86400000);
+  const dny = t.hodinyVcera === vcera ? [dnes] : [vcera, dnes];
+  let nalezeno = 0;
+  for (const d of dny) {
+    const j = await pccQueued(() => pccApiFetch('/remote/v1/app/common/transfer', {
+      method: 'POST', body: JSON.stringify(tcSpotrebaHodinyTelo(guid, d))
+    }));
+    if (tcOdmitnuti(j)) return 0;
+    const h = aquareaHodinyRozeber(j, d);
+    nalezeno += h.length;
+    tcHodinySluc(h, now);
+  }
+  t.hodinyVcera = vcera;
+  if (nalezeno) t.hodinyOk = true;
+  return nalezeno;
+}
+
 // Odmítnutí od Aquarey chodí jako HTTP 200 se seznamem `message`
 function tcOdmitnuti(j) {
   if (!j || typeof j !== 'object') return null;
@@ -7852,6 +8002,8 @@ async function tcSpotrebaPoll() {
     if (tcMesice()) broadcast('months', { months: state.months });
     if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
     if (!t.historie) await tcHistorieDotahni(aq.guid);
+    // Hodinová spotřeba je pokus navíc — její chyba denní data nezastaví ani nehlásí
+    try { await tcHodinyPoll(aq.guid); } catch { /* cloud hodiny nedává */ }
   } catch (err) {
     const text = String(err.message || err).replace(aq.guid, '…').slice(0, 160);
     if (!t.chyba) addLog('Tepelné čerpadlo: spotřebu se nepodařilo načíst — ' + text, 'error');
@@ -7883,6 +8035,16 @@ app.get('/api/aquarea/spotreba/diagnostika', async (req, res) => {
       zaznamu: seznam.length,
       prvni: seznam.slice(0, 3),
       rozebrano: aquareaSpotrebaRozeber(j).slice(-3),
+      hodinove: await (async () => {
+        try {
+          const d = pragueDateString();
+          const h = await pccQueued(() => pccApiFetch('/remote/v1/app/common/transfer', {
+            method: 'POST', body: JSON.stringify(tcSpotrebaHodinyTelo(aq.guid, d)) }));
+          const s = Array.isArray(h && h.historyDataList) ? h.historyDataList : [];
+          return { odmitnuti: tcOdmitnuti(h), klice: h && typeof h === 'object' ? Object.keys(h) : [], zaznamu: s.length,
+            prvni: s.slice(0, 3), rozebrano: aquareaHodinyRozeber(h, d).slice(-3), ulozeno: (state.tcSpotreba.hodiny || []).length };
+        } catch (err) { return { chyba: String(err.message || err).replace(aq.guid, '…').slice(0, 200) }; }
+      })(),
       stav: { dnu: state.tcSpotreba.dny.length, ts: state.tcSpotreba.ts, chyba: state.tcSpotreba.chyba }
     });
   } catch (err) {
@@ -7895,6 +8057,13 @@ app.post('/api/aquarea/spotreba/restore', (req, res) => {
   const dny = req.body && Array.isArray(req.body.dny) ? req.body.dny : null;
   if (!dny) return res.status(400).json({ error: 'Chybí dny.' });
   if (req.body.historie === true) state.tcSpotreba.historie = true;
+  // Hodinová spotřeba: jen platné záznamy, novější z cloudu má přednost
+  if (Array.isArray(req.body.hodiny)) {
+    const cislo = v => (v === null || (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 50));
+    const mam = new Set((state.tcSpotreba.hodiny || []).map(x => x.k));
+    tcHodinySluc(req.body.hodiny.filter(x => x && typeof x.k === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}$/.test(x.k)
+      && !mam.has(x.k) && cislo(x.topeni) && cislo(x.voda)).map(x => ({ k: x.k, topeni: x.topeni, voda: x.voda })));
+  }
   const kwh = v => (v === null || v === undefined ? null : typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 500 ? v : undefined);
   const dnes = pragueDateString();
   let pridano = 0;
@@ -12819,7 +12988,8 @@ function storeSnapshot() {
     '/api/rohlik/nauceno/restore': { nauceno: state.rohlikNauceno },
     '/api/site-dny/restore': { siteDny: state.siteDny },
     '/api/months/restore': { months: state.months },
-    '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts, historie: !!state.tcSpotreba.historie },
+    '/api/aquarea/spotreba/restore': { dny: state.tcSpotreba.dny, ts: state.tcSpotreba.ts, historie: !!state.tcSpotreba.historie,
+      hodiny: state.tcSpotreba.hodiny || [] },
     '/api/spotreba/restore': { citace: (state.spotreba || {}).citace || {}, pv: (state.spotreba || {}).pv || {},
       doplneno: (state.spotreba || {}).doplneno || null, teploty: (state.spotreba || {}).teploty || {} },
     '/api/solinator/restore': { ...state.solinator },

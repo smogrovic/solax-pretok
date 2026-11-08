@@ -1686,6 +1686,10 @@
   .pruvodce-vyrobek{font-size:12px;color:var(--grey-text);overflow-wrap:anywhere;}
   .pruvodce-zmenit{flex:0 0 auto;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--grey-text);text-decoration:underline;cursor:pointer;}
   .pruvodce-soucet{font-size:13px;font-weight:800;color:var(--navy);padding:10px 0 2px;border-top:1px solid rgba(44,62,80,0.15);}
+  .topeni-analyza{font-size:13px;color:var(--navy);line-height:1.45;margin:4px 0 8px;}
+  .topeni-analyza div + div{margin-top:3px;}
+  .topeni-analyza .lepsi{color:#1f8a4c;font-weight:700;}
+  .topeni-analyza .horsi{color:#c0392b;font-weight:700;}
   .jid-tyden{font-size:12px;color:var(--grey-text);text-align:center;margin-top:2px;}
   .jid-pozor{font-size:12px;color:#8a5a00;background:rgba(255,210,63,0.18);border-radius:10px;padding:6px 10px 6px 24px;margin:8px 0 0;}
   .jid-pozor li{margin:1px 0;}
@@ -3029,6 +3033,7 @@
       <button class="sbal-btn" data-sbal="topeni" type="button" aria-expanded="false">Topení a teplota v domě<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="topeni">
         <div class="graph-title">Topení po dnech</div>
+        <div class="topeni-analyza" id="topeniAnalyza" hidden></div>
         <div class="wbsrc-list" id="topeniList"></div>
         <div class="wbsrc-note" id="topeniPozn"></div>
         <button class="sbal-btn" id="topeniKopirBtn" type="button">Zkopírovat data<i id="topeniStav">▾</i></button>
@@ -10328,8 +10333,37 @@ function topeniStupne(v) {
   return typeof v === 'number' ? v.toFixed(1).replace('.', ',') + ' °C' : '–';
 }
 
+const tpCislo = (v, d = 1) => v.toFixed(d).replace('.', ',');
+// Rozbor nahoře: kWh na stupeň, od kdy se topí, týden proti minulému (na denostupeň)
+function renderTopeniAnalyza() {
+  const el = document.getElementById('topeniAnalyza');
+  if (!el) return;
+  const a = topeniData && topeniData.analyza;
+  el.textContent = '';
+  el.hidden = !a || (typeof a.kwhNaK !== 'number' && !a.tyden);
+  if (el.hidden) return;
+  const zdroj = a.zdroj === 'tc' ? 'změřeno TČ' : 'odhad ze spotřeby domu';
+  if (typeof a.kwhNaK === 'number') {
+    jidEl('div', '', el, `Každý °C venku chladněji = +${tpCislo(a.kwhNaK)} kWh topení za den (${a.wNaK} W/K)`
+      + (typeof a.bodZlomuC === 'number' ? ` · topit začíná pod ${tpCislo(a.bodZlomuC)} °C` : '')
+      + ` · ${a.regreseDnu} dní, ${zdroj}`);
+  }
+  if (a.tyden) {
+    const r = jidEl('div', '', el, `Týden: ${tpCislo(a.tyden.kwhDen)} kWh/den při ${tpCislo(a.tyden.venkuC)} °C venku`
+      + (typeof a.tyden.kwhNaDenostupen === 'number' ? ` = ${tpCislo(a.tyden.kwhNaDenostupen, 2)} kWh/denostupeň` : ''));
+    const t = a.tyden.kwhNaDenostupen, m = a.minuly && a.minuly.kwhNaDenostupen;
+    if (typeof t === 'number' && typeof m === 'number' && m > 0) {
+      const zmena = Math.round((t / m - 1) * 100);
+      r.append(' (minulý ' + tpCislo(m, 2) + ', ');
+      jidEl('span', zmena <= 0 ? 'lepsi' : 'horsi', r, (zmena > 0 ? '+' : '') + zmena + ' %');
+      r.append(')');
+    }
+  }
+}
+
 function renderTopeni() {
   if (!topeniListEl) return;
+  renderTopeniAnalyza();
   const dny = (topeniData && topeniData.dny) || [];
   topeniListEl.textContent = '';
   if (!dny.length) {
@@ -10365,7 +10399,7 @@ function renderTopeni() {
   if (topeniPoznEl) {
     const m = (topeniData && topeniData.model) || {};
     topeniPoznEl.textContent = 'Topení se odhaduje: spotřeba domu bez bojlerů a sauny, minus stálý odběr '
-      + (m.zakladW || 400) + ' W a večer (' + (m.vareniOd || 17) + '–' + (m.vareniDo || 20) + ' h) vaření '
+      + (m.zakladW || 400) + ' W' + (m.zakladZDat ? ' (spočítaný z nočních hodin)' : '') + ' a večer (' + (m.vareniOd || 17) + '–' + (m.vareniDo || 20) + ' h) vaření '
       + (m.vareniW || 500) + ' W. '
       + (topeniData && topeniData.hodin ? topeniData.hodin + ' hodin dat. Tlačítkem pošli data k analýze.' : '');
   }

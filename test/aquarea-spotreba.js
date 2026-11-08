@@ -31,7 +31,7 @@ function build(o = {}) {
   });
   const api = new Function('app', 'requireAuth', 'broadcast', 'addLog', 'pccQueued', 'pccApiFetch', 'state', 'panasonicEnabled', 'storeUlozBrzy',
     CODE + '\n; return { tcPosunPrahy, tcSpotrebaTelo, tcOdmitnuti, aquareaSpotrebaRozeber, tcSpotrebaSluc, tcMesice, tcSpotrebaPayload,'
-      + ' aquareaSpotrebaNacti, tcMesiceKNacteni, tcSpotrebaPoll, tcHistorieDotahni };')(
+      + ' aquareaSpotrebaNacti, tcMesiceKNacteni, tcSpotrebaPoll, tcHistorieDotahni, aquareaHodinyRozeber, tcHodinySluc, tcHodinyPoll, tcSpotrebaHodinyTelo };')(
     { get: (c, h) => { routy.get[c] = h; }, post: (c, h) => { routy.post[c] = h; } },
     (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push(u), t => logy.push(t), f => f(), pccApiFetch, state, o.vypnuto ? false : true, () => { ulozeno++; });
@@ -169,6 +169,44 @@ function build(o = {}) {
     check('  podruhé už se historie netahá', p.dotazy.length - pocet <= 2, true);
   }
 
+  nadpis('Hodinová spotřeba (pokus)');
+  {
+    const h = build();
+    check('dotaz s dataMode 0 pro daný den', JSON.stringify(h.api.tcSpotrebaHodinyTelo('G', '2026-11-08').bodyParam),
+      JSON.stringify({ gwid: 'G', dataMode: 0, date: '20261108', osTimezone: '+01:00' }));
+    const dlouhe = { historyDataList: [
+      { dataTime: '2026110800', heatConsumption: 0.8, tankConsumption: -255 },
+      { dataTime: '2026110801', heatConsumption: '1.2', tankConsumption: 0.3 },
+      { dataTime: '2026110701', heatConsumption: 5 },                          // jiný den
+      { dataTime: '2026110802', heatConsumption: -255, tankConsumption: -255 }  // ještě nic
+    ] };
+    check('rozbor hodin (YYYYMMDDHH)', JSON.stringify(h.api.aquareaHodinyRozeber(dlouhe, '2026-11-08')),
+      JSON.stringify([{ k: '2026-11-08 00', topeni: 0.8, voda: null }, { k: '2026-11-08 01', topeni: 1.2, voda: 0.3 }]));
+    check('  krátký čas (HH)', h.api.aquareaHodinyRozeber({ historyDataList: [{ dataTime: '7', heatConsumption: 1 }] }, '2026-11-08')[0].k, '2026-11-08 07');
+    check('  bez času jen při 24 položkách', [
+      h.api.aquareaHodinyRozeber({ historyDataList: Array.from({ length: 24 }, (_, i) => ({ heatConsumption: i === 5 ? 1 : -255 })) }, '2026-11-08').map(x => x.k).join(),
+      h.api.aquareaHodinyRozeber({ historyDataList: [{ heatConsumption: 1 }] }, '2026-11-08').length].join(' '), '2026-11-08 05 0');
+    check('  denní data (YYYYMMDD) se za hodiny nevydávají', h.api.aquareaHodinyRozeber(ODPOVED, '2026-10-14').length, 0);
+    const now = Date.UTC(2026, 10, 8, 12);
+    h.state.tcSpotreba.hodiny = [{ k: '2026-09-01 00', topeni: 1, voda: 1 }, { k: '2026-11-08 00', topeni: 0.1, voda: null }];
+    h.api.tcHodinySluc([{ k: '2026-11-08 00', topeni: 0.8, voda: null }], now);
+    check('slučování: novější přepíše, starší 40 dní pryč', JSON.stringify(h.state.tcSpotreba.hodiny), JSON.stringify([{ k: '2026-11-08 00', topeni: 0.8, voda: null }]));
+
+    const p = build({ odpoved: dlouhe });
+    p.state.tcSpotreba.hodiny = [];
+    check('poll: včera i dnes, uloží (každému dni jeho hodiny)', await p.api.tcHodinyPoll('G', Date.UTC(2026, 10, 8, 10)) + ' ' + p.state.tcSpotreba.hodiny.map(x => x.k).join(), '3 2026-11-07 01,2026-11-08 00,2026-11-08 01');
+    check('  příznak, že cloud hodiny dává', p.state.tcSpotreba.hodinyOk, true);
+    const pred = p.dotazy.length;
+    await p.api.tcHodinyPoll('G', Date.UTC(2026, 10, 8, 11));
+    check('  příště už jen dnešek', p.dotazy.length - pred, 1);
+    const den = build();
+    await den.api.tcSpotrebaPoll();
+    check('denní načítání jde dál, i když hodiny nic nedají', [den.state.tcSpotreba.dny.length > 0, (den.state.tcSpotreba.hodiny || []).length, !!den.state.tcSpotreba.chyba].join(' '), 'true 0 false');
+    const pad = build({ fetch: async (c, o) => { if (JSON.parse(o.body).bodyParam.dataMode === 0) throw new Error('x'); return ODPOVED; } });
+    await pad.api.tcSpotrebaPoll();
+    check('  chyba hodin denní data neshodí ani nezaloguje', JSON.stringify([pad.state.tcSpotreba.dny.length > 0, pad.state.tcSpotreba.chyba, pad.logy.length]), '[true,null,0]');
+  }
+
   nadpis('Diagnostika a obnova');
   {
     const h = build();
@@ -176,6 +214,7 @@ function build(o = {}) {
     check('diagnostika: tvar a první záznamy', [out.ok, out.klice.join(','), out.zaznamu, out.prvni.length].join(' '),
       'true dateString,energyShowing,historyDataList 6 3');
     check('  bez GUID', JSON.stringify(out).includes('GW-TAJNE'), false);
+    check('  ukáže i hodinový pokus', [out.hodinove.zaznamu, out.hodinove.rozebrano.length].join(' '), '6 0');
     const e = build({ chyba: 'pád' });
     const d2 = (await e.volej('get', '/api/aquarea/spotreba/diagnostika')).out;
     check('  chyba bez GUID', [d2.ok, d2.chyba].join(' '), 'false pád …');
@@ -196,6 +235,12 @@ function build(o = {}) {
     check('  venku jen rozumné, příznak historie', [r.state.tcSpotreba.dny[2].venku, 'venku' in r.state.tcSpotreba.dny[3], r.state.tcSpotreba.historie].join(' '), '4.5 false true');
     check('  razítko a měsíce', [r.state.tcSpotreba.ts, r.state.months[0].tc].join(' '), '7 26000');
     check('  bez dny = 400', (await r.volej('post', '/api/aquarea/spotreba/restore', {})).kod, 400);
+    r.state.tcSpotreba.hodiny = [{ k: '2099-01-01 05', topeni: 0.5, voda: 0 }];
+    await r.volej('post', '/api/aquarea/spotreba/restore', { dny: [], hodiny: [
+      { k: '2099-01-01 05', topeni: 9, voda: 0 }, { k: '2099-01-01 06', topeni: 0.4, voda: null },
+      { k: 'nesmysl', topeni: 1, voda: 1 }, { k: '2099-01-01 07', topeni: 99, voda: 0 }] });
+    check('obnova hodin: jen platné nové, uložené nepřepíše', JSON.stringify(r.state.tcSpotreba.hodiny),
+      JSON.stringify([{ k: '2099-01-01 05', topeni: 0.5, voda: 0 }, { k: '2099-01-01 06', topeni: 0.4, voda: null }]));
   }
   konec();
 })();
