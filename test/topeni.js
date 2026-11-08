@@ -17,7 +17,7 @@ function build(now) {
   const realNow = Date.now;
   const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'SENSOR_SILENCE_LOG_MS', 'DATA_MAX_AGE_MS',
     CODE + '\n; return { topeniOdhadW, topeniVzorek, topeniUzavri, topeniSouhrn, topeniPayload, topeniObnov,'
-         + ' topeniNavod, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
+         + ' topeniNavod, topeniTcDny, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
   )(state, (u, d) => zpravy.push({ u, d }), { get: (c, f) => { routy[c] = f; } }, () => true,
     6 * HOD, 10 * 60000);
   return { state, zpravy, api, routy, realNow };
@@ -45,7 +45,7 @@ nadpis('2) Hodina se sbírá a uzavře');
     loznice: { tempC: 30, reportedAt: T0 - 7 * HOD } };
   state.aircon = { fetchedAt: new Date().toISOString(),
     devices: [{ power: true, mode: 'heat' }, { power: true, mode: 'cool' }, { power: false, mode: 'heat' }],
-    aquarea: [{ zones: [{ on: true }] }] };
+    aquarea: [{ venku: 3.4, zones: [{ on: true, temp: 34, target: -1, pouzita: true }, { on: false, temp: 20, target: 0, pouzita: false }] }] };
   for (let i = 0; i < 30; i++) api.topeniVzorek({ dumW: i < 15 ? 2000 : 3000, bojleryW: 0, saunaW: null }, T0 + i * 120000);
   check('během hodiny se nic nezapíše', state.topeni.zaznamy.length, 0);
   api.topeniVzorek({ dumW: 500, bojleryW: 0, saunaW: 0 }, T0 + HOD + 1000);
@@ -58,6 +58,7 @@ nadpis('2) Hodina se sbírá a uzavře');
   check('  pokoje jen s čerstvým čidlem', JSON.stringify(z.pokoje), '{"obyvak":21.5,"miky":20.5}');
   check('  topící klimatizace', z.klimaTopi, 1);
   check('  Aquarea topí', z.aqTopi, 1);
+  check('  čidla TČ: venku, topná voda, posun (jen používaná zóna)', [z.tcVenkuC, z.tcVodaC, z.tcPosun].join(' '), '3.4 34 -1');
   check('  sauna bez dat chybí', 'saunaW' in z, false);
   const hodPraha = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Prague', hour: '2-digit', hour12: false }).format(T0)) % 24;
   check('  odhad topení podle pražské hodiny', z.topeniW, api.topeniOdhadW(2500, 0, null, hodPraha));
@@ -101,7 +102,11 @@ nadpis('3) Souhrn, ořez a obnova');
     state.tcSpotreba = { dny: [{ d: d0, topeni: 7.25, voda: 1.9, chlazeni: null }] };
     const s = api.topeniSouhrn([{ t: h0, topeniW: 1000 }])[0];
     check('  s daty TČ: topení, voda i odhad', [s.tcTopeniKwh, s.tcVodaKwh, s.topeniKwh].join(' '), '7.25 1.9 1');
+    state.tcSpotreba = { dny: [{ d: '2025-01-10', topeni: 20.5, voda: 2.1, chlazeni: 0, venku: -3.2 }, { d: d0, topeni: null, voda: 1 }] };
+    check('denní spotřeba TČ do exportu i zpětně', JSON.stringify(api.topeniTcDny()),
+      JSON.stringify([{ d: '2025-01-10', topeniKwh: 20.5, vodaKwh: 2.1, venkuC: -3.2 }, { d: d0, vodaKwh: 1 }]));
     delete state.tcSpotreba;
+    check('  bez dat prázdné', JSON.stringify(api.topeniTcDny()), '[]');
   }
 
   const pred = state.topeni.zaznamy.length;
@@ -131,6 +136,7 @@ nadpis('4) Návod pro AI');
   check('zmiňuje cyklování', /cykluje/.test(t), true);
   check('radí denní součty', /denními součty/.test(t), true);
   check('upozorní na COP', /COP/.test(t), true);
+  check('popisuje tcDny a čidla TČ', /`tcDny`/.test(t) && /tcVenkuC/.test(t) && /tcVodaC/.test(t), true);
   check('časové pásmo', /Europe\/Prague/.test(t), true);
 }
 
@@ -141,7 +147,7 @@ nadpis('4) Napojení');
   check('do appky jde souhrn', /topeni: topeniPayload\(\),/.test(SRC), true);
   check('ukládá se do vlastního klíče', /storeTopeniUloz\(\)/.test(SRC) && /:topeni`/.test(SRC), true);
   check('po startu se načte', /await storeTopeniNacti\(\)/.test(SRC), true);
-  check('návod jde v odpovědi první', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), zaznamy/.test(SRC), true);
+  check('návod jde v odpovědi první', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), tcDny: topeniTcDny\(\), zaznamy/.test(SRC), true);
   check('celá řada jen přes zámek', /app\.get\('\/api\/topeni', \(req, res\) => \{\s*if \(!requireAuth/.test(SRC), true);
 }
 

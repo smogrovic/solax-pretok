@@ -1117,6 +1117,10 @@ function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
     pridej('klimaTopi', (ac.devices || []).filter(d => d.power === true && d.mode === 'heat').length);
     const aq = (ac.aquarea || [])[0];
     if (aq && Array.isArray(aq.zones)) pridej('aqTopi', aq.zones.some(z => z.on) ? 1 : 0);
+    // Čidla tepelného čerpadla: venkovní teplota, teplota topné vody a posun křivky zóny
+    if (aq) pridej('tcVenkuC', aq.venku);
+    const zona = aq && Array.isArray(aq.zones) ? (aq.zones.find(z => z.pouzita !== false) || aq.zones[0]) : null;
+    if (zona) { pridej('tcVodaC', zona.temp); pridej('tcPosun', zona.target); }
   }
 }
 
@@ -1144,6 +1148,10 @@ function topeniUzavri() {
   if (klima !== null) z.klimaTopi = zaokr(klima, 10);
   const aq = prumer('aqTopi');
   if (aq !== null) z.aqTopi = zaokr(aq, 100);
+  for (const k of ['tcVenkuC', 'tcVodaC', 'tcPosun']) {
+    const v = prumer(k);
+    if (v !== null) z[k] = zaokr(v, 10);
+  }
   z.topeniW = topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(b.t).hour);
   t.zaznamy.push(z);
   const od = Date.now() - TOPENI_DNU * 86400000;
@@ -1180,6 +1188,18 @@ function topeniSouhrn(zaznamy = state.topeni.zaznamy) {
     });
 }
 
+// Denní spotřeba TČ z Comfort Cloudu za celou dobu, co ji appka má (od ledna 2025)
+function topeniTcDny() {
+  return ((state.tcSpotreba && state.tcSpotreba.dny) || []).map(x => {
+    const o = { d: x.d };
+    if (typeof x.topeni === 'number') o.topeniKwh = x.topeni;
+    if (typeof x.voda === 'number') o.vodaKwh = x.voda;
+    if (typeof x.chlazeni === 'number' && x.chlazeni > 0) o.chlazeniKwh = x.chlazeni;
+    if (typeof x.venku === 'number') o.venkuC = x.venku;
+    return o;
+  });
+}
+
 function topeniModel() {
   return { zakladW: TOPENI_ZAKLAD_W, vareniW: TOPENI_VARENI_W, vareniOd: TOPENI_VARENI_OD, vareniDo: TOPENI_VARENI_DO };
 }
@@ -1191,8 +1211,8 @@ function topeniNavod() {
   return [
     'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
     'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
-    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
-    'SKUTEČNÁ SPOTŘEBA TČ: V denním souhrnu tcTopeniKwh / tcVodaKwh = elektřina tepelného čerpadla na topení / ohřev vody za den podle Comfort Cloudu (měřené jednotkou). Kde jsou, mají přednost před odhadem.',
+    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'SKUTEČNÁ SPOTŘEBA TČ: `tcDny` = elektřina tepelného čerpadla po dnech podle Comfort Cloudu (měřené jednotkou), i zpětně za dobu, kdy hodinové záznamy ještě nebyly: topeniKwh = topení, vodaKwh = ohřev teplé vody, venkuC = průměrná venkovní teplota dne z čidla TČ. Kde jsou, mají přednost před odhadem topeniW. Dnešek je neúplný.',
     'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0. Obě konstanty jsou hrubé odhady (viz `model`). Klidně je přepočítej ze surových dumW/bojleryW/saunaW — např. stálý odběr urči z nočních hodin teplých dnů, kdy se netopí (aqTopi = 0, klimaTopi = 0).',
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
     'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
@@ -3199,7 +3219,7 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
   // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
-  res.json({ navod: topeniNavod(), model: topeniModel(), zaznamy: state.topeni.zaznamy });
+  res.json({ navod: topeniNavod(), model: topeniModel(), tcDny: topeniTcDny(), zaznamy: state.topeni.zaznamy });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
