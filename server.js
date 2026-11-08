@@ -7003,6 +7003,8 @@ function pccAquareaFromGroup(d) {
     tankOn: t.operationStatus === 1,
     tankMin: cislo(t.heatMin),
     tankMax: cislo(t.heatMax),
+    // Venkovní teplota z čidla jednotky (detail zařízení) — zatím jen pro srovnání na počasí
+    venku: (v => (typeof v === 'number' && Number.isFinite(v) && v > -60 && v < 60 ? v : null))(typeof d.outdoorNow === 'string' && d.outdoorNow.trim() !== '' ? Number(d.outdoorNow) : d.outdoorNow),
     zones: zonesRaw.map((z, i) => {
       const target = aquaNum(z.heatSet);
       const min = cislo(z.heatMin), max = cislo(z.heatMax);

@@ -340,6 +340,7 @@
   @keyframes sc-mlha{from{transform:translateX(-12%);}to{transform:translateX(12%);}}
   @media (prefers-reduced-motion: reduce){.poc-scena *{animation:none !important;}}
   .poc-popis{font-size:18px;font-weight:500;opacity:0.95;}
+  .poc-tc{font-size:12px;opacity:0.85;margin-left:10px;}
   .poc-minmax{font-size:16px;font-weight:500;margin-top:1px;}
   .poc-karta{background:rgba(255,255,255,0.16);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
     border-radius:16px;padding:8px 12px 9px;}
@@ -13005,6 +13006,7 @@ function connectStream() {
     renderTimeline(); // názvy klimatizací v legendě osy
     renderTempAuto(); // aktuální teploty v pokojích
     renderAirconChart(); // názvy a barvy řad se berou ze seznamu jednotek
+    bezpecne(renderKalDen); // teplota z čidla TČ na počasí
   });
   es.addEventListener('sensor', e => {
     const d = JSON.parse(e.data);
@@ -15525,7 +15527,10 @@ function renderKalPocasi(p, now = Date.now()) {
   }
   const popis = ted.popis ? ted.popis.charAt(0).toUpperCase() + ted.popis.slice(1) : '';
   el('div', 'poc-popis', hlava, popis);
-  el('div', 'poc-minmax', hlava, `Max ${st(p.maxC)}  Min ${st(p.minC)}`);
+  const minmax = el('div', 'poc-minmax', hlava, `Max ${st(p.maxC)}  Min ${st(p.minC)}`);
+  // Pro srovnání: co měří venkovní čidlo tepelného čerpadla (menším písmem na stejném řádku)
+  const tcVenku = ((airconData && airconData.aquarea) || [])[0];
+  if (tcVenku && typeof tcVenku.venku === 'number') el('span', 'poc-tc', minmax, 'čidlo TČ ' + st(tcVenku.venku));
   // Během dne: z Open-Meteo po hodinách, z OpenWeather po 3 h
   const delka = (p.zdroj === 'open-meteo' ? 1 : 3) * 3600000;
   const hodiny = (p.hodiny || []).filter(h => h.t + delka > now);

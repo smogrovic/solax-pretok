@@ -612,6 +612,16 @@ setTimeout(async () => {
     check('rozpětí: tečka teď na správném místě', Math.round(parseFloat(tecka.style.left)), Math.round((6.4 - 2.2) / (13.6 - 2.2) * 100));
     const karty = [...poc.querySelectorAll('.poc-male .poc-karta')].map(k => k.textContent);
     check('karta slunce: východ a západ', karty[0], 'Slunce7:12Východ, západ 16:45.');
+    check('bez TČ řádek s čidlem chybí', poc.querySelector('.poc-tc'), null);
+    const airconPuv = airconData;
+    airconData = { ...airconData, aquarea: [{ venku: 7.5 }] };
+    renderKalPocasi(POC, v7);
+    const tcEl = poc.querySelector('.poc-tc');
+    check('čidlo TČ menším písmem pod Max/Min', tcEl && tcEl.textContent + ' ' + (parseFloat(getComputedStyle(tcEl).fontSize) < parseFloat(getComputedStyle(poc.querySelector('.poc-popis')).fontSize))
+      + ' ' + tcEl.parentElement.className, 'čidlo TČ 8° true poc-minmax');
+    check('  vejde se bez posouvání i s ním', poc.scrollHeight <= poc.clientHeight + 1, true);
+    airconData = airconPuv;
+    renderKalPocasi(POC, v7);
     check('nahoře Benešov a dvě teploty', poc.querySelector('.poc-misto').textContent + ' | '
       + [...poc.querySelectorAll('.poc-t')].map(t => t.textContent).join(' | '), 'Benešov | 6°Skutečná | 3°Pocitová');
     const ts = [...poc.querySelectorAll('.poc-t')].map(t => t.getBoundingClientRect());

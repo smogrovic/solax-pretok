@@ -44,6 +44,8 @@ function build(o = {}) {
     '[1,34,2,-5,5,true]');
   check('nádrž: teplota, cíl, rozsah, zapnutá', [aq.tankTemp, aq.tankTarget, aq.tankMin, aq.tankMax, aq.tankOn].join(' '), '48 50 40 60 false');
   check('režim z toho, co je zapnuté', h0.api.aquareaRezim(aq), 'topeni');
+  check('venkovní teplota z čidla TČ', JSON.stringify([h0.api.pccAquareaFromGroup({ outdoorNow: 7.5 }).venku, h0.api.pccAquareaFromGroup({ outdoorNow: '-3' }).venku,
+    h0.api.pccAquareaFromGroup({ outdoorNow: -255 }).venku, h0.api.pccAquareaFromGroup({}).venku]), '[7.5,-3,null,null]');
   const abs = h0.api.pccAquareaFromGroup({ zoneStatus: [{ zoneId: 1, heatSet: 35 }], tankStatus: {} });
   check('bez rozsahu: 35 °C = absolutní cíl', abs.zones[0].relativni, false);
   check('  bez rozsahu: +3 = posun křivky', h0.api.pccAquareaFromGroup({ zoneStatus: [{ zoneId: 1, heatSet: 3 }] }).zones[0].relativni, true);
