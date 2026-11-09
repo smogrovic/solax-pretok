@@ -400,10 +400,11 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ---------- Přihlášení (Apple ID přes Firebase) ----------
-// Do appky se jednou na zařízení přihlásí Apple ID přes Firebase Authentication.
-// Server ověří podpis Firebase ID tokenu (veřejné klíče Googlu), poskytovatele
-// apple.com a e-mail ze seznamu povolených, a vydá vlastní dlouhodobou cookie
+// ---------- Přihlášení (Google účet nebo jednorázový odkaz e-mailem, přes Firebase) ----------
+// Do appky se jednou na zařízení přihlásí přes Firebase Authentication: Google účtem,
+// nebo jednorázovým odkazem poslaným e-mailem (jde s jakoukoli adresou, i iCloud).
+// Server ověří podpis Firebase ID tokenu (veřejné klíče Googlu), poskytovatele,
+// ověřený e-mail ze seznamu povolených, a vydá vlastní dlouhodobou cookie
 // (HMAC, 400 dní, průběžně se prodlužuje) — Firebase pak už není potřeba.
 // Dokud na serveru chybí FIREBASE_PROJECT_ID, FIREBASE_API_KEY nebo AUTH_SESSION_SECRET,
 // přihlášení je vypnuté a appka jede jako dřív (nasazení nikoho nezamkne).
@@ -417,6 +418,8 @@ const AUTH_EMAILY = ((process.env.AUTH_EMAILY || '').trim() ? process.env.AUTH_E
 const prihlaseniZapnute = !!(FIREBASE_PROJECT_ID && FIREBASE_API_KEY && AUTH_SESSION_SECRET);
 if (!prihlaseniZapnute) console.log('Přihlášení vypnuté (chybí FIREBASE_PROJECT_ID / FIREBASE_API_KEY / AUTH_SESSION_SECRET).');
 const AUTH_COOKIE = 'solinator_prihlaseni';
+// Google účet, nebo odkaz z e-mailu (Firebase ho v tokenu hlásí jako password/emailLink)
+const AUTH_POSKYTOVATELE = ['google.com', 'password', 'emailLink'];
 const AUTH_PLATNOST_MS = 400 * 86400000;          // nejdelší, co prohlížeče u cookie dovolí
 const AUTH_OBNOVIT_PO_MS = 30 * 86400000;         // starší přihlášení se při použití prodlouží
 // Obnova dat po startu volá vlastní /restore endpointy — ty projdou s tímhle klíčem
@@ -470,7 +473,7 @@ async function firebaseKliceNacti(now = Date.now()) {
   return firebaseKlice.klice;
 }
 // Ověření Firebase ID tokenu bez knihovny: RS256 podpis klíčem podle `kid`,
-// aud = projekt, iss = securetoken, platnost, poskytovatel apple.com.
+// aud = projekt, iss = securetoken, platnost, poskytovatel a ověřený e-mail.
 async function firebaseOverToken(idToken, { now = Date.now(), klice = null } = {}) {
   if (typeof idToken !== 'string' || idToken.length > 5000) throw new Error('Chybí token.');
   const casti = idToken.split('.');
@@ -485,9 +488,11 @@ async function firebaseOverToken(idToken, { now = Date.now(), klice = null } = {
   const s = Math.floor(now / 1000);
   if (telo.aud !== FIREBASE_PROJECT_ID || telo.iss !== 'https://securetoken.google.com/' + FIREBASE_PROJECT_ID) throw new Error('Token je pro jiný projekt.');
   if (!(telo.exp > s) || !(telo.iat <= s + 60) || !(telo.auth_time <= s + 60) || typeof telo.sub !== 'string' || !telo.sub) throw new Error('Token vypršel.');
-  if (!telo.firebase || telo.firebase.sign_in_provider !== 'apple.com') throw new Error('Přihlas se přes Apple ID.');
-  if (typeof telo.email !== 'string' || !telo.email) throw new Error('Apple nesdílel e-mail — přihlas se znovu a zvol „Sdílet můj e-mail“.');
-  return { email: telo.email.trim().toLowerCase(), overeny: telo.email_verified === true };
+  if (!telo.firebase || !AUTH_POSKYTOVATELE.includes(telo.firebase.sign_in_provider)) throw new Error('Přihlas se Google účtem nebo odkazem z e-mailu.');
+  if (typeof telo.email !== 'string' || !telo.email) throw new Error('Účet nemá e-mail.');
+  // Odkaz z e-mailu i Google e-mail ověřují; bez ověření by šlo jen zadat cizí adresu
+  if (telo.email_verified !== true) throw new Error('E-mail není ověřený — přihlas se odkazem z e-mailu.');
+  return { email: telo.email.trim().toLowerCase() };
 }
 
 // Adresy pro stroje bez přihlášení: mají vlastní klíč, nebo je volá zařízení,
@@ -518,13 +523,13 @@ function prihlaseniBrana(req, res, next) {
   const vnitrni = req.get('X-Vnitrni');
   if (typeof vnitrni === 'string' && safeEqual(vnitrni, VNITRNI_KLIC)) return next();
   res.setHeader('X-Prihlaseni', 'nutne');
-  res.status(401).json({ error: 'Nejsi přihlášený — otevři appku a přihlas se přes Apple ID.' });
+  res.status(401).json({ error: 'Nejsi přihlášený — otevři appku a přihlas se.' });
 }
 app.use(prihlaseniBrana);
 
 // Firebase přihlašování přes přesměrování potřebuje stránky /__/auth/* na stejné
 // doméně jako appka (jinak ho Safari na iPhonu rozbije blokováním cizích cookies).
-// Proto je appka přeposílá na <projekt>.firebaseapp.com. Návratová adresa pro Apple
+// Proto je appka přeposílá na <projekt>.firebaseapp.com. Návratová adresa pro Google
 // je pak https://<doména appky>/__/auth/handler.
 app.all(['/__/auth/*', '/__/firebase/*'], express.raw({ type: () => true, limit: '1mb' }), async (req, res) => {
   if (!FIREBASE_PROJECT_ID) return res.status(404).end();
@@ -610,10 +615,7 @@ app.post('/api/auth/firebase', async (req, res) => {
   if (!authEmailPovolen(u.email)) {
     registerFailedAttempt(req.ip);
     addLog(`Přihlášení odmítnuto: ${u.email} není mezi povolenými`, 'error');
-    const skryty = /@privaterelay\.appleid\.com$/.test(u.email);
-    return res.status(403).json({ error: skryty
-      ? 'Apple poslal skrytý e-mail. V Nastavení iPhonu → Apple ID → Přihlásit se přes Apple zruš Solinátor a přihlas se znovu s volbou „Sdílet můj e-mail“.'
-      : `Účet ${u.email} do appky přístup nemá.` });
+    return res.status(403).json({ error: `Účet ${u.email} do appky přístup nemá.` });
   }
   unlockAttempts.delete(req.ip);
   authNastavCookie(res, authVydej(u.email));
@@ -627,8 +629,8 @@ app.post('/api/auth/odhlasit', (req, res) => {
 });
 
 // Kód pro další zařízení: přihlášený si vyžádá 6 číslic (10 min, jednou), nové
-// zařízení ho zadá místo Apple ID — hlavně appka na ploše iPhonu, kde přesměrování
-// na Apple nemusí projít.
+// zařízení ho zadá místo přihlášení — hlavně appka na ploše iPhonu: odkaz z e-mailu
+// se tam otevře v Safari, ne v appce, a přesměrování na Google nemusí projít.
 const AUTH_KOD_PLATI_MS = 10 * 60000;
 const authKody = new Map();   // kód → { email, do }
 app.post('/api/auth/kod', (req, res) => {

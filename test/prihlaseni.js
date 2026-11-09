@@ -1,11 +1,11 @@
-// Přihlášení přes Apple ID (Firebase): ověření ID tokenu, povolené e-maily, cookie,
+// Přihlášení přes Firebase (Google účet nebo odkaz z e-mailu): ověření ID tokenu, povolené e-maily, cookie,
 // brána na /api a stránku, výjimky pro stroje, kód pro další zařízení.
 const crypto = require('crypto');
 const path = require('path');
 const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('přihlášení');
 
-const CODE = between('// ---------- Přihlášení (Apple ID přes Firebase)', '// ---------- Otisk verze')
+const CODE = between('// ---------- Přihlášení (Google účet', '// ---------- Otisk verze')
   + '\n' + between('// Přihlášení: stav (veřejný', '// ---------- SSE stream') + '\n' + fn('function safeEqual(a, b) {');
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -19,7 +19,7 @@ function jwt(telo, { kid = 'k1', klic = privateKey, alg = 'RS256' } = {}) {
 const ted = () => Math.floor(Date.now() / 1000);
 const token = (o = {}) => jwt({ aud: 'projekt-x', iss: 'https://securetoken.google.com/projekt-x', sub: 'u1',
   iat: ted() - 10, auth_time: ted() - 10, exp: ted() + 3600, email: 'Smogrovic@gmail.com', email_verified: true,
-  firebase: { sign_in_provider: 'apple.com' }, ...o });
+  firebase: { sign_in_provider: 'google.com' }, ...o });
 
 function build(env = {}) {
   const routy = {}, middleware = [], logy = [];
@@ -57,7 +57,9 @@ function build(env = {}) {
   {
     const { api } = build();
     const klice = { k1: PUB };
-    check('platný token Apple → e-mail malými písmeny', (await api.firebaseOverToken(token(), { klice })).email, 'smogrovic@gmail.com');
+    check('platný token z Google účtu → e-mail malými písmeny', (await api.firebaseOverToken(token(), { klice })).email, 'smogrovic@gmail.com');
+    check('  odkaz z e-mailu (password i emailLink) taky', (await api.firebaseOverToken(token({ firebase: { sign_in_provider: 'password' } }), { klice })).email
+      + ' ' + (await api.firebaseOverToken(token({ firebase: { sign_in_provider: 'emailLink' } }), { klice })).email, 'smogrovic@gmail.com smogrovic@gmail.com');
     const chyba = async (t, o) => { try { await api.firebaseOverToken(t, { klice, ...o }); return 'prošlo'; } catch (e) { return e.message; } };
     const jiny = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
     check('cizí podpis', await chyba(jwt({ ...JSON.parse(Buffer.from(token().split('.')[1], 'base64')) }, { klic: jiny })), 'Neplatný podpis tokenu.');
@@ -65,8 +67,10 @@ function build(env = {}) {
     check('jiný vydavatel', await chyba(token({ iss: 'https://evil' })), 'Token je pro jiný projekt.');
     check('vypršelý', await chyba(token({ exp: ted() - 1 })), 'Token vypršel.');
     check('z budoucnosti', await chyba(token({ iat: ted() + 3600 })), 'Token vypršel.');
-    check('Google místo Apple', await chyba(token({ firebase: { sign_in_provider: 'google.com' } })), 'Přihlas se přes Apple ID.');
-    check('bez e-mailu', /Sdílet můj e-mail/.test(await chyba(token({ email: undefined }))), true);
+    check('anonymní / Apple / jiný poskytovatel ne', [await chyba(token({ firebase: { sign_in_provider: 'anonymous' } })), await chyba(token({ firebase: { sign_in_provider: 'apple.com' } }))].join(' | '),
+      'Přihlas se Google účtem nebo odkazem z e-mailu. | Přihlas se Google účtem nebo odkazem z e-mailu.');
+    check('bez e-mailu', await chyba(token({ email: undefined })), 'Účet nemá e-mail.');
+    check('neověřený e-mail (heslo k cizí adrese) ne', await chyba(token({ firebase: { sign_in_provider: 'password' }, email_verified: false })), 'E-mail není ověřený — přihlas se odkazem z e-mailu.');
     check('neznámý klíč', await chyba(jwt({}, { kid: 'nic' })), 'Neznámý klíč tokenu.');
     check('alg none', await chyba(jwt({}, { alg: 'none' })), 'Neplatný token.');
     check('nesmysl', await chyba('abc'), 'Neplatný token.');
@@ -81,8 +85,6 @@ function build(env = {}) {
       'true elena.smogrovicova@icloud.com true true');
     const cizi = await h.volej('POST', '/api/auth/firebase', { telo: { idToken: token({ email: 'cizi@example.com' }) } });
     check('cizí účet 403, bez cookie, zaloguje se', [cizi.kod, cizi.cookies.length, /cizi@example\.com/.test(h.logy.join())].join(' '), '403 0 true');
-    const skryty = await h.volej('POST', '/api/auth/firebase', { telo: { idToken: token({ email: 'abc@privaterelay.appleid.com' }) } });
-    check('skrytý e-mail od Apple: návod', /Sdílet můj e-mail/.test(skryty.json.error), true);
     const s = h.api.authOver(h.api.authVydej('smogrovic@gmail.com'));
     check('cookie se ověří', s && s.email, 'smogrovic@gmail.com');
     check('  podvržený podpis ne', h.api.authOver(h.api.authVydej('smogrovic@gmail.com').replace(/.$/, 'x') + 'y'), null);

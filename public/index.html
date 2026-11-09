@@ -3894,7 +3894,7 @@
         <div class="rezim-hint" id="zalohaHint">Data se zálohují i automaticky. Soubor obsahuje i aplikaci, ale bez hesel a přihlášení.</div>
       </div>
 
-      <!-- Přihlášení přes Apple ID: kdo je přihlášený, odhlášení a kód pro další zařízení -->
+      <!-- Přihlášení: kdo je přihlášený, odhlášení a kód pro další zařízení -->
       <div class="card" id="prihlaseniKarta" hidden>
         <div class="asst-log-title">Přihlášení</div>
         <div class="rezim-hint" id="prihlaseniKdo"></div>
@@ -16325,7 +16325,7 @@ if (kalPanelEl) {
   });
 }
 
-// ---------- Přihlášení: karta v Log/Nastavení ----------
+// ---------- Přihlášení: karta v Log/Nastavení (Google / odkaz z e-mailu / kód) ----------
 const prihlaseniKartaEl = document.getElementById('prihlaseniKarta');
 let prihlaseniKodTimer = null;
 async function prihlaseniNacti() {
@@ -16338,7 +16338,7 @@ async function prihlaseniNacti() {
 }
 if (prihlaseniKartaEl) {
   document.getElementById('prihlaseniOdhlasit').addEventListener('click', async () => {
-    if (!(await zeptejSe('Odhlásit toto zařízení?', 'Pak se tu bude potřeba znovu přihlásit přes Apple ID nebo kódem.'))) return;
+    if (!(await zeptejSe('Odhlásit toto zařízení?', 'Pak se tu bude potřeba znovu přihlásit (Google, odkaz z e-mailu nebo kód).'))) return;
     try { await fetch('/api/auth/odhlasit', { method: 'POST' }); } catch {}
     location.reload();
   });

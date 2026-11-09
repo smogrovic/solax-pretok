@@ -1,90 +1,75 @@
-# Přihlášení do appky přes Apple ID (Firebase)
+# Přihlášení do appky (Google účet nebo jednorázový odkaz e-mailem)
 
-Do appky se na každém zařízení přihlásí **jednou**, přes Apple ID. Pak si zařízení přihlášení pamatuje.
+Do appky se na každém zařízení přihlásí **jednou**. Pak si zařízení přihlášení pamatuje.
 Platnost je 400 dní a při používání se sama prodlužuje.
 
-**Povolené účty** (e-mail Apple ID): smogrovic@gmail.com, zuzana.smogrovicova@gmail.com,
+**Tři způsoby přihlášení:**
+- **Google účtem.** Hodí se pro adresy na Gmailu.
+- **Jednorázovým odkazem e-mailem.** Jde s jakoukoli adresou, takže i s iCloudem.
+  Appka pošle odkaz, ten se otevře a přihlášení je hotové. Odkaz platí jednou, zhruba hodinu.
+- **Kódem z jiného přihlášeného zařízení** (6 číslic, platí 10 minut a jednou). Hodí se pro appku
+  na ploše iPhonu: odkaz z e-mailu se otevře v Safari, ne v ní.
+
+**Povolené účty:** smogrovic@gmail.com, zuzana.smogrovicova@gmail.com,
 mikulas.smogrovic@icloud.com, elena.smogrovicova@icloud.com.
 Seznam jde přepsat proměnnou `AUTH_EMAILY` na Renderu, e-maily oddělené čárkou.
 
 **Dokud nejsou nastavené proměnné z kroku 3, appka jede jako dřív, bez přihlášení.**
-Nasazení samo nikoho nezamkne.
-
-## Co je potřeba
-
-- **Placený Apple Developer Program** (99 USD/rok). Bez něj Apple přihlášení na webu nepovolí.
-- Účet Google kvůli Firebase. Stačí zdarma tarif Spark.
+Nasazení samo nikoho nezamkne. Všechno je zdarma, stačí tarif Firebase Spark.
 
 ## 1. Firebase
 
-1. Na [console.firebase.google.com](https://console.firebase.google.com) vytvoř projekt, třeba `solinator`.
-   Google Analytics nejsou potřeba.
-2. **Project settings → General → Your apps → Web (`</>`)**: zaregistruj webovou appku (hosting ne).
-   Z ukázaného `firebaseConfig` si opiš `apiKey` a `projectId`.
-3. **Authentication → Get started → Sign-in method → Apple → Enable.** Okno nech otevřené, vyplníš ho v kroku 2.6.
-4. **Authentication → Settings → Authorized domains → Add domain:** `solax-pretok.onrender.com`.
+Můžeš použít **projekt, který už máš pro Moje finance** (`moje-finance-4bb9e`), nebo založit nový.
+Postup je stejný.
 
-## 2. Apple Developer ([developer.apple.com/account](https://developer.apple.com/account))
+1. [console.firebase.google.com](https://console.firebase.google.com) → projekt → **Project settings →
+   General → Your apps**. Pokud tam webová appka (`</>`) ještě není, zaregistruj ji (hosting ne).
+   Z `firebaseConfig` si opiš `apiKey` a `projectId`.
+2. **Authentication → Sign-in method:**
+   - **Google → Enable.** Vyplň support e-mail, uložit.
+   - **Email/Password → Enable** a zapni i **Email link (passwordless sign-in)**, uložit.
+3. **Authentication → Settings → Authorized domains → Add domain:** `solax-pretok.onrender.com`.
+4. **Authentication → Templates:** jazyk šablon (tužka dole) přepni na **češtinu**, aby e-mail s odkazem
+   přišel česky.
+5. **Návratová adresa pro Google.** Je potřeba kvůli Safari na iPhonu, appka si přihlašovací stránky
+   Firebase přeposílá ze své domény.
+   - [console.cloud.google.com](https://console.cloud.google.com) → vyber stejný projekt.
+   - **APIs & Services → Credentials** → klient *Web client (auto created by Google Service)* → upravit.
+   - **Authorized JavaScript origins:** přidej `https://solax-pretok.onrender.com`.
+   - **Authorized redirect URIs:** přidej `https://solax-pretok.onrender.com/__/auth/handler`.
+   - Uložit. Změna se projeví do pár minut.
 
-1. **Certificates, IDs & Profiles → Identifiers → +** → *App IDs* → *App*:
-   - Description: `Solinator`;
-   - Bundle ID: `com.smogrovic.solinator`;
-   - v Capabilities zaškrtni **Sign In with Apple**;
-   - uložit.
-2. **Identifiers → +** → *Services IDs*:
-   - Description: `Solinator web`;
-   - Identifier: `com.smogrovic.solinator.web`.
-
-   Tohle je *Services ID*, budeš ho potřebovat ve Firebase.
-3. Otevři ten Services ID, zaškrtni **Sign In with Apple → Configure**:
-   - Primary App ID: `com.smogrovic.solinator`;
-   - **Domains**: `solax-pretok.onrender.com`;
-   - **Return URLs**: `https://solax-pretok.onrender.com/__/auth/handler`;
-   - uložit (Next → Done → Continue → Save).
-4. **Keys → +**:
-   - Name: `Solinator Sign in`;
-   - zaškrtni **Sign In with Apple → Configure** → Primary App ID `com.smogrovic.solinator`;
-   - uložit a **stáhni soubor `.p8`**. Jde stáhnout jen jednou. Opiš si **Key ID**.
-5. **Team ID** najdeš vpravo nahoře u jména, nebo v Membership details.
-6. Zpátky ve Firebase (Apple provider z kroku 1.3) vyplň:
-   - Services ID: `com.smogrovic.solinator.web`;
-   - v *OAuth code flow configuration*: **Apple team ID**, **Key ID** a **Private key** (celý obsah souboru `.p8`);
-   - Save.
-
-   Soubor `.p8` a privátní klíč nikam jinam nedávej: do chatu, repozitáře ani na Render.
-
-## 3. Render (služba `solax-pretok` → Environment)
+## 2. Render (služba `solax-pretok` → Environment)
 
 | Proměnná | Hodnota |
 |---|---|
-| `FIREBASE_API_KEY` | `apiKey` z kroku 1.2. Není tajný, posílá se i do prohlížeče. |
-| `FIREBASE_PROJECT_ID` | `projectId` z kroku 1.2 |
+| `FIREBASE_API_KEY` | `apiKey` z kroku 1.1. Není tajný, posílá se i do prohlížeče. |
+| `FIREBASE_PROJECT_ID` | `projectId` z kroku 1.1 |
 | `AUTH_SESSION_SECRET` | dlouhý náhodný řetězec, např. z `openssl rand -hex 32` v Terminálu. **Tajný, nikam neposílat.** |
 | `AUTH_EMAILY` | nepovinné, jen když chceš změnit seznam povolených účtů |
 
 Po uložení se Render restartuje a přihlášení se zapne.
 
-## 4. První přihlášení
+## 3. První přihlášení
 
-1. Otevři appku a klepni na **Přihlásit se přes Apple**.
-2. Apple se zeptá, jestli sdílet e-mail. Zvol **Sdílet můj e-mail**. Při volbě „Skrýt můj e-mail“
-   Apple pošle náhodnou adresu a appka přístup odmítne. Kdo to omylem zvolí, opraví to takto:
-   - v Nastavení iPhonu → [jméno] → Přihlášení a zabezpečení → Přihlásit se přes Apple
-     → Solinator → *Přestat používat*;
-   - přihlásí se znovu se sdílením e-mailu.
-3. **Appka na ploše iPhonu nebo iPadu:** pokud přesměrování na Apple v appce z plochy neprojde, použij
-   kód z jiného zařízení:
-   - na přihlášeném zařízení otevři **Log/Nastavení → Přihlášení → Kód pro další zařízení**;
-   - na novém zařízení zadej 6 číslic.
+- **Gmail:** otevři appku a klepni na **Přihlásit se Google účtem**.
+- **iCloud (nebo jakýkoli e-mail):** zadej e-mail a klepni na **Poslat**. Odkaz z e-mailu otevři
+  **na stejném zařízení**. Když se otevře jinde, appka si e-mail řekne znovu.
+- **Appka na ploše iPhonu nebo iPadu:** přihlas se jednou v Safari, nebo na jiném zařízení.
+  Pak v té appce otevři **Log/Nastavení → Přihlášení → Kód pro další zařízení** a v appce
+  na ploše zadej 6 číslic.
 
-   Kód platí 10 minut a jen jednou.
+Účet mimo seznam appka odmítne s hláškou, že nemá přístup. Odmítnutí se zapíše do logu.
 
 ## Jak to funguje
 
-- Firebase ověří Apple ID a vydá podepsaný token.
-- Server zkontroluje podpis tokenu (veřejné klíče Googlu), projekt, platnost, poskytovatele `apple.com`
-  a e-mail ze seznamu povolených.
+- Firebase přihlásí Google účet nebo ověří odkaz z e-mailu a vydá podepsaný token.
+- Server zkontroluje:
+  - podpis tokenu (veřejné klíče Googlu), projekt a platnost;
+  - poskytovatele (Google nebo odkaz z e-mailu);
+  - **ověřený** e-mail ze seznamu povolených.
 - Pak vydá vlastní přihlašovací cookie: HttpOnly, Secure, podepsanou `AUTH_SESSION_SECRET`.
+  Firebase už dál potřeba není.
 - Cookie se kontroluje u každého požadavku včetně seznamu povolených účtů. Kdo ze seznamu vypadne,
   přístup okamžitě ztratí.
 - **Odhlásit všechna zařízení najednou:** změň `AUTH_SESSION_SECRET` na Renderu.
