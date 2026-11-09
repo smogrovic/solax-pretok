@@ -1046,7 +1046,7 @@ const USAGE_DAYS_MAX = DEN_MAX;
 
 // Společné tělo pro auto, bazén i dům. Každý dostane, kolik importu na něj ještě
 // zbylo, a vezme si z toho nejvýš tolik, kolik sám bere.
-function recordDen(pole, w, zbylyImportW, dtH) {
+function recordDen(pole, w, zbylyImportW, dtH, nt = null) {
   if (!(w > 0) || !(dtH > 0)) return;            // nic nebere → den se ani nezakládá
   // Kdyby se ze sítě zrovna dobíjela baterie, nesmí „ze sítě" přerůst spotřebu —
   // ten zbytek do daného okruhu nešel a jako jeho spotřeba se nezapočítá.
@@ -1054,6 +1054,10 @@ function recordDen(pole, w, zbylyImportW, dtH) {
   const d = pragueDateString();
   let rec = state[pole].find(r => r.d === d);
   if (!rec) { rec = { d, grid: 0, pv: 0 }; state[pole].push(rec); }
+  // Kolik ze sítě šlo v nízkém tarifu (HDO) — kvůli ceně; jen kde se to ví (auto).
+  // Den, který už odebíral bez měření tarifu, zůstane bez něj (jinak by NT chybělo).
+  if (nt !== null && rec.gridNt === undefined && rec.grid === 0) rec.gridNt = 0;
+  if (nt === true && typeof rec.gridNt === 'number') rec.gridNt += zeSite * dtH;
   rec.grid += zeSite * dtH;
   rec.pv += (w - zeSite) * dtH;                  // grid + pv vždy sedne na denní kWh
   if (state[pole].length > DEN_MAX) {
@@ -1062,7 +1066,9 @@ function recordDen(pole, w, zbylyImportW, dtH) {
   }
 }
 
-function recordWbDay(wbW, importW, dtH) { recordDen('wbDays', wbW, importW, dtH); }
+function recordWbDay(wbW, importW, dtH) {
+  recordDen('wbDays', wbW, importW, dtH, typeof hdoNizky === 'function' ? hdoNizky(Date.now()) : null);
+}
 function recordPoolDay(poolW, zbylyImportW, dtH) { recordDen('poolDays', poolW, zbylyImportW, dtH); }
 function recordUsageDay(loadW, zbylyImportW, dtH) { recordDen('usageDays', loadW, zbylyImportW, dtH); }
 
@@ -3235,13 +3241,14 @@ function denniRestore(pole, strop) {
     for (const inc of days.slice(-DEN_MAX)) {
       if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
       if (inc.d > dnes) continue;                       // z budoucnosti se nic nepřijímá
-      const grid = num(inc.grid), pv = num(inc.pv);
+      const grid = num(inc.grid), pv = num(inc.pv), gridNt = num(inc.gridNt);
       if (grid === null && pv === null) continue;       // prázdný den nezakládat
       let rec = state[pole].find(r => r.d === inc.d);
       if (!rec) { rec = { d: inc.d, grid: 0, pv: 0 }; state[pole].push(rec); changed = true; }
       // Bere se vyšší hodnota: server po restartu začíná od nuly, telefon má celý den
       if (grid !== null && grid > rec.grid) { rec.grid = grid; changed = true; }
       if (pv !== null && pv > rec.pv) { rec.pv = pv; changed = true; }
+      if (gridNt !== null && gridNt <= rec.grid && !(gridNt <= rec.gridNt)) { rec.gridNt = gridNt; changed = true; }
     }
     if (changed) {
       state[pole].sort((a, b) => a.d.localeCompare(b.d));
@@ -12529,6 +12536,7 @@ const JIDELNICEK_WEBY = ['maruskaveg.com', 'buchtavtroube.cz', 'receptyodanicky.
 const JIDELNICEK_KATEGORIE = ['vecere', 'peceni', 'snidane'];
 const JIDELNICEK_TYPY = ['pracovni', 'vikend', 'bez_vareni', 'peceni', 'pracovni_snidane', 'vikend_snidane'];
 const JIDELNICEK_STITKY = ['maso', 'vegan', 'ryba', 'tortilla', 'brambory', 'mozzarella', 'cottage', 'tvaroh'];
+
 const JIDELNICEK_NAKUP_KATEGORIE = ['Maso, ryby, tofu a další bílkoviny', 'Mléčné výrobky a sýry', 'Zelenina', 'Ovoce',
   'Pečivo a přílohy', 'Mouky, vločky a suché potraviny', 'Ořechy, semínka a sladké suroviny', 'Dochucovadla a ostatní'];
 const JIDELNICEK_RECEPTU_MAX = 20;
@@ -13529,6 +13537,50 @@ const server = app.listen(PORT, async () => {
   pollSolax();                                             //   0 s — hned po startu
   scheduleEvery(pollSolax, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
   scheduleEvery(pollShelly, POLL_INTERVAL_MS, 20000);      //  20 s (uvnitř má frontu 1 dotaz/s)
+});
+
+// ---------- Nabíjení auta pro jinou appku ----------
+// GET /api/auto/nabijeni?od=YYYY-MM-DD&do=YYYY-MM-DD s hlavičkou X-Klic (AUTO_KLIC
+// v prostředí Renderu). Po dnech: kolik auto vzalo z FVE a ze sítě a kolik to stálo.
+// FVE je zdarma (přetok se neprodává); síť za proměnnou cenu ČEZ D56d podle tarifu.
+// U dnů z doby před měřením tarifu se VT/NT dělí podle podílu času (odhadTarifu).
+const AUTO_KLIC = (process.env.AUTO_KLIC || '').trim();
+const AUTO_MAX_DNU = 400;
+const kwh2 = wh => Math.round(wh / 10) / 100;
+function autoNabijeniDny(od, doo, now = Date.now()) {
+  const dnes = pragueDateString(now);
+  return (state.wbDays || []).filter(r => r.d >= od && r.d <= doo && (r.grid > 0 || r.pv > 0))
+    .sort((a, b) => a.d.localeCompare(b.d))
+    .map(r => {
+      const sit = Math.max(0, r.grid || 0), fve = Math.max(0, r.pv || 0);
+      const zmereno = typeof r.gridNt === 'number';
+      const nt = zmereno ? Math.min(sit, Math.max(0, r.gridNt)) : sit * (1 - HDO_VT_PODIL);
+      const vt = sit - nt;
+      const cena = (vt * CENIK.vt + nt * CENIK.nt) / 1000;
+      const out = { d: r.d, kwh: kwh2(sit + fve), fveKwh: kwh2(fve), sitKwh: kwh2(sit),
+        sitVtKwh: kwh2(vt), sitNtKwh: kwh2(nt), cenaKc: Math.round(cena * 100) / 100 };
+      if (!zmereno && sit > 0) out.odhadTarifu = true;
+      if (r.d === dnes) out.neuplny = true;
+      return out;
+    });
+}
+app.get('/api/auto/nabijeni', (req, res) => {
+  if (!AUTO_KLIC) return res.status(503).json({ error: 'Na serveru není nastavený AUTO_KLIC.' });
+  const k = req.get('X-Klic');
+  if (typeof k !== 'string' || !k || !safeEqual(k, AUTO_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
+  const datum = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const dnes = pragueDateString();
+  const doo = datum(req.query.do) || dnes;
+  const od = datum(req.query.od) || pragueDateString(Date.now() - 30 * 86400000);
+  if (od > doo) return res.status(400).json({ error: 'od je po do.' });
+  if ((Date.parse(doo) - Date.parse(od)) / 86400000 > AUTO_MAX_DNU) return res.status(400).json({ error: `Nejvýš ${AUTO_MAX_DNU} dní najednou.` });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    ok: true, od, do: doo, mena: 'CZK',
+    cenik: { nazev: CENIK.nazev, vtKcKwh: CENIK.vt, ntKcKwh: CENIK.nt, fveKcKwh: 0 },
+    poznamka: 'Cena = jen proměnná cena elektřiny ze sítě (VT/NT vč. distribuce a DPH), bez měsíčních poplatků. FVE je zdarma. Den s neuplny: true ještě běží — načti ho znovu.',
+    dny: autoNabijeniDny(od, doo)
+  });
 });
 
 // ---------- Záloha do souboru (data i aplikace) ----------
