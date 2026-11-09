@@ -400,6 +400,154 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// ---------- Přihlášení (Apple ID přes Firebase) ----------
+// Do appky se jednou na zařízení přihlásí Apple ID přes Firebase Authentication.
+// Server ověří podpis Firebase ID tokenu (veřejné klíče Googlu), poskytovatele
+// apple.com a e-mail ze seznamu povolených, a vydá vlastní dlouhodobou cookie
+// (HMAC, 400 dní, průběžně se prodlužuje) — Firebase pak už není potřeba.
+// Dokud na serveru chybí FIREBASE_PROJECT_ID, FIREBASE_API_KEY nebo AUTH_SESSION_SECRET,
+// přihlášení je vypnuté a appka jede jako dřív (nasazení nikoho nezamkne).
+const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID || '').trim();
+const FIREBASE_API_KEY = (process.env.FIREBASE_API_KEY || '').trim();
+const FIREBASE_AUTH_DOMAIN = (process.env.FIREBASE_AUTH_DOMAIN || '').trim();   // jinak vlastní doména appky (proxy /__/auth)
+const AUTH_SESSION_SECRET = (process.env.AUTH_SESSION_SECRET || '').trim();
+const AUTH_EMAILY_VYCHOZI = ['smogrovic@gmail.com', 'zuzana.smogrovicova@gmail.com', 'mikulas.smogrovic@icloud.com', 'elena.smogrovicova@icloud.com'];
+const AUTH_EMAILY = ((process.env.AUTH_EMAILY || '').trim() ? process.env.AUTH_EMAILY.split(/[,\s]+/) : AUTH_EMAILY_VYCHOZI)
+  .map(e => e.trim().toLowerCase()).filter(Boolean);
+const prihlaseniZapnute = !!(FIREBASE_PROJECT_ID && FIREBASE_API_KEY && AUTH_SESSION_SECRET);
+if (!prihlaseniZapnute) console.log('Přihlášení vypnuté (chybí FIREBASE_PROJECT_ID / FIREBASE_API_KEY / AUTH_SESSION_SECRET).');
+const AUTH_COOKIE = 'solinator_prihlaseni';
+const AUTH_PLATNOST_MS = 400 * 86400000;          // nejdelší, co prohlížeče u cookie dovolí
+const AUTH_OBNOVIT_PO_MS = 30 * 86400000;         // starší přihlášení se při použití prodlouží
+// Obnova dat po startu volá vlastní /restore endpointy — ty projdou s tímhle klíčem
+const VNITRNI_KLIC = crypto.randomBytes(24).toString('hex');
+
+const authEmailPovolen = email => typeof email === 'string' && AUTH_EMAILY.includes(email.trim().toLowerCase());
+const b64url = buf => Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+const b64urlDecode = s => Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+function authPodpis(data) { return b64url(crypto.createHmac('sha256', AUTH_SESSION_SECRET).update(data).digest()); }
+function authVydej(email, now = Date.now()) {
+  const data = b64url(JSON.stringify({ e: email.trim().toLowerCase(), t: now }));
+  return data + '.' + authPodpis(data);
+}
+// → { email, t } nebo null. E-mail se kontroluje proti seznamu i u platné cookie:
+// kdo ze seznamu vypadne, přestane mít přístup.
+function authOver(token, now = Date.now()) {
+  if (!AUTH_SESSION_SECRET || typeof token !== 'string') return null;
+  const [data, podpis, nic] = token.split('.');
+  if (!data || !podpis || nic !== undefined || !safeEqual(podpis, authPodpis(data))) return null;
+  let o;
+  try { o = JSON.parse(b64urlDecode(data).toString('utf8')); } catch { return null; }
+  if (!o || typeof o.e !== 'string' || !Number.isFinite(o.t) || o.t > now + 60000 || now - o.t > AUTH_PLATNOST_MS) return null;
+  if (!authEmailPovolen(o.e)) return null;
+  return { email: o.e, t: o.t };
+}
+function authCookieZ(req) {
+  const h = req.get ? req.get('cookie') : '';
+  for (const kus of String(h || '').split(';')) {
+    const i = kus.indexOf('=');
+    if (i > 0 && kus.slice(0, i).trim() === AUTH_COOKIE) return decodeURIComponent(kus.slice(i + 1).trim());
+  }
+  return null;
+}
+function authNastavCookie(res, token) {
+  res.append('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(AUTH_PLATNOST_MS / 1000)}; HttpOnly; Secure; SameSite=Lax`);
+}
+function authSmazCookie(res) {
+  res.append('Set-Cookie', `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+
+// Veřejné klíče, kterými Firebase podepisuje ID tokeny (rotují se; cache podle max-age)
+const FIREBASE_KLICE_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+let firebaseKlice = { do: 0, klice: {} };
+async function firebaseKliceNacti(now = Date.now()) {
+  if (now < firebaseKlice.do && Object.keys(firebaseKlice.klice).length) return firebaseKlice.klice;
+  const r = await fetch(FIREBASE_KLICE_URL, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error('Klíče Firebase: HTTP ' + r.status);
+  const m = /max-age=(\d+)/.exec(r.headers.get('cache-control') || '');
+  firebaseKlice = { do: now + (m ? +m[1] * 1000 : 3600000), klice: await r.json() };
+  return firebaseKlice.klice;
+}
+// Ověření Firebase ID tokenu bez knihovny: RS256 podpis klíčem podle `kid`,
+// aud = projekt, iss = securetoken, platnost, poskytovatel apple.com.
+async function firebaseOverToken(idToken, { now = Date.now(), klice = null } = {}) {
+  if (typeof idToken !== 'string' || idToken.length > 5000) throw new Error('Chybí token.');
+  const casti = idToken.split('.');
+  if (casti.length !== 3) throw new Error('Neplatný token.');
+  let hlava, telo;
+  try { hlava = JSON.parse(b64urlDecode(casti[0])); telo = JSON.parse(b64urlDecode(casti[1])); } catch { throw new Error('Neplatný token.'); }
+  if (!hlava || hlava.alg !== 'RS256' || typeof hlava.kid !== 'string') throw new Error('Neplatný token.');
+  const k = (klice || await firebaseKliceNacti(now))[hlava.kid];
+  if (!k) throw new Error('Neznámý klíč tokenu.');
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(casti[0] + '.' + casti[1]), crypto.createPublicKey(k), b64urlDecode(casti[2]));
+  if (!ok) throw new Error('Neplatný podpis tokenu.');
+  const s = Math.floor(now / 1000);
+  if (telo.aud !== FIREBASE_PROJECT_ID || telo.iss !== 'https://securetoken.google.com/' + FIREBASE_PROJECT_ID) throw new Error('Token je pro jiný projekt.');
+  if (!(telo.exp > s) || !(telo.iat <= s + 60) || !(telo.auth_time <= s + 60) || typeof telo.sub !== 'string' || !telo.sub) throw new Error('Token vypršel.');
+  if (!telo.firebase || telo.firebase.sign_in_provider !== 'apple.com') throw new Error('Přihlas se přes Apple ID.');
+  if (typeof telo.email !== 'string' || !telo.email) throw new Error('Apple nesdílel e-mail — přihlas se znovu a zvol „Sdílet můj e-mail“.');
+  return { email: telo.email.trim().toLowerCase(), overeny: telo.email_verified === true };
+}
+
+// Adresy pro stroje bez přihlášení: mají vlastní klíč, nebo je volá zařízení,
+// které se přihlásit neumí (most na NASu, Shelly, naplánovaná úloha jídelníčku)
+const AUTH_VEREJNE_API = [
+  'POST /api/zkratka', 'POST /api/jidelnicek/import', 'GET /api/jidelnicek/historie', 'GET /api/auto/nabijeni',
+  'POST /api/zavlaha/stav', 'POST /api/vysavac/stav', 'POST /api/auto/stav', 'POST /api/sauna/active'
+];
+const PRIHLASENI_HTML_CESTA = path.join(__dirname, 'public', 'prihlaseni.html');
+function prihlaseniBrana(req, res, next) {
+  if (!prihlaseniZapnute) return next();
+  const cesta = req.path;
+  const sezeni = authOver(authCookieZ(req));
+  if (sezeni) {
+    req.prihlasen = sezeni.email;
+    if (Date.now() - sezeni.t > AUTH_OBNOVIT_PO_MS) authNastavCookie(res, authVydej(sezeni.email));   // jednou přihlásit = napořád
+    return next();
+  }
+  if (cesta === '/' || cesta === '/index.html') {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(PRIHLASENI_HTML_CESTA);
+  }
+  if (!cesta.startsWith('/api/')) return next();               // ikony, manifest, sw.js, skripty pro NAS, /__/auth
+  if (cesta.startsWith('/api/auth/')) return next();
+  if (AUTH_VEREJNE_API.includes(req.method + ' ' + cesta)) return next();
+  const vnitrni = req.get('X-Vnitrni');
+  if (typeof vnitrni === 'string' && safeEqual(vnitrni, VNITRNI_KLIC)) return next();
+  res.setHeader('X-Prihlaseni', 'nutne');
+  res.status(401).json({ error: 'Nejsi přihlášený — otevři appku a přihlas se přes Apple ID.' });
+}
+app.use(prihlaseniBrana);
+
+// Firebase přihlašování přes přesměrování potřebuje stránky /__/auth/* na stejné
+// doméně jako appka (jinak ho Safari na iPhonu rozbije blokováním cizích cookies).
+// Proto je appka přeposílá na <projekt>.firebaseapp.com. Návratová adresa pro Apple
+// je pak https://<doména appky>/__/auth/handler.
+app.all(['/__/auth/*', '/__/firebase/*'], express.raw({ type: () => true, limit: '1mb' }), async (req, res) => {
+  if (!FIREBASE_PROJECT_ID) return res.status(404).end();
+  try {
+    const hlavicky = {};
+    for (const h of ['content-type', 'accept', 'accept-language', 'user-agent', 'cookie', 'origin', 'referer']) {
+      if (req.get(h)) hlavicky[h] = req.get(h);
+    }
+    const telo = ['GET', 'HEAD'].includes(req.method) ? undefined
+      : (Buffer.isBuffer(req.body) ? req.body : (req.body && typeof req.body === 'object' ? JSON.stringify(req.body) : undefined));
+    const r = await fetch(`https://${FIREBASE_PROJECT_ID}.firebaseapp.com${req.originalUrl}`, {
+      method: req.method, headers: hlavicky, body: telo, redirect: 'manual', signal: AbortSignal.timeout(15000)
+    });
+    res.status(r.status);
+    for (const h of ['content-type', 'cache-control', 'location', 'content-security-policy', 'x-frame-options']) {
+      if (r.headers.get(h)) res.setHeader(h, r.headers.get(h));
+    }
+    const cookies = typeof r.headers.getSetCookie === 'function' ? r.headers.getSetCookie() : [];
+    if (cookies.length) res.setHeader('Set-Cookie', cookies);
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (err) {
+    res.status(502).send('Přihlašovací služba Firebase neodpovídá.');
+  }
+});
+
 // ---------- Otisk verze (lišta „nová verze" v appce) ----------
 // Build krok appka nemá, takže otisk vzniká při startu serveru = při každém nasazení:
 // prvních 12 znaků SHA-256 obsahu index.html. Mění se jen při skutečné změně stránky.
@@ -436,6 +584,77 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // má vlastní, větší limit (viz /api/zaloha/obnovit) — obecný parser ji přeskočí.
 const jsonBezne = express.json({ limit: '512kb' });
 app.use((req, res, next) => (req.path === '/api/zaloha/obnovit' ? next() : jsonBezne(req, res, next)));
+
+// Přihlášení: stav (veřejný — přihlašovací stránka z něj bere nastavení Firebase),
+// výměna Firebase tokenu za cookie, odhlášení a párovací kód pro další zařízení.
+app.get('/api/auth/stav', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sezeni = prihlaseniZapnute ? authOver(authCookieZ(req)) : null;
+  res.json({
+    zapnuto: prihlaseniZapnute,
+    prihlasen: !prihlaseniZapnute || !!sezeni,
+    email: sezeni ? sezeni.email : null,
+    firebase: prihlaseniZapnute ? { apiKey: FIREBASE_API_KEY, projectId: FIREBASE_PROJECT_ID,
+      authDomain: FIREBASE_AUTH_DOMAIN || req.get('host') } : null
+  });
+});
+
+app.post('/api/auth/firebase', async (req, res) => {
+  if (!prihlaseniZapnute) return res.status(503).json({ error: 'Přihlášení není na serveru nastavené.' });
+  if (tooManyAttempts(req.ip)) return res.status(429).json({ error: 'Příliš mnoho pokusů, zkus to za chvíli.' });
+  let u;
+  try { u = await firebaseOverToken(req.body && req.body.idToken); }
+  catch (err) { registerFailedAttempt(req.ip); return res.status(401).json({ error: err.message }); }
+  if (!authEmailPovolen(u.email)) {
+    registerFailedAttempt(req.ip);
+    addLog(`Přihlášení odmítnuto: ${u.email} není mezi povolenými`, 'error');
+    const skryty = /@privaterelay\.appleid\.com$/.test(u.email);
+    return res.status(403).json({ error: skryty
+      ? 'Apple poslal skrytý e-mail. V Nastavení iPhonu → Apple ID → Přihlásit se přes Apple zruš Solinátor a přihlas se znovu s volbou „Sdílet můj e-mail“.'
+      : `Účet ${u.email} do appky přístup nemá.` });
+  }
+  unlockAttempts.delete(req.ip);
+  authNastavCookie(res, authVydej(u.email));
+  addLog(`Přihlášení: ${u.email}`);
+  res.json({ ok: true, email: u.email });
+});
+
+app.post('/api/auth/odhlasit', (req, res) => {
+  authSmazCookie(res);
+  res.json({ ok: true });
+});
+
+// Kód pro další zařízení: přihlášený si vyžádá 6 číslic (10 min, jednou), nové
+// zařízení ho zadá místo Apple ID — hlavně appka na ploše iPhonu, kde přesměrování
+// na Apple nemusí projít.
+const AUTH_KOD_PLATI_MS = 10 * 60000;
+const authKody = new Map();   // kód → { email, do }
+app.post('/api/auth/kod', (req, res) => {
+  if (!prihlaseniZapnute) return res.status(503).json({ error: 'Přihlášení není na serveru nastavené.' });
+  const sezeni = authOver(authCookieZ(req));
+  if (!sezeni) return res.status(401).json({ error: 'Nejsi přihlášený.' });
+  const now = Date.now();
+  for (const [k, v] of authKody) if (v.do < now) authKody.delete(k);
+  let kod;
+  do { kod = String(crypto.randomInt(0, 1000000)).padStart(6, '0'); } while (authKody.has(kod));
+  authKody.set(kod, { email: sezeni.email, do: now + AUTH_KOD_PLATI_MS });
+  res.json({ ok: true, kod, platiDo: now + AUTH_KOD_PLATI_MS });
+});
+app.post('/api/auth/kod/pouzit', (req, res) => {
+  if (!prihlaseniZapnute) return res.status(503).json({ error: 'Přihlášení není na serveru nastavené.' });
+  if (tooManyAttempts(req.ip)) return res.status(429).json({ error: 'Příliš mnoho pokusů, zkus to za chvíli.' });
+  const kod = String((req.body && req.body.kod) || '').replace(/\D/g, '');
+  const z = authKody.get(kod);
+  if (!z || z.do < Date.now() || !authEmailPovolen(z.email)) {
+    registerFailedAttempt(req.ip);
+    return res.status(401).json({ error: 'Kód neplatí — vyžádej si nový.' });
+  }
+  authKody.delete(kod);
+  unlockAttempts.delete(req.ip);
+  authNastavCookie(res, authVydej(z.email));
+  addLog(`Přihlášení kódem: ${z.email} (další zařízení)`);
+  res.json({ ok: true, email: z.email });
+});
 
 // ---------- SSE stream pro živé aktualizace ----------
 
@@ -13331,7 +13550,7 @@ async function storeObnovPosts(port, posts) {
     try {
       const r = await fetch(`http://127.0.0.1:${port}${cesta}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Vnitrni': VNITRNI_KLIC },
         body: JSON.stringify(telo)
       });
       if (r.ok) obnoveno++;

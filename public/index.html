@@ -1553,6 +1553,8 @@
   .prazdniny-btn:disabled{opacity:0.5;}
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
+  .prihlaseni-kod{margin-top:10px;text-align:center;font-size:13px;color:var(--grey-text);}
+  .prihlaseni-kod b{display:block;font-size:34px;letter-spacing:0.25em;color:var(--navy);font-variant-numeric:tabular-nums;}
   .nova-verze{position:fixed;left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:9500;
     max-width:520px;margin:0 auto;box-sizing:border-box;display:flex;align-items:center;gap:12px;
     padding:10px 10px 10px 16px;border-radius:16px;background:#e2781c;color:#fff;
@@ -3892,6 +3894,17 @@
         <div class="rezim-hint" id="zalohaHint">Data se zálohují i automaticky. Soubor obsahuje i aplikaci, ale bez hesel a přihlášení.</div>
       </div>
 
+      <!-- Přihlášení přes Apple ID: kdo je přihlášený, odhlášení a kód pro další zařízení -->
+      <div class="card" id="prihlaseniKarta" hidden>
+        <div class="asst-log-title">Přihlášení</div>
+        <div class="rezim-hint" id="prihlaseniKdo"></div>
+        <div class="zaloha-btns">
+          <button class="sek-btn" id="prihlaseniKodBtn" type="button">🔑 Kód pro další zařízení</button>
+          <button class="sek-btn" id="prihlaseniOdhlasit" type="button">Odhlásit toto zařízení</button>
+        </div>
+        <div class="prihlaseni-kod" id="prihlaseniKod" hidden></div>
+      </div>
+
       <!-- Vlastní upozornění: po potvrzení ho appka ukáže přes celou obrazovku na všech
            zařízeních (i přes kalendář), dokud ho někdo neodklikne -->
       <div class="card" data-rezim="full">
@@ -4238,6 +4251,20 @@
 </div>
 
 <script>
+// Přihlášení vypršelo nebo bylo zrušené: server u /api vrátí 401 s X-Prihlaseni —
+// appka se znovu načte a server místo ní ukáže přihlašovací stránku.
+(function () {
+  const puvodni = window.fetch.bind(window);
+  let jednou = false;
+  window.fetch = async (...args) => {
+    const r = await puvodni(...args);
+    if (r.status === 401 && !jednou && r.headers && r.headers.get && r.headers.get('X-Prihlaseni') === 'nutne') {
+      jednou = true;
+      location.reload();
+    }
+    return r;
+  };
+})();
 const fveEl = document.getElementById('fveValue');
 const feedinEl = document.getElementById('feedinValue');
 const houseEl = document.getElementById('houseValue');
@@ -16296,6 +16323,47 @@ if (kalPanelEl) {
     else if (kalDenIndex > 0) kalPrehod(-1);
     else kalZpetNaStranky();
   });
+}
+
+// ---------- Přihlášení: karta v Log/Nastavení ----------
+const prihlaseniKartaEl = document.getElementById('prihlaseniKarta');
+let prihlaseniKodTimer = null;
+async function prihlaseniNacti() {
+  if (!prihlaseniKartaEl) return;
+  try {
+    const s = await (await fetch('/api/auth/stav', { cache: 'no-store' })).json();
+    prihlaseniKartaEl.hidden = !s.zapnuto;
+    document.getElementById('prihlaseniKdo').textContent = s.email ? 'Přihlášen: ' + s.email : '';
+  } catch { /* zkusí se při dalším otevření */ }
+}
+if (prihlaseniKartaEl) {
+  document.getElementById('prihlaseniOdhlasit').addEventListener('click', async () => {
+    if (!(await zeptejSe('Odhlásit toto zařízení?', 'Pak se tu bude potřeba znovu přihlásit přes Apple ID nebo kódem.'))) return;
+    try { await fetch('/api/auth/odhlasit', { method: 'POST' }); } catch {}
+    location.reload();
+  });
+  document.getElementById('prihlaseniKodBtn').addEventListener('click', async () => {
+    const el = document.getElementById('prihlaseniKod');
+    el.hidden = false;
+    el.textContent = 'Vytvářím kód…';
+    try {
+      const r = await fetch('/api/auth/kod', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Kód se nepodařilo vytvořit.');
+      clearInterval(prihlaseniKodTimer);
+      const ukaz = () => {
+        const zbyva = Math.max(0, Math.round((d.platiDo - Date.now()) / 1000));
+        el.textContent = '';
+        const b = document.createElement('b');
+        b.textContent = d.kod;
+        el.append(b, zbyva ? 'Zadej ho na novém zařízení do ' + Math.floor(zbyva / 60) + ':' + String(zbyva % 60).padStart(2, '0') + ' (platí jednou).' : 'Kód vypršel — vytvoř nový.');
+        if (!zbyva) clearInterval(prihlaseniKodTimer);
+      };
+      ukaz();
+      prihlaseniKodTimer = setInterval(ukaz, 1000);
+    } catch (err) { el.textContent = err.message; }
+  });
+  prihlaseniNacti();
 }
 
 // ---------- Nová verze appky ----------
