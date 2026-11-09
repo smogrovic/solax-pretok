@@ -3,7 +3,7 @@ const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('nabíjení auta');
 
 const CODE_DNY = between('// ---------- Odkud co bralo', '// ---------- Sauna ----------');
-const CODE_API = between('// ---------- Nabíjení auta pro jinou appku', '// ---------- Záloha do souboru');
+const CODE_API = between('// ---------- Nabíjení auta pro jinou appku', '// ---------- Nabíjení auta pro Moje finance');
 const CENIK_SRC = between('const CENIK = {', 'function spotrebaPredMesic(');
 
 function dny(nt) {

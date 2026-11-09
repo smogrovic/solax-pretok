@@ -107,3 +107,20 @@ a ukládají se přepsáním podle data.
 >   (včetně průměrné ceny a procenta z FVE), chování při 401, 503 a timeoutu.
 >   Solinátor v testech podvrhni, nevolej ostrou adresu.
 > - Na konci mi napiš, jestli musím na Renderu něco nastavit, a jak ověřím, že stahování funguje.
+
+## 4. Moje finance (přímo z prohlížeče, bez klíče)
+
+Webová appka Moje finance je statická stránka, klíč by v ní nebyl tajný. Proto má vlastní adresu:
+
+```
+GET https://solax-pretok.onrender.com/api/auto/nabijeni/fin?od=…&do=…
+Hlavička: Authorization: Bearer <přihlašovací token z Firebase>
+```
+
+- Solinátor ověří podpis tokenu veřejnými certifikáty Googlu (projekt `FIN_FIREBASE_PROJECT`, výchozí
+  `moje-finance-4bb9e`) a pustí jen e-maily z `FIN_EMAILS`. Odpověď je stejná jako u adresy s klíčem.
+- Prohlížeč smí volat jen z adresy appky (`FIN_ORIGIN`, výchozí `https://finance-kavq.onrender.com`).
+- Nastavení: Render → `solax-pretok` → Environment → `FIN_EMAILS` = e-mail(y) oddělené čárkou.
+  Bez něj adresa vrací 503. E-mail do repozitáře nepiš (je veřejný).
+- Chyby: 401 = chybí nebo neplatné přihlášení, 403 = e-mail není v `FIN_EMAILS`, 502 = nejde ověřit u Googlu.
+- Test: `node test/auto-fin.js`.

@@ -26,6 +26,8 @@ node test/sekacka-server.js           # sekačka v appce: cloud Anthbotu, obnova
 node test/diagnostika.js             # diagnostika: proškrtání klíčů, obal kolem fetch
 node test/rezim-pin.js                # PIN na přepnutí režimu: porovnání kódu, limit pokusů
 node test/vysavac.js                  # vysavač Xiaomi: RC4 proti vzoru, přihlášení, ověření účtu
+node test/auto-nabijeni.js           # nabíjení auta pro jinou appku (FVE/síť, VT/NT, cena, klíč)
+node test/auto-fin.js                 # nabíjení pro Moje finance: přihlášení Firebase, FIN_EMAILS, CORS
 node test/runtime-sauna.js            # ostrý server na portu 3996 s podstrčeným cloudem
 node test/runtime-store.js            # dva ostré servery: uložit, spadnout, načíst zpátky
 node test/runtime-rele.js             # ostrý server: relé zmizí, účtování dojede a skončí

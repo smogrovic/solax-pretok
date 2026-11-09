@@ -13568,6 +13568,9 @@ app.get('/api/auto/nabijeni', (req, res) => {
   if (!AUTO_KLIC) return res.status(503).json({ error: 'Na serveru není nastavený AUTO_KLIC.' });
   const k = req.get('X-Klic');
   if (typeof k !== 'string' || !k || !safeEqual(k, AUTO_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
+  autoNabijeniOdpoved(req, res);
+});
+function autoNabijeniOdpoved(req, res) {
   const datum = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
   const dnes = pragueDateString();
   const doo = datum(req.query.do) || dnes;
@@ -13581,6 +13584,66 @@ app.get('/api/auto/nabijeni', (req, res) => {
     poznamka: 'Cena = jen proměnná cena elektřiny ze sítě (VT/NT vč. distribuce a DPH), bez měsíčních poplatků. FVE je zdarma. Den s neuplny: true ještě běží — načti ho znovu.',
     dny: autoNabijeniDny(od, doo)
   });
+}
+
+// ---------- Nabíjení auta pro Moje finance (přihlášení Firebase) ----------
+// GET /api/auto/nabijeni/fin – stejná data jako /api/auto/nabijeni, ale pro webovou appku
+// Moje finance přímo z prohlížeče: místo klíče (ten by v prohlížeči nebyl tajný) posílá
+// přihlašovací token z Firebase (Authorization: Bearer …). Token se ověří podpisem Googlu
+// (veřejné certifikáty, žádný tajný klíč) a pustí se jen e-maily z FIN_EMAILS.
+// Prostředí: FIN_EMAILS (povinné, čárkou oddělené), FIN_FIREBASE_PROJECT, FIN_ORIGIN (adresa appky).
+const FIN_EMAILS = (process.env.FIN_EMAILS || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+const FIN_PROJEKT = (process.env.FIN_FIREBASE_PROJECT || 'moje-finance-4bb9e').trim();
+const FIN_ORIGIN = (process.env.FIN_ORIGIN || 'https://finance-kavq.onrender.com').trim().replace(/\/+$/, '');
+const FIN_CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+let finCerts = null, finCertsDo = 0;
+async function finCertifikaty(now = Date.now()) {
+  if (finCerts && now < finCertsDo) return finCerts;
+  const r = await fetch(FIN_CERTS_URL, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw Object.assign(new Error('certifikáty ' + r.status), { kod: 502 });
+  const j = await r.json();
+  const m = /max-age=(\d+)/.exec(r.headers.get('cache-control') || '');
+  finCerts = j; finCertsDo = now + Math.min(Number(m && m[1]) || 3600, 6 * 3600) * 1000;
+  return j;
+}
+async function finOverToken(token, now = Date.now()) {
+  const casti = String(token || '').split('.');
+  if (casti.length !== 3) throw new Error('token');
+  const json = t => JSON.parse(Buffer.from(t, 'base64url').toString('utf8'));
+  const hlava = json(casti[0]), obsah = json(casti[1]);
+  if (hlava.alg !== 'RS256' || !hlava.kid) throw new Error('token');
+  let certs;
+  try { certs = await finCertifikaty(now); } catch (e) { throw Object.assign(e, { kod: 502 }); }
+  const pem = certs[hlava.kid];
+  if (!pem) throw new Error('token');
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(casti[0] + '.' + casti[1]), crypto.createPublicKey(pem), Buffer.from(casti[2], 'base64url'));
+  const t = now / 1000;
+  if (!ok || !(obsah.exp > t) || obsah.iat > t + 300 || obsah.aud !== FIN_PROJEKT ||
+      obsah.iss !== 'https://securetoken.google.com/' + FIN_PROJEKT || !obsah.sub) throw new Error('token');
+  return obsah;
+}
+function finCors(req, res) {
+  if (req.get('Origin') === FIN_ORIGIN) { res.setHeader('Access-Control-Allow-Origin', FIN_ORIGIN); res.setHeader('Vary', 'Origin'); }
+}
+app.options('/api/auto/nabijeni/fin', (req, res) => {
+  finCors(req, res);
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization');
+  res.setHeader('Access-Control-Max-Age', '600');
+  res.status(204).end();
+});
+app.get('/api/auto/nabijeni/fin', async (req, res) => {
+  finCors(req, res);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!FIN_EMAILS.length) return res.status(503).json({ error: 'Na serveru není nastavený FIN_EMAILS.' });
+  const m = /^Bearer (.+)$/.exec(req.get('Authorization') || '');
+  if (!m) return res.status(401).json({ error: 'Chybí přihlášení.' });
+  let kdo;
+  try { kdo = await finOverToken(m[1]); } catch (e) {
+    return e.kod === 502 ? res.status(502).json({ error: 'Nejde ověřit přihlášení (Google).' }) : res.status(401).json({ error: 'Neplatné přihlášení.' });
+  }
+  if (kdo.email_verified !== true || !FIN_EMAILS.includes(String(kdo.email || '').toLowerCase())) return res.status(403).json({ error: 'Tenhle účet nemá přístup.' });
+  autoNabijeniOdpoved(req, res);
 });
 
 // ---------- Záloha do souboru (data i aplikace) ----------
