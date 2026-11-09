@@ -494,6 +494,8 @@ async function firebaseOverToken(idToken, { now = Date.now(), klice = null } = {
 // které se přihlásit neumí (most na NASu, Shelly, naplánovaná úloha jídelníčku)
 const AUTH_VEREJNE_API = [
   'POST /api/zkratka', 'POST /api/jidelnicek/import', 'GET /api/jidelnicek/historie', 'GET /api/auto/nabijeni',
+  // Moje finance (jiná doména, vlastní přihlášení Firebase přes Bearer token + CORS)
+  'GET /api/auto/nabijeni/fin', 'OPTIONS /api/auto/nabijeni/fin',
   'POST /api/zavlaha/stav', 'POST /api/vysavac/stav', 'POST /api/auto/stav', 'POST /api/sauna/active'
 ];
 const PRIHLASENI_HTML_CESTA = path.join(__dirname, 'public', 'prihlaseni.html');

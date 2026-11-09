@@ -108,7 +108,8 @@ function build(env = {}) {
     check('  ikony, manifest, skripty pro NAS volně', ['/icon-192.png', '/manifest.json', '/nas/zavlaha-most.js', '/__/auth/handler', '/version.json'].every(c => h.brana('GET', c).dal), true);
     check('  přihlašovací API volně', ['/api/auth/stav'].every(c => h.brana('GET', c).dal) && h.brana('POST', '/api/auth/kod/pouzit').dal, true);
     check('  stroje (zkratky, NAS, Shelly, jídelníček, auto) volně', [['POST', '/api/zkratka'], ['POST', '/api/zavlaha/stav'], ['POST', '/api/vysavac/stav'],
-      ['POST', '/api/auto/stav'], ['POST', '/api/sauna/active'], ['POST', '/api/jidelnicek/import'], ['GET', '/api/jidelnicek/historie'], ['GET', '/api/auto/nabijeni']]
+      ['POST', '/api/auto/stav'], ['POST', '/api/sauna/active'], ['POST', '/api/jidelnicek/import'], ['GET', '/api/jidelnicek/historie'], ['GET', '/api/auto/nabijeni'],
+      ['GET', '/api/auto/nabijeni/fin'], ['OPTIONS', '/api/auto/nabijeni/fin']]
       .every(([m, c]) => h.brana(m, c).dal), true);
     check('  ale jen danou metodou', h.brana('GET', '/api/zavlaha/stav').kod, 401);
     check('vnitřní obnova po startu s klíčem projde', h.brana('POST', '/api/wbdays/restore', { hlavicky: { 'X-Vnitrni': h.api.VNITRNI_KLIC } }).dal, true);

@@ -102,6 +102,7 @@ Tyhle adresy volají zařízení, která se přihlásit neumí, nebo mají vlast
 | `POST /api/jidelnicek/import` | naplánovaná úloha | klíč `JIDELNICEK_KLIC` |
 | `GET /api/jidelnicek/historie` | naplánovaná úloha | bez klíče, jen názvy jídel |
 | `GET /api/auto/nabijeni` | druhá appka | klíč `AUTO_KLIC` |
+| `GET /api/auto/nabijeni/fin` | appka Moje finance | její přihlášení Firebase (`FIN_EMAILS`) |
 | `POST /api/zavlaha/stav`, `/api/vysavac/stav`, `/api/auto/stav` | mosty na NASu | **bez klíče, jako dosud** |
 | `POST /api/sauna/active` | webhook ze Shelly | bez klíče, jen vypíná bazén |
 | ikony, manifest, `version.json`, skripty pro NAS | — | veřejné soubory |
