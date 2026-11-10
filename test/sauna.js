@@ -57,7 +57,7 @@ function build({ prah = 500, drzeni = 30, pool = false, solinator = false,
     CODE2 + '\n; return { saunaTopi, saunaBlokuje, saunaPayload, updateSauna, recordSaunaDay,'
           + ' enforceSaunaOff, sendKeepalive, noteCmd, lastCmd, saunaLimitW, saunaHoldMs,'
           + ' SAUNA_ON_W, SAUNA_HOLD_MIN, SAUNA_ALERT_MS, SAUNA_ALERT_AGAIN_MS, SAUNA_DAYS_MAX, saunaEnabled,'
-          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, pocasiSrazky,'
+          + ' nahrevStart, nahrevVzorek, nahrevKonec, nahrevObnov, NAHREV_PRAHY, pocasiSrazky, nahrevCil, nahrevCilZdrojNastav,'
           + ' odhadNabehu, saunaOdhad, SAUNA_TERMOSTAT,'
           + ' NAHREV_BODU_MAX, NAHREV_STROP_MS, saunaZapnutoTopi, saunaZapnutoKontrola,'
           + ' saunaZapnutoObnov, SAUNA_ZAPNUTO_RESET_MS };'
@@ -406,7 +406,7 @@ nadpis('Měření nahřívání');
   check('  s větrem', b().vitrMs, 3.5);
   // Ke každému bodu počasí a skutečný příkon kamen — kvůli ztrátám
   check('  teplota na startu je první bod', JSON.stringify(b().body),
-    '[{"min":0,"c":22,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
+    '[{"min":0,"c":22,"topi":true,"cilC":79,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
 
   // Vzorky chodí z dotazů na kamna, po dvou minutách
   h.posun(2); h.api.nahrevVzorek(31, h.now);
@@ -551,12 +551,12 @@ nadpis('Model náběhu');
   const T = Date.UTC(2026, 8, 24, 16, 0, 0);
   const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
   const blizko = (x, y) => x !== null && Math.abs(x - y) <= 0.5;
-  // Zadání modelu: rozjezd 5,3 + τ 109,4 · ln(…) + dojezd 8, T_max = 134,5 + 0,3 · venku
+  // Zadání modelu: rozjezd 5,2 + τ 114,7 · ln(…) + dojezd 8, T_max = 138,5 + 0,3 · venku
   check('venku 14,94, start 27, cíl 60 → ~51 min', blizko(o(14.94, 27, 60).minut, 51.5), 'true');
   check('venku 14,94, start 27, cíl 80 → ~83 min', blizko(o(14.94, 27, 80).minut, 83.4), 'true');
-  check('venku −20, start 10, cíl 85 → ~123 min', blizko(o(-20, 10, 85).minut, 122.9), 'true');
-  check('venku −20, start −20, cíl 85 → ~148 min', blizko(o(-20, -20, 85).minut, 147.6), 'true');
-  check('venku 10, start 20, cíl 80 → 91,5 min', o(10, 20, 80).minut.toFixed(1), '91.5');
+  check('venku −20, start 10, cíl 85 → ~122 min', blizko(o(-20, 10, 85).minut, 121.9), 'true');
+  check('venku −20, start −20, cíl 85 → ~147 min', blizko(o(-20, -20, 85).minut, 147.0), 'true');
+  check('venku 10, start 20, cíl 80 → 91,3 min', o(10, 20, 80).minut.toFixed(1), '91.3');
   check('rozjezd i dojezd se připočítají (cíl těsně nad startem ≈ 5,3 + 8 min)', blizko(o(10, 20, 20.01).minut, 13.3), 'true');
   check('cíl 90 je nedosažitelný (termostat)', JSON.stringify(o(10, 20, 90)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
   check('cíl nad stropem taky, bez výjimky', o(-600, 20, 80).dosazitelne, 'false');
@@ -575,7 +575,7 @@ nadpis('Model náběhu');
     bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
   const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
   const n = netopi.api.saunaOdhad(netopi.now);
-  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd + ' ' + n.model.dojezd, '0 20 10 109.4 5.3 8');
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd + ' ' + n.model.dojezd, '0 20 10 114.7 5.2 8');
   // Kamna už hřejí: z rozjezdu zbývá jen to, co ještě neuběhlo
   const hreje = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
     fetchedAt: new Date(h.now).toISOString() } });
@@ -629,7 +629,7 @@ nadpis('Měření nahřívání přežije nasazení');
   check('vyhraje dřívější měření ze zálohy', b.start, T - 30 * 60000);
   check('  s původní startovní teplotou', b.odC, 25);
   check('  vzorky nového se připojí s přepočtenými minutami', JSON.stringify(b.body.slice(-2)),
-    '[{"min":30,"c":64,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000},{"min":32,"c":71,"topi":true,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
+    '[{"min":30,"c":64,"topi":true,"cilC":80,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000},{"min":32,"c":71,"topi":true,"cilC":80,"venkuC":8,"vitrMs":3.5,"srazkyMm":0,"w":6000}]');
   check('  práh 60 zůstane z původního měření', b.prahy[60].min, 24);
   check('  práh 70 se doplní z nového', b.prahy[70].min, 32);
   check('  a maximum sedí', b.maxC, 71);
@@ -713,10 +713,51 @@ nadpis('Zapnuto v');
   check('  a když už server něco má, nepřepíše ho', h.state.saunaZapnuto.od, now - 3600000);
 }
 
+nadpis('Cílová teplota během saunování');
+{
+  const h = build({ venku: 8, huum: { temperature: 22, targetTemperature: 64 } });
+  h.api.nahrevCilZdrojNastav(64, 'appka', h.now);
+  h.api.nahrevStart('appka', h.now);
+  const b = () => h.state.saunaNahrev.bezici;
+  check('při zapnutí: cíl, cíl na startu a první změna z appky', JSON.stringify([b().cilC, b().cilStartC, b().zmenyCile]),
+    JSON.stringify([64, 64, [{ min: 0, cilC: 64, zdroj: 'appka' }]]));
+  check('  bod nese cíl platný v tu chvíli', b().body[0].cilC, 64);
+  h.posun(60); h.api.nahrevVzorek(64.5, h.now);
+  check('dosažený cíl (zatím konečný) = práh cil', JSON.stringify(b().prahy.cil), JSON.stringify({ min: 60, c: 64.5 }));
+  // Změna na kamnech (appka o ní neví) → manual; dřívější cíl se přesune na cil1
+  h.posun(38.5);
+  h.state.huum.targetTemperature = 75;
+  h.api.nahrevCil(75, h.now);
+  h.api.nahrevVzorek(65, h.now);
+  check('změna cíle: hlavička = nový cíl, start zůstane', [b().cilC, b().cilStartC].join(' '), '75 64');
+  check('  záznam změny s minutou a zdrojem', JSON.stringify(b().zmenyCile[1]), JSON.stringify({ min: 98.5, cilC: 75, zdroj: 'manual' }));
+  check('  dřívější dosažený cíl je cil1, cil zatím není', JSON.stringify([b().prahy.cil1, b().prahy.cil || null]), JSON.stringify([{ min: 60, c: 64.5 }, null]));
+  check('  další body nesou nový cíl', b().body[b().body.length - 1].cilC, 75);
+  h.api.nahrevCil(75, h.now);
+  check('  stejný cíl znovu nic nepřidá', b().zmenyCile.length, 2);
+  h.posun(30); h.api.nahrevVzorek(75.2, h.now);
+  check('dosažení konečného cíle = cil', b().prahy.cil.c, 75.2);
+  // Časovač nastaví nový cíl → zdroj casovac; dosažený 75 → cil2
+  h.api.nahrevCilZdrojNastav(80, 'casovac', h.now);
+  h.posun(1); h.api.nahrevCil(80, h.now);
+  check('změna z časovače se pozná, dosažený cíl → cil2', [b().zmenyCile[2].zdroj, b().prahy.cil2.c, 'cil' in b().prahy].join(' '), 'casovac 75.2 false');
+  h.api.nahrevKonec(h.now);
+  const z = h.state.saunaNahrev.zaznamy[h.state.saunaNahrev.zaznamy.length - 1];
+  check('hotový záznam: konečný cíl, start a všechny změny', [z.cilC, z.cilStartC, z.zmenyCile.map(x => x.cilC).join('>')].join(' '), '80 64 64>75>80');
+}
+{
+  // Cíl při startu neznámý (kamna neodpověděla) → první známý se zapíše jako startovní v min 0
+  const h = build({ huum: { temperature: 22 } });
+  h.api.nahrevStart('odber', h.now);
+  h.posun(4); h.api.nahrevCil(70, h.now);
+  const b = h.state.saunaNahrev.bezici;
+  check('neznámý cíl na startu: první známý = start', JSON.stringify([b.cilStartC, b.zmenyCile]), JSON.stringify([70, [{ min: 0, cilC: 70, zdroj: 'manual' }]]));
+}
+
 konec();
 })().catch(err => {
   // Bez tohohle by výjimka sadu tiše ukončila: summary by se nevypsal, návratový
   // kód by byl nula a „0 chyb" by znamenalo „nic se nedoběhlo".
   check('sada doběhla bez výjimky', err && err.stack, '(nic)');
-  konec();
+konec();
 });

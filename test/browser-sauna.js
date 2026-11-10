@@ -655,6 +655,15 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('přes hodinu v hodinách', odhadEl.textContent, 'za 1 h 05 min');
   topi(78, [{ c: 80, minut: 0, hotovoV: Date.now() - 2 * MIN, dosazitelne: true }]);
   check('odhad prošel, teplota ještě ne → „za chvíli"', odhadEl.textContent, 'za chvíli');
+  // Cíl změněný za běhu (server ještě poslal odhad pro starý cíl 75): appka přepočítá
+  // od teploty v sauně k novému cíli 80 bez rozjezdu, s dojezdem
+  topi(60, [{ c: 75, minut: 10, hotovoV: Date.now() + 10 * MIN, dosazitelne: true }]);
+  {
+    const m = { ...model, rozjezd: 0 }, tMax = m.a + m.b * 10;
+    const cekam = Math.round(m.tau * Math.log((tMax - 60) / (tMax - 80)) + (m.dojezd || 0));
+    const ukazano = odhadEl.textContent.match(/(\d+) min/);
+    check('změna cíle za běhu: odhad k novému cíli od teploty v sauně', Math.abs(Number((odhadEl.textContent.match(/za (\\d+) min/) || [])[1]) - cekam) <= 1, true);
+  }
   topi(81, []);
   check('cíl dosažený → „Nahřáto"', odhadEl.textContent, 'Nahřáto');
   topi(50, [{ c: 80, minut: null, hotovoV: null, dosazitelne: false }]);

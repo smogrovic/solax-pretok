@@ -9842,7 +9842,14 @@ function renderHuumOdhad(now = Date.now()) {
     const d = huumData || {};
     const cilC = typeof d.targetTemperature === 'number' ? d.targetTemperature : huumCil();
     const cile = o.cile || [];
-    const c = cile.find(x => x.c === cilC) || cile[0];
+    // Po změně cíle za běhu (než server pošle nový odhad) se přepočítá tady: od
+    // teploty v sauně k novému cíli, rozjezd už je za námi, dojezd se přičte
+    let c = cile.find(x => x.c === cilC);
+    if (!c && typeof cilC === 'number' && typeof d.temperature === 'number') {
+      const r = odhadNabehuJs({ ...o.model, rozjezd: 0 }, o.venkuC, d.temperature, cilC, now);
+      if (r) c = { c: cilC, ...r };
+    }
+    if (!c) c = cile[0];
     el.textContent = huumSaunaNahrata() ? 'Nahřáto'
       : (c && c.dosazitelne === false ? 'Nad možnosti kamen'
       : (c && typeof c.hotovoV === 'number' ? huumOdpocetText(c.hotovoV - now) : ''));

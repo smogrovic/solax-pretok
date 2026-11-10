@@ -1746,7 +1746,7 @@ const NAHREV_STROP_MS = 4 * 3600000;
 // Přefitováno z měření: po zapnutí chvíli trvá, než kamna začnou hřát (rozjezd),
 // pak se teplota exponenciálně blíží stropu, který závisí na venkovní teplotě.
 // Na konci se přičte dojezd (poslední stupně, než se teplota ustálí na cíli).
-// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 4. 11. 2026;
+// Konstanty jdou přebít v Render → Environment. Přefitováno z měření 10. 11. 2026;
 // B je zatím odhad, upřesní zimní data.
 //   T_max = A + B · venkuC
 //   t     = rozjezd + τ · ln((T_max − T_start) / (T_max − T_cíl)) + dojezd
@@ -1754,9 +1754,9 @@ const saunaEnvNum = (klic, vychozi) => {
   const v = process.env[klic];
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : vychozi;
 };
-const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.3);
-const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 109.4);
-const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 134.5);
+const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.2);
+const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 114.7);
+const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 138.5);
 const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.3);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
 const SAUNA_DOJEZD_MIN = saunaEnvNum('SAUNA_DOJEZD_MIN', 8);
@@ -1830,6 +1830,45 @@ function pocasiSrazky(data) {
   return Math.round(mm * 10) / 10;
 }
 
+// Odkud přišla změna cílové teploty: povel z appky / časovače si to poznamená
+// a následné čtení kamen s tímtéž cílem ho tak zapíše. Cíl, o kterém appka nic
+// neví (appka HUUM, panel na kamnech), je „manual".
+const NAHREV_ZDROJ_PLATI_MS = 2 * 60000;
+let nahrevCilZdroj = null;   // { cilC, zdroj, do }
+function nahrevCilZdrojNastav(cilC, zdroj, now = Date.now()) {
+  nahrevCilZdroj = { cilC, zdroj, do: now + NAHREV_ZDROJ_PLATI_MS };
+}
+function nahrevZdrojPro(cilC, now = Date.now()) {
+  const z = nahrevCilZdroj;
+  return z && z.cilC === cilC && now <= z.do ? z.zdroj : 'manual';
+}
+
+// Cílová teplota během saunování: hlavička `cilC` je vždy ta poslední (konečná),
+// `cilStartC` ta při zapnutí a `zmenyCile` celá historie. Práh `cil` patří jen
+// konečnému cíli — dosažený dřívější cíl se při změně přesune na `cil1`, `cil2`…
+function nahrevCil(cilC, now = Date.now()) {
+  const b = state.saunaNahrev && state.saunaNahrev.bezici;
+  if (!b || typeof cilC !== 'number' || !Number.isFinite(cilC)) return;
+  if (!Array.isArray(b.zmenyCile)) b.zmenyCile = [];
+  if (b.cilC === cilC && b.zmenyCile.length) return;
+  const min = Math.max(0, Math.round((now - b.start) / 6000) / 10);
+  if (typeof b.cilC !== 'number' || !b.zmenyCile.length) {
+    // Cíl při zapnutí (nebo první, který jsme se dozvěděli)
+    b.cilC = cilC;
+    if (typeof b.cilStartC !== 'number') b.cilStartC = cilC;
+    b.zmenyCile.push({ min: b.zmenyCile.length ? min : 0, cilC, zdroj: nahrevZdrojPro(cilC, now) });
+    return;
+  }
+  if (b.prahy && b.prahy.cil) {
+    let i = 1;
+    while (b.prahy['cil' + i]) i++;
+    b.prahy['cil' + i] = b.prahy.cil;
+    delete b.prahy.cil;
+  }
+  b.cilC = cilC;
+  b.zmenyCile.push({ min, cilC, zdroj: nahrevZdrojPro(cilC, now) });
+}
+
 function nahrevStart(duvod, now = Date.now()) {
   const n = state.saunaNahrev;
   if (n.bezici) return;           // z appky i z odběru přijde obojí — zakládá se jednou
@@ -1839,11 +1878,14 @@ function nahrevStart(duvod, now = Date.now()) {
     duvod,
     ...nahrevPocasi(now),
     odC: typeof huum.temperature === 'number' ? huum.temperature : null,
-    cilC: typeof huum.targetTemperature === 'number' ? huum.targetTemperature : null,
+    cilC: null,
+    cilStartC: null,
+    zmenyCile: [],
     prahy: {},
     body: [],
     maxC: null
   };
+  nahrevCil(huum.targetTemperature, now);
   // Teplota na startu je zároveň první bod křivky
   if (n.bezici.odC !== null) nahrevVzorek(n.bezici.odC, now);
 }
@@ -1860,6 +1902,7 @@ function nahrevVzorek(c, now = Date.now()) {
   // Ke každému bodu i to, co ovlivňuje ztráty: počasí (za hodinu nahřívání se večer
   // ochladí), skutečný příkon kamen a otevřené dveře (pustí ven spoustu tepla)
   const bod = { min, c, topi };
+  if (typeof b.cilC === 'number') bod.cilC = b.cilC;   // cíl platný v tu chvíli
   const { venkuC, vitrMs, srazkyMm } = nahrevPocasi(now);
   if (venkuC !== null) bod.venkuC = venkuC;
   if (vitrMs !== null) bod.vitrMs = vitrMs;
@@ -1953,6 +1996,12 @@ function nahrevObnov(telo, now = Date.now()) {
       const min = x => Math.round((x + posun) * 10) / 10;
       for (const v of nove.body) if (b.body.length < NAHREV_BODU_MAX) b.body.push({ ...v, min: min(v.min) });
       for (const [k, v] of Object.entries(nove.prahy)) if (!b.prahy[k]) b.prahy[k] = { min: min(v.min), c: v.c };
+      // Změny cíle z nového měření navážou, jen když cíl opravdu jiný
+      if (!Array.isArray(b.zmenyCile)) b.zmenyCile = [];
+      for (const z of Array.isArray(nove.zmenyCile) ? nove.zmenyCile : []) {
+        const posledni = b.zmenyCile[b.zmenyCile.length - 1];
+        if (!posledni || posledni.cilC !== z.cilC) { b.zmenyCile.push({ ...z, min: min(z.min) }); b.cilC = z.cilC; }
+      }
       if (typeof nove.maxC === 'number') b.maxC = typeof b.maxC === 'number' ? Math.max(b.maxC, nove.maxC) : nove.maxC;
     }
     n.bezici = b;
@@ -9758,6 +9807,7 @@ function saunaRelaceSleduj(pred, po, now = Date.now()) {
 function huumUloz(d) {
   saunaRelaceSleduj(state.huum, d);
   state.huum = { ...d, error: null, fetchedAt: new Date().toISOString() };
+  if (typeof nahrevCil === 'function') nahrevCil(d && d.targetTemperature);
   if (typeof saunaPripravaTik === 'function') saunaPripravaTik(state.huum).catch(() => {});
   broadcast('huum', { huum: huumPayload() });
   return d;
@@ -9815,6 +9865,7 @@ async function pollHuum() {
     huumSvetloZmenaMimo(pred, state.huum);
     if (typeof saunaPripravaTik === 'function') saunaPripravaTik(state.huum).catch(() => {});
     checkHuumNahrata(state.huum);
+    if (typeof nahrevCil === 'function') nahrevCil(state.huum.targetTemperature);   // před vzorkem, ať bod nese nový cíl
     nahrevVzorek(state.huum.temperature);
     // Zapnutí z appky HUUM nebo z panelu na kamnech měřák nemusí vidět hned
     if (state.huum.heating) saunaZapnutoTopi(); else saunaZapnutoKontrola();
@@ -9954,6 +10005,7 @@ async function saunaTimerTik(now = Date.now()) {
             addLog(`Sauna: časovač ${t.time} — kamna už topí, nezapínám znovu`);
           } else {
             try {
+              if (typeof nahrevCilZdrojNastav === 'function') nahrevCilZdrojNastav(t.teplota, 'casovac');
               await huumPovel('start', { targetTemperature: t.teplota });
               addLog(`Sauna: zapnuta na ${t.teplota} °C (časovač, příchod v ${t.time}, odhad ${t.nabeh.minut} min)`);
               nahrevStart('casovac');
@@ -10075,6 +10127,7 @@ app.post('/api/sauna/huum-start', async (req, res) => {
   }
   const uzTopila = !!(state.huum && state.huum.heating);
   try {
+    if (typeof nahrevCilZdrojNastav === 'function') nahrevCilZdrojNastav(teplota, 'appka');
     await huumPovel('start', { targetTemperature: teplota });
     addLog(uzTopila ? `Sauna: teplota změněna na ${teplota} °C` : `Sauna: zapnuta na ${teplota} °C`);
     const po = await huumOverStav(true);
@@ -12288,6 +12341,7 @@ async function scenaSauna() {
     kroky.push('Sauna se nezapnula — má otevřené dveře.');
   } else {
     try {
+      if (typeof nahrevCilZdrojNastav === 'function') nahrevCilZdrojNastav(SCENA_SAUNA_C, 'appka');
       await huumPovel('start', { targetTemperature: SCENA_SAUNA_C });
       addLog(`Sauna: zapnuta na ${SCENA_SAUNA_C} °C (tlačítko)`);
       const po = await huumOverStav(true);
