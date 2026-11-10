@@ -1180,6 +1180,9 @@
   }
   /* Osa „kdy běželo" uvnitř karty oběhového čerpadla. Výšku si drawTimeline dopočítá
      podle počtu drah (tady jedna), tohle je jen než se poprvé vykreslí. */
+  .tl-tip{position:fixed;z-index:9600;pointer-events:none;background:rgba(30,40,52,0.94);color:#fff;font-size:12px;font-weight:600;
+    padding:5px 9px;border-radius:8px;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,0.2);font-variant-numeric:tabular-nums;}
+  .tl-tip[hidden]{display:none;}
   #obehTimeline,#tvMikyTimeline{
     width:100%;
     height:70px;
@@ -6191,6 +6194,10 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
   canvas.height = h * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
+  // Kde leží které úseky — pro okénko s časy po najetí myší / klepnutí
+  canvas._useky = [];
+  canvas._jednaDraha = lanes.filter(l => !l.separator).length === 1;
+  tlTipNavaz(canvas);
 
   // Legenda (oddělovač skupin do ní nepatří — nemá barvu ani název). U jediné dráhy
   // se `legendEl` nepředává: puntík s názvem by jen opakoval nadpis karty.
@@ -6277,10 +6284,69 @@ function drawTimeline(canvas, legendEl, lanes, startHour, spanHours) {
         ctx.moveTo(x1, y);
         ctx.lineTo(Math.max(x2, x1 + 2), y);
         ctx.stroke();
+        canvas._useky.push({ x1, x2: Math.max(x2, x1 + 2), y, from: s.from, to: s.to, label: lane.label });
       }
     });
   });
 }
+
+// ---------- Okénko s časy nad úsekem časové osy ----------
+// Myš: po najetí; iPad/telefon: klepnutím (další klepnutí jinam ho schová).
+const tlTipEl = document.createElement('div');
+tlTipEl.className = 'tl-tip';
+tlTipEl.hidden = true;
+document.body.appendChild(tlTipEl);
+const TL_BEZI_MS = 3 * 60000;   // úsek končící před chvílí ještě běží
+const tlCas = t => new Date(t).toLocaleTimeString('cs-CZ', { hour: 'numeric', minute: '2-digit' });
+function tlDelka(ms) {
+  const min = Math.max(1, Math.round(ms / 60000));
+  return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '');
+}
+function tlTipText(u, now = Date.now()) {
+  const bezi = now - u.to < TL_BEZI_MS;
+  const den = d => { const a = new Date(d); a.setHours(0, 0, 0, 0); return a.getTime(); };
+  const odDen = den(u.from) !== den(u.to) ? (den(u.from) === den(now) - 86400000 ? 'včera ' : '') : '';
+  return `${tlCas(u.from).replace(/^/, odDen)} – ${bezi ? 'teď (běží)' : tlCas(u.to)} · ${tlDelka((bezi ? now : u.to) - u.from)}`;
+}
+function tlUsekNa(canvas, ev) {
+  const r = canvas.getBoundingClientRect();
+  const px = ev.clientX - r.left, py = ev.clientY - r.top;
+  let nej = null, vzd = Infinity;
+  for (const u of canvas._useky || []) {
+    if (Math.abs(py - u.y) > 9) continue;
+    const d = px < u.x1 ? u.x1 - px : px > u.x2 ? px - u.x2 : 0;
+    if (d <= 6 && d < vzd) { nej = u; vzd = d; }
+  }
+  return nej;
+}
+function tlTipUkaz(canvas, u, ev) {
+  tlTipEl.textContent = (canvas._jednaDraha ? '' : u.label + ': ') + tlTipText(u);
+  tlTipEl.hidden = false;
+  const r = canvas.getBoundingClientRect();
+  const tw = tlTipEl.offsetWidth, th = tlTipEl.offsetHeight;
+  const sx = Math.min(Math.max(8, ev.clientX - tw / 2), window.innerWidth - tw - 8);
+  const sy = r.top + u.y - th - 10;
+  tlTipEl.style.left = sx + 'px';
+  tlTipEl.style.top = (sy < 8 ? r.top + u.y + 12 : sy) + 'px';
+  tlTipEl._canvas = canvas;
+}
+function tlTipSchovej() { tlTipEl.hidden = true; tlTipEl._canvas = null; }
+function tlTipNavaz(canvas) {
+  if (canvas._tipNavazano) return;
+  canvas._tipNavazano = true;
+  canvas.addEventListener('pointermove', ev => {
+    if (ev.pointerType !== 'mouse') return;
+    const u = tlUsekNa(canvas, ev);
+    if (u) tlTipUkaz(canvas, u, ev); else if (tlTipEl._canvas === canvas) tlTipSchovej();
+  });
+  canvas.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse' && tlTipEl._canvas === canvas) tlTipSchovej(); });
+  canvas.addEventListener('click', ev => {
+    const u = tlUsekNa(canvas, ev);
+    if (u) { ev.stopPropagation(); tlTipUkaz(canvas, u, ev); } else tlTipSchovej();
+  });
+}
+document.addEventListener('click', ev => { if (!tlTipEl.hidden && !(ev.target instanceof HTMLCanvasElement)) tlTipSchovej(); });
+window.addEventListener('scroll', tlTipSchovej, true);
 
 // Oběhové čerpadlo má vlastní malý graf přímo v kartě na Ovládání: jedna dráha,
 // stejná osa jako na Přehledu (0:00–24:00, Dnes a Včera). Kreslí se z týchž

@@ -102,6 +102,26 @@ setTimeout(() => {
   renderObehTimeline();
   check('  graf v kartě dostane výšku', parseInt(tvMikyCanvas.style.height, 10) > 0, true);
   check('  záloha osy si pruhy televize nechá', (pruneTimelineLocal(timelineData).tvMiky || []).length, 1);
+  // Klepnutí na úsek: okénko s časy od–do a délkou
+  {
+    const od = new Date(); od.setHours(Math.max(0, od.getHours() - 2), 5, 0, 0);
+    timelineData = { tvMiky: [{ from: od.getTime(), to: od.getTime() + 47 * MIN }] };
+    renderObehTimeline();
+    const u = tvMikyCanvas._useky[0], rc = tvMikyCanvas.getBoundingClientRect();
+    tvMikyCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: rc.left + (u.x1 + u.x2) / 2, clientY: rc.top + u.y }));
+    const tip = document.querySelector('.tl-tip');
+    const cas = t => new Date(t).toLocaleTimeString('cs-CZ', { hour: 'numeric', minute: '2-digit' });
+    check('klepnutí na úsek ukáže od–do a délku', !tip.hidden && tip.textContent, cas(od.getTime()) + ' – ' + cas(od.getTime() + 47 * MIN) + ' · 47 min');
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check('  klepnutí jinam ho schová', tip.hidden, true);
+    tvMikyCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: rc.left + 2, clientY: rc.top + 2 }));
+    check('  klepnutí mimo úsek nic neukáže', tip.hidden, true);
+    timelineData = { tvMiky: [{ from: Date.now() - 20 * MIN, to: Date.now() - MIN }] };
+    renderObehTimeline();
+    const u2 = tvMikyCanvas._useky[0];
+    tvMikyCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: rc.left + (u2.x1 + u2.x2) / 2, clientY: rc.top + u2.y }));
+    check('  běžící úsek: do teď', tip.hidden + ' ' + tip.textContent.replace(/^.* – /, ''), 'false teď (běží) · 20 min');
+  }
   timelineData = {};
   check('vysavač: kód -704042011 = offline v cloudu Xiaomi', /offline/.test(vysavacKodVysvetli('vysavač odmítl (kód -704042011)')) + ' ' + vysavacKodVysvetli('kód 12'), 'true ');
 
