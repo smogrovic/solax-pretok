@@ -36,12 +36,12 @@ nadpis('1) Ze sítě podle tarifu');
 const HOD = 3600000;
 function build(o = {}) {
   const routy = {};
-  const state = { wbDays: o.dny || [] };
-  const api = new Function('state', 'app', 'process', 'pragueDateString', 'safeEqual', 'pragueTime',
-    CENIK_SRC + '\n' + CODE_API + '\n; return { autoNabijeniDny, CENIK, HDO_VT_PODIL };')(
+  const state = { wbDays: o.dny || [], months: o.mesice || [] };
+  const api = new Function('state', 'app', 'process', 'pragueDateString', 'safeEqual', 'pragueTime', 'SPOTREBA_HISTORIE',
+    CENIK_SRC + '\n' + CODE_API + '\n; return { autoNabijeniDny, autoNabijeniMesice, CENIK, HDO_VT_PODIL };')(
     state, { get: (c, f) => { routy[c] = f; } }, { env: { AUTO_KLIC: o.klic === undefined ? 'tajny-klic' : o.klic } },
     at => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(at === undefined ? new Date() : new Date(at)),
-    (a, b) => a === b, () => ({ hour: 0, minute: 0 }));
+    (a, b) => a === b, () => ({ hour: 0, minute: 0 }), o.tabulka || []);
   const volej = (query, klic) => {
     let out, kod = 200;
     const res = { setHeader() {}, json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -69,6 +69,30 @@ nadpis('2) Cena po dnech');
   check('jen z FVE = 0 Kč', d[0].cenaKc, 0);
 }
 
+nadpis('2b) Po měsících od ledna 2025');
+{
+  const { api } = build({
+    tabulka: [
+      { m: '2025-02', celkova: 1000, sit: 400, auto: 100 },        // jen tabulka → odhad dělení
+      { m: '2025-03', celkova: 0, sit: 0, auto: 50 },              // bez spotřeby domu nejde → vynechat
+      { m: '2026-10', celkova: 1400, sit: 800, auto: 300 }         // změřeno appkou jen zčásti
+    ],
+    mesice: [
+      { m: '2026-10', wb: 100000, wbGrid: 60000, wbPv: 40000 },    // 100 kWh < 90 % z 300
+      { m: '2026-11', wb: 200000, wbGrid: 50000, wbPv: 150000 },   // změřeno celé
+      { m: '2026-12', wb: 10000 }                                  // bez rozpadu → neznámo, vynechat
+    ],
+    dny: [{ d: '2026-11-03', grid: 50000, pv: 0, gridNt: 40000 }]
+  });
+  const m = api.autoNabijeniMesice(Date.UTC(2026, 11, 15));
+  check('měsíce: tabulka i změřené, bez neznámých', m.map(x => x.m).join(), '2025-02,2026-10,2026-11');
+  check('starý měsíc z tabulky: síť podle podílu sítě v domě, odhad', [m[0].kwh, m[0].sitKwh, m[0].fveKwh, m[0].odhadDeleni, m[0].odhadTarifu].join(' '), '100 40 60 true true');
+  check('  cena z odhadu VT/NT podle času', m[0].cenaKc, Math.round((40 * api.HDO_VT_PODIL * api.CENIK.vt + 40 * (1 - api.HDO_VT_PODIL) * api.CENIK.nt) * 100) / 100);
+  check('zčásti změřený měsíc: celkem z tabulky, poměr ze změřené části', [m[1].kwh, m[1].sitKwh, m[1].odhadDeleni].join(' '), '300 180 true');
+  check('změřený měsíc s tarifem ze dnů: přesné VT/NT, bez odhadu', [m[2].kwh, m[2].fveKwh, m[2].sitKwh, m[2].sitNtKwh, m[2].sitVtKwh, 'odhadDeleni' in m[2], 'odhadTarifu' in m[2]].join(' '), '200 150 50 40 10 false false');
+  check('  cena = 10 × VT + 40 × NT', m[2].cenaKc, Math.round((10 * api.CENIK.vt + 40 * api.CENIK.nt) * 100) / 100);
+}
+
 nadpis('3) Adresa s klíčem');
 {
   const dnes = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
@@ -77,6 +101,7 @@ nadpis('3) Adresa s klíčem');
   check('špatný klíč 401', h.volej({}, 'jiny').kod, 401);
   const r = h.volej({ od: '2026-10-01', do: dnes }, 'tajny-klic');
   check('správný klíč: dny i ceník', [r.kod, r.out.dny.length, r.out.mena, r.out.cenik.fveKcKwh].join(' '), '200 2 CZK 0');
+  check('  i měsíční přehled', Array.isArray(r.out.mesice), true);
   check('  dnešek označený jako neúplný', r.out.dny[1].neuplny, true);
   check('  výchozí: posledních 31 dní', h.volej({}, 'tajny-klic').out.od < dnes, true);
   check('od po do → 400', h.volej({ od: '2026-10-05', do: '2026-10-01' }, 'tajny-klic').kod, 400);

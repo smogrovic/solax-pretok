@@ -817,7 +817,7 @@ function snapshot() {
     jidelnicek: state.jidelnicek,
     runtime: runtimePayload(),
     pvDays: state.pvDays,
-    wbDays: state.wbDays,
+    wbDays: state.wbDays.slice(-DEN_MAX),
     poolDays: state.poolDays,
     usageDays: state.usageDays,
     saunaEnabled,
@@ -1264,8 +1264,11 @@ function recordPvDay() {
 // jako FVE — i když to zrovna teklo z baterky, protože ta se nabíjí ze slunce.
 // Počítá se ze vzorků, které už poller stahuje (po 2 min), žádné dotazy navíc.
 const DEN_MAX = 14;
-const WB_DAYS_MAX = DEN_MAX;
+// Auto se drží déle: z jeho dnů se počítá cena nabíjení pro jiné appky (FVE/síť, VT/NT).
+// Do telefonu (snímek, živé zprávy) jde dál jen posledních DEN_MAX dní.
+const WB_DAYS_MAX = 400;
 const USAGE_DAYS_MAX = DEN_MAX;
+const denMax = pole => (pole === 'wbDays' ? WB_DAYS_MAX : DEN_MAX);
 
 // Společné tělo pro auto, bazén i dům. Každý dostane, kolik importu na něj ještě
 // zbylo, a vezme si z toho nejvýš tolik, kolik sám bere.
@@ -1283,9 +1286,9 @@ function recordDen(pole, w, zbylyImportW, dtH, nt = null) {
   if (nt === true && typeof rec.gridNt === 'number') rec.gridNt += zeSite * dtH;
   rec.grid += zeSite * dtH;
   rec.pv += (w - zeSite) * dtH;                  // grid + pv vždy sedne na denní kWh
-  if (state[pole].length > DEN_MAX) {
+  if (state[pole].length > denMax(pole)) {
     state[pole].sort((a, b) => a.d.localeCompare(b.d));
-    state[pole] = state[pole].slice(-DEN_MAX);
+    state[pole] = state[pole].slice(-denMax(pole));
   }
 }
 
@@ -3076,7 +3079,7 @@ function updateRuntimes() {
   broadcast('runtime', { runtime: runtimePayload() });
   broadcast('timeline', { timeline: state.timeline });
   broadcast('pvDays', { pvDays: state.pvDays });
-  broadcast('wbDays', { wbDays: state.wbDays });
+  broadcast('wbDays', { wbDays: state.wbDays.slice(-DEN_MAX) });
   broadcast('poolDays', { poolDays: state.poolDays });
   broadcast('usageDays', { usageDays: state.usageDays });
   if (saunaEnabled) broadcast('saunaDays', { saunaDays: state.saunaDays });
@@ -3463,7 +3466,7 @@ function denniRestore(pole, strop) {
     const dnes = pragueDateString();
     const num = v => (typeof v === 'number' && isFinite(v) && v >= 0 && v <= strop ? v : null);
     let changed = false;
-    for (const inc of days.slice(-DEN_MAX)) {
+    for (const inc of days.slice(-denMax(pole))) {
       if (!inc || typeof inc.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(inc.d)) continue;
       if (inc.d > dnes) continue;                       // z budoucnosti se nic nepřijímá
       const grid = num(inc.grid), pv = num(inc.pv), gridNt = num(inc.gridNt);
@@ -3477,8 +3480,8 @@ function denniRestore(pole, strop) {
     }
     if (changed) {
       state[pole].sort((a, b) => a.d.localeCompare(b.d));
-      state[pole] = state[pole].slice(-DEN_MAX);
-      broadcast(pole, { [pole]: state[pole] });
+      state[pole] = state[pole].slice(-denMax(pole));
+      broadcast(pole, { [pole]: state[pole].slice(-DEN_MAX) });
     }
     res.json({ ok: true, days: state[pole].length });
   };
@@ -13812,6 +13815,46 @@ app.get('/api/auto/nabijeni', (req, res) => {
   if (typeof k !== 'string' || !k || !safeEqual(k, AUTO_KLIC)) return res.status(401).json({ error: 'Špatný klíč.' });
   autoNabijeniOdpoved(req, res);
 });
+// Po měsících od ledna 2025: kolik auto nabilo z FVE a ze sítě a kolik to stálo.
+//  - měsíce, které appka měřila sama (state.months: wbGrid/wbPv) → změřené dělení;
+//  - starší měsíce z ručně vedené tabulky mají jen celkové kWh auta → ze sítě se
+//    odhadne podle podílu sítě na celé spotřebě domu v tom měsíci (odhadDeleni);
+//  - VT/NT: z denních záznamů, když pokrývají ≥ 90 % odběru ze sítě, jinak podle
+//    podílu času (odhadTarifu).
+function autoNabijeniMesice(now = Date.now()) {
+  const dnes = pragueDateString(now), mesic = dnes.slice(0, 7);
+  const out = new Map();
+  for (const r of SPOTREBA_HISTORIE) {
+    if (!r || typeof r.m !== 'string' || !(r.auto > 0)) continue;
+    const podilSite = r.celkova > 0 && r.sit >= 0 ? Math.min(1, r.sit / r.celkova) : null;
+    if (podilSite === null) continue;
+    out.set(r.m, { m: r.m, kwh: r.auto, sitKwh: r.auto * podilSite, odhadDeleni: true });
+  }
+  for (const r of state.months || []) {
+    if (!r || typeof r.m !== 'string' || !(r.wb > 0) || typeof r.wbGrid !== 'number') continue;
+    const kwh = r.wb / 1000, podil = Math.min(1, r.wbGrid / r.wb);
+    const tabulka = out.get(r.m);
+    // Měsíc, který appka měřila jen zčásti (začala uprostřed): celkem z tabulky,
+    // poměr FVE/síť ze změřené části
+    if (tabulka && kwh < 0.9 * tabulka.kwh) out.set(r.m, { m: r.m, kwh: tabulka.kwh, sitKwh: tabulka.kwh * podil, odhadDeleni: true });
+    else out.set(r.m, { m: r.m, kwh, sitKwh: kwh * podil, odhadDeleni: false });
+  }
+  return [...out.values()].sort((a, b) => a.m.localeCompare(b.m)).map(x => {
+    const dny = (state.wbDays || []).filter(d => d.d.startsWith(x.m) && typeof d.gridNt === 'number');
+    const sitDny = dny.reduce((a, d) => a + d.grid, 0) / 1000;
+    const zmerenoNt = !x.odhadDeleni && x.sitKwh > 0 && sitDny >= 0.9 * x.sitKwh;
+    const ntPodil = zmerenoNt ? dny.reduce((a, d) => a + d.gridNt, 0) / 1000 / sitDny : 1 - HDO_VT_PODIL;
+    const nt = x.sitKwh * ntPodil, vt = x.sitKwh - nt;
+    const o = { m: x.m, kwh: Math.round(x.kwh * 100) / 100, fveKwh: Math.round((x.kwh - x.sitKwh) * 100) / 100,
+      sitKwh: Math.round(x.sitKwh * 100) / 100, sitVtKwh: Math.round(vt * 100) / 100, sitNtKwh: Math.round(nt * 100) / 100,
+      cenaKc: Math.round((vt * CENIK.vt + nt * CENIK.nt) * 100) / 100 };
+    if (x.odhadDeleni) o.odhadDeleni = true;
+    if (x.sitKwh > 0 && !zmerenoNt) o.odhadTarifu = true;
+    if (x.m === mesic) o.neuplny = true;
+    return o;
+  });
+}
+
 function autoNabijeniOdpoved(req, res) {
   const datum = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
   const dnes = pragueDateString();
@@ -13823,8 +13866,9 @@ function autoNabijeniOdpoved(req, res) {
   res.json({
     ok: true, od, do: doo, mena: 'CZK',
     cenik: { nazev: CENIK.nazev, vtKcKwh: CENIK.vt, ntKcKwh: CENIK.nt, fveKcKwh: 0 },
-    poznamka: 'Cena = jen proměnná cena elektřiny ze sítě (VT/NT vč. distribuce a DPH), bez měsíčních poplatků. FVE je zdarma. Den s neuplny: true ještě běží — načti ho znovu.',
-    dny: autoNabijeniDny(od, doo)
+    poznamka: 'Cena = jen proměnná cena elektřiny ze sítě (VT/NT vč. distribuce a DPH), bez měsíčních poplatků. FVE je zdarma. Den/měsíc s neuplny: true ještě běží — načti ho znovu. mesice = celá historie po měsících (odhadDeleni: FVE/síť odhadnuté z podílu sítě na spotřebě domu; odhadTarifu: VT/NT podle času).',
+    dny: autoNabijeniDny(od, doo),
+    mesice: autoNabijeniMesice()
   });
 }
 

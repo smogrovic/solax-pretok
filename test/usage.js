@@ -149,6 +149,17 @@ nadpis('3) Dny');
   check('drží se 14 dní', h.state.usageDays.length, h.api.USAGE_DAYS_MAX);
   check('  a to ty poslední', h.state.usageDays[h.state.usageDays.length - 1].d, '2026-08-20');
 }
+{
+  // Auto se drží 400 dní (cena nabíjení pro jiné appky), ostatní dál 14
+  const h = build();
+  const d0 = Date.UTC(2025, 0, 1);
+  for (let i = 0; i < 420; i++) {
+    h.setDen(new Date(d0 + i * 86400000).toISOString().slice(0, 10));
+    h.api.recordWbDay(1000, 0, 1);
+    h.api.recordPoolDay(1000, 0, 1);
+  }
+  check('auto 400 dní, bazén 14', h.state.wbDays.length + ' ' + h.state.poolDays.length, '400 14');
+}
 
 nadpis('4) Prořídění drží špičku');
 {

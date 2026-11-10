@@ -59,6 +59,27 @@ Dny bez nabíjení v seznamu nejsou, to znamená nula. Hodnoty dne se můžou m�
 a po restartu Solinátoru se ještě doplní ze zálohy. Proto se poslední dny stahují pokaždé znovu
 a ukládají se přepsáním podle data.
 
+**Denní záznamy** Solinátor drží 400 dní. Do 10. 11. 2026 ale držel jen 14 dní, takže denní historie
+začíná až kolem 27. 10. 2026.
+
+**Měsíční přehled `mesice`** je v každé odpovědi a pokrývá celou historii od února 2025, nezávisle
+na `od`/`do`:
+
+```json
+"mesice": [
+  { "m": "2025-02", "kwh": 100, "fveKwh": 60, "sitKwh": 40, "sitVtKwh": 6.67, "sitNtKwh": 33.33,
+    "cenaKc": 142.95, "odhadDeleni": true, "odhadTarifu": true },
+  { "m": "2026-11", "kwh": 200, "fveKwh": 150, "sitKwh": 50, "sitVtKwh": 10, "sitNtKwh": 40,
+    "cenaKc": 180.22, "neuplny": true }
+]
+```
+
+| Pole | Význam |
+|---|---|
+| `odhadDeleni` | Měsíc před tím, než Solinátor měřil, kolik auto bere ze sítě. Celkové kWh auta jsou z ručně vedené tabulky, podíl ze sítě je odhadnutý podle podílu sítě na spotřebě celého domu v tom měsíci. |
+| `odhadTarifu` | VT/NT je rozdělené podle podílu času, ne změřené. |
+| `neuplny` | Běžící měsíc. |
+
 ## 3. Prompt pro Clauda (do repozitáře druhé appky)
 
 > Přidej do aplikace evidenci nákladů na nabíjení auta. Data dodává moje druhá aplikace Solinátor
@@ -76,6 +97,10 @@ a ukládají se přepsáním podle data.
 >   - `cenaKc` je cena jen za odběr ze sítě. FVE je zdarma. Měsíční poplatky v ceně nejsou.
 >   - `neuplny: true` je dnešek, který se ještě mění.
 >   - `odhadTarifu: true` znamená, že VT/NT je u toho dne odhadnuté podle času.
+> - V každé odpovědi je navíc `mesice: [{ m: "YYYY-MM", kwh, fveKwh, sitKwh, sitVtKwh, sitNtKwh,
+>   cenaKc, odhadDeleni?, odhadTarifu?, neuplny? }]`. Je to celá historie po měsících od února 2025.
+>   `odhadDeleni: true` znamená, že dělení FVE/síť je u toho měsíce odhadnuté.
+>   Denní záznamy existují až zhruba od konce října 2026.
 > - Jeden dotaz smí mít nejvýš 400 dní.
 > - Chyby: 401 = špatný klíč, 503 = Solinátor nemá nastavený klíč, 400 = špatný rozsah.
 > - Solinátor běží na Renderu a po nečinnosti usíná. Použij timeout 60 s a při chybě opakuj
@@ -100,7 +125,9 @@ a ukládají se přepsáním podle data.
 >   s vysvětlivkou „VT/NT odhadnuto podle času“.
 > - Ukaž, kdy byla data naposledy stažena. Když poslední stažení selhalo, ukaž srozumitelnou hlášku.
 > - Přidej tlačítko „Načíst znovu“, které stáhne posledních 31 dní.
-> - Měsíční součty počítej z uložených denních dat, neukládej je zvlášť.
+> - Měsíční součty počítej z uložených denních dat. U měsíců, pro které denní data nemáš (nebo jen
+>   zčásti), použij hodnoty z `mesice`. Ukládej je přepsáním podle měsíce a označ je hvězdičkou
+>   „odhad“, pokud mají `odhadDeleni`.
 >
 > **Ověření**
 > - Napiš testy: rozbor odpovědi, upsert (přepsání dne i vynulování chybějícího dne), měsíční součty
