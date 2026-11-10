@@ -634,6 +634,8 @@
   .power-btn:active{transform:scale(0.93);}
   .power-btn:disabled{opacity:0.5;}
   .power-btn.active-state{box-shadow:0 0 0 3px rgba(245,147,61,0.55);}
+  /* Televize Miky: zapnuté relé = zelené ON (televize sama může být vypnutá) */
+  #tvMikyOnBtn.active-state{background:var(--green);box-shadow:none;}
   .device-power{
     font-size:12px;
     color:var(--grey-text);
@@ -4725,8 +4727,12 @@ function renderManualHold() {
       // Sauna přebíjí i ruční zapnutí — jistič je přednější
       device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;
     } else if (key === 'tvMiky') {
-      // Žádná automatika ji neřídí — věta „automatika převezme" by lhala
-      device.holdEl.textContent = '';
+      // Žádná automatika ji neřídí. Relé ale může být zapnuté a televize vypnutá —
+      // rozhoduje odběr (nad 5 W jede), stejně jako pro časovou osu
+      const w = d && typeof d.powerW === 'number' ? Math.round(d.powerW) : null;
+      device.holdEl.textContent = d && d.isOn === true
+        ? (w === null ? 'Relé zapnuté' : w > 5 ? `Televize jede · ${w} W` : `Relé zapnuté, televize vypnutá (${w} W)`)
+        : '';
     } else if (key === 'obeh') {
       // Oběhové čerpadlo žádná automatika neřídí, takže věta „automatika převezme"
       // by lhala. Zajímavé je tu něco jiného: kdy ho shodí časovač v samotném relé.

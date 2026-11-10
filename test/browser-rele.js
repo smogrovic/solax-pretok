@@ -97,7 +97,11 @@ setTimeout(() => {
   check('televize Miky: karta na Ovládání', !!document.querySelector('.slide[data-title="Ovládání"] #tvMikyCard'), true);
   check('  ON i OFF a graf v kartě', [document.getElementById('tvMikyOnBtn').textContent, document.getElementById('tvMikyOffBtn').textContent, !!tv.querySelector('#tvMikyTimeline')].join(' '), 'ON OFF true');
   renderDevice(devices.tvMiky, { online: true, isOn: true, powerW: 80, fetchedAt: new Date().toISOString() }); renderManualHold();
-  check('  zapnutá: semafor svítí, žádná věta o automatice', devices.tvMiky.light[0].className + ' |' + devices.tvMiky.holdEl.textContent + '|', 'traffic-light on ||');
+  check('  zapnutá a jede: semafor, zelené ON, příkon', [devices.tvMiky.light[0].className, getComputedStyle(document.getElementById('tvMikyOnBtn')).backgroundColor === 'rgb(63, 185, 80)', devices.tvMiky.holdEl.textContent].join(' | '), 'traffic-light on | true | Televize jede · 80 W');
+  renderDevice(devices.tvMiky, { online: true, isOn: true, powerW: 2, fetchedAt: new Date().toISOString() }); renderManualHold();
+  check('  relé zapnuté, televize vypnutá (do 5 W)', devices.tvMiky.holdEl.textContent, 'Relé zapnuté, televize vypnutá (2 W)');
+  renderDevice(devices.tvMiky, { online: true, isOn: false, powerW: 0, fetchedAt: new Date().toISOString() }); renderManualHold();
+  check('  vypnuté relé: ON není zelené, bez textu', [document.getElementById('tvMikyOnBtn').classList.contains('active-state'), devices.tvMiky.holdEl.textContent].join(' |'), 'false |');
   timelineData = { tvMiky: [{ from: T - 30 * MIN, to: T - 15 * MIN }] };
   renderObehTimeline();
   check('  graf v kartě dostane výšku', parseInt(tvMikyCanvas.style.height, 10) > 0, true);

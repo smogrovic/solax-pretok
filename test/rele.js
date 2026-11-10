@@ -139,6 +139,8 @@ nadpis('6) Oběhové čerpadlo');
   check('televize Miky je v seznamu zařízení', /tvMiky:\s*\{[^}]*apiPath: '\/api\/tv\/miky'[^}]*deviceId: TV_MIKY_DEVICE_ID/.test(zdroj)
     && /TV_MIKY_DEVICE_ID\s*=\s*process\.env\.TV_MIKY_DEVICE_ID\s*\|\|\s*'34b7dac919a4'/.test(zdroj), true);
   check('  s popiskem, dráhou v ose a obnovou osy', /tvMiky: 'Televize Miky'/.test(zdroj) && /timeline: \{[^}]*tvMiky: \[\]/.test(zdroj) && validKey.includes('tvMiky'), true);
+  check('  na osu jen při odběru nad 5 W (relé zapnuté ≠ televize jede)', /TV_BEZI_W = 5/.test(zdroj)
+    && /k === 'tvMiky' && !\(releZname\(k\) && state\.devices\.tvMiky\.powerW > TV_BEZI_W\)\) continue;/.test(zdroj), true);
   check('  není v udržovacím ON ani v době běhu', /tvMiky/.test(keepalive) || /ms: \{[^}]*tvMiky/.test(zdroj), false);
 }
 

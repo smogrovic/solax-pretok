@@ -43,6 +43,7 @@ const OBEH_SERVER_URI = process.env.OBEH_SERVER_URI || SHELLY_SERVER_URI;
 // žádná automatika ani auto-off v relé — proto ani odhad „samo se vypne".
 const TV_MIKY_DEVICE_ID  = process.env.TV_MIKY_DEVICE_ID  || '34b7dac919a4';
 const TV_MIKY_SERVER_URI = process.env.TV_MIKY_SERVER_URI || SHELLY_SERVER_URI;
+const TV_BEZI_W = 5;   // nad tímhle odběrem televize opravdu jede (relé samo neříká nic)
 
 // Tři samostatné měřáky spotřeby bazénu (ne relé). Proměnná je seznam oddělený čárkami.
 const POOL_PM_IDS = (process.env.POOL_PM_IDS || '54320470d17c,5432046cb538,543204702434')
@@ -2996,6 +2997,8 @@ function updateRuntimes() {
   // Do doby běhu (runtime.ms) schválně nepatří — ta je o spotřebičích, které řídí automatika.
   for (const k of ['obeh', 'tvMiky']) {
     if (!releBezi(k)) continue;
+    // Televize: relé může být zapnuté a televize vypnutá — „běží" až nad TV_BEZI_W
+    if (k === 'tvMiky' && !(releZname(k) && state.devices.tvMiky.powerW > TV_BEZI_W)) continue;
     if (!state.timeline[k]) state.timeline[k] = [];
     const segs = state.timeline[k];
     const last = segs[segs.length - 1];
