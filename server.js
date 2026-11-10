@@ -2550,6 +2550,8 @@ function oznameniObnov(o, now = Date.now()) {
 app.post('/api/oznameni', (req, res) => {
   const r = oznameniNastav(req.body && req.body.text);
   if (r.chyba) return res.status(400).json({ error: r.chyba });
+  // I jako notifikace — všem včetně dětí, kromě iPadu (tam svítí přes obrazovku)
+  if (typeof sendPushToAll === 'function') sendPushToAll('📢 Upozornění', state.oznameni.text, { kategorie: 'oznameni' }).catch(() => {});
   res.json({ ok: true, oznameni: state.oznameni });
 });
 app.post('/api/oznameni/zrusit', (req, res) => {
@@ -3938,26 +3940,43 @@ app.get('/api/push/vapid-key', (req, res) => {
   res.json({ key: VAPID_PUBLIC_KEY });
 });
 
+// Ke každému zařízení si pamatujeme režim appky (full / miky / elenka) a jestli je to
+// iPad: dětem chodí jen garáž a upozornění pro všechny, iPadu upozornění ne (to na
+// něm svítí přes celou obrazovku). Staré tělo (jen subscription) = full, ne iPad.
+const PUSH_REZIMY = ['full', 'miky', 'elenka'];
+const PUSH_PRO_DETI = ['garaz', 'oznameni'];
+function pushZaznam(telo) {
+  const sub = telo && telo.sub && typeof telo.sub === 'object' ? telo.sub : telo;
+  if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint) || !sub.keys || typeof sub.keys !== 'object') return null;
+  return { sub: { endpoint: sub.endpoint, keys: sub.keys, ...(sub.expirationTime ? { expirationTime: sub.expirationTime } : {}) },
+    rezim: PUSH_REZIMY.includes(telo && telo.rezim) ? telo.rezim : 'full', ipad: !!(telo && telo.ipad === true) };
+}
+// Má tohle zařízení dostat hlášku dané kategorie?
+function pushProZarizeni(z, kategorie) {
+  if (z.rezim !== 'full' && !PUSH_PRO_DETI.includes(kategorie)) return false;
+  if (z.ipad && kategorie === 'oznameni') return false;
+  return true;
+}
+
 app.post('/api/push/subscribe', (req, res) => {
-  const sub = req.body;
-  if (!sub || !sub.endpoint) {
-    return res.status(400).json({ error: 'Neplatná subscription.' });
-  }
-  pushSubscriptions.set(sub.endpoint, sub);
-  res.json({ ok: true });
+  const z = pushZaznam(req.body);
+  if (!z) return res.status(400).json({ error: 'Neplatná subscription.' });
+  pushSubscriptions.set(z.sub.endpoint, z);
+  res.json({ ok: true, rezim: z.rezim, ipad: z.ipad });
 });
 
 // Každá hláška se zapíše i do logu (tučně) — ať se dá zpětně dohledat, co přišlo na
 // telefon a kdy. Zapisuje se i s vypnutými pushi: do logu to patří tak jako tak.
 // `log: false` je jen pro výpadky dat, které mají svoje červené řádky a souhrn by je
 // jen duplikoval.
-async function sendPushToAll(title, bodyText, { log = true } = {}) {
+async function sendPushToAll(title, bodyText, { log = true, kategorie = null } = {}) {
   if (log) addLog(`${title} — ${bodyText}`, 'notif');
   if (!pushEnabled) return;
   const payload = JSON.stringify({ title, body: bodyText });
-  for (const [endpoint, sub] of pushSubscriptions) {
+  for (const [endpoint, z] of pushSubscriptions) {
+    if (!pushProZarizeni(z, kategorie)) continue;
     try {
-      await webpush.sendNotification(sub, payload);
+      await webpush.sendNotification(z.sub, payload);
     } catch (err) {
       // 404/410 = subscription už neplatí
       if (err.statusCode === 404 || err.statusCode === 410) {
@@ -4025,7 +4044,7 @@ async function checkGarageOpen() {
     if (openMs >= GARAGE_OPEN_ALERT_MS && !notif.garageNotified) {
       notif.garageNotified = true;
       const mins = Math.round(openMs / 60000);
-      sendPushToAll('🚪 Garáž je otevřená', `Garáž je otevřená už ${mins} min.`);
+      sendPushToAll('🚪 Garáž je otevřená', `Garáž je otevřená už ${mins} min.`, { kategorie: 'garaz' });
     }
   } catch {}
 }
@@ -13388,9 +13407,9 @@ function storeApplyPrimo(p) {
   // Bez tohohle chodí notifikace až po prvním otevření appky — telefon se přihlašuje
   // znovu při startu, ale mezitím by hlášky mizely do prázdna
   if (Array.isArray(p.push)) {
-    for (const sub of p.push.slice(0, 20)) {
-      if (sub && typeof sub.endpoint === 'string' && /^https:\/\//.test(sub.endpoint)
-          && sub.keys && typeof sub.keys === 'object') pushSubscriptions.set(sub.endpoint, sub);
+    for (const ulozeny of p.push.slice(0, 20)) {
+      const z = pushZaznam(ulozeny);
+      if (z) pushSubscriptions.set(z.sub.endpoint, z);
     }
   }
 }

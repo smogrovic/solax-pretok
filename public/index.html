@@ -3871,8 +3871,15 @@
       <button class="sbal-btn jen-full" data-sbal-obsah="log" id="diagBtn" type="button">Zkopírovat diagnostiku<i id="diagStav">▾</i></button>
       <textarea class="diag-zaloha jen-full" id="diagZaloha" readonly hidden></textarea>
 
-      <button class="notif-btn jen-full" data-sbal-obsah="log" id="notifBtn">🔔 Zapnout notifikace</button>
       <div class="store-note jen-full" data-sbal-obsah="log" id="storeNote"></div>
+
+      <!-- Notifikace: ve všech režimech. Dětem chodí jen garáž a upozornění pro všechny,
+           iPadu upozornění ne (svítí mu přes obrazovku) — filtruje server podle režimu -->
+      <div class="card">
+        <div class="asst-log-title">Notifikace</div>
+        <button class="notif-btn" id="notifBtn" type="button">🔔 Zapnout notifikace</button>
+        <div class="rezim-hint" id="notifHint"></div>
+      </div>
 
       <!-- Přepínač je vidět ve všech režimech — jinak by z dětského nebyla cesta zpět -->
       <div class="card">
@@ -4474,6 +4481,7 @@ async function rezimOverKod(klic, kod) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Kód se nepodařilo ověřit.');
     pouzijRezim(klic);
+    bezpecne(pushPoZmeneRezimu);   // notifikace podle nového režimu (dětem jen garáž a upozornění)
     errorEl.classList.remove('show');
   } catch (err) {
     errorEl.textContent = 'Režim: ' + err.message;
@@ -13415,6 +13423,20 @@ function urlBase64ToUint8Array(base64String) {
   return arr;
 }
 
+// iPad (i ten, co se v Safari hlásí jako Mac) — upozornění pro všechny mu nechodí,
+// svítí mu přes celou obrazovku
+const jeIpad = () => /iPad/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function notifHintNastav() {
+  const el = document.getElementById('notifHint');
+  if (!el) return;
+  const deti = typeof rezimApky === 'string' && rezimApky !== 'full';
+  el.textContent = deti
+    ? 'Chodí jen: garáž otevřená moc dlouho a upozornění pro všechny.'
+    : 'Chodí všechny hlášky appky' + (jeIpad() ? ' kromě upozornění pro všechny — to svítí na obrazovce iPadu.' : ' včetně upozornění pro všechny.');
+}
+
 async function subscribePush() {
   await navigator.serviceWorker.register('sw.js');
   const reg = await navigator.serviceWorker.ready;
@@ -13425,11 +13447,17 @@ async function subscribePush() {
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(keyData.key)
   });
+  // Server podle režimu a iPadu vybírá, které hlášky sem pošle
   await fetch('/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sub)
+    body: JSON.stringify({ sub: sub.toJSON ? sub.toJSON() : sub, rezim: typeof rezimApky === 'string' ? rezimApky : 'full', ipad: jeIpad() })
   });
+}
+// Po přepnutí režimu appky: znovu přihlásit s novým režimem (jen když jsou notifikace zapnuté)
+function pushPoZmeneRezimu() {
+  notifHintNastav();
+  if (pushSupported && Notification.permission === 'granted') subscribePush().catch(() => {});
 }
 
 notifBtn.addEventListener('click', async () => {
@@ -13450,8 +13478,15 @@ notifBtn.addEventListener('click', async () => {
 
 // Server drží subscriptions jen v paměti — po každém otevření appky se tiše přihlásíme znovu
 async function initPush() {
+  notifHintNastav();
   if (!pushSupported) {
-    notifBtn.style.display = 'none';
+    notifBtn.disabled = true;
+    notifBtn.textContent = '🔕 Tady notifikace nejdou';
+    const el = document.getElementById('notifHint');
+    // iPhone/iPad: push jen v appce přidané na plochu (Sdílet → Přidat na plochu)
+    if (el) el.textContent = /iPhone|iPad/.test(navigator.userAgent) || jeIpad()
+      ? 'Na iPhonu a iPadu fungují jen v appce přidané na plochu: Safari → Sdílet → Přidat na plochu, pak appku otevři z ikony.'
+      : 'Tenhle prohlížeč notifikace neumí.';
     return;
   }
   if (Notification.permission === 'granted') {
