@@ -92,6 +92,19 @@ setTimeout(() => {
   check('záloha v telefonu si pruhy nechá', (zalohovane.obeh || []).length, 1);
   check('  a cizí klíč pořád zahodí', (pruneTimelineLocal({ nesmysl: [] }).nesmysl || 'pryč'), 'pryč');
 
+  // Mikyho televize: karta na Ovládání s ON i OFF a vlastním grafem
+  const tv = document.getElementById('tvMikyCard');
+  check('televize Miky: karta na Ovládání', !!document.querySelector('.slide[data-title="Ovládání"] #tvMikyCard'), true);
+  check('  ON i OFF a graf v kartě', [document.getElementById('tvMikyOnBtn').textContent, document.getElementById('tvMikyOffBtn').textContent, !!tv.querySelector('#tvMikyTimeline')].join(' '), 'ON OFF true');
+  renderDevice(devices.tvMiky, { online: true, isOn: true, powerW: 80, fetchedAt: new Date().toISOString() }); renderManualHold();
+  check('  zapnutá: semafor svítí, žádná věta o automatice', devices.tvMiky.light[0].className + ' |' + devices.tvMiky.holdEl.textContent + '|', 'traffic-light on ||');
+  timelineData = { tvMiky: [{ from: T - 30 * MIN, to: T - 15 * MIN }] };
+  renderObehTimeline();
+  check('  graf v kartě dostane výšku', parseInt(tvMikyCanvas.style.height, 10) > 0, true);
+  check('  záloha osy si pruhy televize nechá', (pruneTimelineLocal(timelineData).tvMiky || []).length, 1);
+  timelineData = {};
+  check('vysavač: kód -704042011 = offline v cloudu Xiaomi', /offline/.test(vysavacKodVysvetli('vysavač odmítl (kód -704042011)')) + ' ' + vysavacKodVysvetli('kód 12'), 'true ');
+
   // Rozvrh v kartě být nemá — patří do vysvětlení automatiky. Tam se ale vypisuje
   // z časů, podle kterých server opravdu spíná; ručně opsaný text by se rozešel.
   check('v kartě čerpadla rozvrh není', !!karta.querySelector('#obehPlan'), false);

@@ -134,6 +134,19 @@ nadpis('6) Oběhové čerpadlo');
   // Telefon vrací serveru pruhy po deployi — bez klíče ve whitelistu by je zahodil
   const validKey = (zdroj.match(/const validKey = k => \/\^\(([^)]*)\)/) || [])[1] || '';
   check('obnova časové osy ho propustí', validKey.includes('obeh'), true);
+
+  // Mikyho televize: obyčejné relé bez automatiky a bez auto-off v relé
+  check('televize Miky je v seznamu zařízení', /tvMiky:\s*\{[^}]*apiPath: '\/api\/tv\/miky'[^}]*deviceId: TV_MIKY_DEVICE_ID/.test(zdroj)
+    && /TV_MIKY_DEVICE_ID\s*=\s*process\.env\.TV_MIKY_DEVICE_ID\s*\|\|\s*'34b7dac919a4'/.test(zdroj), true);
+  check('  s popiskem, dráhou v ose a obnovou osy', /tvMiky: 'Televize Miky'/.test(zdroj) && /timeline: \{[^}]*tvMiky: \[\]/.test(zdroj) && validKey.includes('tvMiky'), true);
+  check('  není v udržovacím ON ani v době běhu', /tvMiky/.test(keepalive) || /ms: \{[^}]*tvMiky/.test(zdroj), false);
+}
+
+nadpis('Televize: bez odhadu samovypnutí');
+{
+  const h = build();
+  h.lastCmd.tvMiky = { turn: 'on', at: Date.now() };
+  check('po ON se neodhaduje, kdy zhasne', h.api.releDobehDo('tvMiky'), 0);
 }
 
 konec();

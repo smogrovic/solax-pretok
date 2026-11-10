@@ -39,6 +39,11 @@ const SOLINATOR_SERVER_URI = process.env.SOLINATOR_SERVER_URI || SHELLY_SERVER_U
 const OBEH_DEVICE_ID  = process.env.OBEH_DEVICE_ID  || '543204663bf4';
 const OBEH_SERVER_URI = process.env.OBEH_SERVER_URI || SHELLY_SERVER_URI;
 
+// Televize v Mikyho pokoji (Shelly 1PM Mini Gen3). Obyčejné ON/OFF z Ovládání a časovačů,
+// žádná automatika ani auto-off v relé — proto ani odhad „samo se vypne".
+const TV_MIKY_DEVICE_ID  = process.env.TV_MIKY_DEVICE_ID  || '34b7dac919a4';
+const TV_MIKY_SERVER_URI = process.env.TV_MIKY_SERVER_URI || SHELLY_SERVER_URI;
+
 // Tři samostatné měřáky spotřeby bazénu (ne relé). Proměnná je seznam oddělený čárkami.
 const POOL_PM_IDS = (process.env.POOL_PM_IDS || '54320470d17c,5432046cb538,543204702434')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -117,7 +122,8 @@ const DEVICES = {
   lightBazen:  { apiPath: '/api/light/bazen',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_BAZEN_ID },
   lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID },
   lightKoupelna: { apiPath: '/api/light/koupelna',    serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_KOUPELNA_ID },
-  obeh:        { apiPath: '/api/obeh',                serverUri: OBEH_SERVER_URI,      deviceId: OBEH_DEVICE_ID }
+  obeh:        { apiPath: '/api/obeh',                serverUri: OBEH_SERVER_URI,      deviceId: OBEH_DEVICE_ID },
+  tvMiky:      { apiPath: '/api/tv/miky',             serverUri: TV_MIKY_SERVER_URI,   deviceId: TV_MIKY_DEVICE_ID }
 };
 
 const shellyCache = new Map();
@@ -193,7 +199,8 @@ const DEVICE_LABELS = {
   lightBazen: 'Světlo bazén',
   lightNocni: 'Noční světla',
   lightKoupelna: 'Noční světlo koupelna',
-  obeh: 'Oběhové čerpadlo'
+  obeh: 'Oběhové čerpadlo',
+  tvMiky: 'Televize Miky'
 };
 
 // Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
@@ -258,7 +265,7 @@ const state = {
     lastTs: Date.now()
   },
   // segmenty { from, to } za 48 h; wbPlugged = kdy bylo auto připojené (graf režimů)
-  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [], obeh: [] },
+  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [], obeh: [], tvMiky: [] },
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za poslední 4 dny
@@ -2985,11 +2992,12 @@ function updateRuntimes() {
     if (last && now - last.to <= TIMELINE_GAP_MS) last.to = now;
     else segs.push({ from: now, to: now });
   }
-  // Oběhové čerpadlo: jen pruh „kdy běželo" do karty na Ovládání. Do doby běhu
-  // (runtime.ms) schválně nepatří — ta je o spotřebičích, které řídí automatika.
-  if (releBezi('obeh')) {
-    if (!state.timeline.obeh) state.timeline.obeh = [];
-    const segs = state.timeline.obeh;
+  // Oběhové čerpadlo a Mikyho televize: jen pruh „kdy běželo" do karty na Ovládání.
+  // Do doby běhu (runtime.ms) schválně nepatří — ta je o spotřebičích, které řídí automatika.
+  for (const k of ['obeh', 'tvMiky']) {
+    if (!releBezi(k)) continue;
+    if (!state.timeline[k]) state.timeline[k] = [];
+    const segs = state.timeline[k];
     const last = segs[segs.length - 1];
     if (last && now - last.to <= TIMELINE_GAP_MS) last.to = now;
     else segs.push({ from: now, to: now });
@@ -3617,7 +3625,7 @@ app.post('/api/timeline/restore', (req, res) => {
   const now = Date.now();
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
-  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
@@ -4240,7 +4248,10 @@ function releZname(key) {
   return !!d && d.online === true && (d.isOn === true || d.isOn === false) && cerstve(d.fetchedAt);
 }
 // Dokdy nejpozději může relé běžet bez dalšího ON. 0 = nevíme o žádném ON.
+// Relé bez časovače vypnutí: u nich se z posledního ON nedá odhadnout, kdy zhasne
+const RELE_BEZ_AUTO_OFF = ['tvMiky'];
 function releDobehDo(key) {
+  if (RELE_BEZ_AUTO_OFF.includes(key)) return 0;
   const cmd = lastCmd[key];
   return cmd && cmd.turn === 'on' ? cmd.at + RELAY_AUTO_OFF_MS : 0;
 }

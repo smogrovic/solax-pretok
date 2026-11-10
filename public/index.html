@@ -1180,7 +1180,7 @@
   }
   /* Osa „kdy běželo" uvnitř karty oběhového čerpadla. Výšku si drawTimeline dopočítá
      podle počtu drah (tady jedna), tohle je jen než se poprvé vykreslí. */
-  #obehTimeline{
+  #obehTimeline,#tvMikyTimeline{
     width:100%;
     height:70px;
     display:block;
@@ -3438,6 +3438,22 @@
         </div>
       </div>
 
+      <!-- Mikyho televize: obyčejné ON/OFF, žádná automatika ani auto-off v relé -->
+      <div class="card lockable jen-full" data-emoji="📺" id="tvMikyCard">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="tvMikyLight"></div>
+            <div class="shelly-label">Televize Miky</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="tvMikyOnBtn">ON</button>
+            <button class="power-btn off-btn" id="tvMikyOffBtn">OFF</button>
+          </div>
+          <div class="manual-hold" id="tvMikyHold"></div>
+          <canvas id="tvMikyTimeline"></canvas>
+        </div>
+      </div>
+
       <div class="card lockable jen-full" data-emoji="🔑" id="nukiCard">
         <button class="home-btn home-btn-sm" id="nukiLockBtn"><span class="home-btn-ico">🔒</span>Zamknout dům</button>
         <div class="home-msg" id="homeMsg"></div>
@@ -4663,6 +4679,16 @@ const devices = {
     holdEl: document.getElementById('obehHold'),
     label: 'Oběhové čerpadlo'
   },
+  tvMiky: {
+    statusUrl: '/api/tv/miky',
+    setUrl: '/api/tv/miky/set',
+    light: els('tvMikyLight'),
+    state: els('tvMikyState'),
+    onBtn: els('tvMikyOnBtn'),
+    offBtn: els('tvMikyOffBtn'),
+    holdEl: document.getElementById('tvMikyHold'),
+    label: 'Televize Miky'
+  },
   lightNocni: {
     statusUrl: '/api/light/nocni',
     setUrl: '/api/light/nocni/set',
@@ -4695,6 +4721,9 @@ function renderManualHold() {
     } else if ((key === 'pool' || key === 'solinator') && saunaBlokujeUi()) {
       // Sauna přebíjí i ruční zapnutí — jistič je přednější
       device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;
+    } else if (key === 'tvMiky') {
+      // Žádná automatika ji neřídí — věta „automatika převezme" by lhala
+      device.holdEl.textContent = '';
     } else if (key === 'obeh') {
       // Oběhové čerpadlo žádná automatika neřídí, takže věta „automatika převezme"
       // by lhala. Zajímavé je tu něco jiného: kdy ho shodí časovač v samotném relé.
@@ -6057,7 +6086,7 @@ function pruneTimelineLocal(tl) {
   const now = Date.now();
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|ac_)/.test(k)) continue;
     // Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, tak se drží 4 dny
     const cutoff = now - (k === 'wbPlugged' ? HIST_MAX_AGE_MS : 48 * 60 * 60 * 1000);
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
@@ -6274,8 +6303,13 @@ function renderObehPlan(rozvrh) {
     : 'Rozvrh se načítá…';
 }
 
+// Mikyho televize: stejný malý graf ve své kartě
+const tvMikyCanvas = document.getElementById('tvMikyTimeline');
+const TV_MIKY_LANE = { key: 'tvMiky', label: 'Televize Miky', color: '#7d5fd6' };
+
 function renderObehTimeline() {
   drawTimeline(obehCanvas, null, [OBEH_LANE], 0, 24);
+  if (tvMikyCanvas) drawTimeline(tvMikyCanvas, null, [TV_MIKY_LANE], 0, 24);
 }
 
 function renderTimeline() {
@@ -8673,7 +8707,8 @@ const RELAY_TIMER_DEVICES = [
   { key: 'lightNahore', label: 'Zahrada nahoře' },
   { key: 'lightBazen', label: 'Světlo bazén' },
   { key: 'lightNocni', label: 'Noční světla' },
-  { key: 'obeh', label: 'Oběhové čerpadlo' }
+  { key: 'obeh', label: 'Oběhové čerpadlo' },
+  { key: 'tvMiky', label: 'Televize Miky' }
 ];
 
 const relayTimerDeviceEl = document.getElementById('relayTimerDevice');
@@ -12602,8 +12637,20 @@ function renderVysavac(d) {
     ? 'Vysavač ovládá most na NASu (vysavac-most.js). Zatím se neozval.'
     : !zive ? 'Most na NASu se neozývá — vysavač teď ovládat nejde.'
     : vyprselo || (s && s.chyba) ? (s.chyba || 'Přihlášení vypršelo — na NASu spusť vysavac-most.js --prihlas.')
-    : p && p.ok === false ? `Poslední povel se nepovedl: ${p.zprava || '?'}`
+    : p && p.ok === false ? `Poslední povel se nepovedl: ${p.zprava || '?'}${vysavacKodVysvetli(p.zprava)}`
     : '';
+}
+
+// Chybové kódy cloudu Xiaomi (MIoT) — most posílá jen číslo, tady se přeloží.
+// Klíče s tečkami po třech číslicích (devět číslic za sebou by vypadalo jako telefon).
+const VYSAVAC_KODY = {
+  '-704.042.011': 'vysavač je pro cloud Xiaomi offline (není na Wi-Fi, vybitý nebo vypnutý). Zkontroluj ho v appce Mi Home.',
+  '-704.083.036': 'vysavač neodpověděl včas — zkus to za chvíli znovu.'
+};
+function vysavacKodVysvetli(zprava) {
+  const m = /kód (-?)(\d+)/.exec(String(zprava || ''));
+  const klic = m ? m[1] + m[2].replace(/\B(?=(\d{3})+$)/g, '.') : '';
+  return VYSAVAC_KODY[klic] ? ' — ' + VYSAVAC_KODY[klic] : '';
 }
 
 async function vysavacPovel(typ, btn) {

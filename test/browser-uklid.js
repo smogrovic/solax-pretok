@@ -193,7 +193,7 @@ setTimeout(async () => {
   check('  tlačítka jsou zamykatelná', !!document.getElementById('sekSekatBtn').closest('.card.lockable'), true);
   // Pořadí karet: světla, sekačka, vysavač, bojler, oběhové čerpadlo, pak zbytek
   const emoji = [...slide.querySelectorAll(':scope > .page > .card[data-emoji]')].map(c => c.dataset.emoji).join('');
-  check('pořadí: světla, sekačka, vysavač, bojler, oběh, zámek', emoji, '💡🌱🧹🛁🔄🔑');
+  check('pořadí: světla, sekačka, vysavač, bojler, oběh, televize, zámek', emoji, '💡🌱🧹🛁🔄📺🔑');
   check('  v dětském režimu sekačka ani vysavač nejsou', document.getElementById('vysKarta').classList.contains('jen-full'), true);
 
   R.push('\\n8) Vysavač Xiaomi');
