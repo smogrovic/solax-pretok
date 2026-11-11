@@ -108,6 +108,45 @@ const puvodniFetch = globalThis.fetch;
     check('odmítnutý povel jde appce i s kódem', v.appka[1].posledniPovel.ok + ' ' + /-704/.test(v.appka[1].posledniPovel.zprava), 'false true');
   }
 
+  {
+    // Akce podle specifikace: jiná čísla než záloha, najdou se podle jména
+    const SPEC2 = { services: [...SPEC.services,
+      { iid: 7, type: 'urn:miot-spec-v2:service:vacuum:00007810:xiaomi-c102gl:1', actions: [
+        { iid: 5, type: 'urn:miot-spec-v2:action:start-sweep:00002804:xiaomi-c102gl:1' },
+        { iid: 6, type: 'urn:miot-spec-v2:action:stop-sweeping:00002805:xiaomi-c102gl:1' }] },
+      { iid: 8, type: 'urn:miot-spec-v2:service:battery:00007805:xiaomi-c102gl:1', actions: [
+        { iid: 9, type: 'urn:miot-spec-v2:action:start-charge:00002802:xiaomi-c102gl:1' }] }] };
+    const z = t => JSON.stringify(M.akceZeSpec(SPEC2, t));
+    check('akce ze specifikace', z('uklid') + z('stop') + z('dok'),
+      '{"siid":7,"aiid":5,"jmeno":"start-sweep"}{"siid":7,"aiid":6,"jmeno":"stop-sweeping"}{"siid":8,"aiid":9,"jmeno":"start-charge"}');
+    check('bez specifikace nic (platí záloha)', M.akceZeSpec(null, 'uklid'), null);
+    const v = podstrc({ ukoly: [{ typ: 'uklid' }] });
+    await M.kolo(NASTAVENI, { relace: RELACE, spec: SPEC2 }, tiche);
+    v.vrat();
+    const p = JSON.parse(v.cloud.find(c => c.cesta.endsWith('/miotspec/action')).telo).params;
+    check('  povel jde s čísly ze specifikace', p.siid + '/' + p.aiid, '7/5');
+  }
+  {
+    // Cloud se nedovolal: jednou znovu, pak chyba i s povelem a stavem online
+    let n = 0;
+    const v = podstrc({ ukoly: [{ typ: 'dok' }], akce: () => ({ code: 0, result: { code: ++n === 1 ? -704042011 : 0 } }) });
+    const pamet = { relace: RELACE, opakovaniMs: 0 };
+    await M.kolo(NASTAVENI, pamet, tiche);
+    v.vrat();
+    check('po nedovolání se povel zopakuje a projde', n + ' ' + v.appka[1].posledniPovel.ok, '2 true');
+    const v2 = podstrc({ ukoly: [{ typ: 'dok' }], akce: () => ({ code: 0, result: { code: -704042011 } }) });
+    const puv = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => new URL(String(url)).pathname.endsWith('/home/device_list')
+      ? { ok: true, status: 200, text: async () => JSON.stringify({ code: 0, result: { list: [{ did: '1066125993', isOnline: true }] } }) }
+      : puv(url, opts);
+    const pamet2 = { relace: RELACE, opakovaniMs: 0 };
+    await M.kolo(NASTAVENI, pamet2, tiche);
+    v2.vrat();
+    check('  napodruhé zas ne → chyba s povelem a online', v2.appka[1].posledniPovel.zprava,
+      'vysavač odmítl (kód -704042011, povel 3/1, cloud ho hlásí online)');
+    check('  zkusilo se to právě dvakrát', v2.cloud.filter(c => c.cesta.endsWith('/miotspec/action')).length, 2);
+  }
+
   nadpis('3) Přihlášení');
   {
     const v = podstrc({ prop: () => ({ status: 401 }) });

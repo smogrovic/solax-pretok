@@ -68,6 +68,29 @@ const AKCE = {
   dok: { siid: 3, aiid: 1 }      // battery.start-charge
 };
 
+// Čísla povelů se přednostně berou ze specifikace modelu (podle jména akce).
+// AKCE výše jsou jen záloha, když se specifikace nenačte.
+const AKCE_JMENA = {
+  uklid: [['vacuum', ['start-sweep', 'start-clean', 'start-cleaning']]],
+  stop: [['vacuum', ['stop-sweeping', 'stop-cleaning', 'stop-clean']]],
+  dok: [['battery', ['start-charge']], ['vacuum', ['start-charge']]]
+};
+// Kód, kterým cloud Xiaomi říká, že se k vysavači nedovolal
+const KOD_NEDOVOLANO = -704042011;
+const OPAKOVANI_MS = 4000;
+
+function akceZeSpec(spec, typ) {
+  for (const [sJmeno, aJmena] of AKCE_JMENA[typ] || []) {
+    const sluzba = ((spec && spec.services) || []).find(s => V.kratkyNazev(s.type) === sJmeno);
+    if (!sluzba) continue;
+    for (const jmeno of aJmena) {
+      const a = (sluzba.actions || []).find(x => V.kratkyNazev(x.type) === jmeno);
+      if (a && Number.isInteger(sluzba.iid) && Number.isInteger(a.iid)) return { siid: sluzba.iid, aiid: a.iid, jmeno };
+    }
+  }
+  return null;
+}
+
 // ---------- Relace ----------
 
 function ulozRelaci(relace, cesta = RELACE) {
@@ -175,6 +198,17 @@ async function ohlas(nastaveni, stav) {
 
 // ---------- Vykonání úkolu ----------
 
+const cekej = ms => new Promise(r => setTimeout(r, ms));
+
+// Jen pro popis chyby: co o vysavači ví seznam zařízení v cloudu
+async function jeOnline(relace) {
+  try {
+    const seznam = await V.zarizeni(relace, relace.region, relace.varianta);
+    const z = seznam.find(d => String(d.did) === String(relace.did));
+    return z && typeof z.isOnline === 'boolean' ? z.isOnline : null;
+  } catch { return null; }
+}
+
 // Appce se věří jen potud, pokud povel dává smysl. Cokoli jiného se zahodí.
 function zkontroluj(u) {
   if (!u || typeof u !== 'object') return 'úkol není objekt';
@@ -188,13 +222,23 @@ async function proved(relace, u, pamet, pis = zapis) {
     pis(`úkol zahozen — ${potiz}`);
     return false;
   }
-  const a = AKCE[u.typ];
+  const a = akceZeSpec(pamet.spec, u.typ) || AKCE[u.typ];
+  const posli = () => V.dotaz(relace, relace.region, '/miotspec/action',
+    { params: { did: relace.did, siid: a.siid, aiid: a.aiid, in: [] } },
+    relace.varianta === 'rc4' ? 'rc4' : null);
+  const kodZ = out => (out && typeof out.code === 'number' ? out.code : 0);
   try {
-    const out = await V.dotaz(relace, relace.region, '/miotspec/action',
-      { params: { did: relace.did, siid: a.siid, aiid: a.aiid, in: [] } },
-      relace.varianta === 'rc4' ? 'rc4' : null);
-    const kod = out && typeof out.code === 'number' ? out.code : 0;
-    if (kod !== 0) throw new Error(`vysavač odmítl (kód ${kod})`);
+    let kod = kodZ(await posli());
+    // Spící vysavač se cloudu napoprvé někdy neozve — jednou to zkusit znovu
+    if (kod === KOD_NEDOVOLANO) {
+      await cekej(pamet.opakovaniMs ?? OPAKOVANI_MS);
+      kod = kodZ(await posli());
+    }
+    if (kod !== 0) {
+      const online = await jeOnline(relace);
+      const kde = online === true ? ', cloud ho hlásí online' : online === false ? ', cloud ho hlásí offline' : '';
+      throw new Error(`vysavač odmítl (kód ${kod}, povel ${a.siid}/${a.aiid}${kde})`);
+    }
     pamet.posledniPovel = { typ: u.typ, ok: true, zprava: null };
     pis(`${u.typ}: provedeno`);
     return true;
@@ -324,7 +368,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  SLOZKA, KONFIG, RELACE, APPKA_VYCHOZI, INTERVAL_S, CTENI, AKCE,
+  SLOZKA, KONFIG, RELACE, APPKA_VYCHOZI, INTERVAL_S, CTENI, AKCE, akceZeSpec,
   ulozRelaci, nactiRelaci, jeVyprseni, prihlasANajdi, popisZeSpec, zjistiStav,
   ohlas, zkontroluj, proved, kolo, nactiNastaveni, hlavni, stavBezDat
 };

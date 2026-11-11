@@ -127,7 +127,7 @@ setTimeout(() => {
     check('  běžící úsek: do teď', tip.hidden + ' ' + tip.textContent.replace(/^.* – /, ''), 'false teď (běží) · 20 min');
   }
   timelineData = {};
-  check('vysavač: kód -704042011 = offline v cloudu Xiaomi', /offline/.test(vysavacKodVysvetli('vysavač odmítl (kód -704042011)')) + ' ' + vysavacKodVysvetli('kód 12'), 'true ');
+  check('vysavač: kód -704042011 = cloud se nedovolal', /nedovolal/.test(vysavacKodVysvetli('vysavač odmítl (kód -704042011, povel 2/1, cloud ho hlásí online)')) + ' ' + vysavacKodVysvetli('kód 12'), 'true ');
 
   // Rozvrh v kartě být nemá — patří do vysvětlení automatiky. Tam se ale vypisuje
   // z časů, podle kterých server opravdu spíná; ručně opsaný text by se rozešel.
