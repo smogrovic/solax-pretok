@@ -47,6 +47,7 @@ const sub = id => ({ endpoint: 'https://push.example/' + id, keys: { p256dh: 'a'
     check('běžná hláška (baterie, sauna…): jen full', await kdo(null), 'ipad,tata');
     check('  neplatné zařízení se smaže', h.api.pushSubscriptions.has('https://push.example/mrtvy'), false);
     check('garáž: všichni včetně dětí', await kdo('garaz'), 'elenka,ipad,miky,tata');
+    check('popelnice: všechny telefony včetně dětí, ne iPad', await kdo('popelnice'), 'elenka,miky,tata');
     check('upozornění pro všechny: všichni kromě iPadu', await kdo('oznameni'), 'elenka,miky,tata');
   }
 

@@ -2330,6 +2330,8 @@ app.post('/api/pripominky/:id/hotovo', (req, res) => {
   if (!pripominkaHotovo(req.params.id, zpet, Date.now(), Number.isFinite(kdy) ? kdy : undefined)) {
     return res.status(404).json({ error: 'Neznámá připomínka.' });
   }
+  // Vyndaná popelnice → ranní upozornění na iPadu hned zmizí
+  if (typeof popelniceHlidej === 'function') popelniceHlidej();
   res.json({ ok: true, pripominky: state.pripominky });
 });
 
@@ -2587,10 +2589,11 @@ app.post('/api/nakup/:id/smazat', (req, res) => {
 // zařízeních (i přes kalendář na iPadu), dokud ho někdo neodklikne. Odkliknutí
 // platí pro všechny — ale jen to upozornění, které dotyčný viděl (id).
 const OZNAMENI_MAX = 200;
-function oznameniNastav(text, now = Date.now()) {
+// `jenIpad`: upozornění jen pro velkou obrazovku (hlídač popelnic) — telefony mají notifikaci
+function oznameniNastav(text, now = Date.now(), { jenIpad = false } = {}) {
   const t = typeof text === 'string' ? text.trim() : '';
   if (!t || t.length > OZNAMENI_MAX) return { chyba: `Upozornění musí mít 1–${OZNAMENI_MAX} znaků.` };
-  state.oznameni = { id: 'o_' + now.toString(36), text: t, od: now };
+  state.oznameni = { id: 'o_' + now.toString(36), text: t, od: now, ...(jenIpad ? { jenIpad: true } : {}) };
   broadcast('oznameni', { oznameni: state.oznameni });
   return { ok: true };
 }
@@ -2604,7 +2607,7 @@ function oznameniObnov(o, now = Date.now()) {
   if (state.oznameni || !o || typeof o !== 'object') return;
   if (typeof o.id !== 'string' || !/^o_[a-z0-9]{1,12}$/.test(o.id) || typeof o.text !== 'string'
       || !o.text.trim() || o.text.length > OZNAMENI_MAX || !Number.isFinite(o.od) || o.od > now) return;
-  state.oznameni = { id: o.id, text: o.text.trim(), od: o.od };
+  state.oznameni = { id: o.id, text: o.text.trim(), od: o.od, ...(o.jenIpad === true ? { jenIpad: true } : {}) };
 }
 
 app.post('/api/oznameni', (req, res) => {
@@ -4004,10 +4007,10 @@ app.get('/api/push/vapid-key', (req, res) => {
 });
 
 // Ke každému zařízení si pamatujeme režim appky (full / miky / elenka) a jestli je to
-// iPad: dětem chodí jen garáž a upozornění pro všechny, iPadu upozornění ne (to na
+// iPad: dětem chodí jen garáž, popelnice a upozornění pro všechny, iPadu upozornění ne (to na
 // něm svítí přes celou obrazovku). Staré tělo (jen subscription) = full, ne iPad.
 const PUSH_REZIMY = ['full', 'miky', 'elenka'];
-const PUSH_PRO_DETI = ['garaz', 'oznameni'];
+const PUSH_PRO_DETI = ['garaz', 'oznameni', 'popelnice'];
 function pushZaznam(telo) {
   const sub = telo && telo.sub && typeof telo.sub === 'object' ? telo.sub : telo;
   if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint) || !sub.keys || typeof sub.keys !== 'object') return null;
@@ -4017,7 +4020,7 @@ function pushZaznam(telo) {
 // Má tohle zařízení dostat hlášku dané kategorie?
 function pushProZarizeni(z, kategorie) {
   if (z.rezim !== 'full' && !PUSH_PRO_DETI.includes(kategorie)) return false;
-  if (z.ipad && kategorie === 'oznameni') return false;
+  if (z.ipad && (kategorie === 'oznameni' || kategorie === 'popelnice')) return false;
   return true;
 }
 
@@ -13999,6 +14002,66 @@ app.get('/api/auto/nabijeni/fin', async (req, res) => {
   if (kdo.email_verified !== true || !FIN_EMAILS.includes(String(kdo.email || '').toLowerCase())) return res.status(403).json({ error: 'Tenhle účet nemá přístup.' });
   autoNabijeniOdpoved(req, res);
 });
+
+// ---------- Hlídač popelnic ----------
+// V den svozu ráno: když popelnice (a BIO, je-li zapnutá a v sezóně) není odťuknutá
+// jako vyndaná, iPad mezi 7:30 a 8:00 ukáže červené upozornění přes celou obrazovku
+// a telefony (i dětské) v 7:30 dostanou notifikaci. Vyndáno = odťuknuto od poledne minulého
+// svozu (stejně jako v appce). Po odťuknutí nebo v 8:00 upozornění zmizí samo.
+const POPELNICE_SVOZ = { popelnice: 4, bio: 1 };   // den v týdnu: čtvrtek, pondělí
+const POPELNICE_NAZVY = { popelnice: 'popelnici', bio: 'popelnici BIO' };
+const POPELNICE_OKNO = { od: 7 * 60 + 30, push: 7 * 60 + 30, do: 8 * 60 };   // minuty od půlnoci
+
+function popelnicePraha(now) {
+  const c = {};
+  for (const x of new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Prague', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false }).formatToParts(new Date(now))) c[x.type] = x.value;
+  const y = +c.year, m = +c.month, d = +c.day, h = +c.hour % 24, min = +c.minute;
+  const nastenne = Date.UTC(y, m - 1, d, h, min);
+  return { den: `${c.year}-${c.month}-${c.day}`, minuty: h * 60 + min,
+    tyden: new Date(Date.UTC(y, m - 1, d)).getUTCDay(),
+    // poledne před týdnem jako skutečný čas (posun pražských hodin se bere z teď)
+    odMinulehoSvozu: Date.UTC(y, m - 1, d - 7, 12) - (nastenne - Math.floor(now / 60000) * 60000) };
+}
+
+// Které popelnice dnes nejsou vyndané (prázdné pole = vše v pořádku / dnes se neveze)
+function popelniceNevyndane(now = Date.now()) {
+  const t = popelnicePraha(now);
+  return Object.keys(POPELNICE_SVOZ).filter(id => {
+    const p = state.pripominky && state.pripominky[id];
+    if (!p || p.zapnuto === false || POPELNICE_SVOZ[id] !== t.tyden) return false;
+    if (typeof vSezone === 'function' && !vSezone(id, now)) return false;
+    return !(p.hotovo && p.hotovo >= t.odMinulehoSvozu);
+  });
+}
+
+function popelniceText(ids) {
+  return '🗑️ Vyvézt ' + ids.map(id => POPELNICE_NAZVY[id]).join(' a ');
+}
+
+function popelniceHlidej(now = Date.now()) {
+  const t = popelnicePraha(now);
+  const h = state.popelniceHlidac && state.popelniceHlidac.den === t.den ? state.popelniceHlidac
+    : (state.popelniceHlidac = { den: t.den, oznId: null, zobrazeno: false, push: false });
+  const chybi = popelniceNevyndane(now);
+  const vOkne = t.minuty >= POPELNICE_OKNO.od && t.minuty < POPELNICE_OKNO.do;
+  // Konec okna nebo vyndáno → pryč s upozorněním (jen s tím naším)
+  if (h.oznId && (!vOkne || !chybi.length)) {
+    oznameniZrus(h.oznId);
+    h.oznId = null;
+  }
+  if (!vOkne || !chybi.length) return;
+  // Jednou za den: kdo ho odklikne, tomu se už nevrátí. Cizí upozornění se nepřepisuje.
+  if (!h.zobrazeno && !state.oznameni) {
+    const r = oznameniNastav(popelniceText(chybi), now, { jenIpad: true });
+    if (r.ok) { h.zobrazeno = true; h.oznId = state.oznameni.id; }
+  }
+  if (!h.push && t.minuty >= POPELNICE_OKNO.push) {
+    h.push = true;
+    if (typeof sendPushToAll === 'function') sendPushToAll(popelniceText(chybi), 'Ještě nejsou odťuknuté jako vyndané.', { kategorie: 'popelnice' }).catch(() => {});
+  }
+}
+if (typeof scheduleEvery === 'function') scheduleEvery(() => popelniceHlidej(), 60000, 20000);
 
 // ---------- Záloha do souboru (data i aplikace) ----------
 // Tlačítkem na Log/Nastavení se stáhne jeden JSON: data (stejný snímek jako do Upstash

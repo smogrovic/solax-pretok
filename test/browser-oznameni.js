@@ -26,6 +26,13 @@ setTimeout(async () => {
   // Kalendář přes celou obrazovku (iPad) — upozornění musí být nad ním
   const siroky = window.innerWidth >= 1000;
   const zal = document.getElementById('oznameniZalozka');
+  // Popelnice (jenIpad): iPad přes displej, telefon nic (má notifikaci)
+  oznameniData = { id: 'o_pop', text: '🗑️ Vyvézt popelnici', od: Date.now(), jenIpad: true };
+  renderOznameni();
+  check(siroky ? 'popelnice: iPad přes displej' : 'popelnice: telefon nic, ani záložku',
+    siroky ? !okno.hidden : okno.hidden && zal.hidden, true);
+  oznameniData = null;
+  renderOznameni();
   if (!siroky) {
     // Telefon: jen červená záložka u zvonečku, box až po klepnutí
     oznameniData = { id: 'o_abc', text: 'Večeře v 18:00!', od: Date.now() };

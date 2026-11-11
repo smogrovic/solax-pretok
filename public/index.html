@@ -15314,11 +15314,13 @@ const oznameniZalozkaEl = document.getElementById('oznameniZalozka');
 function renderOznameni() {
   if (!oznameniOknoEl) return;
   const siroky = window.matchMedia('(min-width: 1000px)').matches;
-  if (!oznameniData) oznameniRozbaleno = false;
-  oznameniOknoEl.hidden = !oznameniData || (!siroky && !oznameniRozbaleno);
+  // Upozornění jen pro iPad (hlídač popelnic): telefon ho nekreslí, má notifikaci
+  const o = oznameniData && (!oznameniData.jenIpad || siroky) ? oznameniData : null;
+  if (!o) oznameniRozbaleno = false;
+  oznameniOknoEl.hidden = !o || (!siroky && !oznameniRozbaleno);
   document.getElementById('oznameniZavrit').hidden = siroky;
-  if (oznameniZalozkaEl) oznameniZalozkaEl.hidden = !oznameniData || siroky;
-  if (oznameniData) document.getElementById('oznameniText').textContent = oznameniData.text;
+  if (oznameniZalozkaEl) oznameniZalozkaEl.hidden = !o || siroky;
+  if (o) document.getElementById('oznameniText').textContent = o.text;
   bezpecne(() => pripZalozkaObnov());
 }
 window.addEventListener('resize', () => bezpecne(renderOznameni));
