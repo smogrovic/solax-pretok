@@ -12982,6 +12982,8 @@ function jidelnicekOver(b, { bezOdkazu = false, now = Date.now(), maxReceptu = J
       // výchozí: nové jídlo všechny, jídlo z minulého týdne žádnou.
       ...(Array.isArray(r.nakupit) ? { nakupit: r.nakupit.filter(x => typeof x === 'string').map(x => jidText(x, 120)).filter(Boolean).slice(0, 40) } : {}),
       ...(typeof r.zMinula === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.zMinula) ? { zMinula: r.zMinula } : {}),
+      // Výrobek z Rohlíku vybraný předem v okně u jídla: { surovina: výrobek }
+      ...(jidelnicekRohlikOver(r.rohlik, suroviny) ? { rohlik: jidelnicekRohlikOver(r.rohlik, suroviny) } : {}),
       ...(Number.isFinite(r.fotoPokus) && r.fotoPokus > 0 && r.fotoPokus <= now ? { fotoPokus: r.fotoPokus } : {})
     });
   }
@@ -13021,7 +13023,7 @@ function jidelnicekNaSeznam(plan, now = Date.now()) {
     while (!id || state.nakup.some(x => x.id === id)) id = 'n_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0');
     const mnozstvi = jidelnicekMnozstvi(n);
     state.nakup.push({ id, text: (n.nazev + (mnozstvi ? ' ' + mnozstvi : '')).slice(0, NAKUP_TEXT_MAX), t: t++,
-      nazev: n.nazev, mnozstvi, kategorie: n.kategorie, zdroj: 'jidelnicek' });
+      nazev: n.nazev, mnozstvi, kategorie: n.kategorie, zdroj: 'jidelnicek', ...(n.vyber ? { vyber: n.vyber } : {}) });
   }
   broadcast('nakup', { nakup: state.nakup });
 }
@@ -13050,9 +13052,13 @@ function jidelnicekDoHistorie(tyden, recepty) {
 
 // Nový jídelníček z úlohy čeká na výběr (✕ smazat, aktivovat náhradní) — na seznam
 // jde až po „Přidat na nákupní seznam". Ručně vložený týden (nakupHotovo) je rovnou hotový.
+const JIDELNICEK_NIC_OD = '2026-11-16';
 function jidelnicekUloz(plan, now = Date.now()) {
   const zbyva = jidelnicekZbyva(plan);
   const potvrzeno = !!plan.nakupHotovo;
+  // Od týdne 16. 11. 2026 jsou suroviny nových jídel výchozí NEzaškrtnuté — co koupit,
+  // se vybírá v okně u jídla (i s výrobkem z Rohlíku). Ručně vložený hotový týden ne.
+  if (!potvrzeno && plan.tyden >= JIDELNICEK_NIC_OD) plan = { ...plan, recepty: plan.recepty.map(r => (Array.isArray(r.nakupit) ? r : { ...r, nakupit: [] })) };
   state.jidelnicek = { ...plan, recepty: [...plan.recepty, ...zbyva], vytvoreno: now, nakupPotvrzeno: potvrzeno };
   jidelnicekDoHistorie(plan.tyden, plan.recepty);
   if (potvrzeno) jidelnicekNaSeznam({ nakup: [] }, now);
@@ -13072,10 +13078,15 @@ function jidelnicekSecti(recepty, nakupUlohy = []) {
     const k = jidKlic(x.nazev) + '|' + (m === null ? '?' + jidKlic(j) : jidKlic(j));
     const u = zUlohy.get(jidKlic(x.nazev) + '|' + jidKlic(j));
     const p = out.get(k);
-    if (p) { if (m !== null) p.mnozstvi = Math.round((p.mnozstvi + m) * 1000) / 1000; continue; }
+    const vyber = r.rohlik && r.rohlik[x.nazev];
+    if (p) {
+      if (m !== null) p.mnozstvi = Math.round((p.mnozstvi + m) * 1000) / 1000;
+      if (vyber && !p.vyber) p.vyber = vyber;
+      continue;
+    }
     out.set(k, { nazev: x.nazev, mnozstvi: m, jednotka: m === null ? '' : j, odhad: m === null || !!(u && u.odhad),
       poznamka: (u && u.poznamka) || (m === null ? j : x.poznamka) || '',
-      kategorie: (u && u.kategorie) || x.kategorie || 'Dochucovadla a ostatní' });
+      kategorie: (u && u.kategorie) || x.kategorie || 'Dochucovadla a ostatní', ...(vyber ? { vyber } : {}) });
   }
   // Když součet sedí na položku úlohy, ponechat její jednotku („0,5 l", ne „500 ml")
   return [...out.values()].map(n => {
@@ -13085,6 +13096,19 @@ function jidelnicekSecti(recepty, nakupUlohy = []) {
     const [m] = jedn(u.mnozstvi, u.jednotka);
     return Math.abs(m - n.mnozstvi) <= Math.max(0.01 * n.mnozstvi, 0.001) ? { ...n, mnozstvi: u.mnozstvi, jednotka: u.jednotka } : n;
   });
+}
+
+// Výrobky z Rohlíku vybrané u surovin jídla: jen platné a jen k surovinám toho jídla
+function jidelnicekRohlikOver(v, suroviny) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || typeof nakupVyberOver !== 'function') return null;
+  const nazvy = new Set(suroviny.map(x => x.nazev));
+  const out = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (!nazvy.has(k)) continue;
+    const vy = nakupVyberOver(x);
+    if (vy) out[k] = vy;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 // Suroviny jídla, které se mají koupit: výběr z okna u jídla, jinak výchozí —
@@ -13140,6 +13164,21 @@ app.post('/api/jidelnicek/nakup-jidla', (req, res) => {
   const vyber = [...new Set(b.nakupit.filter(x => typeof x === 'string' && nazvy.has(x)))];
   // Jen se uloží — na nákupní seznam to jde až tlačítkem „Přidat na nákupní seznam"
   r.nakupit = vyber;
+  // Výrobky z Rohlíku vybrané předem (bez pole = beze změny)
+  if (b.rohlik !== undefined) {
+    const v = jidelnicekRohlikOver(b.rohlik, r.suroviny);
+    if (v) r.rohlik = v; else delete r.rohlik;
+    // Už je to na nákupním seznamu: výběr se promítne i tam (u nekoupených položek)
+    let zmena = false;
+    for (const [sur, vy] of Object.entries(v || {})) {
+      for (const x of state.nakup || []) {
+        if (x.zdroj !== 'jidelnicek' || x.koupeno || x.kosik || jidKlic(x.nazev) !== jidKlic(sur)) continue;
+        if (x.vyber && x.vyber.productId === vy.productId) continue;
+        x.vyber = vy; delete x.vyprodano; zmena = true;
+      }
+    }
+    if (zmena) broadcast('nakup', { nakup: state.nakup });
+  }
   broadcast('jidelnicek', { jidelnicek: j });
   if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   res.json({ ok: true, jidelnicek: j });
@@ -13167,6 +13206,8 @@ app.post('/api/jidelnicek/potvrdit', (req, res) => {
   const nove = j.recepty.filter(r => !r.nahradni && !r.zMinula);
   const vybrane = jidelnicekKNakupu(j.recepty);
   const nakup = jidelnicekSecti(vybrane, j.nakup);
+  // Nic vybraného (od 16. 11. je výchozí výběr prázdný): nepotvrzovat naprázdno
+  if (!nakup.length) return res.status(400).json({ error: 'Není vybraná žádná surovina — u jídla otevři 🛒 a zaškrtni, co koupit.' });
   j.recepty = j.recepty.filter(r => !r.nahradni);
   j.nakup = nakup;
   j.nakupPotvrzeno = true;

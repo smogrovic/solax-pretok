@@ -1731,6 +1731,13 @@
   .jid-sur-radek{display:flex;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid rgba(44,62,80,0.08);font-size:14px;color:var(--navy);cursor:pointer;}
   .jid-sur-radek input{width:20px;height:20px;flex:0 0 auto;accent-color:#2e9d57;}
   .jid-sur-mn{margin-left:auto;font-size:12px;color:var(--grey-text);white-space:nowrap;}
+  .jid-sur-polozka{border-top:1px solid rgba(44,62,80,0.08);}
+  .jid-sur-polozka .jid-sur-radek{border-top:none;}
+  .jid-sur-rohlik-radek{display:flex;align-items:center;gap:8px;padding:0 2px 8px 32px;font-size:12px;color:var(--grey-text);}
+  .jid-sur-rohlik-stav{flex:1;min-width:0;overflow-wrap:anywhere;}
+  .jid-sur-rohlik-stav.zname{color:#2e7d4f;}
+  .jid-sur-rohlik-btn{flex:0 0 auto;border:1px solid #d6dbe1;background:#fff;border-radius:10px;padding:4px 10px;font:inherit;font-size:12px;color:#1b6fb8;cursor:pointer;}
+  .jid-sur-vyrobky{padding:0 2px 10px 32px;}
   .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
   .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
   a.jid-zdroj{color:#1b6fb8;}
@@ -14803,8 +14810,11 @@ async function jidPotvrdit() {
   } catch (err) { jidZprava(err.message); }
 }
 
-// Okno se surovinami: co na dané jídlo koupit. Nová jídla mají vybráno vše,
-// jídla z minulého týdne nic (nakoupeno už je) — dokud to uživatel nezmění.
+// Okno se surovinami: co na dané jídlo koupit. Nová jídla od týdne 16. 11. 2026
+// nemají vybráno nic (server jim dá prázdný výběr), dřívější vše; jídla z minulého
+// týdne nic (nakoupeno už je). U každé suroviny je vidět, jestli výrobek z Rohlíku
+// známe z dřívějších nákupů, a jde ho vybrat (nebo změnit) předem — výběr pak jde
+// s položkou na nákupní seznam a průvodce košíkem ho předvybere.
 const JID_DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
 const jidKlicC = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const jidKupovatelne = r => (r.suroviny || []).filter(s => !JID_DOMA.includes(jidKlicC(s.nazev)));
@@ -14815,24 +14825,91 @@ function jidVybrane(r) {
 }
 const jidSurOknoEl = document.getElementById('jidSurOkno');
 let jidSurIndex = null;
+let jidSurVyrobky = {};   // surovina → výrobek z Rohlíku vybraný v okně
+let jidSurHledani = {};   // surovina → { vysledky, hledam, chyba }
+let jidSurOtevrena = null; // u které suroviny je otevřené hledání
 function jidSurOtevri(index) {
   const r = jidelnicekData && jidelnicekData.recepty[index];
   if (!jidSurOknoEl || !r) return;
   jidSurIndex = index;
-  document.getElementById('jidSurJidlo').textContent = r.nazev + (r.zMinula ? '\nZ minulého týdne — zaškrtni, co už nemáš.' : '\nOdškrtni, co už máš doma.');
+  jidSurVyrobky = { ...(r.rohlik || {}) };
+  jidSurHledani = {};
+  jidSurOtevrena = null;
+  document.getElementById('jidSurJidlo').textContent = r.nazev + (r.zMinula ? '\nZ minulého týdne — zaškrtni, co už nemáš.' : '\nZaškrtni, co koupit.');
   const seznam = document.getElementById('jidSurSeznam');
   seznam.textContent = '';
   const vybrane = new Set(jidVybrane(r).map(s => s.nazev));
   for (const s of jidKupovatelne(r)) {
-    const l = jidEl('label', 'jid-sur-radek', seznam);
+    const blok = jidEl('div', 'jid-sur-polozka', seznam);
+    blok.dataset.nazev = s.nazev;
+    const l = jidEl('label', 'jid-sur-radek', blok);
     const cb = jidEl('input', '', l);
     cb.type = 'checkbox';
     cb.value = s.nazev;
     cb.checked = vybrane.has(s.nazev);
     jidEl('span', '', l, s.nazev);
     jidEl('span', 'jid-sur-mn', l, jidMnozstvi(s));
+    jidEl('div', 'jid-sur-rohlik', blok);
   }
   jidSurOknoEl.hidden = false;
+  jidSurRohlikVse();
+  // Zapamatované výrobky se můžou teprve načítat — pak se značky dokreslí
+  if (rohlikData && rohlikData.prihlaseno && !rohlikZname) {
+    rohlikGet('/api/rohlik/vyber').then(d => { rohlikZname = d.vyber || {}; bezpecne(jidSurRohlikVse); }).catch(() => {});
+  }
+}
+function jidSurRohlikVse() {
+  document.querySelectorAll('#jidSurSeznam .jid-sur-polozka').forEach(b => bezpecne(() => jidSurRohlik(b)));
+}
+// Řádek pod surovinou: známe / neznáme z Rohlíku, vybraný výrobek, hledání
+function jidSurRohlik(blok) {
+  const el = blok.querySelector('.jid-sur-rohlik');
+  const nazev = blok.dataset.nazev;
+  el.textContent = '';
+  if (!(rohlikData && rohlikData.prihlaseno)) return;
+  const zname = rohlikZname ? rohlikZname[rohlikKlicJs(nazev)] : null;
+  const vybrany = jidSurVyrobky[nazev] || null;
+  const v = vybrany || zname;
+  const radek = jidEl('div', 'jid-sur-rohlik-radek', el);
+  const stav = !rohlikZname && !vybrany ? '…' : vybrany ? '🛒 Vybráno: ' : zname ? '🟢 Známe z nákupů: ' : '⚪ Na Rohlíku zatím nekoupeno';
+  jidEl('span', 'jid-sur-rohlik-stav' + (vybrany || zname ? ' zname' : ''), radek, stav + (v ? v.nazev + (v.jednotka ? ' · ' + v.jednotka : '') : ''));
+  const otevreno = jidSurOtevrena === nazev;
+  const btn = jidEl('button', 'jid-sur-rohlik-btn', radek, otevreno ? 'zavřít' : v ? 'jiný' : 'vybrat');
+  btn.type = 'button';
+  btn.addEventListener('click', () => {
+    const predtim = jidSurOtevrena;
+    jidSurOtevrena = otevreno ? null : nazev;
+    if (predtim && predtim !== nazev) { const b = [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(x => x.dataset.nazev === predtim); if (b) jidSurRohlik(b); }
+    jidSurRohlik(blok);
+    if (!otevreno) jidSurHledej(blok);
+  });
+  if (!otevreno) return;
+  const h = jidSurHledani[nazev] || {};
+  const vyrobky = jidEl('div', 'rohlik-vyrobky jid-sur-vyrobky', el);
+  const ukazane = new Set();
+  if (v) { vyrobky.appendChild(rohlikVyrobekEl(v, true, null)); ukazane.add(String(v.productId)); }
+  for (const x of (h.vysledky || []).slice(0, 6)) {
+    if (ukazane.has(String(x.productId))) continue;
+    vyrobky.appendChild(rohlikVyrobekEl(x, false, () => {
+      jidSurVyrobky[nazev] = x;
+      jidSurOtevrena = null;
+      const cb = blok.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = true;   // vybraný výrobek = koupit
+      jidSurRohlik(blok);
+    }));
+  }
+  const info = h.hledam ? 'Hledám…' : h.chyba ? h.chyba : h.vysledky && !h.vysledky.length ? 'Nic se nenašlo.' : '';
+  if (info) jidEl('div', 'rohlik-info', el, info);
+}
+async function jidSurHledej(blok) {
+  const nazev = blok.dataset.nazev;
+  if (jidSurHledani[nazev] && (jidSurHledani[nazev].vysledky || jidSurHledani[nazev].hledam)) return;
+  const h = jidSurHledani[nazev] = { hledam: true };
+  jidSurRohlik(blok);
+  try { h.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(nazev))).vyrobky || []; }
+  catch (err) { h.chyba = err.message; h.vysledky = []; }
+  h.hledam = false;
+  if (blok.isConnected) jidSurRohlik(blok);
 }
 function jidSurZavri() { if (jidSurOknoEl) jidSurOknoEl.hidden = true; jidSurIndex = null; }
 async function jidSurUloz() {
@@ -14843,7 +14920,7 @@ async function jidSurUloz() {
   jidSurZavri();
   jidZprava('');
   try {
-    await jidPost('/api/jidelnicek/nakup-jidla', { index, nazev: r.nazev, nakupit });
+    await jidPost('/api/jidelnicek/nakup-jidla', { index, nazev: r.nazev, nakupit, rohlik: jidSurVyrobky });
     if (jidelnicekData && jidelnicekData.nakupPotvrzeno !== false) jidZprava('Uloženo — na seznam to přidá tlačítko „Přidat na nákupní seznam".');
   } catch (err) { jidZprava(err.message); }
 }

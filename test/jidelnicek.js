@@ -1,9 +1,9 @@
 // Jídelníček z páteční úlohy: příjem v appce, nákupní seznam, historie a záloha
 const crypto = require('crypto');
-const { between, suite } = require('./zdroj');
+const { between, fn, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('jídelníček');
 const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
-const CODE = between('// ---------- Jídelníček na týden ----------', '// ---------- Trvalé úložiště');
+const CODE = fn('function nakupVyberOver(v) {') + '\n' + between('// ---------- Jídelníček na týden ----------', '// ---------- Trvalé úložiště');
 const VZOR = require('./data/jidelnicek-vzor.json');
 const kopie = () => JSON.parse(JSON.stringify(VZOR));
 
@@ -158,7 +158,7 @@ nadpis('Nový týden: neuvařená jídla zůstanou');
   check('stejný týden znovu (oprava): nic se nepřevádí', h.state.jidelnicek.recepty.length, 9);
   const p4 = kopie(); p4.tyden = '2026-11-30';
   h.vloz(p4);
-  check('starší než 14 dní se nepřevádí', h.state.jidelnicek.recepty.length, 9);
+  check('starší než 14 dní se nepřevádí', h.state.jidelnicek.recepty.filter(r => !r.nahradni).length, 9);
 }
 
 nadpis('Ověření');
@@ -343,6 +343,40 @@ nadpis('Záloha');
   c.volej('POST /api/jidelnicek/restore', { jidelnicek: { ...a.state.jidelnicek, vytvoreno: 1 } });
   check('záloha nepřepíše novější', c.state.jidelnicek.vytvoreno, pred);
 }
+nadpis('Od týdne 16. 11.: nic nezaškrtnuto, výrobek z Rohlíku předem');
+{
+  const h = build({ nakup: [{ id: 'n_ruc00001', text: 'Toaletní papír', t: 1 }] });
+  const p = kopie(); p.tyden = '2026-11-16';
+  h.volej('POST /api/jidelnicek/import', p);
+  const j = () => h.state.jidelnicek;
+  const idx = n => j().recepty.findIndex(r => r.nazev === n);
+  const T = 'Zapečené těstoviny s mozzarellou';
+  const tr = () => j().recepty[idx(T)];
+  check('nová jídla mají prázdný výběr', j().recepty.every(r => r.nahradni || JSON.stringify(r.nakupit) === '[]'), true);
+  const st = build(); const p2 = kopie(); p2.tyden = '2026-11-09'; st.volej('POST /api/jidelnicek/import', p2);
+  check('  starší týden beze změny (vše)', st.state.jidelnicek.recepty.some(r => 'nakupit' in r), false);
+  const ruc = build(); const p3 = kopie(); p3.tyden = '2026-11-16'; p3.nakupHotovo = true; ruc.volej('POST /api/jidelnicek/import', p3);
+  check('  ručně vložený hotový týden výběr nedostane', ruc.state.jidelnicek.recepty.some(r => 'nakupit' in r), false);
+  check('bez výběru „Přidat na seznam" nic nepřidá ani nepotvrdí', h.volej('POST /api/jidelnicek/potvrdit', {}).kod + ' ' + h.state.nakup.length + ' ' + j().nakupPotvrzeno, '400 1 false');
+  const MOZ = { productId: 1234, nazev: 'Galbani Mozzarella', cena: 29.9, obrazek: 'https://x.test/m.jpg', jednotka: '125 g' };
+  const r = h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'],
+    rohlik: { Mozzarella: MOZ, Neexistuje: MOZ, Těstoviny: { productId: {} } } });
+  check('výrobek se uloží jen k platné surovině', r.kod + ' ' + JSON.stringify(Object.keys(tr().rohlik)) + ' ' + tr().rohlik.Mozzarella.productId, '200 ["Mozzarella"] 1234');
+  h.volej('POST /api/jidelnicek/potvrdit', {});
+  const moz = h.state.nakup.find(x => x.nazev === 'Mozzarella');
+  check('  na seznam jde i s vybraným výrobkem', moz && moz.vyber.nazev, 'Galbani Mozzarella');
+  check('  a jen vybrané suroviny', h.state.nakup.filter(x => x.zdroj === 'jidelnicek').length, 1);
+  const MOZ2 = { ...MOZ, productId: 99, nazev: 'Mozzarella Pilos' };
+  h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'], rohlik: { Mozzarella: MOZ2 } });
+  check('změna výrobku po potvrzení se promítne i na seznam', h.state.nakup.find(x => x.nazev === 'Mozzarella').vyber.productId, 99);
+  h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'] });
+  check('bez pole rohlik se výběr nemění', tr().rohlik && tr().rohlik.Mozzarella.productId, 99);
+  h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'], rohlik: {} });
+  check('prázdné rohlik výběr smaže', 'rohlik' in tr(), false);
+  const o = h.api.jidelnicekOver({ ...kopie(), recepty: [{ ...kopie().recepty[0], rohlik: { [kopie().recepty[0].suroviny[0].nazev]: MOZ } }] }, { bezOdkazu: true });
+  check('záloha výběr výrobku přenese', !!(o.plan && o.plan.recepty[0].rohlik), true);
+}
+
 check('záloha, snapshot, úvodní data', SRC.includes("'/api/jidelnicek/restore',") && SRC.includes("'/api/jidelnicek/restore': { jidelnicek: state.jidelnicek, historie: state.jidelnicekHistorie }")
   && SRC.includes('jidelnicek: state.jidelnicek,'), true);
 check('Rohlík si pamatuje podle názvu bez množství', SRC.includes('rohlikZapamatuj(n.nazev || n.text, p, ted);'), true);

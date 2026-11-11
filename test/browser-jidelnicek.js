@@ -107,7 +107,7 @@ setTimeout(async () => {
     ? { ok: true, pridano: 0, jidelnicek: { ...jidelnicekData, recepty: jidelnicekData.recepty.map((r, i) => i === telo.index ? { ...r, nakupit: telo.nakupit } : r) } } : { ok: true };
   document.getElementById('jidSurUlozit').click();
   await pockej(50);
-  check('Uložit pošle vybrané', JSON.stringify(dotazy.slice(-1)[0].telo), JSON.stringify({ index: 0, nazev: 'Zbylé tortilly', nakupit: ['Tortilly', 'Paprika'] }));
+  check('Uložit pošle vybrané', JSON.stringify(dotazy.slice(-1)[0].telo), JSON.stringify({ index: 0, nazev: 'Zbylé tortilly', nakupit: ['Tortilly', 'Paprika'], rohlik: {} }));
   check('  okno se zavře, u jídla 2/4', surOkno.hidden + ' ' + karta.querySelector('details.jid-recept .jid-kosik').textContent, 'true 🛒 2/4');
   check('  tlačítko teď počítá i zbylé', karta.querySelector('.jid-potvrdit').textContent, '🛒 Přidat na nákupní seznam (10 jídel)');
   const druhy = [...karta.querySelectorAll('details.jid-recept')][1];
@@ -162,6 +162,44 @@ setTimeout(async () => {
   check('  nevíme u ostatních', li('n_jid00001').querySelector('.nakup-znacka').textContent + ' ' + li('n_jid00001').querySelector('.nakup-jiny').textContent, 'nevíme vybrat');
   check('  i u ručních', li('n_ruc00001').querySelector('.nakup-znacka').textContent, 'nevíme');
   check('  vybraný výrobek v bublině', li('n_jid00003').querySelector('.nakup-znacka').title, 'Galbani Mozzarella 125 g');
+
+  R.push('\\n2b) Okno u jídla: výrobek z Rohlíku předem');
+  {
+    const ti = VZOR.recepty.findIndex(r => r.nazev === 'Zapečené těstoviny s mozzarellou');
+    jidelnicekData = { ...JSON.parse(JSON.stringify(VZOR)), nakupPotvrzeno: false };
+    jidelnicekData.recepty[ti].nakupit = [];
+    renderJidelnicek();
+    jidSurOtevri(ti);
+    await pockej(30);
+    const blok = n => [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(b => b.dataset.nazev === n);
+    const cb = n => blok(n).querySelector('input[type=checkbox]');
+    check('nic nezaškrtnuto (prázdný výběr)', [...document.querySelectorAll('#jidSurSeznam input')].some(c => c.checked), false);
+    check('  text vybízí zaškrtnout', /Zaškrtni, co koupit/.test(document.getElementById('jidSurJidlo').textContent), true);
+    check('známé z nákupů', blok('Mozzarella').querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').textContent,
+      '🟢 Známe z nákupů: Galbani Mozzarella 125 g | jiný');
+    const jine = [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(b => b.dataset.nazev !== 'Mozzarella');
+    check('  neznámé', jine.querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + jine.querySelector('.jid-sur-rohlik-btn').textContent, '⚪ Na Rohlíku zatím nekoupeno | vybrat');
+    jine.querySelector('.jid-sur-rohlik-btn').click();
+    await pockej(40);
+    const vyr = [...jine.querySelectorAll('.rohlik-vyrobek')];
+    check('vybrat ukáže výrobky z Rohlíku', vyr.length + ' ' + dotazy.some(d => d.url === '/api/rohlik/hledat?q=' + encodeURIComponent(jine.dataset.nazev)), '2 true');
+    vyr[1].click();
+    check('  výběr se ukáže a surovina se zaškrtne', /^🛒 Vybráno: .* B$/.test(jine.querySelector('.jid-sur-rohlik-stav').textContent) + ' ' + cb(jine.dataset.nazev).checked + ' ' + jine.querySelectorAll('.rohlik-vyrobek').length, 'true true 0');
+    blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').click();
+    await pockej(40);
+    check('  i u známého jde vybrat jiný (známý nahoře)', blok('Mozzarella').querySelector('.rohlik-vyrobek.vybrany').textContent.startsWith('Galbani Mozzarella 125 g'), true);
+    cb('Mozzarella').checked = true;
+    blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').click();
+    const odpovedRohlik = odpoved;
+    odpoved = () => ({ ok: true });
+    dotazy = [];
+    document.getElementById('jidSurUlozit').click();
+    await pockej(40);
+    const t = dotazy[0] && dotazy[0].telo;
+    check('Uložit pošle výběr i výrobky', t && JSON.stringify([t.nakupit.sort(), Object.keys(t.rohlik)]), JSON.stringify([['Mozzarella', jine.dataset.nazev].sort(), [jine.dataset.nazev]]));
+    jidelnicekData = VZOR; renderJidelnicek();
+    odpoved = odpovedRohlik;
+  }
 
   R.push('\\n3) Průvodce krok po kroku');
   const okno = document.getElementById('pruvodceOkno');
