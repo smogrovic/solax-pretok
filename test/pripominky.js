@@ -301,8 +301,12 @@ nadpis('N) Nákupní seznam');
     const w = build();
     w.api.nakupPridej({ text: 'Vejce' });
     const wid = w.state.nakup[0].id;
+    const zapamatovano = [];
+    globalThis.rohlikZapamatuj = (t, v) => zapamatovano.push(t + '=' + v.productId);
     check('rozpracovaný výběr se uloží', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M', cena: 99.9, obrazek: 'http://x/y.jpg' }, kusu: 2 }).status
       + ' ' + JSON.stringify([w.state.nakup[0].vyber.productId, w.state.nakup[0].vyber.obrazek, w.state.nakup[0].kusu]), '200 [14,null,2]');
+    check('  a výrobek je hned „známý" (i bez košíku)', zapamatovano.join(), 'Vejce=14');
+    delete globalThis.rohlikZapamatuj;
     check('  neplatný výrobek 400', w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { nazev: 'bez id' } }).status, 400);
     w.zavolej('/api/nakup/:id/vyber', { id: wid }, { vyber: { productId: 14, nazev: 'Vejce M' }, kusu: 3, rucne: true });
     check('  ručně změněný počet se označí', w.state.nakup[0].kusu + ' ' + w.state.nakup[0].kusuRucne, '3 true');

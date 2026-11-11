@@ -175,10 +175,10 @@ setTimeout(async () => {
     const cb = n => blok(n).querySelector('input[type=checkbox]');
     check('nic nezaškrtnuto (prázdný výběr)', [...document.querySelectorAll('#jidSurSeznam input')].some(c => c.checked), false);
     check('  text vybízí zaškrtnout', /Zaškrtni, co koupit/.test(document.getElementById('jidSurJidlo').textContent), true);
-    check('známé z nákupů', blok('Mozzarella').querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').textContent,
-      '🟢 Známe z nákupů: Galbani Mozzarella 125 g | jiný');
+    check('známé z dřívějšího výběru', blok('Mozzarella').querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').textContent,
+      '🟢 Známe z dřív: Galbani Mozzarella 125 g | jiný');
     const jine = [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(b => b.dataset.nazev !== 'Mozzarella');
-    check('  neznámé', jine.querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + jine.querySelector('.jid-sur-rohlik-btn').textContent, '⚪ Na Rohlíku zatím nekoupeno | vybrat');
+    check('  neznámé', jine.querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + jine.querySelector('.jid-sur-rohlik-btn').textContent, '⚪ Na Rohlíku zatím nevybráno | vybrat');
     jine.querySelector('.jid-sur-rohlik-btn').click();
     await pockej(40);
     const vyr = [...jine.querySelectorAll('.rohlik-vyrobek')];

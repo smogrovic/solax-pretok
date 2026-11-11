@@ -2537,7 +2537,8 @@ if (typeof scheduleEvery === 'function') {
   scheduleEvery(() => { if (nakupUklid()) broadcast('nakup', { nakup: state.nakup }); }, 5 * 60000, 7 * 60000);
 }
 // Rozpracovaný výběr výrobku z Rohlíku u položky seznamu (průvodce košíkem). Drží se,
-// i když se okno zavře; do trvalé paměti výrobků jde až po přidání do košíku.
+// i když se okno zavře. Do paměti výrobků („známe") jde hned při výběru — stačí,
+// že byl někdy vybrán, i když se nakonec do košíku nepřidal.
 function nakupVyberOver(v) {
   if (v === null) return null;
   if (!v || typeof v !== 'object') return undefined;
@@ -2553,7 +2554,10 @@ function nakupVyber(id, b) {
   if (!x) return { kod: 404, chyba: 'Položka už na seznamu není.' };
   const v = nakupVyberOver(b && b.vyber);
   if (v === undefined) return { kod: 400, chyba: 'Neplatný výrobek.' };
-  if (v) { x.vyber = v; delete x.vyprodano; } else delete x.vyber;
+  if (v) {
+    x.vyber = v; delete x.vyprodano;
+    if (typeof rohlikZapamatuj === 'function') rohlikZapamatuj(x.nazev || x.text, v);
+  } else delete x.vyber;
   const k = b && b.kusu;
   if (Number.isInteger(k) && k >= 1 && k <= 20) x.kusu = k;
   else if (k !== undefined) return { kod: 400, chyba: 'Počet kusů 1–20.' };
@@ -13168,6 +13172,8 @@ app.post('/api/jidelnicek/nakup-jidla', (req, res) => {
   if (b.rohlik !== undefined) {
     const v = jidelnicekRohlikOver(b.rohlik, r.suroviny);
     if (v) r.rohlik = v; else delete r.rohlik;
+    // Vybraný výrobek je od teď „známý", i kdyby se nakonec nekoupil
+    if (typeof rohlikZapamatuj === 'function') for (const [sur, vy] of Object.entries(v || {})) rohlikZapamatuj(sur, vy);
     // Už je to na nákupním seznamu: výběr se promítne i tam (u nekoupených položek)
     let zmena = false;
     for (const [sur, vy] of Object.entries(v || {})) {

@@ -359,9 +359,13 @@ nadpis('Od týdne 16. 11.: nic nezaškrtnuto, výrobek z Rohlíku předem');
   check('  ručně vložený hotový týden výběr nedostane', ruc.state.jidelnicek.recepty.some(r => 'nakupit' in r), false);
   check('bez výběru „Přidat na seznam" nic nepřidá ani nepotvrdí', h.volej('POST /api/jidelnicek/potvrdit', {}).kod + ' ' + h.state.nakup.length + ' ' + j().nakupPotvrzeno, '400 1 false');
   const MOZ = { productId: 1234, nazev: 'Galbani Mozzarella', cena: 29.9, obrazek: 'https://x.test/m.jpg', jednotka: '125 g' };
+  const zapamatovano = [];
+  globalThis.rohlikZapamatuj = (t, v) => zapamatovano.push(t + '=' + v.productId);
   const r = h.volej('POST /api/jidelnicek/nakup-jidla', { index: idx(T), nazev: T, nakupit: ['Mozzarella'],
     rohlik: { Mozzarella: MOZ, Neexistuje: MOZ, Těstoviny: { productId: {} } } });
   check('výrobek se uloží jen k platné surovině', r.kod + ' ' + JSON.stringify(Object.keys(tr().rohlik)) + ' ' + tr().rohlik.Mozzarella.productId, '200 ["Mozzarella"] 1234');
+  check('  vybraný výrobek je hned „známý" (i bez košíku)', zapamatovano.join(), 'Mozzarella=1234');
+  delete globalThis.rohlikZapamatuj;
   h.volej('POST /api/jidelnicek/potvrdit', {});
   const moz = h.state.nakup.find(x => x.nazev === 'Mozzarella');
   check('  na seznam jde i s vybraným výrobkem', moz && moz.vyber.nazev, 'Galbani Mozzarella');

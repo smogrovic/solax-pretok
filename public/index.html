@@ -14871,7 +14871,7 @@ function jidSurRohlik(blok) {
   const vybrany = jidSurVyrobky[nazev] || null;
   const v = vybrany || zname;
   const radek = jidEl('div', 'jid-sur-rohlik-radek', el);
-  const stav = !rohlikZname && !vybrany ? '…' : vybrany ? '🛒 Vybráno: ' : zname ? '🟢 Známe z nákupů: ' : '⚪ Na Rohlíku zatím nekoupeno';
+  const stav = !rohlikZname && !vybrany ? '…' : vybrany ? '🛒 Vybráno: ' : zname ? '🟢 Známe z dřív: ' : '⚪ Na Rohlíku zatím nevybráno';
   jidEl('span', 'jid-sur-rohlik-stav' + (vybrany || zname ? ' zname' : ''), radek, stav + (v ? v.nazev + (v.jednotka ? ' · ' + v.jednotka : '') : ''));
   const otevreno = jidSurOtevrena === nazev;
   const btn = jidEl('button', 'jid-sur-rohlik-btn', radek, otevreno ? 'zavřít' : v ? 'jiný' : 'vybrat');
@@ -14892,6 +14892,7 @@ function jidSurRohlik(blok) {
     if (ukazane.has(String(x.productId))) continue;
     vyrobky.appendChild(rohlikVyrobekEl(x, false, () => {
       jidSurVyrobky[nazev] = x;
+      if (rohlikZname) rohlikZname[rohlikKlicJs(nazev)] = x;
       jidSurOtevrena = null;
       const cb = blok.querySelector('input[type=checkbox]');
       if (cb) cb.checked = true;   // vybraný výrobek = koupit
@@ -15151,6 +15152,7 @@ function pruvodceUloz(r) {
   const vyber = { productId: r.vyber.productId, nazev: r.vyber.nazev, cena: typeof r.vyber.cena === 'number' ? r.vyber.cena : null,
     obrazek: r.vyber.obrazek || null, jednotka: r.vyber.jednotka || null };
   r.polozka.vyber = vyber; r.polozka.kusu = r.mnozstvi; delete r.polozka.vyprodano;
+  if (rohlikZname) rohlikZname[rohlikKlicPolozky(r.polozka)] = vyber;   // vybraný = známý (server si ho pamatuje taky)
   if (r.rucne) r.polozka.kusuRucne = true; else delete r.polozka.kusuRucne;
   fetch('/api/nakup/' + encodeURIComponent(r.polozka.id) + '/vyber', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ vyber, kusu: r.mnozstvi, rucne: !!r.rucne }) }).catch(() => {});
