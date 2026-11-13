@@ -14810,9 +14810,8 @@ async function jidPotvrdit() {
   } catch (err) { jidZprava(err.message); }
 }
 
-// Okno se surovinami: co na dané jídlo koupit. Nová jídla od týdne 16. 11. 2026
-// nemají vybráno nic (server jim dá prázdný výběr), dřívější vše; jídla z minulého
-// týdne nic (nakoupeno už je). U každé suroviny je vidět, jestli výrobek z Rohlíku
+// Okno se surovinami: co na dané jídlo koupit. Nová jídla mají vybráno vše,
+// jídla z minulého týdne nic (nakoupeno už je) — dokud to uživatel nezmění. U každé suroviny je vidět, jestli výrobek z Rohlíku
 // známe z dřívějších nákupů, a jde ho vybrat (nebo změnit) předem — výběr pak jde
 // s položkou na nákupní seznam a průvodce košíkem ho předvybere.
 const JID_DOMA = ['sul', 'pepr', 'voda', 'studena voda', 'tepla voda', 'horka voda'];
@@ -14835,7 +14834,7 @@ function jidSurOtevri(index) {
   jidSurVyrobky = { ...(r.rohlik || {}) };
   jidSurHledani = {};
   jidSurOtevrena = null;
-  document.getElementById('jidSurJidlo').textContent = r.nazev + (r.zMinula ? '\nZ minulého týdne — zaškrtni, co už nemáš.' : '\nZaškrtni, co koupit.');
+  document.getElementById('jidSurJidlo').textContent = r.nazev + (r.zMinula ? '\nZ minulého týdne — zaškrtni, co už nemáš.' : '\nOdškrtni, co už máš doma.');
   const seznam = document.getElementById('jidSurSeznam');
   seznam.textContent = '';
   const vybrane = new Set(jidVybrane(r).map(s => s.nazev));

@@ -13056,13 +13056,9 @@ function jidelnicekDoHistorie(tyden, recepty) {
 
 // Nový jídelníček z úlohy čeká na výběr (✕ smazat, aktivovat náhradní) — na seznam
 // jde až po „Přidat na nákupní seznam". Ručně vložený týden (nakupHotovo) je rovnou hotový.
-const JIDELNICEK_NIC_OD = '2026-11-16';
 function jidelnicekUloz(plan, now = Date.now()) {
   const zbyva = jidelnicekZbyva(plan);
   const potvrzeno = !!plan.nakupHotovo;
-  // Od týdne 16. 11. 2026 jsou suroviny nových jídel výchozí NEzaškrtnuté — co koupit,
-  // se vybírá v okně u jídla (i s výrobkem z Rohlíku). Ručně vložený hotový týden ne.
-  if (!potvrzeno && plan.tyden >= JIDELNICEK_NIC_OD) plan = { ...plan, recepty: plan.recepty.map(r => (Array.isArray(r.nakupit) ? r : { ...r, nakupit: [] })) };
   state.jidelnicek = { ...plan, recepty: [...plan.recepty, ...zbyva], vytvoreno: now, nakupPotvrzeno: potvrzeno };
   jidelnicekDoHistorie(plan.tyden, plan.recepty);
   if (potvrzeno) jidelnicekNaSeznam({ nakup: [] }, now);
@@ -13212,7 +13208,7 @@ app.post('/api/jidelnicek/potvrdit', (req, res) => {
   const nove = j.recepty.filter(r => !r.nahradni && !r.zMinula);
   const vybrane = jidelnicekKNakupu(j.recepty);
   const nakup = jidelnicekSecti(vybrane, j.nakup);
-  // Nic vybraného (od 16. 11. je výchozí výběr prázdný): nepotvrzovat naprázdno
+  // Nic vybraného (všechno odškrtnuté): nepotvrzovat naprázdno
   if (!nakup.length) return res.status(400).json({ error: 'Není vybraná žádná surovina — u jídla otevři 🛒 a zaškrtni, co koupit.' });
   j.recepty = j.recepty.filter(r => !r.nahradni);
   j.nakup = nakup;

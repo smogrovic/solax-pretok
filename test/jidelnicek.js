@@ -343,7 +343,7 @@ nadpis('Záloha');
   c.volej('POST /api/jidelnicek/restore', { jidelnicek: { ...a.state.jidelnicek, vytvoreno: 1 } });
   check('záloha nepřepíše novější', c.state.jidelnicek.vytvoreno, pred);
 }
-nadpis('Od týdne 16. 11.: nic nezaškrtnuto, výrobek z Rohlíku předem');
+nadpis('Nová jídla: vše zaškrtnuto, výrobek z Rohlíku předem');
 {
   const h = build({ nakup: [{ id: 'n_ruc00001', text: 'Toaletní papír', t: 1 }] });
   const p = kopie(); p.tyden = '2026-11-16';
@@ -352,11 +352,11 @@ nadpis('Od týdne 16. 11.: nic nezaškrtnuto, výrobek z Rohlíku předem');
   const idx = n => j().recepty.findIndex(r => r.nazev === n);
   const T = 'Zapečené těstoviny s mozzarellou';
   const tr = () => j().recepty[idx(T)];
-  check('nová jídla mají prázdný výběr', j().recepty.every(r => r.nahradni || JSON.stringify(r.nakupit) === '[]'), true);
-  const st = build(); const p2 = kopie(); p2.tyden = '2026-11-09'; st.volej('POST /api/jidelnicek/import', p2);
-  check('  starší týden beze změny (vše)', st.state.jidelnicek.recepty.some(r => 'nakupit' in r), false);
-  const ruc = build(); const p3 = kopie(); p3.tyden = '2026-11-16'; p3.nakupHotovo = true; ruc.volej('POST /api/jidelnicek/import', p3);
-  check('  ručně vložený hotový týden výběr nedostane', ruc.state.jidelnicek.recepty.some(r => 'nakupit' in r), false);
+  check('nová jídla bez výběru = kupují se všechny suroviny', j().recepty.some(r => 'nakupit' in r), false);
+  const nv = build(); const pn = kopie(); pn.tyden = '2026-11-16'; nv.vloz(pn);
+  check('  týden od 16. 11. bez úprav: na seznam jdou suroviny všech nových jídel', nv.state.nakup.length, 25);
+  // Všechno odškrtnuté (jako když si člověk vše odškrtne v okně u jídla)
+  j().recepty.forEach(r => { r.nakupit = []; });
   check('bez výběru „Přidat na seznam" nic nepřidá ani nepotvrdí', h.volej('POST /api/jidelnicek/potvrdit', {}).kod + ' ' + h.state.nakup.length + ' ' + j().nakupPotvrzeno, '400 1 false');
   const MOZ = { productId: 1234, nazev: 'Galbani Mozzarella', cena: 29.9, obrazek: 'https://x.test/m.jpg', jednotka: '125 g' };
   const zapamatovano = [];

@@ -173,8 +173,8 @@ setTimeout(async () => {
     await pockej(30);
     const blok = n => [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(b => b.dataset.nazev === n);
     const cb = n => blok(n).querySelector('input[type=checkbox]');
-    check('nic nezaškrtnuto (prázdný výběr)', [...document.querySelectorAll('#jidSurSeznam input')].some(c => c.checked), false);
-    check('  text vybízí zaškrtnout', /Zaškrtni, co koupit/.test(document.getElementById('jidSurJidlo').textContent), true);
+    check('odškrtnuté vše (uložený prázdný výběr)', [...document.querySelectorAll('#jidSurSeznam input')].some(c => c.checked), false);
+    check('  text u nového jídla', /Odškrtni, co už máš doma/.test(document.getElementById('jidSurJidlo').textContent), true);
     check('známé z dřívějšího výběru', blok('Mozzarella').querySelector('.jid-sur-rohlik-stav').textContent + ' | ' + blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').textContent,
       '🟢 Známe z dřív: Galbani Mozzarella 125 g | jiný');
     const jine = [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].find(b => b.dataset.nazev !== 'Mozzarella');
