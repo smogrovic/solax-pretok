@@ -1466,6 +1466,7 @@
   .aqp-editor[hidden]{display:none;}
   .aqp-sek{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--grey-text);margin:8px 0 4px;}
   .aqp-radek{display:flex;align-items:center;gap:6px;margin:4px 0;}
+  .aqp-pozn{font-size:12px;color:var(--grey-text);margin:8px 0 4px;line-height:1.4;}
   .aqp-radek .timer-time{flex:1 1 0;min-width:0;}
   .aqp-radek .timer-select{flex:1 1 0;min-width:0;margin:0;}
   .aqp-smazat{flex:0 0 auto;width:30px;height:30px;border:none;border-radius:50%;background:rgba(44,62,80,0.08);color:var(--navy);font-weight:700;}
@@ -8369,16 +8370,27 @@ let aqProgramData = null;        // ze serveru
 let aqProgramKoncept = null;     // rozpracovaná úprava (null = není)
 let aqProgramEditor = false;
 const AQ_POSUNY = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
-const AQ_VODA = [null, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 52, 55, 58, 60];
+// Teploty vody v programu: 30–50 po stupni, pak 52–65. Čerpadlo může dovolit méně
+// (hlásí tankMin/tankMax) — nižší hodnotu pak server pošle jako jeho minimum.
+const AQ_VODA = [null, ...Array.from({ length: 21 }, (_, i) => 30 + i), 52, 55, 58, 60, 65];
 const aqPosunText = v => (v > 0 ? '+' : '') + v + ' °C';
 const aqVodaText = v => (v === null ? 'Vyp.' : v + ' °C');
 const aqMin = od => Number(od.slice(0, 2)) * 60 + Number(od.slice(3));
 
+// Před prvním úsekem dne platí poslední úsek z předchozího večera (den se točí dokola)
 function aqProgramUsek(rady, now = new Date(Date.now())) {
   const ted = now.getHours() * 60 + now.getMinutes();
-  let i = 0;
-  rady.forEach((r, j) => { if (aqMin(r.od) <= ted) i = j; });
-  return { r: rady[i], do: rady[i + 1] ? rady[i + 1].od : '24:00' };
+  let i = rady.length - 1;
+  let pred = true;
+  rady.forEach((r, j) => { if (aqMin(r.od) <= ted) { i = j; pred = false; } });
+  const dalsi = pred ? rady[0] : rady[i + 1] || rady[0];
+  return { r: rady[i], do: dalsi && dalsi !== rady[i] && dalsi.od !== '00:00' ? dalsi.od : '24:00' };
+}
+// Úseky na pruh přes den: když první nezačíná o půlnoci, od 0:00 do něj pokračuje poslední
+function aqProgramPruhy(rady) {
+  const out = rady.map((r, i) => ({ r, od: aqMin(r.od), doo: rady[i + 1] ? aqMin(rady[i + 1].od) : 1440 }));
+  if (out.length && out[0].od > 0) out.unshift({ r: rady[rady.length - 1], od: 0, doo: out[0].od });
+  return out;
 }
 
 async function aqProgramUloz(program) {
@@ -8443,13 +8455,13 @@ function renderAqProgram() {
     const radek = el('div', 'aqp-pruh-radek', aqProgramObsahEl);
     el('span', 'aqp-pruh-nazev', radek, nazev);
     const pr = el('div', 'aqp-pruh', radek);
-    rady.forEach((r, i) => {
-      const od = aqMin(r.od), doo = rady[i + 1] ? aqMin(rady[i + 1].od) : 1440;
+    const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    for (const { r, od, doo } of aqProgramPruhy(rady)) {
       const hodnota = r.posun !== undefined ? r.posun : r.teplota;
       const u = el('div', 'aqp-usek ' + (hodnota === null ? 'vyp' : trida), pr, (doo - od) >= 120 ? text(hodnota) : '');
       u.style.flex = String(doo - od);
-      u.title = `${r.od}–${rady[i + 1] ? rady[i + 1].od : '24:00'}: ${text(hodnota)}`;
-    });
+      u.title = `${hm(od)}–${doo === 1440 ? '24:00' : hm(doo)}: ${text(hodnota)}`;
+    }
   };
   pruh('Topení', p.topeni, v => aqPosunText(v).replace(' °C', ''), 'topeni');
   pruh('Voda', p.voda, v => (v === null ? 'vyp.' : String(v)), 'voda');
@@ -8476,8 +8488,7 @@ function renderAqProgram() {
       cas.type = 'time';
       cas.step = '900';
       cas.value = r.od;
-      cas.disabled = i === 0;           // první úsek začíná vždy o půlnoci
-      cas.addEventListener('change', () => { r.od = cas.value; });
+      cas.addEventListener('change', () => { if (cas.value) r.od = cas.value; });
       const sel = el('select', 'timer-select', radek);
       for (const m of moznosti) {
         const o = el('option', '', sel, text(m));
@@ -8487,7 +8498,7 @@ function renderAqProgram() {
       sel.addEventListener('change', () => { r[pole] = sel.value === '' ? null : Number(sel.value); });
       const x = el('button', 'aqp-smazat', radek, '✕');
       x.type = 'button';
-      x.disabled = i === 0;
+      x.disabled = k[klic].length <= 1;   // aspoň jeden úsek musí zůstat
       x.addEventListener('click', () => { k[klic].splice(i, 1); renderAqProgram(); });
     });
     const plus = el('button', 'mode-btn aqp-pridat', ed, '+ úsek');
@@ -8504,6 +8515,11 @@ function renderAqProgram() {
   };
   seznam('Topení — posun křivky', 'topeni', 'posun', AQ_POSUNY, aqPosunText);
   seznam('Voda v nádrži', 'voda', 'teplota', AQ_VODA, aqVodaText);
+  const aqTc = (airconData && airconData.aquarea || [])[0];
+  const vodaMin = aqTc && Number.isFinite(aqTc.tankMin) ? aqTc.tankMin : 40;
+  el('div', 'aqp-pozn', ed, `Čerpadlo bere vodu od ${vodaMin} °C — nižší hodnotu pošle jako ${vodaMin} °C. `
+    + 'Aby nádrž s ohřevem počkala (třeba po ranní sprše do poledne), dej na ten úsek „Vyp.". '
+    + 'Před prvním úsekem dne platí poslední úsek z předchozího večera.');
   const ulozit = el('button', 'timer-add-btn aqp-ulozit', ed, 'Uložit program');
   ulozit.type = 'button';
   ulozit.addEventListener('click', () => {

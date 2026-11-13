@@ -7593,11 +7593,13 @@ app.post('/api/aquarea', async (req, res) => {
 });
 
 // ---------- Program tepelného čerpadla (místo plánu v appce Panasonic) ----------
-// Stejný každý den. Úsek platí od svého času do začátku dalšího. Povel jde jen
+// Stejný každý den. Úsek platí od svého času do začátku dalšího, poslední úsek dne
+// pokračuje přes půlnoc až do prvního (úsek v 00:00 není povinný). Povel jde jen
 // při přechodu do nového úseku — ruční změna v boxu tak platí do dalšího úseku
 // a s programem se nic nepere. Výchozí podle plánu, který byl v Panasonicu.
 // Po nasazení vypnutý: plán v Panasonicu se musí nejdřív vypnout.
 const AQ_PROGRAM_MAX = 12;
+const AQ_VODA_MIN = 30, AQ_VODA_MAX = 65;   // co jde do programu uložit; čerpadlo může mít užší rozsah
 function aquareaProgramVychozi() {
   return {
     zapnuto: false,
@@ -7622,13 +7624,13 @@ function aquareaProgramOver(p) {
       out.push({ od: r.od, v });
     }
     out.sort((a, b) => a.od.localeCompare(b.od));
-    if (out[0].od !== '00:00') return { chyba: `${nazev}: první úsek musí začínat v 00:00.` };
+    // Úsek v 00:00 není povinný: před prvním úsekem dne platí poslední z předchozího večera
     if (out.some((r, i) => i && r.od === out[i - 1].od)) return { chyba: `${nazev}: dva úseky ve stejný čas.` };
     return { out };
   };
   const t = seznam(p.topeni, r => (Number.isInteger(r.posun) && r.posun >= -5 && r.posun <= 5 ? r.posun : undefined), 'Topení');
   if (t.chyba) return t;
-  const v = seznam(p.voda, r => (r.teplota === null ? null : Number.isInteger(r.teplota) && r.teplota >= 40 && r.teplota <= 60 ? r.teplota : undefined), 'Voda');
+  const v = seznam(p.voda, r => (r.teplota === null ? null : Number.isInteger(r.teplota) && r.teplota >= AQ_VODA_MIN && r.teplota <= AQ_VODA_MAX ? r.teplota : undefined), 'Voda');
   if (v.chyba) return v;
   return { program: { zapnuto: p.zapnuto === true,
     topeni: t.out.map(r => ({ od: r.od, posun: r.v })), voda: v.out.map(r => ({ od: r.od, teplota: r.v })) } };
@@ -7638,7 +7640,8 @@ function aquareaProgramOver(p) {
 function aquareaProgramUsek(program, now = Date.now()) {
   const pt = pragueTime(now);
   const ted = String(pt.hour).padStart(2, '0') + ':' + String(pt.minute).padStart(2, '0');
-  const najdi = rady => rady.filter(r => r.od <= ted).pop() || rady[0];
+  // Před prvním úsekem dne pokračuje poslední úsek z předchozího večera
+  const najdi = rady => rady.filter(r => r.od <= ted).pop() || rady[rady.length - 1];
   const topeni = najdi(program.topeni), voda = najdi(program.voda);
   return { topeni, voda, klic: `${pragueDateString(now)} ${topeni.od} ${voda.od}` };
 }
@@ -7653,7 +7656,9 @@ function aquareaProgramKroky(aq, usek) {
   if (vodaChci !== !!aq.tankOn) {
     kroky.push({ rezim: vodaChci ? (topi ? 'oboji' : 'voda') : (topi ? 'topeni' : 'vypnuto') });
   }
-  if (vodaChci && aq.tankTarget !== usek.voda.teplota) kroky.push({ nadrz: usek.voda.teplota });
+  // Teplota mimo rozsah čerpadla (např. 30 °C, když dovolí nejníž 40) se srovná na jeho mez
+  const vodaCil = vodaChci ? Math.min(aq.tankMax ?? 65, Math.max(aq.tankMin ?? 40, usek.voda.teplota)) : null;
+  if (vodaChci && aq.tankTarget !== vodaCil) kroky.push({ nadrz: vodaCil });
   // Topení jen když topí — v létě je vypnuté a program na něj nesahá
   if (topi && zona.target !== usek.topeni.posun) kroky.push({ zona: { zoneId: zona.zoneId, heatSet: usek.topeni.posun } });
   return kroky;

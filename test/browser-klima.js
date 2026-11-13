@@ -239,7 +239,8 @@ setTimeout(async () => {
   pbox.querySelector('.aqp-upravit').click();
   const prRadky = k => [...pbox.querySelectorAll('.aqp-radek[data-seznam="' + k + '"]')];
   check('editor: úseky topení a vody', prRadky('topeni').length + ' ' + prRadky('voda').length, '3 3');
-  check('  první úsek 00:00 nejde smazat ani posunout', prRadky('topeni')[0].querySelector('.aqp-smazat').disabled + ' ' + prRadky('topeni')[0].querySelector('input').disabled, 'true true');
+  check('  i úsek 00:00 jde smazat a posunout', prRadky('topeni')[0].querySelector('.aqp-smazat').disabled + ' ' + prRadky('topeni')[0].querySelector('input').disabled, 'false false');
+  check('  voda jde vybrat i 30 °C', [...prRadky('voda')[0].querySelectorAll('option')].some(o => o.value === '30'), true);
   pbox.querySelector('.aqp-pridat[data-seznam="topeni"]').click();
   const novy = prRadky('topeni')[3];
   check('+ úsek: o hodinu později, stejná hodnota', novy.querySelector('input').value + ' ' + novy.querySelector('select').value, '18:00 0');
@@ -259,6 +260,18 @@ setTimeout(async () => {
   pbox.querySelector('.aqp-ulozit').click();
   await pockej(80);
   check('chyba ze serveru v boxu', document.getElementById('aqProgramChyba').textContent, 'Program: Topení: dva úseky ve stejný čas.');
+  // Program bez úseku v 00:00: do prvního úseku platí poslední z večera (pruh i „Teď")
+  aqProgramData = { zapnuto: true, topeni: [{ od: '06:00', posun: 0 }, { od: '22:00', posun: -2 }],
+    voda: [{ od: '04:30', teplota: 48 }, { od: '07:00', teplota: null }, { od: '11:00', teplota: 50 }, { od: '16:00', teplota: 40 }] };
+  aqProgramEditor = false; aqProgramKoncept = null;
+  dnes.setHours(2, 0, 0, 0);
+  renderAqProgram();
+  check('bez 00:00: ve 2:00 platí večerní úseky', pbox.querySelector('.aqp-ted').textContent, 'Teď: topení -2 °C (do 06:00), voda 40 °C (do 04:30)');
+  const pruhy2 = [...pbox.querySelectorAll('.aqp-pruh')].map(p => [...p.children].map(u => u.textContent + '@' + u.style.flexGrow).join(','));
+  check('  pruh od půlnoci pokračuje večerním úsekem', pruhy2.join(' | '), '-2@360,0@960,-2@120 | 40@270,48@150,vyp.@240,50@300,40@480');
+  dnes.setHours(23, 0, 0, 0);
+  renderAqProgram();
+  check('  ve 23:00 „do" ukáže první úsek dalšího dne', pbox.querySelector('.aqp-ted').textContent, 'Teď: topení -2 °C (do 06:00), voda 40 °C (do 04:30)');
   check('nic nepřetéká', pbox.scrollWidth <= pbox.clientWidth + 1, true);
   Date.now = puvodniNow;
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }

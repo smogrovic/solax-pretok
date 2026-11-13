@@ -133,11 +133,12 @@ function build(o = {}) {
         voda: [{ od: '00:00', teplota: 43 }, { od: '06:00', teplota: null }, { od: '09:00', teplota: 43 }] }));
     const over = p => h.api.aquareaProgramOver(p);
     check('ověření: seřadí', JSON.stringify(over({ ...V, topeni: [{ od: '11:00', posun: 1 }, { od: '00:00', posun: 0 }] }).program.topeni), '[{"od":"00:00","posun":0},{"od":"11:00","posun":1}]');
-    check('  bez 00:00', over({ ...V, topeni: [{ od: '01:00', posun: 0 }] }).chyba, 'Topení: první úsek musí začínat v 00:00.');
+    check('  bez 00:00 jde (den se točí dokola)', JSON.stringify(over({ ...V, topeni: [{ od: '01:00', posun: 0 }] }).program.topeni), '[{"od":"01:00","posun":0}]');
     check('  čas po čtvrthodinách', over({ ...V, voda: [{ od: '00:00', teplota: 43 }, { od: '06:10', teplota: 43 }] }).chyba, 'Voda: čas musí být po čtvrthodinách (HH:MM).');
     check('  dvojí čas', over({ ...V, topeni: [{ od: '00:00', posun: 0 }, { od: '00:00', posun: 1 }] }).chyba, 'Topení: dva úseky ve stejný čas.');
     check('  posun ±5', !!over({ ...V, topeni: [{ od: '00:00', posun: 6 }] }).chyba + ' ' + !!over({ ...V, topeni: [{ od: '00:00', posun: 1.5 }] }).chyba, 'true true');
-    check('  voda 40–60 nebo vyp.', !!over({ ...V, voda: [{ od: '00:00', teplota: 65 }] }).chyba + ' ' + over({ ...V, voda: [{ od: '00:00', teplota: null }] }).program.voda[0].teplota, 'true null');
+    check('  voda 30–65 nebo vyp.', [29, 30, 65, 66].map(t => !!over({ ...V, voda: [{ od: '00:00', teplota: t }] }).chyba).join(' ')
+      + ' ' + over({ ...V, voda: [{ od: '00:00', teplota: null }] }).program.voda[0].teplota, 'true false false true null');
     check('  nejvýš 12 úseků', !!over({ ...V, topeni: Array.from({ length: 13 }, (_, i) => ({ od: String(i).padStart(2, '0') + ':00', posun: 0 })) }).chyba, true);
     // Praha = UTC+1 (zimní čas 29. 10. 2026)
     const P = (hh, mm = 0) => Date.UTC(2026, 9, 29, hh - 1, mm);
@@ -146,6 +147,12 @@ function build(o = {}) {
       '0/43 0/null 0/43 1/43 0/43 0/43');
     check('  klíč se mění se dnem i úsekem', h.api.aquareaProgramUsek(V, P(11)).klic + ' | ' + h.api.aquareaProgramUsek(V, P(23, 59) + 60000).klic,
       '2026-10-29 11:00 09:00 | 2026-10-30 00:00 00:00');
+    // Bez úseku v 00:00: do prvního úseku platí poslední z předchozího večera
+    const R = { zapnuto: true, topeni: [{ od: '06:00', posun: 0 }, { od: '22:00', posun: -2 }],
+      voda: [{ od: '04:30', teplota: 48 }, { od: '07:00', teplota: null }, { od: '11:00', teplota: 50 }, { od: '16:00', teplota: 40 }] };
+    const ur = t => { const u = h.api.aquareaProgramUsek(R, t); return u.topeni.posun + '/' + u.voda.teplota; };
+    check('bez 00:00: 0:30, 4:30, 7:00, 11:00, 16:00, 23:00', [ur(P(0, 30)), ur(P(4, 30)), ur(P(7)), ur(P(11)), ur(P(16)), ur(P(23))].join(' '),
+      '-2/40 -2/48 0/null 0/50 0/40 -2/40');
   }
   {
     // Kroky podle stavu čerpadla
@@ -159,6 +166,9 @@ function build(o = {}) {
     check('voda vyp. když jen voda → vypnuto', k(aqz(false, true), 0, null), '[{"rezim":"vypnuto"}]');
     check('voda 43 při topení → obojí', k(aqz(true, false, 0, 43), 0, 43), '[{"rezim":"oboji"}]');
     check('voda 45 při vypnutém → voda + 45 °C', k(aqz(false, false, 0, 43), 0, 45), '[{"rezim":"voda"},{"nadrz":45}]');
+    check('voda 30, čerpadlo bere od 40 → pošle 40', k({ ...aqz(true, true, 0, 48), tankMin: 40, tankMax: 65 }, 0, 30), '[{"nadrz":40}]');
+    check('  čerpadlo bere od 30 → pošle 30', k({ ...aqz(true, true, 0, 48), tankMin: 30, tankMax: 65 }, 0, 30), '[{"nadrz":30}]');
+    check('  už na minimu → nic (žádné opakování)', k({ ...aqz(true, true, 0, 40), tankMin: 40 }, 0, 30), '[]');
   }
   {
     // Spouštění: jen při přechodu úseku, ne každý běh
