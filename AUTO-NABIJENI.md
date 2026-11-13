@@ -1,16 +1,17 @@
 # Nabíjení auta: data pro jinou appku
 
-Solinátor po dnech počítá, kolik auto (wallbox) vzalo z FVE a kolik ze sítě, a kolik to stálo.
-Druhá appka si data stahuje sama z adresy Solinátoru a sčítá je do měsíců.
+SMGhome po dnech počítá, kolik auto (wallbox) vzalo z FVE a kolik ze sítě, a kolik to stálo.
+Druhá appka si data stahuje sama z adresy SMGhome a sčítá je do měsíců.
 
 ## 1. Nastavení (jednou)
 
 1. **Vymysli klíč.** Je to dlouhý náhodný řetězec, třeba z příkazu `openssl rand -hex 24` v Terminálu
    na Macu. Klíč nikam neposílej, ani do chatu, ani do repozitáře.
-2. **Solinátor na Renderu:** služba `solax-pretok` → Environment → Add Environment Variable:
+2. **SMGhome na Renderu:** služba `solax-pretok` → Environment → Add Environment Variable:
    `AUTO_KLIC` = tvůj klíč. Uložit; Render službu sám restartuje.
 3. **Druhá appka na Renderu:** její služba → Environment → `SOLINATOR_KLIC` = **stejný** klíč.
    Do stejné appky přidej i `SOLINATOR_URL` = `https://solax-pretok.onrender.com`.
+   Proměnné se jmenují `SOLINATOR_…` z dřívějška. Kde už jsou nastavené, nepřejmenovávej je.
 4. Pak dej Claudovi v repozitáři druhé appky prompt ze sekce 3.
 
 Bez nastaveného `AUTO_KLIC` adresa vrací 503 a žádná data nevydá.
@@ -52,14 +53,14 @@ Popis polí:
 | `fveKwh` | Z fotovoltaiky, počítá se zdarma (přetok se neprodává) |
 | `sitKwh` | Ze sítě, rozdělené na `sitVtKwh` (vysoký tarif) a `sitNtKwh` (nízký tarif) |
 | `cenaKc` | `sitVtKwh × vtKcKwh + sitNtKwh × ntKcKwh`. Je to proměnná cena s DPH a distribucí. Měsíční poplatky (jistič, stálá platba) v ní **nejsou**, ty platíš i bez auta. |
-| `odhadTarifu` | `true` = den z doby, kdy Solinátor ještě neměřil tarif. VT/NT je u něj rozdělené podle podílu času. |
+| `odhadTarifu` | `true` = den z doby, kdy SMGhome ještě neměřil tarif. VT/NT je u něj rozdělené podle podílu času. |
 | `neuplny` | `true` = dnešek, ještě se nabíjí. Načti ho znovu později. |
 
 Dny bez nabíjení v seznamu nejsou, to znamená nula. Hodnoty dne se můžou měnit, dokud den neskončí,
-a po restartu Solinátoru se ještě doplní ze zálohy. Proto se poslední dny stahují pokaždé znovu
+a po restartu SMGhome se ještě doplní ze zálohy. Proto se poslední dny stahují pokaždé znovu
 a ukládají se přepsáním podle data.
 
-**Denní záznamy** Solinátor drží 400 dní. Do 10. 11. 2026 ale držel jen 14 dní, takže denní historie
+**Denní záznamy** SMGhome drží 400 dní. Do 10. 11. 2026 ale držel jen 14 dní, takže denní historie
 začíná až kolem 27. 10. 2026.
 
 **Měsíční přehled `mesice`** je v každé odpovědi a pokrývá celou historii od února 2025, nezávisle
@@ -76,13 +77,13 @@ na `od`/`do`:
 
 | Pole | Význam |
 |---|---|
-| `odhadDeleni` | Měsíc před tím, než Solinátor měřil, kolik auto bere ze sítě. Celkové kWh auta jsou z ručně vedené tabulky, podíl ze sítě je odhadnutý podle podílu sítě na spotřebě celého domu v tom měsíci. |
+| `odhadDeleni` | Měsíc před tím, než SMGhome měřil, kolik auto bere ze sítě. Celkové kWh auta jsou z ručně vedené tabulky, podíl ze sítě je odhadnutý podle podílu sítě na spotřebě celého domu v tom měsíci. |
 | `odhadTarifu` | VT/NT je rozdělené podle podílu času, ne změřené. |
 | `neuplny` | Běžící měsíc. |
 
 ## 3. Prompt pro Clauda (do repozitáře druhé appky)
 
-> Přidej do aplikace evidenci nákladů na nabíjení auta. Data dodává moje druhá aplikace Solinátor
+> Přidej do aplikace evidenci nákladů na nabíjení auta. Data dodává moje druhá aplikace SMGhome
 > přes HTTP. Napoj se na ni, ukládej denní data a ukazuj měsíční součty.
 >
 > **Zdroj dat**
@@ -102,8 +103,8 @@ na `od`/`do`:
 >   `odhadDeleni: true` znamená, že dělení FVE/síť je u toho měsíce odhadnuté.
 >   Denní záznamy existují až zhruba od konce října 2026.
 > - Jeden dotaz smí mít nejvýš 400 dní.
-> - Chyby: 401 = špatný klíč, 503 = Solinátor nemá nastavený klíč, 400 = špatný rozsah.
-> - Solinátor běží na Renderu a po nečinnosti usíná. Použij timeout 60 s a při chybě opakuj
+> - Chyby: 401 = špatný klíč, 503 = SMGhome nemá nastavený klíč, 400 = špatný rozsah.
+> - SMGhome běží na Renderu a po nečinnosti usíná. Použij timeout 60 s a při chybě opakuj
 >   nejvýš 3× s odstupem 2 minut.
 >
 > **Ukládání**
@@ -132,7 +133,7 @@ na `od`/`do`:
 > **Ověření**
 > - Napiš testy: rozbor odpovědi, upsert (přepsání dne i vynulování chybějícího dne), měsíční součty
 >   (včetně průměrné ceny a procenta z FVE), chování při 401, 503 a timeoutu.
->   Solinátor v testech podvrhni, nevolej ostrou adresu.
+>   SMGhome v testech podvrhni, nevolej ostrou adresu.
 > - Na konci mi napiš, jestli musím na Renderu něco nastavit, a jak ověřím, že stahování funguje.
 
 ## 4. Moje finance (přímo z prohlížeče, bez klíče)
@@ -144,7 +145,7 @@ GET https://solax-pretok.onrender.com/api/auto/nabijeni/fin?od=…&do=…
 Hlavička: Authorization: Bearer <přihlašovací token z Firebase>
 ```
 
-- Solinátor ověří podpis tokenu veřejnými certifikáty Googlu (projekt `FIN_FIREBASE_PROJECT`, výchozí
+- SMGhome ověří podpis tokenu veřejnými certifikáty Googlu (projekt `FIN_FIREBASE_PROJECT`, výchozí
   `moje-finance-4bb9e`) a pustí jen e-maily z `FIN_EMAILS`. Odpověď je stejná jako u adresy s klíčem.
 - Prohlížeč smí volat jen z adresy appky (`FIN_ORIGIN`, výchozí `https://finance-kavq.onrender.com`).
 - Nastavení: Render → `solax-pretok` → Environment → `FIN_EMAILS` = e-mail(y) oddělené čárkou.

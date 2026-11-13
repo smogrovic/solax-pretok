@@ -1,7 +1,7 @@
 # Úloha: jídelníček na příští týden
 
 Spouští se v pátek ve 12:00 jako naplánovaná úloha (a kdykoli ručně). Výsledek se pošle do
-appky Solinátor. Appka ho ukáže na stránce Nákup a jeho suroviny dá na nákupní seznam.
+appky SMGhome. Appka ho ukáže na stránce Nákup a jeho suroviny dá na nákupní seznam.
 
 Pravidla jídelníčku jsou v `jidelnicek/PROMPT.md`. Platí bez výjimek. Formát výstupu
 (sekce 12–14 promptu) tady nahrazuje JSON níž: appka z něj sama udělá přehled

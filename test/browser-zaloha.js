@@ -71,7 +71,7 @@ setTimeout(async () => {
   check('  a ukáže výsledek', document.getElementById('zalohaHint').textContent, 'Obnoveno 30 z 41 částí.');
   dotaz = null;
   await zalohaObnov('{"neco":1}');
-  check('cizí soubor se nepošle', [dotaz, document.getElementById('zalohaHint').textContent].join(' '), ' Soubor není záloha Solinátoru.');
+  check('cizí soubor se nepošle', [dotaz, document.getElementById('zalohaHint').textContent].join(' '), ' Soubor není záloha SMGhome.');
   window.zeptejSe = async () => false;
   zeptejSe = window.zeptejSe;
   await zalohaObnov(JSON.stringify({ data: { posts: {} } }));

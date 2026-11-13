@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SMG home">
+<meta name="apple-mobile-web-app-title" content="SMGhome">
 <meta name="theme-color" content="#eef2f6">
-<title>SMG home</title>
+<title>SMGhome</title>
 <link rel="manifest" href="manifest.json?v=2">
 <link rel="apple-touch-icon" href="icon-180.png?v=2">
 <style>
@@ -8227,9 +8227,9 @@ async function zalohaStahni() {
 }
 async function zalohaObnov(text) {
   let zaloha;
-  try { zaloha = JSON.parse(text); } catch { zalohaHintEl.textContent = 'Soubor není záloha Solinátoru.'; return; }
+  try { zaloha = JSON.parse(text); } catch { zalohaHintEl.textContent = 'Soubor není záloha SMGhome.'; return; }
   const data = zaloha && zaloha.data;
-  if (!data || typeof data.posts !== 'object') { zalohaHintEl.textContent = 'Soubor není záloha Solinátoru.'; return; }
+  if (!data || typeof data.posts !== 'object') { zalohaHintEl.textContent = 'Soubor není záloha SMGhome.'; return; }
   const kdy = zaloha.at ? new Date(zaloha.at).toLocaleString('cs-CZ') : 'neznámo kdy';
   if (!(await zeptejSe('Obnovit data ze zálohy?', `Záloha z ${kdy}. Doplní se, co chybí; nic se nesmaže.`))) return;
   zalohaHintEl.textContent = 'Obnovuji…';
@@ -13469,7 +13469,7 @@ async function enrollFaceId() {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rp: { name: 'SMG home' },
+      rp: { name: 'SMGhome' },
       user: {
         id: crypto.getRandomValues(new Uint8Array(16)),
         name: 'smogy',

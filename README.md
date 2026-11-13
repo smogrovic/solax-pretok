@@ -1,4 +1,4 @@
-# SMG home
+# SMGhome
 
 Domácí appka k fotovoltaice: ukazuje výrobu, přetok a stav baterie a podle přebytku sama
 spíná bojler, bazénovou filtraci a solinátor. K tomu ovládá klimatizace, žaluzie, wallbox,

@@ -5962,7 +5962,7 @@ async function blindCommand(deviceURL, action, value, tilt) {
   const cmd = blind.commands[action];
   if (!cmd) throw Object.assign(new Error(`${blind.label}: povel není podporován.`), { status: 400 });
 
-  const label = `SMG home: ${blind.label} ${action}`;
+  const label = `SMGhome: ${blind.label} ${action}`;
   const num = v => Math.round(Math.min(100, Math.max(0, v)));
 
   if (action === 'orientation' && await tahomaJizdaBezi(deviceURL)) {
@@ -9484,7 +9484,7 @@ app.post('/api/assistant', async (req, res) => {
   if (!text) return res.status(400).json({ error: 'Chybí text.' });
 
   const prague = pragueTime();
-  const system = `Jsi hlasový asistent chytré domácnosti "SMG home". Uživatel mluví česky. `
+  const system = `Jsi hlasový asistent chytré domácnosti "SMGhome". Uživatel mluví česky. `
     + `Aktuální čas je ${String(prague.hour).padStart(2, '0')}:${String(prague.minute).padStart(2, '0')}. `
     + `Podle jeho pokynu zavolej správné nástroje a proveď akci. Můžeš zavolat i více nástrojů najednou (např. "zhasni všechna světla"). `
     + `Zařízení: bojler, bazén (filtrace), solinátor, světla (zahrada dole, zahrada nahoře, světlo bazén, noční světla), `
@@ -12925,7 +12925,7 @@ async function jidelnicekDoplnFotky(now = Date.now()) {
       if (r.foto || !r.zdroj || !r.zdroj.url || (r.fotoPokus && now - r.fotoPokus < JIDELNICEK_FOTO_ZNOVU_MS)) continue;
       r.fotoPokus = now;
       try {
-        const res = await fetch(r.zdroj.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Solinator; recept)' }, signal: AbortSignal.timeout(10000) });
+        const res = await fetch(r.zdroj.url, { headers: { 'User-Agent': 'Mozilla/5.0 (SMGhome; recept)' }, signal: AbortSignal.timeout(10000) });
         if (!res.ok) continue;
         const foto = jidelnicekFotoZeStranky((await res.text()).slice(0, 1500000));
         if (foto && state.jidelnicek === j) { r.foto = foto; nove++; }
@@ -14266,7 +14266,7 @@ app.post('/api/zaloha/obnovit', zalohaJson, async (req, res) => {
   const b = req.body || {};
   const d = b.data && typeof b.data === 'object' ? b.data : b;
   if (!d || typeof d.posts !== 'object' || !d.posts || Array.isArray(d.posts)) {
-    return res.status(400).json({ error: 'Tohle není záloha Solinátoru (chybí data).' });
+    return res.status(400).json({ error: 'Tohle není záloha SMGhome (chybí data).' });
   }
   const primo = d.primo && typeof d.primo === 'object' ? { ...d.primo } : null;
   if (primo) for (const k of ZALOHA_PRIMO_TAJNE) delete primo[k];
@@ -14402,7 +14402,7 @@ async function rohlikOauthKlient(meta, redirectNas) {
   for (const redirect of [redirectNas, ...ROHLIK_NAVRATY].filter(Boolean)) {
     const r = await rohlikJson(meta.registration_endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ client_name: 'SMG home', redirect_uris: [redirect],
+      body: JSON.stringify({ client_name: 'SMGhome', redirect_uris: [redirect],
         grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
         token_endpoint_auth_method: 'none' })
     });

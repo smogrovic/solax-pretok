@@ -1,6 +1,6 @@
 {
-  "name": "SMG home",
-  "short_name": "SMG home",
+  "name": "SMGhome",
+  "short_name": "SMGhome",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#eef2f6",
