@@ -13548,7 +13548,12 @@ function storeDecode(txt) {
   }
 }
 
+// Kolik bajtů má která hodnota v úložišti (poslední zápis) — pro kartu velikostí
+const storeVelikosti = {};
 async function storeFetch(cesta, init = {}) {
+  if (init.method === 'POST' && /^\/set\//.test(cesta) && init.body != null) {
+    storeVelikosti[decodeURIComponent(cesta.slice(5))] = Buffer.byteLength(String(init.body));
+  }
   const ctrl = new AbortController();
   const stopka = setTimeout(() => ctrl.abort(), STORE_TIMEOUT_MS);
   try {
@@ -14044,6 +14049,99 @@ app.get('/api/auto/nabijeni/fin', async (req, res) => {
   }
   if (kdo.email_verified !== true || !FIN_EMAILS.includes(String(kdo.email || '').toLowerCase())) return res.status(403).json({ error: 'Tenhle účet nemá přístup.' });
   autoNabijeniOdpoved(req, res);
+});
+
+// ---------- Velikost aplikace (jen pro správce) ----------
+// Karta v Log/Nastavení: kolik zabírá kód, záloha a paměť a kolik to je z limitů
+// GitHubu, Renderu a Upstashe. Vidí ji jen první účet ze seznamu povolených
+// (nebo AUTH_SPRAVCE). Limity jsou veřejné hodnoty služeb, jdou přepsat proměnnými.
+const VELIKOST_LIMITY = {
+  githubSoubor: 100 * 1024 * 1024,                                    // tvrdý limit na jeden soubor
+  githubRepo: 1024 * 1024 * 1024,                                     // doporučená velikost repozitáře
+  renderRam: (Number(process.env.RENDER_RAM_MB) || 512) * 1024 * 1024, // Free i Starter: 512 MB
+  upstashZaznam: 10 * 1024 * 1024,                                    // max. velikost jednoho požadavku (Free)
+  upstashData: (Number(process.env.UPSTASH_DATA_MB) || 256) * 1024 * 1024 // max. data (Free)
+};
+const VELIKOST_REPO = process.env.GITHUB_REPO || 'smogrovic/solax-pretok';
+const velikostSpravce = () => String(process.env.AUTH_SPRAVCE || AUTH_EMAILY[0] || '').trim().toLowerCase();
+const fsVelikost = require('fs');
+let velikostSouboryCache = null;
+let velikostGithubCache = null;
+
+function velikostSlozky(cesta, vynech = []) {
+  let celkem = 0, souboru = 0, nejvetsi = { nazev: '', b: 0 };
+  const projdi = d => {
+    let polozky;
+    try { polozky = fsVelikost.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of polozky) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (!vynech.includes(e.name)) projdi(p); continue; }
+      if (!e.isFile()) continue;
+      let b = 0;
+      try { b = fsVelikost.statSync(p).size; } catch { continue; }
+      celkem += b; souboru++;
+      if (b > nejvetsi.b) nejvetsi = { nazev: path.relative(cesta, p), b };
+    }
+  };
+  projdi(cesta);
+  return { b: celkem, souboru, nejvetsi };
+}
+
+function velikostSoubory(now = Date.now()) {
+  if (velikostSouboryCache && now - velikostSouboryCache.t < 10 * 60000) return velikostSouboryCache;
+  const koren = __dirname;
+  const b = f => { try { return fsVelikost.statSync(path.join(koren, f)).size; } catch { return 0; } };
+  velikostSouboryCache = {
+    t: now,
+    kod: velikostSlozky(koren, ['node_modules', '.git']),
+    zavislosti: velikostSlozky(path.join(koren, 'node_modules')),
+    indexHtml: b('public/index.html'),
+    serverJs: b('server.js')
+  };
+  return velikostSouboryCache;
+}
+
+// Velikost repozitáře z veřejného API GitHubu (bez přihlášení), nejvýš jednou za hodinu
+async function velikostGithub(now = Date.now()) {
+  if (velikostGithubCache && now - velikostGithubCache.t < 3600000) return velikostGithubCache;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${VELIKOST_REPO}`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'solinator' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    velikostGithubCache = { t: now, b: Number(d.size) * 1024, chyba: null };
+  } catch (err) {
+    velikostGithubCache = { t: now - 3000000, b: velikostGithubCache ? velikostGithubCache.b : null, chyba: err.message };   // zkusit znovu za 10 min
+  }
+  return velikostGithubCache;
+}
+
+async function velikostPrehled(now = Date.now()) {
+  const sb = velikostSoubory(now);
+  const gh = await velikostGithub(now);
+  const mem = process.memoryUsage();
+  const uloziste = { ...storeVelikosti };
+  if (typeof storeSnapshot === 'function' && typeof storeEncode === 'function' && typeof STORE_KEY === 'string' && !uloziste[STORE_KEY]) {
+    try { uloziste[STORE_KEY] = Buffer.byteLength(storeEncode(storeSnapshot())); } catch {}
+  }
+  const ulozCelkem = Object.values(uloziste).reduce((a, b) => a + b, 0);
+  const nejvetsiZaznam = Math.max(0, ...Object.values(uloziste));
+  return {
+    kod: { b: sb.kod.b, souboru: sb.kod.souboru, indexHtml: sb.indexHtml, serverJs: sb.serverJs, nejvetsi: sb.kod.nejvetsi },
+    zavislosti: { b: sb.zavislosti.b, souboru: sb.zavislosti.souboru },
+    github: { repo: VELIKOST_REPO, b: gh.b, chyba: gh.chyba },
+    pamet: { rss: mem.rss, heap: mem.heapUsed },
+    uloziste: { zaznamy: Object.entries(uloziste).map(([k, b]) => ({ k: k.replace(/^[^:]*:/, ''), b })).sort((a, c) => c.b - a.b),
+      celkem: ulozCelkem, nejvetsi: nejvetsiZaznam, zapnuto: !!(typeof storeEnabled !== 'undefined' && storeEnabled) },
+    limity: VELIKOST_LIMITY
+  };
+}
+
+app.get('/api/velikost', async (req, res) => {
+  const sezeni = prihlaseniZapnute ? authOver(authCookieZ(req)) : null;
+  if (!sezeni || String(sezeni.email || '').toLowerCase() !== velikostSpravce()) return res.status(403).json({ error: 'Jen pro správce.' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, ...(await velikostPrehled()) });
 });
 
 // ---------- Hlídač popelnic ----------

@@ -1559,6 +1559,15 @@
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
   .prihlaseni-kod{margin-top:10px;text-align:center;font-size:13px;color:var(--grey-text);}
+  .velikost-radek{padding:8px 0;border-top:1px solid rgba(44,62,80,0.08);font-size:13px;color:var(--navy);}
+  .velikost-radek:first-child{border-top:none;}
+  .velikost-hlava{display:flex;justify-content:space-between;gap:10px;}
+  .velikost-hodnota{font-weight:700;white-space:nowrap;}
+  .velikost-pod{font-size:12px;color:var(--grey-text);margin-top:2px;}
+  .velikost-pruh{height:6px;border-radius:3px;background:rgba(44,62,80,0.1);margin-top:5px;overflow:hidden;}
+  .velikost-pruh span{display:block;height:100%;background:#2e9d57;border-radius:3px;}
+  .velikost-pruh.pozor span{background:#e69a28;}
+  .velikost-pruh.plno span{background:#c62828;}
   .prihlaseni-kod b{display:block;font-size:34px;letter-spacing:0.25em;color:var(--navy);font-variant-numeric:tabular-nums;}
   .nova-verze{position:fixed;left:16px;right:16px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:9500;
     max-width:520px;margin:0 auto;box-sizing:border-box;display:flex;align-items:center;gap:12px;
@@ -3941,6 +3950,13 @@
           <button class="sek-btn" id="prihlaseniOdhlasit" type="button">Odhlásit toto zařízení</button>
         </div>
         <div class="prihlaseni-kod" id="prihlaseniKod" hidden></div>
+      </div>
+
+      <!-- Velikost aplikace a limity služeb — jen pro správce (server ostatním vrací 403) -->
+      <div class="card" id="velikostKarta" hidden>
+        <div class="asst-log-title">Velikost aplikace</div>
+        <div id="velikostObsah"></div>
+        <div class="rezim-hint" id="velikostPozn"></div>
       </div>
 
       <!-- Vlastní upozornění: po potvrzení ho appka ukáže přes celou obrazovku na všech
@@ -16605,7 +16621,57 @@ async function prihlaseniNacti() {
     const s = await (await fetch('/api/auth/stav', { cache: 'no-store' })).json();
     prihlaseniKartaEl.hidden = !s.zapnuto;
     document.getElementById('prihlaseniKdo').textContent = s.email ? 'Přihlášen: ' + s.email : '';
+    if (s.email) bezpecne(velikostNacti);
   } catch { /* zkusí se při dalším otevření */ }
+}
+
+// ---------- Velikost aplikace (jen správce) ----------
+const velikostKartaEl = document.getElementById('velikostKarta');
+const velikostMB = b => (b / 1048576).toLocaleString('cs-CZ', { maximumFractionDigits: b < 10485760 ? 2 : 1 }) + ' MB';
+const velikostPct = (b, z) => { const p = 100 * b / z; return (p < 1 ? p.toLocaleString('cs-CZ', { maximumFractionDigits: 2 }) : Math.round(p)) + ' %'; };
+function velikostRadek(rodic, nazev, hodnota, pod, b, z) {
+  const r = jidEl('div', 'velikost-radek', rodic);
+  const h = jidEl('div', 'velikost-hlava', r);
+  jidEl('span', '', h, nazev);
+  jidEl('span', 'velikost-hodnota', h, hodnota);
+  if (pod) jidEl('div', 'velikost-pod', r, pod);
+  if (z) {
+    const p = Math.min(100, 100 * b / z);
+    const pruh = jidEl('div', 'velikost-pruh' + (p >= 90 ? ' plno' : p >= 70 ? ' pozor' : ''), r);
+    jidEl('span', '', pruh).style.width = Math.max(p, 0.5) + '%';
+  }
+}
+function renderVelikost(d) {
+  const obsah = document.getElementById('velikostObsah');
+  obsah.textContent = '';
+  const L = d.limity;
+  velikostRadek(obsah, 'Kód aplikace', velikostMB(d.kod.b),
+    d.kod.souboru + ' souborů · index.html ' + velikostMB(d.kod.indexHtml) + ' · server.js ' + velikostMB(d.kod.serverJs));
+  velikostRadek(obsah, 'GitHub: největší soubor', velikostPct(d.kod.nejvetsi.b, L.githubSoubor),
+    d.kod.nejvetsi.nazev + ' ' + velikostMB(d.kod.nejvetsi.b) + ' z limitu ' + velikostMB(L.githubSoubor) + ' na soubor', d.kod.nejvetsi.b, L.githubSoubor);
+  if (d.github.b !== null && d.github.b !== undefined) {
+    velikostRadek(obsah, 'GitHub: repozitář s historií', velikostPct(d.github.b, L.githubRepo),
+      velikostMB(d.github.b) + ' z doporučených ' + velikostMB(L.githubRepo), d.github.b, L.githubRepo);
+  } else velikostRadek(obsah, 'GitHub: repozitář s historií', '?', 'GitHub teď neodpověděl' + (d.github.chyba ? ' (' + d.github.chyba + ')' : ''));
+  velikostRadek(obsah, 'Render: paměť serveru', velikostPct(d.pamet.rss, L.renderRam),
+    velikostMB(d.pamet.rss) + ' z ' + velikostMB(L.renderRam) + ' RAM', d.pamet.rss, L.renderRam);
+  if (d.uloziste.zapnuto || d.uloziste.zaznamy.length) {
+    velikostRadek(obsah, 'Upstash: největší záznam', velikostPct(d.uloziste.nejvetsi, L.upstashZaznam),
+      d.uloziste.zaznamy.map(z => z.k + ' ' + velikostMB(z.b)).join(' · ') + ' — limit ' + velikostMB(L.upstashZaznam) + ' na zápis', d.uloziste.nejvetsi, L.upstashZaznam);
+    velikostRadek(obsah, 'Upstash: data celkem', velikostPct(d.uloziste.celkem, L.upstashData),
+      velikostMB(d.uloziste.celkem) + ' z ' + velikostMB(L.upstashData), d.uloziste.celkem, L.upstashData);
+  }
+  velikostRadek(obsah, 'Knihovny (node_modules)', velikostMB(d.zavislosti.b), d.zavislosti.souboru + ' souborů · Render je instaluje sám, do limitů se nepočítají');
+  document.getElementById('velikostPozn').textContent = 'Limity: GitHub 100 MB na soubor a doporučeně 1 GB na repozitář, Render 512 MB RAM, Upstash zdarma 10 MB na zápis a 256 MB dat.';
+}
+async function velikostNacti() {
+  if (!velikostKartaEl) return;
+  try {
+    const r = await fetch('/api/velikost', { cache: 'no-store' });
+    if (!r.ok) { velikostKartaEl.hidden = true; return; }
+    renderVelikost(await r.json());
+    velikostKartaEl.hidden = false;
+  } catch { velikostKartaEl.hidden = true; }
 }
 if (prihlaseniKartaEl) {
   document.getElementById('prihlaseniOdhlasit').addEventListener('click', async () => {
