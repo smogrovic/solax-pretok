@@ -14494,13 +14494,17 @@ function rohlikNastroj(seznam, slova, ne = []) {
 const rohlikVlastnosti = t => (t && t.inputSchema && t.inputSchema.properties) || {};
 
 // Argumenty pro hledání: textový parametr podle obvyklých názvů, jinak první řetězec
-function rohlikArgHledani(t, dotaz) {
+// Stránkování: když nástroj umí `offset`, pošle se; jinak se řekne o víc výsledků
+// (od + pocet) a začátek se odřízne až tady (viz rohlikHledej).
+function rohlikArgHledani(t, dotaz, { od = 0, pocet = 8 } = {}) {
   const vl = rohlikVlastnosti(t);
   const jmena = Object.keys(vl);
   const klic = ['query', 'keyword', 'search', 'q', 'term', 'text', 'name'].find(k => jmena.includes(k))
     || jmena.find(k => (vl[k] && vl[k].type) === 'string') || 'query';
   const arg = { [klic]: dotaz };
-  for (const k of ['limit', 'max_results', 'maxResults', 'size']) if (jmena.includes(k)) { arg[k] = 8; break; }
+  const offset = jmena.includes('offset');
+  if (offset && od) arg.offset = od;
+  for (const k of ['limit', 'max_results', 'maxResults', 'size']) if (jmena.includes(k)) { arg[k] = offset ? pocet : od + pocet; break; }
   return arg;
 }
 
@@ -14678,11 +14682,11 @@ async function rohlikWeb(cesta, opts) {
   return r;
 }
 
-async function rohlikWebHledej(dotaz) {
-  const q = new URLSearchParams({ search: dotaz, offset: '0', limit: '10', companyId: '1', canCorrect: 'true' });
+async function rohlikWebHledej(dotaz, { od = 0, pocet = 8 } = {}) {
+  const q = new URLSearchParams({ search: dotaz, offset: String(od), limit: String(Math.max(pocet, 10)), companyId: '1', canCorrect: 'true' });
   const r = await rohlikWeb('/services/frontend-service/search-metadata?' + q.toString());
   if (r.status >= 300 || !r.j) throw rohlikWebChyba(r, 'hledání');
-  const vyrobky = rohlikVyrobky({ structuredContent: r.j }).slice(0, 8);
+  const vyrobky = rohlikVyrobky({ structuredContent: r.j }).slice(0, pocet);
   if (!vyrobky.length) rohlikDiag.ukazka = rohlikTajne(r.text).slice(0, 600);
   else if (!vyrobky.some(v => v.obrazek)) await rohlikWebFotky(vyrobky);
   return vyrobky;
@@ -14747,13 +14751,15 @@ function rohlikIdVKosiku(x, out = new Set(), hloubka = 0) {
   return out;
 }
 
-async function rohlikHledej(dotaz) {
-  if (rohlikWebZapnuto) return rohlikWebHledej(dotaz);
+async function rohlikHledej(dotaz, { od = 0, pocet = 8 } = {}) {
+  if (rohlikWebZapnuto) return rohlikWebHledej(dotaz, { od, pocet });
   const nastroje = await rohlikNastroje();
   const t = rohlikNastroj(nastroje, ['search', 'product']) || rohlikNastroj(nastroje, ['search'], ['recipe', 'order']);
   if (!t) throw new RohlikChyba('Rohlík: nástroj pro hledání nenalezen (viz diagnostika).');
-  const result = await rohlikRpc('tools/call', { name: t.name, arguments: rohlikArgHledani(t, dotaz) });
-  const vyrobky = rohlikVyrobky(result).slice(0, 8);
+  const arg = rohlikArgHledani(t, dotaz, { od, pocet });
+  const result = await rohlikRpc('tools/call', { name: t.name, arguments: arg });
+  const vsechny = rohlikVyrobky(result);
+  const vyrobky = (arg.offset ? vsechny : vsechny.slice(od)).slice(0, pocet);
   if (!vyrobky.length && result) {
     rohlikDiag.ukazka = rohlikTajne(JSON.stringify(result)).slice(0, 600);
   }
@@ -14870,11 +14876,18 @@ const rohlikOdpovezChybou = (res, err) => {
   res.status(err instanceof RohlikChyba ? 502 : 500).json({ error: err instanceof RohlikChyba ? err.message : 'Rohlík: chyba.' });
 };
 
+const ROHLIK_STRANKA = 6;          // výrobků na jedno „Další"
+const ROHLIK_HLEDANI_MAX = 60;     // dál se nestránkuje
 app.get('/api/rohlik/hledat', async (req, res) => {
   if (!requireAuth(req, res)) return;
   const q = String((req.query && req.query.q) || '').trim().slice(0, 80);
   if (!q) return res.status(400).json({ error: 'Chybí co hledat.' });
-  try { res.json({ ok: true, vyrobky: await rohlikHledej(q) }); }
+  // Po stránkách: `od` = kolik výrobků už appka má. O jeden víc, ať je poznat, jestli jsou další.
+  const od = Math.min(ROHLIK_HLEDANI_MAX, Math.max(0, Math.floor(Number(req.query.od) || 0)));
+  try {
+    const vse = await rohlikHledej(q, { od, pocet: ROHLIK_STRANKA + 1 });
+    res.json({ ok: true, vyrobky: vse.slice(0, ROHLIK_STRANKA), dalsi: vse.length > ROHLIK_STRANKA && od + ROHLIK_STRANKA < ROHLIK_HLEDANI_MAX, od });
+  }
   catch (err) { rohlikOdpovezChybou(res, err); }
 });
 

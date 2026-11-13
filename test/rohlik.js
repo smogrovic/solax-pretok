@@ -172,10 +172,32 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  s tokenem', f.log[0].hlavicky.Authorization, 'Bearer ' + ACCESS);
     check('  a bez starých hlaviček', 'rhl-pass' in f.log[0].hlavicky, false);
     check('  sezení se posílá dál', f.log[3].hlavicky['Mcp-Session-Id'], 'S1');
-    check('  textový parametr podle schématu', JSON.stringify(f.log[3].telo.params.arguments), '{"keyword":"mléko","limit":8}');
+    check('  textový parametr podle schématu', JSON.stringify(f.log[3].telo.params.arguments), '{"keyword":"mléko","limit":7}');
     await h.volej('GET /api/rohlik/hledat', { query: { q: 'chleba' } });
     check('nástroje se nenačítají znovu', f.log.filter(x => x.telo.method === 'tools/list').length, 1);
     check('prázdný dotaz 400', (await h.volej('GET /api/rohlik/hledat', { query: { q: ' ' } })).kod, 400);
+    check('  dva výsledky = žádné další', r.out.dalsi + ' ' + r.out.od, 'false 0');
+  }
+  {
+    // Stránkování po 6: 20 výrobků, nástroj neumí offset → víc výsledků a začátek se odřízne
+    const MNOHO = { content: [{ type: 'text', text: JSON.stringify({ products: Array.from({ length: 20 }, (_, i) => ({ productId: 100 + i, productName: 'Mléko ' + i, price: { amount: 20 } })) }) }] };
+    const f = falesny({ nastroje: NASTROJE_A, hledani: () => ({ result: MNOHO }) });
+    const h = build(f);
+    const r1 = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko' } });
+    check('stránka 1: 6 výrobků a jsou další', r1.out.vyrobky.map(v => v.productId).join() + ' ' + r1.out.dalsi, '100,101,102,103,104,105 true');
+    const r2 = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko', od: '6' } });
+    check('stránka 2: dalších 6', r2.out.vyrobky.map(v => v.productId).join() + ' ' + r2.out.dalsi, '106,107,108,109,110,111 true');
+    check('  nástroj dostal větší limit', f.log.slice(-1)[0].telo.params.arguments.limit, 13);
+    const r4 = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko', od: '18' } });
+    check('poslední stránka: zbytek a už nic', r4.out.vyrobky.map(v => v.productId).join() + ' ' + r4.out.dalsi, '118,119 false');
+    const rx = await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko', od: 'nesmysl' } });
+    check('nesmyslné od = od začátku', rx.out.od, 0);
+    // Nástroj s offsetem: pošle se offset a limit jen na stránku
+    const f2 = falesny({ nastroje: [{ ...NASTROJE_A[0], inputSchema: { properties: { keyword: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' } } } }, NASTROJE_A[1]],
+      hledani: () => ({ result: MNOHO }) });
+    const h2 = build(f2);
+    await h2.volej('GET /api/rohlik/hledat', { query: { q: 'mléko', od: '12' } });
+    check('nástroj s offsetem dostane offset', JSON.stringify(f2.log.slice(-1)[0].telo.params.arguments), '{"keyword":"mléko","offset":12,"limit":7}');
   }
   {
     // SSE odpovědi a jiný tvar (structuredContent, id/name, items vnořené)
@@ -384,6 +406,9 @@ const VYSLEDEK_A = { content: [{ type: 'text', text: JSON.stringify({ products: 
     check('  e-mail bez uvozovek a mezer, heslo', f.log[0].telo.email + ' ' + f.log[0].telo.password, EMAIL + ' ' + HESLO);
     check('  cookie z přihlášení jde dál', f.log[1].hlavicky.Cookie, 'PHPSESSIONID=sez1');
     check('  hledaný text', f.log[1].query.search, 'mléko');
+    await h.volej('GET /api/rohlik/hledat', { query: { q: 'mléko', od: '6' } });
+    const posl = f.log.filter(x => /search-metadata/.test(x.cesta)).slice(-1)[0];
+    check('  další stránka přes offset', posl.query.offset + ' ' + posl.query.limit, '6 10');
     check('  na MCP ani OAuth se nesahá', f.log.every(x => x.cesta.startsWith('/services/frontend-service/')), true);
     await h.volej('GET /api/rohlik/hledat', { query: { q: 'chleba' } });
     check('podruhé se nepřihlašuje znovu', f.log.filter(x => /login/.test(x.cesta)).length, 1);

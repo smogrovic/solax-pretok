@@ -185,6 +185,28 @@ setTimeout(async () => {
     check('vybrat ukáže výrobky z Rohlíku', vyr.length + ' ' + dotazy.some(d => d.url === '/api/rohlik/hledat?q=' + encodeURIComponent(jine.dataset.nazev)), '2 true');
     vyr[1].click();
     check('  výběr se ukáže a surovina se zaškrtne', /^🛒 Vybráno: .* B$/.test(jine.querySelector('.jid-sur-rohlik-stav').textContent) + ' ' + cb(jine.dataset.nazev).checked + ' ' + jine.querySelectorAll('.rohlik-vyrobek').length, 'true true 0');
+    // Další výrobky: hledání vrací po 6, dokud nedojdou (celkem 14)
+    const puvodniOdp = odpoved;
+    odpoved = (url, telo) => {
+      if (url.startsWith('/api/rohlik/hledat')) {
+        const od = Number((url.match(/[?&]od=(\\d+)/) || [0, 0])[1]);
+        const vse = Array.from({ length: 14 }, (_, i) => ({ productId: 500 + i, nazev: 'Výrobek ' + i, cena: 10 }));
+        return { ok: true, vyrobky: vse.slice(od, od + 6), dalsi: od + 6 < 14, od };
+      }
+      return puvodniOdp(url, telo);
+    };
+    const treti = [...document.querySelectorAll('#jidSurSeznam .jid-sur-polozka')].filter(b => b.dataset.nazev !== 'Mozzarella' && b !== jine)[0];
+    treti.querySelector('.jid-sur-rohlik-btn').click();
+    await pockej(40);
+    check('další: nejdřív 6 výrobků a tlačítko', treti.querySelectorAll('.rohlik-vyrobek').length + ' ' + !!treti.querySelector('.rohlik-dalsi'), '6 true');
+    treti.querySelector('.rohlik-dalsi').click();
+    await pockej(40);
+    check('  po kliknutí dalších 6 (připojí se)', treti.querySelectorAll('.rohlik-vyrobek').length + ' ' + dotazy.slice(-1)[0].url.includes('od=6'), '12 true');
+    treti.querySelector('.rohlik-dalsi').click();
+    await pockej(40);
+    check('  na konci zbytek a tlačítko zmizí', treti.querySelectorAll('.rohlik-vyrobek').length + ' ' + !!treti.querySelector('.rohlik-dalsi'), '14 false');
+    treti.querySelector('.jid-sur-rohlik-btn').click();
+    odpoved = puvodniOdp;
     blok('Mozzarella').querySelector('.jid-sur-rohlik-btn').click();
     await pockej(40);
     check('  i u známého jde vybrat jiný (známý nahoře)', blok('Mozzarella').querySelector('.rohlik-vyrobek.vybrany').textContent.startsWith('Galbani Mozzarella 125 g'), true);
@@ -211,7 +233,16 @@ setTimeout(async () => {
   check('okno se otevře', vidi(okno), true);
   check('kroky jen pro neznámé (3 ze 4)', obsah.querySelector('.pruvodce-krok').textContent, '1 / 3');
   check('  první je toaletní papír', obsah.querySelector('.pruvodce-titul-nazev').textContent, 'Toaletní papír');
-  check('  hledá se podle názvu bez množství', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat')).map(d => decodeURIComponent(d.url.split('q=')[1])).join(), 'Toaletní papír');
+  {
+    const r = pruvodce.radky[pruvodce.kroky[0]];
+    check('průvodce: bez dalších výrobků tlačítko není', !!obsah.querySelector('.rohlik-dalsi'), false);
+    r.dalsi = true; renderPruvodce();
+    const pred = dotazy.length;
+    obsah.querySelector('.rohlik-dalsi').click();
+    await pockej(40);
+    check('  s dalšími je a načte další stránku', dotazy.slice(pred).map(d => d.url).join(), '/api/rohlik/hledat?q=Toaletn%C3%AD%20pap%C3%ADr&od=2');
+  }
+  check('  hledá se podle názvu bez množství', dotazy.filter(d => d.url.startsWith('/api/rohlik/hledat') && !d.url.includes('&od=')).map(d => decodeURIComponent(d.url.split('q=')[1])).join(), 'Toaletní papír');
   check('Další až po výběru', dal.disabled, true);
   obsah.querySelectorAll('.rohlik-vyrobek')[1].click();
   check('  po klepnutí na výrobek jde dál', dal.disabled + ' ' + obsah.querySelector('.rohlik-vyrobek.vybrany').textContent.includes('Toaletní papír B'), 'false true');

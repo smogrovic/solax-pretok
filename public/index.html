@@ -1738,6 +1738,9 @@
   .jid-sur-rohlik-stav.zname{color:#2e7d4f;}
   .jid-sur-rohlik-btn{flex:0 0 auto;border:1px solid #d6dbe1;background:#fff;border-radius:10px;padding:4px 10px;font:inherit;font-size:12px;color:#1b6fb8;cursor:pointer;}
   .jid-sur-vyrobky{padding:0 2px 10px 32px;}
+  .rohlik-dalsi{display:block;width:100%;margin:6px 0 10px;border:1px solid #d6dbe1;background:#fff;border-radius:12px;padding:10px;
+    font:inherit;font-size:14px;font-weight:600;color:#1b6fb8;cursor:pointer;}
+  .jid-sur-rohlik .rohlik-dalsi{margin-left:32px;width:calc(100% - 34px);}
   .jid-telo{font-size:13px;color:var(--navy);padding:0 2px 10px;}
   .jid-zdroj{display:block;font-size:12px;color:var(--grey-text);margin-bottom:4px;}
   a.jid-zdroj{color:#1b6fb8;}
@@ -14613,6 +14616,33 @@ function rohlikOtevri() {
   rohlikOknoEl.hidden = false;
 }
 
+// Hledání po stránkách: `stav` = { vysledky, hledam, chyba, dalsi, od }. Další stránka
+// se připojí za už načtené (dvojí výrobek se vynechá).
+async function rohlikHledejStranku(dotaz, stav) {
+  if (stav.hledam) return;
+  stav.hledam = true; stav.chyba = '';
+  try {
+    const d = await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(dotaz) + (stav.od ? '&od=' + stav.od : ''));
+    const mam = new Set((stav.vysledky || []).map(v => String(v.productId)));
+    const nove = (d.vyrobky || []).filter(v => !mam.has(String(v.productId)));
+    stav.vysledky = [...(stav.vysledky || []), ...nove];
+    stav.od = (Number(d.od) || 0) + (d.vyrobky || []).length;
+    stav.dalsi = !!d.dalsi;
+  } catch (err) {
+    stav.chyba = err.message;
+    if (!stav.vysledky) stav.vysledky = [];
+    stav.dalsi = false;
+  }
+  stav.hledam = false;
+}
+function rohlikDalsiEl(rodic, stav, onClick) {
+  if (!stav || !stav.dalsi || stav.hledam) return null;
+  const b = jidEl('button', 'rohlik-dalsi', rodic, 'Další výrobky ›');
+  b.type = 'button';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
 function rohlikVyrobekEl(v, vybrany, onClick) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -14887,7 +14917,7 @@ function jidSurRohlik(blok) {
   const vyrobky = jidEl('div', 'rohlik-vyrobky jid-sur-vyrobky', el);
   const ukazane = new Set();
   if (v) { vyrobky.appendChild(rohlikVyrobekEl(v, true, null)); ukazane.add(String(v.productId)); }
-  for (const x of (h.vysledky || []).slice(0, 6)) {
+  for (const x of h.vysledky || []) {
     if (ukazane.has(String(x.productId))) continue;
     vyrobky.appendChild(rohlikVyrobekEl(x, false, () => {
       jidSurVyrobky[nazev] = x;
@@ -14900,15 +14930,15 @@ function jidSurRohlik(blok) {
   }
   const info = h.hledam ? 'Hledám…' : h.chyba ? h.chyba : h.vysledky && !h.vysledky.length ? 'Nic se nenašlo.' : '';
   if (info) jidEl('div', 'rohlik-info', el, info);
+  rohlikDalsiEl(el, h, () => jidSurHledej(blok, true));
 }
-async function jidSurHledej(blok) {
+async function jidSurHledej(blok, dalsi = false) {
   const nazev = blok.dataset.nazev;
-  if (jidSurHledani[nazev] && (jidSurHledani[nazev].vysledky || jidSurHledani[nazev].hledam)) return;
-  const h = jidSurHledani[nazev] = { hledam: true };
+  const h = jidSurHledani[nazev] || (jidSurHledani[nazev] = {});
+  if (h.hledam || (h.vysledky && !dalsi)) return;
+  const hotovo = rohlikHledejStranku(nazev, h);
   jidSurRohlik(blok);
-  try { h.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(nazev))).vyrobky || []; }
-  catch (err) { h.chyba = err.message; h.vysledky = []; }
-  h.hledam = false;
+  await hotovo;
   if (blok.isConnected) jidSurRohlik(blok);
 }
 function jidSurZavri() { if (jidSurOknoEl) jidSurOknoEl.hidden = true; jidSurIndex = null; }
@@ -15086,14 +15116,13 @@ async function pruvodceOtevri(jenPolozka = null, { vse = false } = {}) {
   pruvodceHledej();
 }
 
-async function pruvodceHledej() {
+async function pruvodceHledej(dalsi = false) {
   if (!pruvodce || pruvodce.souhrn) return;
   const r = pruvodce.radky[pruvodce.kroky[pruvodce.krok]];
-  if (!r || r.vysledky || r.hledam) return;
-  r.hledam = true; r.chyba = ''; renderPruvodce();
-  try { r.vysledky = (await rohlikGet('/api/rohlik/hledat?q=' + encodeURIComponent(r.polozka.nazev || r.polozka.text))).vyrobky || []; }
-  catch (err) { r.chyba = err.message; r.vysledky = []; }
-  r.hledam = false;
+  if (!r || r.hledam || (r.vysledky && !dalsi)) return;
+  const hotovo = rohlikHledejStranku(r.polozka.nazev || r.polozka.text, r);
+  renderPruvodce();
+  await hotovo;
   renderPruvodce();
 }
 
@@ -15191,13 +15220,14 @@ function renderPruvodce() {
     const vyrobky = jidEl('div', 'rohlik-vyrobky', pruvodceObsahEl);
     const ukazane = new Set();
     if (r.vyber) { vyrobky.appendChild(rohlikVyrobekEl(r.vyber, true, null)); ukazane.add(String(r.vyber.productId)); }
-    for (const v of (r.vysledky || []).slice(0, 6)) {
+    for (const v of r.vysledky || []) {
       if (ukazane.has(String(v.productId))) continue;
       if (r.polozka.vyprodano && v.nazev === r.polozka.vyprodano) continue;
       vyrobky.appendChild(rohlikVyrobekEl(v, false, () => { r.vyber = v; r.preskocit = false; const n = pruvodceSpocitej(r.polozka, v); if (n) { r.mnozstvi = n; r.rucne = false; } pruvodceUloz(r); renderPruvodce(); }));
     }
     const info = r.hledam ? 'Hledám…' : r.chyba ? r.chyba : (r.vysledky && !r.vysledky.length ? 'Nic se nenašlo — přeskoč, nebo dokup jinde.' : '');
     if (info) jidEl('div', 'rohlik-info', pruvodceObsahEl, info);
+    rohlikDalsiEl(pruvodceObsahEl, r, () => pruvodceHledej(true));
     const akce = jidEl('div', 'pruvodce-akce', pruvodceObsahEl);
     const presk = jidEl('button', 'rohlik-preskocit pruvodce-preskocit', akce, 'Přeskočit (koupím jinde)');
     presk.type = 'button';
@@ -15232,7 +15262,7 @@ function renderPruvodce() {
       r.preskocit = false;
       let k = pruvodce.kroky.indexOf(i);
       if (k < 0) { pruvodce.kroky.push(i); k = pruvodce.kroky.length - 1; }
-      r.vysledky = null;
+      r.vysledky = null; r.od = 0; r.dalsi = false;
       pruvodceJdi(k);
     });
     const nek = jidEl('button', 'pruvodce-zmenit', radek, 'nekupovat');
@@ -15266,7 +15296,7 @@ async function pruvodcePridej() {
     pruvodce.radky.forEach(r => {
       if (!vyprodaneId.has(r.polozka.id)) return;
       r.polozka = (nakupData || []).find(x => x.id === r.polozka.id) || { ...r.polozka, vyprodano: (nedostupne.find(x => x.nakupId === r.polozka.id) || {}).nazev };
-      r.vyber = null; r.vysledky = null; r.znamy = false;
+      r.vyber = null; r.vysledky = null; r.od = 0; r.dalsi = false; r.znamy = false;
     });
     pruvodce.kroky = pruvodce.radky.map((r, i) => (vyprodaneId.has(r.polozka.id) ? i : -1)).filter(i => i >= 0);
     pruvodce.krok = 0; pruvodce.souhrn = !pruvodce.kroky.length;
