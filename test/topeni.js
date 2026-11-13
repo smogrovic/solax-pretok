@@ -17,7 +17,7 @@ function build(now) {
   const realNow = Date.now;
   const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'SENSOR_SILENCE_LOG_MS', 'DATA_MAX_AGE_MS',
     CODE + '\n; return { topeniOdhadW, topeniVzorek, topeniUzavri, topeniSouhrn, topeniPayload, topeniObnov,'
-         + ' topeniNavod, topeniTcDny, topeniZaklad, topeniAnalyza, topeniExportZaznamy, topeniModel, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
+         + ' topeniNavod, topeniTcDny, topeniZaklad, topeniAnalyza, topeniExportZaznamy, topeniModel, TOPENI_ZMENY, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
   )(state, (u, d) => zpravy.push({ u, d }), { get: (c, f) => { routy[c] = f; } }, () => true,
     6 * HOD, 10 * 60000);
   return { state, zpravy, api, routy, realNow };
@@ -64,6 +64,7 @@ nadpis('2) Hodina se sbírá a uzavře');
   check('  Aquarea topí', z.aqTopi, 1);
   check('  čidla TČ: venku, topná voda, posun (jen používaná zóna)', [z.tcVenkuC, z.tcVodaC, z.tcPosun].join(' '), '3.4 34 -1');
   check('  nádrž: průměr, cíl a nárůst za hodinu (ohřev vody)', [z.tcNadrzC, z.tcNadrzCil, z.tcNadrzNarust].join(' '), '46.5 50 2.9');
+  check('  nádrž: nejnižší a nejvyšší teplota v hodině', z.tcNadrzMin + ' ' + z.tcNadrzMax, '45 47.9');
   check('  výroba FVE (oslunění)', z.fveW, 1200);
   check('  sauna bez dat chybí', 'saunaW' in z, false);
   const hodPraha = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Prague', hour: '2-digit', hour12: false }).format(T0)) % 24;
@@ -196,7 +197,11 @@ nadpis('4) Napojení');
   check('do appky jde souhrn', /topeni: topeniPayload\(\),/.test(SRC), true);
   check('ukládá se do vlastního klíče', /storeTopeniUloz\(\)/.test(SRC) && /:topeni`/.test(SRC), true);
   check('po startu se načte', /await storeTopeniNacti\(\)/.test(SRC), true);
-  check('návod jde v odpovědi první', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), analyza: topeniAnalyza\(\), tcDny: topeniTcDny\(\), zaznamy: topeniExportZaznamy\(\)/.test(SRC), true);
+  check('návod jde v odpovědi první, se změnami nastavení', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), analyza: topeniAnalyza\(\), zmenyNastaveni: TOPENI_ZMENY, tcDny: topeniTcDny\(\), zaznamy: topeniExportZaznamy\(\)/.test(SRC), true);
+  const { api: az } = build();
+  check('změny nastavení: datum a popis, seřazené', az.TOPENI_ZMENY.length > 0 && az.TOPENI_ZMENY.every((x, i, a) => /^\d{4}-\d{2}-\d{2}$/.test(x.d) && x.co.length > 10 && (!i || a[i - 1].d <= x.d)), true);
+  check('  návod o nich ví', az.topeniNavod().some(t => t.startsWith('ZMĚNY NASTAVENÍ') && t.includes('zmenyNastaveni')), true);
+  check('  návod popisuje min/max nádrže', az.topeniNavod().some(t => t.includes('tcNadrzMin / tcNadrzMax')), true);
   check('celá řada jen přes zámek', /app\.get\('\/api\/topeni', \(req, res\) => \{\s*if \(!requireAuth/.test(SRC), true);
 }
 

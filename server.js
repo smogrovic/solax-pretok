@@ -1407,6 +1407,9 @@ function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
       if (typeof aq.tankTemp === 'number' && Number.isFinite(aq.tankTemp)) {
         if (b.nadrzPrvni === undefined) b.nadrzPrvni = aq.tankTemp;
         b.nadrzPosledni = aq.tankTemp;
+        // Nejnižší a nejvyšší teplota v hodině: odběr (sprcha) a dohřev jsou vidět i uvnitř hodiny
+        b.nadrzMin = b.nadrzMin === undefined ? aq.tankTemp : Math.min(b.nadrzMin, aq.tankTemp);
+        b.nadrzMax = b.nadrzMax === undefined ? aq.tankTemp : Math.max(b.nadrzMax, aq.tankTemp);
       }
     }
   }
@@ -1444,6 +1447,7 @@ function topeniUzavri() {
     if (v !== null) z[k] = zaokr(v, 10);
   }
   if (typeof b.nadrzPrvni === 'number') z.tcNadrzNarust = zaokr(b.nadrzPosledni - b.nadrzPrvni, 10);
+  if (typeof b.nadrzMin === 'number') { z.tcNadrzMin = zaokr(b.nadrzMin, 10); z.tcNadrzMax = zaokr(b.nadrzMax, 10); }
   const fve = prumer('fveW');
   if (fve !== null) z.fveW = Math.round(fve);
   z.topeniW = topeniOdhadW(z.dumW, z.bojleryW, z.saunaW, pragueTime(b.t).hour, topeniZaklad(t.zaznamy).w);
@@ -1571,14 +1575,24 @@ function topeniNavod() {
   return [
     'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
     'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
-    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). tcNadrzC / tcNadrzCil = teplota a cíl nádrže na teplou vodu; tcNadrzNarust = o kolik °C nádrž za hodinu stoupla (kladné = čerpadlo ohřívalo vodu, ne dům — takové hodiny z topení vyřaď nebo oprav). fveW = výroba FVE (míra oslunění: sluneční teplo okny snižuje potřebu topení, hlavně odpoledne). tcTopeniWh / tcVodaWh = elektřina TČ v té hodině podle Comfort Cloudu, pokud ji cloud po hodinách dává (přesné, má přednost před odhadem). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). tcNadrzC / tcNadrzCil = teplota a cíl nádrže na teplou vodu; tcNadrzNarust = o kolik °C nádrž za hodinu stoupla (kladné = čerpadlo ohřívalo vodu, ne dům — takové hodiny z topení vyřaď nebo oprav). tcNadrzMin / tcNadrzMax = nejnižší a nejvyšší teplota nádrže v hodině (velký pokles = odběr teplé vody, např. sprcha; nárůst = dohřev). fveW = výroba FVE (míra oslunění: sluneční teplo okny snižuje potřebu topení, hlavně odpoledne). tcTopeniWh / tcVodaWh = elektřina TČ v té hodině podle Comfort Cloudu, pokud ji cloud po hodinách dává (přesné, má přednost před odhadem). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
     'SKUTEČNÁ SPOTŘEBA TČ: `tcDny` = elektřina tepelného čerpadla po dnech podle Comfort Cloudu (měřené jednotkou), i zpětně za dobu, kdy hodinové záznamy ještě nebyly: topeniKwh = topení, vodaKwh = ohřev teplé vody, venkuC = průměrná venkovní teplota dne z čidla TČ. Kde jsou, mají přednost před odhadem topeniW. Dnešek je neúplný.',
     'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Stálý odběr je ' + (m.zakladZDat ? 'spočítaný z dat (10. percentil spotřeby v ' + m.zakladHodin + ' nočních hodinách 0–5 h bez bojlerů a sauny)' : 'pevný odhad (zatím málo nočních hodin k výpočtu)') + '. Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0 — hrubý odhad. topeniW v exportu je přepočítaný s aktuálním stálým odběrem. Klidně ho přepočítej ze surových dumW/bojleryW/saunaW.',
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
     'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
-    'POZOR: topeniW je ELEKTRICKÝ příkon, ne teplo. Teplo = příkon × COP (u vzduch-voda zhruba 2–5, klesá s venkovní teplotou), takže skutečná tepelná ztráta domu je vyšší. Odečet stálého odběru a vaření je hrubý, denní součty jsou spolehlivější než hodiny.'
+    'POZOR: topeniW je ELEKTRICKÝ příkon, ne teplo. Teplo = příkon × COP (u vzduch-voda zhruba 2–5, klesá s venkovní teplotou), takže skutečná tepelná ztráta domu je vyšší. Odečet stálého odběru a vaření je hrubý, denní součty jsou spolehlivější než hodiny.',
+    'ZMĚNY NASTAVENÍ: `zmenyNastaveni` = co se kdy na topení a ohřevu vody změnilo. Porovnej období před změnou a po ní (spotřeba na denostupeň, teploty v pokojích, kdy a na kolik se ohřívá nádrž) a řekni, jestli změna pomohla.'
   ];
 }
+
+// Ruční záznam změn nastavení topení a ohřevu vody — jde s exportem, ať další analýza
+// ví, od kdy se co změnilo. Nové změny připsat na konec.
+const TOPENI_ZMENY = [
+  { d: '2026-11-13', co: 'Ekvitermní křivka na ovladači Aquarea snížena z 33 °C (při −15 °C venku) / 23 °C (při +15 °C) na 31 / 22 °C. Při 0 °C venku teď zhruba 26,5 °C vody místo 28 °C.' },
+  { d: '2026-11-13', co: 'Zrušen denní posun křivky +1 v poledne (11–17 h). Posun křivky v programu SMGhome je celý den 0.' },
+  { d: '2026-11-13', co: 'Přivřené okruhy ložnice (asi o třetinu) a obýváku (méně) na rozdělovači. Cíl: obývák ~22 °C, ložnice 19–20 °C, dětské pokoje beze změny.' },
+  { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' }
+];
 
 function topeniPayload() {
   return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel(), analyza: topeniAnalyza() };
@@ -3641,7 +3655,7 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
   // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
-  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
+  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), zmenyNastaveni: TOPENI_ZMENY, tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
