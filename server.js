@@ -1384,7 +1384,16 @@ function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
   pridej('bojleryW', bojleryW);
   pridej('saunaW', saunaW);
   const w = state.weather;
-  if (w && cerstve(w.fetchedAt, 2 * 3600000)) pridej('venkuC', w.tempC);
+  if (w && cerstve(w.fetchedAt, 2 * 3600000)) {
+    pridej('venkuC', w.tempC);
+    // Oblačnost (0–100 %) a jestli je slunce nad obzorem: slunce okny ohřívá pokoje
+    pridej('oblacnost', w.oblacnost);
+    if (Number.isFinite(w.sunriseMs) && Number.isFinite(w.sunsetMs)) {
+      // Časy východu a západu jsou z dneška — porovná se čas dne, ne datum
+      const den = 86400000, cas = x => ((x % den) + den) % den;
+      pridej('slunceNahore', cas(now) >= cas(w.sunriseMs) && cas(now) < cas(w.sunsetMs) ? 1 : 0);
+    }
+  }
   for (const k of TOPENI_POKOJE) {
     const c = state.sensors[k];
     // Čidlo hlásí jen při změně — ticho do šesti hodin je pořád platná teplota
@@ -1428,6 +1437,10 @@ function topeniUzavri() {
   const z = { t: b.t, n: b.c.dumW };
   const venku = prumer('venkuC');
   if (venku !== null) z.venkuC = zaokr(venku, 10);
+  const mraky = prumer('oblacnost');
+  if (mraky !== null) z.oblacnost = Math.round(mraky);
+  const slunce = prumer('slunceNahore');
+  if (slunce !== null) z.slunceNahore = zaokr(slunce, 100);
   const pokoje = {};
   for (const k of TOPENI_POKOJE) {
     const v = prumer('p_' + k);
@@ -1575,7 +1588,7 @@ function topeniNavod() {
   return [
     'NÁVOD K ANALÝZE (pro AI): Hodinové průměry z rodinného domu s FVE. Topí tepelné čerpadlo (Panasonic Aquarea), přitopit můžou i klimatizace. Cíl: zjistit, kolik dům topí v závislosti na venkovní teplotě (tepelná ztráta domu).',
     'ČAS: `t` = začátek hodiny v ms od 1970 (UTC). Hodiny dne a dny počítej v časovém pásmu Europe/Prague. `n` = počet vzorků v hodině (~1 za 2 min; hodina s méně než ' + TOPENI_MIN_VZORKU + ' vzorky se nezapisuje).',
-    'POLE: venkuC = venkovní teplota (OpenWeatherMap). pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). tcNadrzC / tcNadrzCil = teplota a cíl nádrže na teplou vodu; tcNadrzNarust = o kolik °C nádrž za hodinu stoupla (kladné = čerpadlo ohřívalo vodu, ne dům — takové hodiny z topení vyřaď nebo oprav). tcNadrzMin / tcNadrzMax = nejnižší a nejvyšší teplota nádrže v hodině (velký pokles = odběr teplé vody, např. sprcha; nárůst = dohřev). fveW = výroba FVE (míra oslunění: sluneční teplo okny snižuje potřebu topení, hlavně odpoledne). tcTopeniWh / tcVodaWh = elektřina TČ v té hodině podle Comfort Cloudu, pokud ji cloud po hodinách dává (přesné, má přednost před odhadem). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
+    'POLE: venkuC = venkovní teplota (OpenWeatherMap). oblacnost = průměrná oblačnost v hodině (0 = jasno, 100 = zataženo; OpenWeatherMap). slunceNahore = podíl hodiny (0–1), kdy je slunce nad obzorem. Jasno + slunce nahoře = sluneční teplo okny ohřívá pokoje a dům potřebuje méně topit; skutečné oslunění na místě ukazuje i fveW. pokoje.{obyvak,loznice,elenka,miky} = nástěnná čidla v pokojích (°C). dumW = elektrická spotřeba domu bez nabíjení auta a bez bazénu (W, ze střídače). bojleryW = oba bojlery na vodu (měřené). saunaW = sauna (měřená). klimaTopi = průměrný počet klimatizací v režimu topení. aqTopi = podíl hodiny (0–1), kdy Aquarea hlásí zapnutou topnou zónu. tcVenkuC = venkovní teplota z čidla tepelného čerpadla. tcVodaC = teplota topné vody v zóně (°C). tcPosun = posun ekvitermní křivky zóny (−5…+5; nebo cílová teplota vody, pokud je zóna nastavená napevno). tcNadrzC / tcNadrzCil = teplota a cíl nádrže na teplou vodu; tcNadrzNarust = o kolik °C nádrž za hodinu stoupla (kladné = čerpadlo ohřívalo vodu, ne dům — takové hodiny z topení vyřaď nebo oprav). tcNadrzMin / tcNadrzMax = nejnižší a nejvyšší teplota nádrže v hodině (velký pokles = odběr teplé vody, např. sprcha; nárůst = dohřev). fveW = výroba FVE (míra oslunění: sluneční teplo okny snižuje potřebu topení, hlavně odpoledne). tcTopeniWh / tcVodaWh = elektřina TČ v té hodině podle Comfort Cloudu, pokud ji cloud po hodinách dává (přesné, má přednost před odhadem). topeniW = odhad elektrického příkonu topení. Chybějící pole znamená „neměřeno“, ne nulu.',
     'SKUTEČNÁ SPOTŘEBA TČ: `tcDny` = elektřina tepelného čerpadla po dnech podle Comfort Cloudu (měřené jednotkou), i zpětně za dobu, kdy hodinové záznamy ještě nebyly: topeniKwh = topení, vodaKwh = ohřev teplé vody, venkuC = průměrná venkovní teplota dne z čidla TČ. Kde jsou, mají přednost před odhadem topeniW. Dnešek je neúplný.',
     'ODHAD TOPENÍ: topeniW = max(0, dumW − bojleryW − saunaW − ' + m.zakladW + ' W stálý odběr domu − vaření). Stálý odběr je ' + (m.zakladZDat ? 'spočítaný z dat (10. percentil spotřeby v ' + m.zakladHodin + ' nočních hodinách 0–5 h bez bojlerů a sauny)' : 'pevný odhad (zatím málo nočních hodin k výpočtu)') + '. Vaření = ' + m.vareniW + ' W v hodinách ' + m.vareniOd + ':00–' + m.vareniDo + ':00 (Praha), jinak 0 — hrubý odhad. topeniW v exportu je přepočítaný s aktuálním stálým odběrem. Klidně ho přepočítej ze surových dumW/bojleryW/saunaW.',
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',

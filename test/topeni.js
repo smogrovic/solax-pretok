@@ -40,7 +40,8 @@ nadpis('2) Hodina se sbírá a uzavře');
 {
   const { state, zpravy, api } = build();
   const T0 = Math.floor(Date.now() / HOD) * HOD - 3 * HOD;   // před třemi hodinami
-  state.weather = { tempC: 4, fetchedAt: new Date().toISOString() };
+  // Slunce nad obzorem od 15. do 24. vzorku (v rámci jedné hodiny, bez přechodu přes půlnoc)
+  state.weather = { tempC: 4, oblacnost: 75, sunriseMs: T0 + 15 * 120000, sunsetMs: T0 + 25 * 120000, fetchedAt: new Date().toISOString() };
   state.sensors = { obyvak: { tempC: 21.5, reportedAt: Date.now() }, miky: { tempC: 20.5, reportedAt: Date.now() },
     loznice: { tempC: 30, reportedAt: T0 - 7 * HOD } };
   state.aircon = { fetchedAt: new Date().toISOString(),
@@ -59,6 +60,7 @@ nadpis('2) Hodina se sbírá a uzavře');
   check('  průměr spotřeby', z.dumW, 2500);
   check('  počet vzorků', z.n, 30);
   check('  venku', z.venkuC, 4);
+  check('  oblačnost a podíl hodiny se sluncem nad obzorem', z.oblacnost + ' ' + z.slunceNahore, '75 0.33');
   check('  pokoje jen s čerstvým čidlem', JSON.stringify(z.pokoje), '{"obyvak":21.5,"miky":20.5}');
   check('  topící klimatizace', z.klimaTopi, 1);
   check('  Aquarea topí', z.aqTopi, 1);
