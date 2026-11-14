@@ -1715,6 +1715,9 @@
   .topeni-analyza div + div{margin-top:3px;}
   .topeni-analyza .lepsi{color:#1f8a4c;font-weight:700;}
   .topeni-analyza .horsi{color:#c0392b;font-weight:700;}
+  .topeni-porovnani{margin-top:10px;padding-top:8px;border-top:1px solid rgba(44,62,80,0.1);}
+  .topeni-porovnani-h{font-weight:700;margin-bottom:2px;}
+  .topeni-porovnani-pozn{font-size:12px;color:var(--grey-text);}
   .jid-tyden{font-size:12px;color:var(--grey-text);text-align:center;margin-top:2px;}
   .jid-pozor{font-size:12px;color:#8a5a00;background:rgba(255,210,63,0.18);border-radius:10px;padding:6px 10px 6px 24px;margin:8px 0 0;}
   .jid-pozor li{margin:1px 0;}
@@ -10539,7 +10542,8 @@ function renderTopeniAnalyza() {
   if (!el) return;
   const a = topeniData && topeniData.analyza;
   el.textContent = '';
-  el.hidden = !a || (typeof a.kwhNaK !== 'number' && !a.tyden);
+  const voda = ((topeniData && topeniData.voda) || []).filter(v => typeof v.v0630 === 'number' || typeof v.minRano === 'number');
+  el.hidden = !a || (typeof a.kwhNaK !== 'number' && !a.tyden && !a.cop && !(a.porovnani || []).length && !voda.length);
   if (el.hidden) return;
   const zdroj = a.zdroj === 'tc' ? 'změřeno TČ' : 'odhad ze spotřeby domu';
   if (typeof a.kwhNaK === 'number') {
@@ -10556,6 +10560,56 @@ function renderTopeniAnalyza() {
       r.append(' (minulý ' + tpCislo(m, 2) + ', ');
       jidEl('span', zmena <= 0 ? 'lepsi' : 'horsi', r, (zmena > 0 ? '+' : '') + zmena + ' %');
       r.append(')');
+    }
+  }
+  // Odhad účinnosti čerpadla z teplot (ne měření)
+  if (a.cop) {
+    jidEl('div', '', el, `Účinnost čerpadla (odhad z teplot): z 1 kWh elektřiny asi ${tpCislo(a.cop.cop)} kWh tepla`
+      + ` při vodě ${tpCislo(a.cop.vodaC)} °C a ${tpCislo(a.cop.venkuC)} °C venku`
+      + (typeof a.cop.usporaNaStupenPct === 'number' ? ` · topná voda o 1 °C nižší = asi −${tpCislo(a.cop.usporaNaStupenPct)} % elektřiny` : ''));
+  }
+  // Týden před změnou nastavení a týden po ní
+  for (const p of a.porovnani || []) {
+    const blok = jidEl('div', 'topeni-porovnani', el);
+    const kdy = new Date(p.d + 'T12:00:00');
+    jidEl('div', 'topeni-porovnani-h', blok, `Změna nastavení ${kdy.getDate()}. ${kdy.getMonth() + 1}. (${p.zmeny.length}×) — týden před a po`);
+    if (!p.pred || !p.po) {
+      jidEl('div', '', blok, !p.po ? 'Po změně zatím není celý den dat — porovnání se ukáže zítra.' : 'Před změnou nejsou data k porovnání.');
+      continue;
+    }
+    const zmena = (pred, po, popis, text, lepsiDolu = true) => {
+      if (typeof pred !== 'number' || typeof po !== 'number') return;
+      const r = jidEl('div', '', blok, popis + ' ' + text(pred) + ' → ' + text(po) + ' ');
+      const rozdil = po - pred;
+      if (Math.abs(rozdil) >= 0.005) {
+        jidEl('span', (rozdil < 0) === lepsiDolu ? 'lepsi' : 'horsi', r,
+          '(' + (pred > 0 ? (rozdil > 0 ? '+' : '') + Math.round(rozdil / pred * 100) + ' %' : (rozdil > 0 ? '+' : '') + tpCislo(rozdil)) + ')');
+      }
+    };
+    zmena(p.pred.kwhNaDenostupen, p.po.kwhNaDenostupen, 'Topení', v => tpCislo(v, 2) + ' kWh/denostupeň');
+    jidEl('div', 'topeni-porovnani-pozn', blok, `${tpCislo(p.pred.kwhDen)} kWh/den při ${tpCislo(p.pred.venkuC)} °C venku → ${tpCislo(p.po.kwhDen)} kWh/den při ${tpCislo(p.po.venkuC)} °C`
+      + (p.hotovo ? '' : ` · po změně zatím ${p.po.dnu} ${p.po.dnu === 1 ? 'den' : p.po.dnu < 5 ? 'dny' : 'dní'} ze 7`));
+    zmena(p.pred.vodaKwhDen, p.po.vodaKwhDen, 'Teplá voda', v => tpCislo(v) + ' kWh/den');
+    const jmena = { obyvak: 'obývák', loznice: 'ložnice', elenka: 'Elenka', miky: 'Miky' };
+    const pokoje = Object.keys(jmena).filter(k => p.pred.pokoje && p.po.pokoje && typeof p.pred.pokoje[k] === 'number' && typeof p.po.pokoje[k] === 'number');
+    if (pokoje.length) {
+      jidEl('div', '', blok, 'Pokoje: ' + pokoje.map(k => `${jmena[k]} ${tpCislo(p.pred.pokoje[k])} → ${tpCislo(p.po.pokoje[k])} °C`).join(' · '));
+    }
+  }
+  // Teplá voda ráno: kolik měla nádrž v 6:30, kam spadla po sprše a kolik před poledním ohřevem
+  if (voda.length) {
+    const blok = jidEl('div', 'topeni-porovnani', el);
+    jidEl('div', 'topeni-porovnani-h', blok, 'Teplá voda ráno (nádrž TČ)');
+    const st = v => (typeof v === 'number' ? tpCislo(v) + ' °C' : '–');
+    for (const v of [...voda].reverse()) {
+      const kdy = new Date(v.d + 'T12:00:00');
+      jidEl('div', '', blok, `${kdy.getDate()}. ${kdy.getMonth() + 1}.: v 6:30 ${st(v.v0630)} · po sprše nejníž ${st(v.minRano)} · před 11:00 ${st(v.pred11)}`
+        + (typeof v.v1800 === 'number' ? ` · v 18:00 ${st(v.v1800)}` : ''));
+    }
+    const rana = voda.filter(v => typeof v.v0630 === 'number');
+    if (rana.length >= 3) {
+      const teple = rana.filter(v => v.v0630 >= 43).length;
+      jidEl('div', 'topeni-porovnani-pozn', blok, `V 6:30 bylo aspoň 43 °C ${teple}× z ${rana.length} dní.`);
     }
   }
 }

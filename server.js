@@ -1419,12 +1419,74 @@ function topeniVzorek({ dumW, bojleryW, saunaW }, now = Date.now()) {
         // Nejnižší a nejvyšší teplota v hodině: odběr (sprcha) a dohřev jsou vidět i uvnitř hodiny
         b.nadrzMin = b.nadrzMin === undefined ? aq.tankTemp : Math.min(b.nadrzMin, aq.tankTemp);
         b.nadrzMax = b.nadrzMax === undefined ? aq.tankTemp : Math.max(b.nadrzMax, aq.tankTemp);
+        topeniVodaVzorek(aq.tankTemp, now);
       }
     }
   }
   // Výroba FVE jako míra oslunění (sluneční teplo okny)
   const sx = state.solax;
   if (sx && cerstve(sx.fetchedAt) && typeof sx.fveKw === 'number') pridej('fveW', Math.max(0, sx.fveKw * 1000));
+}
+
+// ---- Teplá voda po dnech ----
+// Jeden záznam na den: kolik měla nádrž v 6:30 (ranní sprcha), kam nejníž spadla
+// do 11:00, kolik měla těsně před poledním ohřevem a v 18:00. Podle toho jde poznat,
+// jestli program vody stačí, nebo se dá ubrat.
+const TOPENI_VODA_DNU = 90;
+const TOPENI_VODA_RANO = 6 * 60 + 30, TOPENI_VODA_POLEDNE = 11 * 60, TOPENI_VODA_VECER = 18 * 60;
+function topeniVodaVzorek(tempC, now = Date.now()) {
+  if (typeof tempC !== 'number' || !Number.isFinite(tempC)) return;
+  const t = state.topeni;
+  if (!Array.isArray(t.voda)) t.voda = [];
+  const d = pragueDateString(now), pt = pragueTime(now), m = pt.hour * 60 + pt.minute;
+  let r = t.voda.find(x => x.d === d);
+  if (!r) {
+    r = { d };
+    t.voda.push(r);
+    t.voda.sort((a, c) => a.d.localeCompare(c.d));
+    if (t.voda.length > TOPENI_VODA_DNU) t.voda.splice(0, t.voda.length - TOPENI_VODA_DNU);
+  }
+  const v = Math.round(tempC * 10) / 10;
+  if (m >= TOPENI_VODA_RANO && m < TOPENI_VODA_RANO + 30 && r.v0630 === undefined) r.v0630 = v;
+  if (m >= TOPENI_VODA_RANO && m < TOPENI_VODA_POLEDNE) {
+    r.minRano = r.minRano === undefined ? v : Math.min(r.minRano, v);
+    r.pred11 = v;   // poslední vzorek před 11:00
+  }
+  if (m >= TOPENI_VODA_VECER && m < TOPENI_VODA_VECER + 30 && r.v1800 === undefined) r.v1800 = v;
+  r.max = r.max === undefined ? v : Math.max(r.max, v);
+}
+const TOPENI_VODA_POLE = ['v0630', 'minRano', 'pred11', 'v1800', 'max'];
+function topeniVodaDny(pocet = TOPENI_VODA_DNU) {
+  return (state.topeni.voda || []).slice(-pocet).map(r => ({ ...r }));
+}
+
+// ---- Odhad účinnosti čerpadla (COP) ----
+// Teplo, které čerpadlo dodá, se neměří (chybí průtok). COP se proto odhaduje z teplot:
+// polovina Carnotovy účinnosti mezi kondenzací (topná voda + 3 K) a výparem (venku − 6 K).
+// Pro vzduch-voda to sedí na ±15 % a hlavně správně ukazuje, co udělá každý stupeň vody.
+function topeniCop(vodaC, venkuC) {
+  if (![vodaC, venkuC].every(x => typeof x === 'number' && Number.isFinite(x))) return null;
+  const tk = vodaC + 3 + 273.15, tv = venkuC - 6 + 273.15;
+  if (tk - tv < 8) return null;
+  return Math.round(Math.min(7, Math.max(1.5, 0.5 * tk / (tk - tv))) * 100) / 100;
+}
+// Hodina, kdy čerpadlo topilo do domu (ne do nádrže) a známe teploty
+function topeniCopHodiny(z) {
+  if (!(z.aqTopi >= 0.5) || z.tcNadrzNarust > 3) return null;
+  return topeniCop(z.tcVodaC, typeof z.tcVenkuC === 'number' ? z.tcVenkuC : z.venkuC);
+}
+const TOPENI_COP_MIN_HODIN = 12;
+function topeniCopSouhrn(now = Date.now(), dnu = 7) {
+  const od = now - dnu * 86400000;
+  const h = state.topeni.zaznamy.filter(z => z.t >= od).map(z => ({ z, cop: topeniCopHodiny(z) })).filter(x => x.cop !== null);
+  if (h.length < TOPENI_COP_MIN_HODIN) return null;
+  const prumer = f => h.reduce((s, x) => s + f(x), 0) / h.length;
+  const voda = prumer(x => x.z.tcVodaC), venku = prumer(x => (typeof x.z.tcVenkuC === 'number' ? x.z.tcVenkuC : x.z.venkuC));
+  const cop = topeniCop(voda, venku), nizsi = topeniCop(voda - 1, venku);
+  if (cop === null) return null;
+  return { cop, hodin: h.length, vodaC: Math.round(voda * 10) / 10, venkuC: Math.round(venku * 10) / 10,
+    // o kolik procent méně elektřiny na stejné teplo, když je topná voda o 1 °C nižší
+    usporaNaStupenPct: nizsi ? Math.round((1 - cop / nizsi) * 1000) / 10 : null };
 }
 
 function topeniUzavri() {
@@ -1520,6 +1582,8 @@ function topeniExportZaznamy() {
   const hod = new Map(((state.tcSpotreba && state.tcSpotreba.hodiny) || []).map(x => [x.k, x]));
   return state.topeni.zaznamy.map(z => {
     const o = { ...z, topeniW: topeniHodinaW(z, zakladW) };
+    const cop = topeniCopHodiny(z);
+    if (cop !== null) o.copOdhad = cop;
     const tc = hod.get(pragueDateString(z.t) + ' ' + String(pragueTime(z.t).hour).padStart(2, '0'));
     if (tc && typeof tc.topeni === 'number') o.tcTopeniWh = Math.round(tc.topeni * 1000);
     if (tc && typeof tc.voda === 'number') o.tcVodaWh = Math.round(tc.voda * 1000);
@@ -1578,6 +1642,10 @@ function topeniAnalyza(now = Date.now()) {
   };
   out.tyden = tyden(7, 0);
   out.minuly = tyden(14, 7);
+  const cop = topeniCopSouhrn(now);
+  if (cop) out.cop = cop;
+  const porovnani = topeniPorovnani(now);
+  if (porovnani.length) out.porovnani = porovnani;
   return out;
 }
 
@@ -1594,7 +1662,9 @@ function topeniNavod() {
     'CYKLOVÁNÍ: Tepelné čerpadlo cykluje (běží/stojí, odtávání, ohřev teplé vody v nádrži), takže jednotlivé hodiny skáčou a samy o sobě nic neříkají. Pracuj s denními součty (kWh/den) nebo klouzavým průměrem přes 6–24 h a páruj je s průměrnou venkovní teplotou za stejné období. Ohřev teplé vody čerpadlem je schovaný v dumW a oddělit nejde — ber ho jako přibližně stálou denní složku (v regresi skončí v posunu).',
     'POSTUP: 1) Seskup podle dne (Praha), vyřaď dny s méně než ~20 hodinami dat. 2) Denní energie topení = Σ topeniW / 1000 (kWh). 3) Porovnej s denostupni Σ max(0, 20 − venkuC)/24, případně s rozdílem průměru pokojů a venku. 4) Lineární regrese: sklon = elektrická energie na stupeň a den → W/K; bod zlomu = venkovní teplota, pod kterou se začíná topit. 5) Uveď rozptyl a odlehlé dny (sauna, hosté, nepřítomnost, chybějící data).',
     'POZOR: topeniW je ELEKTRICKÝ příkon, ne teplo. Teplo = příkon × COP (u vzduch-voda zhruba 2–5, klesá s venkovní teplotou), takže skutečná tepelná ztráta domu je vyšší. Odečet stálého odběru a vaření je hrubý, denní součty jsou spolehlivější než hodiny.',
-    'ZMĚNY NASTAVENÍ: `zmenyNastaveni` = co se kdy na topení a ohřevu vody změnilo. Porovnej období před změnou a po ní (spotřeba na denostupeň, teploty v pokojích, kdy a na kolik se ohřívá nádrž) a řekni, jestli změna pomohla.'
+    'ZMĚNY NASTAVENÍ: `zmenyNastaveni` = co se kdy na topení a ohřevu vody změnilo. Porovnej období před změnou a po ní (spotřeba na denostupeň, teploty v pokojích, kdy a na kolik se ohřívá nádrž) a řekni, jestli změna pomohla. `analyza.porovnani` už má pro každý den změny spočítaný týden před a týden po (kWh/den, kWh na denostupeň, voda kWh/den, průměr pokojů); `hotovo` = týden po je celý.',
+    'TEPLÁ VODA PO DNECH: `vodaDny` = teplota nádrže v klíčových časech dne (Praha): v0630 = v 6:30 před ranní sprchou, minRano = nejnižší mezi 6:30 a 11:00 (po sprše), pred11 = těsně před poledním ohřevem, v1800 = v 18:00, max = nejvyšší za den. Posuď, jestli je ráno dost teplé vody a jestli jde cíl nebo čas ohřevu ubrat.',
+    'ÚČINNOST (COP): copOdhad u hodiny a `analyza.cop` jsou ODHAD z teplot (polovina Carnotovy účinnosti mezi topnou vodou + 3 K a venkovní teplotou − 6 K), ne měření — teplo dodané čerpadlem se neměří. Hodí se k porovnání (co udělá nižší topná voda), ne jako přesné číslo. usporaNaStupenPct = o kolik % méně elektřiny na stejné teplo při topné vodě o 1 °C nižší.'
   ];
 }
 
@@ -1607,8 +1677,54 @@ const TOPENI_ZMENY = [
   { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' }
 ];
 
+// Porovnání týdne před změnou nastavení a týdne po ní (den změny se nepočítá, dnešek
+// taky ne — je neúplný). Spotřeba je změřená čerpadlem, přepočtená na denostupně,
+// ať se dá porovnat i různě studené počasí.
+const TOPENI_POROVNANI_DNU = 7;
+function topeniPorovnani(now = Date.now()) {
+  const dnes = pragueDateString(now);
+  const tc = new Map(((state.tcSpotreba && state.tcSpotreba.dny) || []).map(x => [x.d, x]));
+  const pokojeDne = new Map();   // den → { pokoj: [hodinové průměry] }
+  for (const z of state.topeni.zaznamy) {
+    const d = pragueDateString(z.t);
+    let r = pokojeDne.get(d);
+    if (!r) { r = {}; pokojeDne.set(d, r); }
+    for (const [k, v] of Object.entries(z.pokoje || {})) (r[k] = r[k] || []).push(v);
+  }
+  const denPlus = (d, n) => pragueDateString(Date.parse(d + 'T12:00:00Z') + n * 86400000);
+  const prumer = a => a.reduce((s, x) => s + x, 0) / a.length;
+  const zaokr = (v, d) => Math.round(v * d) / d;
+  const obdobi = (od, doo) => {   // dny od (včetně) do (bez)
+    const dny = [];
+    for (let d = od; d < doo; d = denPlus(d, 1)) dny.push(d);
+    const mer = dny.map(d => tc.get(d)).filter(x => x && typeof x.topeni === 'number' && typeof x.venku === 'number');
+    if (!mer.length) return null;
+    const kwh = mer.reduce((s, x) => s + x.topeni, 0);
+    const ds = mer.reduce((s, x) => s + Math.max(0, TOPENI_DENOSTUPNE_ZAKLAD - x.venku), 0);
+    const out = { dnu: mer.length, kwhDen: zaokr(kwh / mer.length, 10), venkuC: zaokr(prumer(mer.map(x => x.venku)), 10),
+      kwhNaDenostupen: ds > 0 ? zaokr(kwh / ds, 100) : null };
+    const voda = mer.filter(x => typeof x.voda === 'number');
+    if (voda.length) out.vodaKwhDen = zaokr(prumer(voda.map(x => x.voda)), 10);
+    const pokoje = {};
+    for (const k of TOPENI_POKOJE) {
+      const denni = dny.map(d => pokojeDne.get(d)).filter(r => r && r[k] && r[k].length >= 12).map(r => prumer(r[k]));
+      if (denni.length) pokoje[k] = zaokr(prumer(denni), 10);
+    }
+    if (Object.keys(pokoje).length) out.pokoje = pokoje;
+    return out;
+  };
+  const skupiny = new Map();
+  for (const z of TOPENI_ZMENY) skupiny.set(z.d, [...(skupiny.get(z.d) || []), z.co]);
+  return [...skupiny.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([d, zmeny]) => {
+    const poDo = [denPlus(d, TOPENI_POROVNANI_DNU + 1), dnes].sort()[0];
+    const po = obdobi(denPlus(d, 1), poDo);
+    return { d, zmeny, pred: obdobi(denPlus(d, -TOPENI_POROVNANI_DNU), d), po, hotovo: !!po && po.dnu >= TOPENI_POROVNANI_DNU };
+  });
+}
+
 function topeniPayload() {
-  return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel(), analyza: topeniAnalyza() };
+  return { dny: topeniSouhrn(), hodin: state.topeni.zaznamy.length, model: topeniModel(), analyza: topeniAnalyza(),
+    voda: topeniVodaDny(7) };
 }
 
 // Sloučení ze zálohy podle hodiny. Nic se neubírá; stejná hodina ve dvou verzích →
@@ -1625,6 +1741,20 @@ function topeniObnov(telo, now = Date.now()) {
         || !Number.isFinite(r.n) || r.n <= 0) continue;
     const mam = podle.get(r.t);
     if (!mam || r.n > mam.n) { podle.set(r.t, r); zmena = true; }
+  }
+  // Teplá voda po dnech: chybějící den se převezme, u známého se doplní jen to, co chybí
+  if (Array.isArray(telo.voda)) {
+    if (!Array.isArray(t.voda)) t.voda = [];
+    const odDne = pragueDateString(now - TOPENI_VODA_DNU * 86400000), dnes = pragueDateString(now);
+    for (const r of telo.voda) {
+      if (!r || typeof r.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r.d) || r.d < odDne || r.d > dnes) continue;
+      let mam = t.voda.find(x => x.d === r.d);
+      if (!mam) { mam = { d: r.d }; t.voda.push(mam); zmena = true; }
+      for (const k of TOPENI_VODA_POLE) {
+        if (mam[k] === undefined && typeof r[k] === 'number' && Number.isFinite(r[k]) && r[k] > 0 && r[k] < 100) { mam[k] = r[k]; zmena = true; }
+      }
+    }
+    t.voda.sort((a, c) => a.d.localeCompare(c.d));
   }
   if (zmena) {
     t.zaznamy = [...podle.values()].sort((a, b) => a.t - b.t);
@@ -3668,7 +3798,7 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
   // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
-  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), zmenyNastaveni: TOPENI_ZMENY, tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
+  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), zmenyNastaveni: TOPENI_ZMENY, vodaDny: topeniVodaDny(), tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
@@ -13685,7 +13815,7 @@ async function storeTopeniUloz() {
   await storeFetch(`/set/${encodeURIComponent(STORE_TOPENI_KEY)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: storeEncode({ at: Date.now(), zaznamy: z })
+    body: storeEncode({ at: Date.now(), zaznamy: z, voda: state.topeni.voda || [] })
   });
   storeTopeniLast = otisk;
   return true;

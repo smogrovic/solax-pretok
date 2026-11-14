@@ -58,6 +58,29 @@ setTimeout(async () => {
   check('  týden proti minulému na denostupeň', anR[1], 'Týden: 31,5 kWh/den při 2,1 °C venku = 1,98 kWh/denostupeň (minulý 2,20, −10 %)'.replace('−', '-'));
   check('  zlepšení zeleně', an.querySelector('.lepsi') && an.querySelector('.lepsi').textContent, '-10 %');
   check('  poznámka: stálý odběr z dat', /310 W \\(spočítaný z nočních hodin\\)/.test(document.getElementById('topeniPozn').textContent), true);
+  // Účinnost, porovnání před/po a ranní voda
+  topeniData.analyza.cop = { cop: 4.11, hodin: 120, vodaC: 28, venkuC: 0.5, usporaNaStupenPct: 2.4 };
+  topeniData.analyza.porovnani = [{ d: '2026-11-13', zmeny: ['a', 'b', 'c', 'd'], hotovo: false,
+    pred: { dnu: 7, kwhDen: 20, venkuC: 2, kwhNaDenostupen: 1.25, vodaKwhDen: 3, pokoje: { obyvak: 23, loznice: 22.4 } },
+    po: { dnu: 3, kwhDen: 14, venkuC: 4, kwhNaDenostupen: 1, vodaKwhDen: 2.5, pokoje: { obyvak: 22.1, loznice: 20 } } }];
+  topeniData.voda = [{ d: '2026-11-14', v0630: 47.2, minRano: 31.4, pred11: 34.1, v1800: 46, max: 50.3 },
+    { d: '2026-11-15', v0630: 41, minRano: 30 }, { d: '2026-11-16', v0630: 46.5, minRano: 33, pred11: 35 }, { d: '2026-11-17', max: 40 }];
+  renderTopeni();
+  const rk = [...an.querySelectorAll('div')].map(e => e.textContent);
+  check('účinnost jako odhad', rk.find(t => t.startsWith('Účinnost')),
+    'Účinnost čerpadla (odhad z teplot): z 1 kWh elektřiny asi 4,1 kWh tepla při vodě 28,0 °C a 0,5 °C venku · topná voda o 1 °C nižší = asi −2,4 % elektřiny');
+  check('porovnání: nadpis', rk.includes('Změna nastavení 13. 11. (4×) — týden před a po'), true);
+  check('  topení na denostupeň se změnou', rk.includes('Topení 1,25 kWh/denostupeň → 1,00 kWh/denostupeň (-20 %)'), true);
+  check('  kWh/den, počasí a kolik dní zatím', rk.includes('20,0 kWh/den při 2,0 °C venku → 14,0 kWh/den při 4,0 °C · po změně zatím 3 dny ze 7'), true);
+  check('  voda a pokoje', rk.includes('Teplá voda 3,0 kWh/den → 2,5 kWh/den (-17 %)') + ' ' + rk.includes('Pokoje: obývák 23,0 → 22,1 °C · ložnice 22,4 → 20,0 °C'), 'true true');
+  check('  úspora zeleně', [...an.querySelectorAll('.topeni-porovnani .lepsi')].map(e => e.textContent).join(' '), '(-20 %) (-17 %)');
+  check('ranní voda: nejnovější nahoře, den bez rána se neukáže', rk.filter(t => /^\\d+\\. 11\\.:/.test(t)).join(' | '),
+    '16. 11.: v 6:30 46,5 °C · po sprše nejníž 33,0 °C · před 11:00 35,0 °C | 15. 11.: v 6:30 41,0 °C · po sprše nejníž 30,0 °C · před 11:00 – | 14. 11.: v 6:30 47,2 °C · po sprše nejníž 31,4 °C · před 11:00 34,1 °C · v 18:00 46,0 °C');
+  check('  souhrn rána', rk.includes('V 6:30 bylo aspoň 43 °C 2× z 3 dní.'), true);
+  topeniData.analyza.porovnani[0].po = null;
+  renderTopeni();
+  check('den po změně: počkat na data', [...an.querySelectorAll('div')].some(e => e.textContent === 'Po změně zatím není celý den dat — porovnání se ukáže zítra.'), true);
+  check('nic nepřetéká', an.scrollWidth <= an.clientWidth + 1, true);
 
   // Kopírování: celá řada se stahuje až teď, se zámkem
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: async t => { schranka = t; } }, configurable: true });

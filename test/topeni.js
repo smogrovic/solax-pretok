@@ -17,7 +17,7 @@ function build(now) {
   const realNow = Date.now;
   const api = new Function('state', 'broadcast', 'app', 'requireAuth', 'SENSOR_SILENCE_LOG_MS', 'DATA_MAX_AGE_MS',
     CODE + '\n; return { topeniOdhadW, topeniVzorek, topeniUzavri, topeniSouhrn, topeniPayload, topeniObnov,'
-         + ' topeniNavod, topeniTcDny, topeniZaklad, topeniAnalyza, topeniExportZaznamy, topeniModel, TOPENI_ZMENY, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
+         + ' topeniNavod, topeniTcDny, topeniZaklad, topeniAnalyza, topeniExportZaznamy, topeniModel, TOPENI_ZMENY, topeniVodaVzorek, topeniVodaDny, topeniCop, topeniCopSouhrn, topeniPorovnani, TOPENI_ZAKLAD_W, TOPENI_VARENI_W, TOPENI_MIN_VZORKU, TOPENI_DNU };'
   )(state, (u, d) => zpravy.push({ u, d }), { get: (c, f) => { routy[c] = f; } }, () => true,
     6 * HOD, 10 * 60000);
   return { state, zpravy, api, routy, realNow };
@@ -192,6 +192,76 @@ nadpis('4) Návod pro AI');
   check('časové pásmo', /Europe\/Prague/.test(t), true);
 }
 
+nadpis('5) Teplá voda po dnech');
+{
+  const { state, api } = build();
+  // Praha = UTC+1 (listopad)
+  const P = (d, h, m = 0) => Date.UTC(2026, 10, d, h - 1, m);
+  const v = (d, h, m, t) => api.topeniVodaVzorek(t, P(d, h, m));
+  v(16, 4, 0, 39.5); v(16, 6, 28, 47.6); v(16, 6, 31, 47.2); v(16, 6, 40, 46.9);
+  v(16, 7, 10, 31.4); v(16, 9, 0, 33); v(16, 10, 58, 34.1); v(16, 11, 2, 36); v(16, 13, 0, 50.3);
+  v(16, 18, 5, 46); v(16, 18, 20, 44); v(16, 23, 0, 41);
+  api.topeniVodaVzorek(null, P(16, 23, 30));
+  check('den: 6:30, nejníž do 11:00, před 11:00, 18:00, maximum', JSON.stringify(state.topeni.voda),
+    JSON.stringify([{ d: '2026-11-16', max: 50.3, v0630: 47.2, minRano: 31.4, pred11: 34.1, v1800: 46 }]));
+  v(17, 8, 0, 40);
+  check('bez vzorku v 6:30–7:00 hodnota 6:30 chybí', ('v0630' in state.topeni.voda[1]) + ' ' + state.topeni.voda[1].minRano, 'false 40');
+  check('do appky posledních 7 dní', api.topeniPayload().voda.map(x => x.d).join(), '2026-11-16,2026-11-17');
+  for (let i = 0; i < 100; i++) api.topeniVodaVzorek(45, P(18, 12) + i * 86400000);
+  check('drží se nejvýš 90 dní', state.topeni.voda.length, 90);
+  // Obnova: chybějící den se převezme, u známého se doplní jen chybějící pole
+  const { state: s2, api: a2 } = build();
+  const ted = P(17, 12);
+  a2.topeniVodaVzorek(40, P(17, 8));
+  a2.topeniObnov({ zaznamy: [], voda: [{ d: '2026-11-16', v0630: 47.2, minRano: 31.4 }, { d: '2026-11-17', v0630: 46, minRano: 20 },
+    { d: 'nesmysl', v0630: 1 }, { d: '2026-11-18', v0630: 44 }, { d: '2026-11-15', v0630: 'x', max: 500 }] }, ted);
+  check('obnova vody', JSON.stringify(s2.topeni.voda), JSON.stringify([{ d: '2026-11-15' }, { d: '2026-11-16', v0630: 47.2, minRano: 31.4 },
+    { d: '2026-11-17', minRano: 40, pred11: 40, max: 40, v0630: 46 }]));
+}
+
+nadpis('6) Odhad účinnosti (COP)');
+{
+  const { state, api } = build();
+  check('voda 28 °C při 0 °C venku', api.topeniCop(28, 0), 4.11);
+  check('teplejší voda = horší účinnost', api.topeniCop(42, 0) < api.topeniCop(28, 0), true);
+  check('mráz = horší účinnost', api.topeniCop(28, -10) < api.topeniCop(28, 0), true);
+  check('meze 1,5–7 a bez teplot nic', [api.topeniCop(60, -30) >= 1.5, api.topeniCop(25, 12) <= 7, api.topeniCop(null, 0), api.topeniCop(20, 25)].join(' '), 'true true  ');
+  const now = Date.UTC(2026, 10, 20, 12);
+  const h = (i, o) => ({ t: now - (i + 1) * HOD, n: 30, aqTopi: 1, tcVodaC: 28, tcVenkuC: 0, ...o });
+  state.topeni.zaznamy = Array.from({ length: 11 }, (_, i) => h(i));
+  check('málo hodin → bez souhrnu', api.topeniCopSouhrn(now), 'null');
+  state.topeni.zaznamy.push(h(11), h(12, { aqTopi: 0 }), h(13, { tcNadrzNarust: 12, tcVodaC: 42 }), h(14, { tcVodaC: undefined }), { ...h(15), t: now - 9 * 86400000 });
+  const c = api.topeniCopSouhrn(now);
+  check('souhrn jen z hodin, kdy topilo do domu', JSON.stringify(c), JSON.stringify({ cop: 4.11, hodin: 12, vodaC: 28, venkuC: 0, usporaNaStupenPct: 2.4 }));
+  const e = api.topeniExportZaznamy();
+  check('export: odhad u hodiny, ohřev nádrže a netopení bez něj', [e[0].copOdhad, 'copOdhad' in e[12], 'copOdhad' in e[13]].join(' '), '4.11 false false');
+  check('rozbor ho nese', api.topeniAnalyza(now).cop.cop, 4.11);
+}
+
+nadpis('7) Porovnání před změnou a po ní');
+{
+  const { state, api } = build();
+  const D = n => '2026-11-' + String(n).padStart(2, '0');
+  const dny = [];
+  // Před 13. 11.: 20 kWh při 2 °C; po: 14 kWh při 4 °C; voda 3 → 2,5 kWh
+  for (let d = 6; d <= 12; d++) dny.push({ d: D(d), topeni: 20, voda: 3, venku: 2 });
+  dny.push({ d: D(13), topeni: 99, voda: 9, venku: 0 });   // den změny se nepočítá
+  for (let d = 14; d <= 21; d++) dny.push({ d: D(d), topeni: 14, voda: 2.5, venku: 4 });
+  state.tcSpotreba = { dny };
+  // Pokoje: obývák 23 před, 22 po (hodinové záznamy, aspoň 12 za den)
+  for (let d = 6; d <= 21; d++) for (let hh = 0; hh < 14; hh++) {
+    state.topeni.zaznamy.push({ t: Date.UTC(2026, 10, d, hh + 2), n: 30, pokoje: { obyvak: d < 13 ? 23 : 22, loznice: d < 13 ? 22 : 20 } });
+  }
+  const p3 = api.topeniPorovnani(Date.UTC(2026, 10, 17, 12))[0];
+  check('po 3 dnech: zatím neúplné, dnešek se nepočítá', p3.po.dnu + ' ' + p3.hotovo, '3 false');
+  const p = api.topeniPorovnani(Date.UTC(2026, 10, 25, 12));
+  check('jedna skupina pro den změny, se všemi změnami', p.length + ' ' + p[0].d + ' ' + p[0].zmeny.length, '1 2026-11-13 ' + api.TOPENI_ZMENY.filter(x => x.d === '2026-11-13').length);
+  check('před: 7 dní', JSON.stringify(p[0].pred), JSON.stringify({ dnu: 7, kwhDen: 20, venkuC: 2, kwhNaDenostupen: 1.25, vodaKwhDen: 3, pokoje: { obyvak: 23, loznice: 22 } }));
+  check('po: 7 dní (14.–20.), hotovo', JSON.stringify(p[0].po) + ' ' + p[0].hotovo, JSON.stringify({ dnu: 7, kwhDen: 14, venkuC: 4, kwhNaDenostupen: 1, vodaKwhDen: 2.5, pokoje: { obyvak: 22, loznice: 20 } }) + ' true');
+  check('den po změně: ještě nic k porovnání', api.topeniPorovnani(Date.UTC(2026, 10, 14, 12))[0].po, 'null');
+  check('rozbor ho nese', api.topeniAnalyza(Date.UTC(2026, 10, 25, 12)).porovnani[0].po.kwhNaDenostupen, 1);
+}
+
 nadpis('4) Napojení');
 {
   const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
@@ -199,7 +269,8 @@ nadpis('4) Napojení');
   check('do appky jde souhrn', /topeni: topeniPayload\(\),/.test(SRC), true);
   check('ukládá se do vlastního klíče', /storeTopeniUloz\(\)/.test(SRC) && /:topeni`/.test(SRC), true);
   check('po startu se načte', /await storeTopeniNacti\(\)/.test(SRC), true);
-  check('návod jde v odpovědi první, se změnami nastavení', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), analyza: topeniAnalyza\(\), zmenyNastaveni: TOPENI_ZMENY, tcDny: topeniTcDny\(\), zaznamy: topeniExportZaznamy\(\)/.test(SRC), true);
+  check('návod jde v odpovědi první, se změnami nastavení a vodou po dnech', /res\.json\(\{ navod: topeniNavod\(\), model: topeniModel\(\), analyza: topeniAnalyza\(\), zmenyNastaveni: TOPENI_ZMENY, vodaDny: topeniVodaDny\(\), tcDny: topeniTcDny\(\), zaznamy: topeniExportZaznamy\(\)/.test(SRC), true);
+  check('voda po dnech se ukládá s topením', /storeEncode\(\{ at: Date\.now\(\), zaznamy: z, voda: state\.topeni\.voda \|\| \[\] \}\)/.test(SRC), true);
   const { api: az } = build();
   check('změny nastavení: datum a popis, seřazené', az.TOPENI_ZMENY.length > 0 && az.TOPENI_ZMENY.every((x, i, a) => /^\d{4}-\d{2}-\d{2}$/.test(x.d) && x.co.length > 10 && (!i || a[i - 1].d <= x.d)), true);
   check('  návod o nich ví', az.topeniNavod().some(t => t.startsWith('ZMĚNY NASTAVENÍ') && t.includes('zmenyNastaveni')), true);
