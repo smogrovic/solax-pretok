@@ -1473,6 +1473,8 @@
   .aqp-volba input[type=checkbox]{width:18px;height:18px;flex:0 0 auto;}
   .aqp-predpoved{margin:6px 0 10px;}
   .aqp-navic{font-size:13px;color:#b8650f;margin:4px 0 6px;}
+  .aqp-varovani{font-size:13px;color:#c0392b;background:rgba(192,57,43,0.08);border-radius:10px;padding:8px 10px;margin:6px 0;}
+  .aqp-zahodit{border:none;background:none;padding:0;font:inherit;font-weight:700;color:#1b6fb8;text-decoration:underline;cursor:pointer;}
   .aqp-usek.slunce{background-image:linear-gradient(135deg, rgba(255,214,0,0.45), rgba(255,214,0,0) 60%);}
   .aqp-radek .timer-time{flex:1 1 0;min-width:0;}
   .aqp-radek .timer-select{flex:1 1 0;min-width:0;margin:0;}
@@ -8379,6 +8381,7 @@ const aqProgramChybaEl = document.getElementById('aqProgramChyba');
 let aqProgramData = null;        // ze serveru
 let aqProgramStav = null;        // co program právě dělá navíc: { korekce, duvod, vodaCeka }
 let aqProgramKoncept = null;     // rozpracovaná úprava (null = není)
+let aqProgramKonceptZ = '';      // z jakého programu na serveru koncept vznikl (JSON)
 let aqProgramEditor = false;
 const AQ_POSUNY = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
 // Teploty vody v programu: 30–50 po stupni, pak 52–65. Čerpadlo může dovolit méně
@@ -8494,9 +8497,20 @@ function renderAqProgram() {
     renderAqProgram();
   });
   if (!aqProgramEditor) return;
-  if (!aqProgramKoncept) aqProgramKoncept = JSON.parse(JSON.stringify({ topeni: p.topeni, voda: p.voda, predpoved: !!p.predpoved }));
+  // Koncept se bere z programu na serveru. Když se program na serveru mezitím změní
+  // (obnova ze zálohy po nasazení, uložení z jiného zařízení), neupravený koncept se
+  // vezme znovu; upravený zůstane, ale appka na změnu upozorní.
+  const zaklad = JSON.stringify({ topeni: p.topeni, voda: p.voda, predpoved: !!p.predpoved });
+  if (aqProgramKoncept && aqProgramKonceptZ !== zaklad && JSON.stringify(aqProgramKoncept) === aqProgramKonceptZ) aqProgramKoncept = null;
+  if (!aqProgramKoncept) { aqProgramKoncept = JSON.parse(zaklad); aqProgramKonceptZ = zaklad; }
   const k = aqProgramKoncept;
   const ed = el('div', 'aqp-editor', aqProgramObsahEl);
+  if (aqProgramKonceptZ !== zaklad) {
+    const var_ = el('div', 'aqp-varovani', ed, 'Program se mezitím změnil (jiné zařízení nebo obnova ze zálohy). Uložením ho přepíšeš. ');
+    const zahodit = el('button', 'aqp-zahodit', var_, 'Načíst aktuální');
+    zahodit.type = 'button';
+    zahodit.addEventListener('click', () => { aqProgramKoncept = null; renderAqProgram(); });
+  }
   // Volba celého programu: posun topení podle předpovědi
   const pl = el('label', 'aqp-volba aqp-predpoved', ed);
   const pc = el('input', '', pl);

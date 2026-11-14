@@ -297,6 +297,20 @@ setTimeout(async () => {
   pbox.querySelector('.aqp-ulozit').click();
   await pockej(80);
   check('  uloží slunce i předpověď', JSON.stringify([poslano[0].predpoved, poslano[0].voda.map(r => r.slunce || '-')]), '[true,["07:30","-","-","-"]]');
+  // Program se na serveru změní, zatímco je editor otevřený (obnova ze zálohy po nasazení)
+  const VYCH = { zapnuto: true, topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }], voda: [{ od: '00:00', teplota: 43 }] };
+  const MUJ = { zapnuto: true, topeni: [{ od: '00:00', posun: 0 }], voda: [{ od: '04:30', teplota: 48 }, { od: '16:00', teplota: 40 }] };
+  aqProgramData = JSON.parse(JSON.stringify(VYCH)); aqProgramKoncept = null; aqProgramEditor = true;
+  renderAqProgram();
+  aqProgramData = JSON.parse(JSON.stringify(MUJ));
+  renderAqProgram();
+  check('neupravený editor vezme obnovený program', prRadky('voda').map(r => r.querySelector('input').value).join(',') + ' ' + !!pbox.querySelector('.aqp-varovani'), '04:30,16:00 false');
+  prRadky('voda')[0].querySelector('select').value = '50'; prRadky('voda')[0].querySelector('select').dispatchEvent(new Event('change'));
+  aqProgramData = JSON.parse(JSON.stringify(VYCH));
+  renderAqProgram();
+  check('  upravený zůstane, ale upozorní', prRadky('voda').map(r => r.querySelector('select').value).join(',') + ' ' + !!pbox.querySelector('.aqp-varovani'), '50,40 true');
+  pbox.querySelector('.aqp-zahodit').click();
+  check('  „Načíst aktuální" vezme program ze serveru', prRadky('voda').map(r => r.querySelector('select').value).join(',') + ' ' + !!pbox.querySelector('.aqp-varovani'), '43 false');
   check('nic nepřetéká', pbox.scrollWidth <= pbox.clientWidth + 1, true);
   Date.now = puvodniNow;
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
