@@ -22,7 +22,7 @@ function build(o = {}) {
     povely.push({ cesta, telo: JSON.parse(opts.body) }); if (o.chyba) throw new Error(o.chyba); return {}; });
   const api = new Function('app', 'requireAuth', 'broadcast', 'addLog', 'pccQueued', 'pccApiFetch', 'pccDevCache', 'state', 'awayActive',
     CODE + '\n; return { pccAquareaFromGroup, aquareaRezim, aquareaTeloRezimu, pccAquareaDetail, aquareaProgramOver, aquareaProgramUsek,'
-      + ' aquareaProgramKroky, runAquareaProgram, aquareaOdchodPlan, aquareaNavratPlan, aquareaKrokyProvest, aquareaProgramVychozi };')(
+      + ' aquareaProgramKroky, runAquareaProgram, aquareaOdchodPlan, aquareaNavratPlan, aquareaKrokyProvest, aquareaProgramVychozi, aquareaPredpovedKorekce };')(
     { post: (c, h) => { routy[c] = h; } },
     (req, res) => { if (!o.zamceno) return true; res.status(401).json({ error: 'zamčeno' }); return false; },
     (u, d) => zpravy.push(u), t => logy.push(t), f => f(), pccApiFetch, pccDevCache, state, () => !!o.pryc);
@@ -153,6 +153,43 @@ function build(o = {}) {
     const ur = t => { const u = h.api.aquareaProgramUsek(R, t); return u.topeni.posun + '/' + u.voda.teplota; };
     check('bez 00:00: 0:30, 4:30, 7:00, 11:00, 16:00, 23:00', [ur(P(0, 30)), ur(P(4, 30)), ur(P(7)), ur(P(11)), ur(P(16)), ur(P(23))].join(' '),
       '-2/40 -2/48 0/null 0/50 0/40 -2/40');
+  }
+  {
+    // Voda podle slunce a posun podle předpovědi
+    const h = build({ state: { aircon: { aquarea: [] } } });
+    const P = (hh, mm = 0, den = 16) => Date.UTC(2026, 10, den, hh - 1, mm);   // Praha UTC+1
+    const over = p => h.api.aquareaProgramOver(p);
+    const V = { zapnuto: true, topeni: [{ od: '00:00', posun: 0 }],
+      voda: [{ od: '04:30', teplota: 48 }, { od: '07:00', teplota: null }, { od: '11:00', teplota: 50, slunce: '14:00' }, { od: '16:00', teplota: 40 }] };
+    const pr = over(V).program;
+    check('slunce se uloží k úseku, předpověď vypnutá', JSON.stringify(pr.voda[2]) + ' ' + pr.predpoved, '{"od":"11:00","teplota":50,"slunce":"14:00"} false');
+    check('  „nejpozději" musí být po začátku a s teplotou', [over({ ...V, voda: [{ od: '11:00', teplota: 50, slunce: '10:00' }] }).chyba,
+      over({ ...V, voda: [{ od: '11:00', teplota: null, slunce: '14:00' }] }).chyba, over({ ...V, voda: [{ od: '11:00', teplota: 50, slunce: '13:10' }] }).chyba].every(Boolean), true);
+    const u = (t, fveW) => { const x = h.api.aquareaProgramUsek(pr, t, { fveW, korekce: { korekce: 0 } }); return x.voda.teplota + (x.stav.vodaCeka ? ' čeká' : '') + ' | ' + x.klic.split(' ').slice(1).join(' '); };
+    check('11:00 bez slunce: platí předchozí úsek, čeká', u(P(11), 300), 'null čeká | 00:00 11:00 cekam');
+    check('  12:10 svítí (2 kW): ohřev 50 °C', u(P(12, 10), 2000), '50 | 00:00 11:00');
+    check('  pak zatáhne: jednou začatý platí dál', u(P(12, 40), 100), '50 | 00:00 11:00');
+    check('  další den znovu čeká', u(P(11, 30, 17), 0), 'null čeká | 00:00 11:00 cekam');
+    check('  nejpozději ve 14:00 začne i bez slunce', u(P(14, 0, 17), 0), '50 | 00:00 11:00');
+    check('  bez FVE dat čeká na čas', u(P(11, 30, 18), null), 'null čeká | 00:00 11:00 cekam');
+    check('  jiné úseky beze změny', u(P(5, 0, 18), 0) + ' / ' + u(P(17, 0, 18), 0), '48 | 00:00 04:30 / 40 | 00:00 16:00');
+    // Předpověď: posun topení
+    const pp = { ...pr, predpoved: true, topeni: [{ od: '00:00', posun: 0 }, { od: '22:00', posun: -5 }] };
+    const t = (cas, korekce) => { const x = h.api.aquareaProgramUsek(pp, cas, { fveW: 0, korekce }); return x.topeni.posun + ' ' + x.stav.korekce + ' ' + x.stav.duvod + ' ' + /k-?\d/.test(x.klic); };
+    check('předpověď: jasno −1, ochlazení +1, meze ±5', [t(P(10), { korekce: -1, duvod: 'jasno' }), t(P(23), { korekce: -1, duvod: 'jasno' }), t(P(3), { korekce: 1, duvod: 'ochlazeni' }), t(P(16), { korekce: 0, duvod: null })].join(' | '),
+      '-1 -1 jasno true | -5 -1 jasno true | 1 1 ochlazeni true | 0 0 null false');
+    check('  vypnutá předpověď nic nemění', h.api.aquareaProgramUsek(pr, P(10), { fveW: 0, korekce: { korekce: -1, duvod: 'jasno' } }).topeni.posun, 0);
+    const slot = (den, hod, o) => ({ t: P(hod, 0, den), tempC: 5, oblacnost: 20, ...o });
+    const sloty = { '2026-11-16': { 9: slot(16, 9), 12: slot(16, 12), 15: slot(16, 15), 21: slot(16, 21, { tempC: 2 }) },
+      '2026-11-17': { 3: slot(17, 3, { tempC: -2 }), 6: slot(17, 6, { tempC: -1 }) } };
+    const k = (cas, s, w) => JSON.stringify(h.api.aquareaPredpovedKorekce(cas, s, w));
+    check('korekce: jasný den v 10:00 → −1', k(P(10), sloty, { tempC: 5, oblacnost: 10 }), '{"korekce":-1,"duvod":"jasno"}');
+    check('  zrovna zataženo → nic', k(P(10), sloty, { tempC: 5, oblacnost: 80 }), '{"korekce":0,"duvod":null}');
+    check('  oblačno v předpovědi → nic', k(P(10), { '2026-11-16': { 9: slot(16, 9, { oblacnost: 70 }), 12: slot(16, 12, { oblacnost: 50 }) } }, { tempC: 5, oblacnost: 10 }), '{"korekce":0,"duvod":null}');
+    check('  v 16:00 už ne', k(P(16), sloty, { tempC: 5, oblacnost: 10 }), '{"korekce":0,"duvod":null}');
+    check('  ve 20:00, do rána −2 °C (z 5 °C) → +1', k(P(20), sloty, { tempC: 5, oblacnost: 10 }), '{"korekce":1,"duvod":"ochlazeni"}');
+    check('  menší ochlazení → nic', k(P(20), sloty, { tempC: 2, oblacnost: 10 }), '{"korekce":0,"duvod":null}');
+    check('  bez předpovědi nic', k(P(10), {}, null), '{"korekce":0,"duvod":null}');
   }
   {
     // Kroky podle stavu čerpadla

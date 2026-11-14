@@ -821,6 +821,7 @@ function snapshot() {
     pocasiDnes: state.pocasiDnes || null,
     pocasiPoloha: { lat: WEATHER_LAT, lon: WEATHER_LON },
     aquareaProgram: state.aquareaProgram,
+    aquareaProgramStav: state.aquareaProgramStav || null,
     zkratky: zkratkyPayload(),
     jidelnicek: state.jidelnicek,
     runtime: runtimePayload(),
@@ -7789,18 +7790,85 @@ function aquareaProgramOver(p) {
   if (t.chyba) return t;
   const v = seznam(p.voda, r => (r.teplota === null ? null : Number.isInteger(r.teplota) && r.teplota >= AQ_VODA_MIN && r.teplota <= AQ_VODA_MAX ? r.teplota : undefined), 'Voda');
   if (v.chyba) return v;
-  return { program: { zapnuto: p.zapnuto === true,
-    topeni: t.out.map(r => ({ od: r.od, posun: r.v })), voda: v.out.map(r => ({ od: r.od, teplota: r.v })) } };
+  // Úsek vody „podle slunce": čeká na výrobu FVE, nejpozději do zadaného času
+  const slunce = {};
+  for (const r of p.voda) {
+    if (!r || r.slunce === undefined || r.slunce === null) continue;
+    if (!/^([01]\d|2[0-3]):(00|15|30|45)$/.test(String(r.slunce)) || r.teplota === null || String(r.slunce) <= String(r.od)) {
+      return { chyba: `Voda: „podle slunce" v ${r.od} potřebuje teplotu a čas „nejpozději" po začátku úseku.` };
+    }
+    slunce[r.od] = r.slunce;
+  }
+  return { program: { zapnuto: p.zapnuto === true, predpoved: p.predpoved === true,
+    topeni: t.out.map(r => ({ od: r.od, posun: r.v })),
+    voda: v.out.map(r => ({ od: r.od, teplota: r.v, ...(slunce[r.od] ? { slunce: slunce[r.od] } : {}) })) } };
 }
 
-// Aktuální úsek obou seznamů (pražský čas) → { topeni, voda, klic }
-function aquareaProgramUsek(program, now = Date.now()) {
+// ---- Ohřev vody podle slunce a posun topení podle předpovědi ----
+// Úsek vody se `slunce: 'HH:MM'` nezačne hned: do té doby platí předchozí úsek a čeká
+// se, až FVE vyrábí aspoň AQ_SLUNCE_W (nádrž se ohřeje z vlastní elektřiny a za
+// tepla). Nejpozději v zadaný čas začne tak jako tak. Jednou začatý platí do konce.
+const AQ_SLUNCE_W = 1500;
+// Předpověď: jasný den (9–15 h, oblačnost ≤ 30 %) → posun −1, slunce okny dům ohřeje;
+// večer a v noci, když má během 12 h přijít ochlazení aspoň o 5 °C → posun +1 předem
+// (podlahovka reaguje pomalu).
+const AQ_JASNO_OBLACNOST = 30, AQ_OCHLAZENI_C = 5;
+function aquareaPredpovedKorekce(now = Date.now(), sloty = pocasiSloty, w = state.weather) {
+  const h = pragueTime(now).hour;
+  const vse = Object.values(sloty || {}).flatMap(d => Object.values(d || {}));
+  if (h >= 9 && h < 15) {
+    const dnes = pragueDateString(now);
+    const den = vse.filter(s => pragueDateString(s.t) === dnes && [9, 12, 15].includes(pragueTime(s.t).hour) && typeof s.oblacnost === 'number');
+    const ted = w && typeof w.oblacnost === 'number' ? w.oblacnost : null;
+    if (den.length >= 2 && den.reduce((a, s) => a + s.oblacnost, 0) / den.length <= AQ_JASNO_OBLACNOST && (ted === null || ted <= 50)) {
+      return { korekce: -1, duvod: 'jasno' };
+    }
+  }
+  if ((h >= 18 || h < 6) && w && typeof w.tempC === 'number') {
+    const dalsi = vse.filter(s => s.t > now && s.t <= now + 12 * 3600000 && typeof s.tempC === 'number');
+    if (dalsi.length && Math.min(...dalsi.map(s => s.tempC)) <= w.tempC - AQ_OCHLAZENI_C) return { korekce: 1, duvod: 'ochlazeni' };
+  }
+  return { korekce: 0, duvod: null };
+}
+function aquareaFveW() {
+  const sx = state.solax;
+  return sx && cerstve(sx.fetchedAt) && typeof sx.fveKw === 'number' ? sx.fveKw * 1000 : null;
+}
+
+// Aktuální úsek obou seznamů (pražský čas) → { topeni, voda, klic, stav }
+// `kontext` jde v testech podvrhnout: { fveW, korekce }.
+function aquareaProgramUsek(program, now = Date.now(), kontext = null) {
   const pt = pragueTime(now);
   const ted = String(pt.hour).padStart(2, '0') + ':' + String(pt.minute).padStart(2, '0');
+  const den = pragueDateString(now);
   // Před prvním úsekem dne pokračuje poslední úsek z předchozího večera
-  const najdi = rady => rady.filter(r => r.od <= ted).pop() || rady[rady.length - 1];
-  const topeni = najdi(program.topeni), voda = najdi(program.voda);
-  return { topeni, voda, klic: `${pragueDateString(now)} ${topeni.od} ${voda.od}` };
+  const index = rady => { let i = -1; rady.forEach((r, j) => { if (r.od <= ted) i = j; }); return i < 0 ? rady.length - 1 : i; };
+  const ti = index(program.topeni), vi = index(program.voda);
+  const topeniUsek = program.topeni[ti];
+  let voda = program.voda[vi];
+  const stav = { korekce: 0, duvod: null, vodaCeka: null };
+  // Voda podle slunce: dokud nezačne, platí předchozí úsek
+  if (voda.slunce && vi >= 0) {
+    const zacal = state.aquareaSlunce && state.aquareaSlunce.den === den && state.aquareaSlunce.od === voda.od;
+    const fve = kontext && 'fveW' in kontext ? kontext.fveW : aquareaFveW();
+    if (zacal || (typeof fve === 'number' && fve >= AQ_SLUNCE_W) || ted >= voda.slunce || ted < voda.od) {
+      if (!zacal && ted >= voda.od) state.aquareaSlunce = { den, od: voda.od };
+    } else {
+      stav.vodaCeka = { od: voda.od, nejpozdeji: voda.slunce, teplota: voda.teplota };
+      voda = program.voda[(vi - 1 + program.voda.length) % program.voda.length];
+    }
+  }
+  // Posun topení podle předpovědi
+  let topeni = topeniUsek;
+  if (program.predpoved) {
+    const k = kontext && kontext.korekce ? kontext.korekce : aquareaPredpovedKorekce(now);
+    if (k.korekce) {
+      stav.korekce = k.korekce; stav.duvod = k.duvod;
+      topeni = { ...topeniUsek, posun: Math.max(-5, Math.min(5, topeniUsek.posun + k.korekce)) };
+    }
+  }
+  return { topeni, voda, stav,
+    klic: `${den} ${topeniUsek.od} ${program.voda[vi].od}${stav.vodaCeka ? ' cekam' : ''}${stav.korekce ? ' k' + stav.korekce : ''}` };
 }
 
 // Co udělat, aby čerpadlo odpovídalo úseku → seznam akcí pro aquareaProvest
@@ -7826,6 +7894,12 @@ async function runAquareaProgram(now = Date.now()) {
   const aq = aquareaPrvni();
   if (!program || !program.zapnuto || !aq || awayActive(now)) return;
   const usek = aquareaProgramUsek(program, now);
+  // Co program právě dělá navíc (čeká na slunce, posun podle předpovědi) — pro appku
+  const stavJson = JSON.stringify(usek.stav);
+  if (stavJson !== JSON.stringify(state.aquareaProgramStav || null)) {
+    state.aquareaProgramStav = usek.stav;
+    broadcast('aquareaProgramStav', { aquareaProgramStav: usek.stav });
+  }
   if (usek.klic === aquareaProgramKlic) return;
   aquareaProgramKlic = usek.klic;
   const kroky = aquareaProgramKroky(aq, usek);
@@ -7842,7 +7916,10 @@ async function runAquareaProgram(now = Date.now()) {
       break;
     }
   }
-  addLog(`Tepelné čerpadlo (program): ${hotovo.join(', ')}`);
+  const pozn = [];
+  if (usek.stav.korekce) pozn.push(usek.stav.duvod === 'jasno' ? 'jasno, posun −1' : 'přijde ochlazení, posun +1');
+  if (usek.stav.vodaCeka) pozn.push(`voda čeká na slunce, nejpozději ${usek.stav.vodaCeka.nejpozdeji}`);
+  addLog(`Tepelné čerpadlo (program): ${hotovo.join(', ')}${pozn.length ? ` (${pozn.join('; ')})` : ''}`);
 }
 
 app.post('/api/aquarea/program', async (req, res) => {

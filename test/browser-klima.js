@@ -251,7 +251,7 @@ setTimeout(async () => {
   poslano = [];
   pbox.querySelector('.aqp-ulozit').click();
   await pockej(80);
-  check('Uložit pošle celý program', JSON.stringify(poslano[0]), JSON.stringify({ zapnuto: true,
+  check('Uložit pošle celý program', JSON.stringify(poslano[0]), JSON.stringify({ zapnuto: true, predpoved: false,
     topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }, { od: '17:00', posun: 0 }, { od: '20:00', posun: -2 }],
     voda: [{ od: '00:00', teplota: 45 }, { od: '09:00', teplota: 43 }] }));
   check('  editor se zavře, pruh ukáže nový program', !!pbox.querySelector('.aqp-editor') + ' ' + pbox.querySelectorAll('.aqp-pruh')[0].children.length, 'false 4');
@@ -272,6 +272,31 @@ setTimeout(async () => {
   dnes.setHours(23, 0, 0, 0);
   renderAqProgram();
   check('  ve 23:00 „do" ukáže první úsek dalšího dne', pbox.querySelector('.aqp-ted').textContent, 'Teď: topení -2 °C (do 06:00), voda 40 °C (do 04:30)');
+  // Voda podle slunce a topení podle předpovědi
+  aqProgramStav = { korekce: -1, duvod: 'jasno', vodaCeka: { od: '11:00', nejpozdeji: '14:00', teplota: 50 } };
+  aqProgramData.voda[2].slunce = '14:00';
+  dnes.setHours(11, 30, 0, 0);
+  renderAqProgram();
+  check('stav: jasno a voda čeká', pbox.querySelector('.aqp-navic').textContent,
+    '☀️ jasný den: topení o 1 níž · ☀️ ohřev vody na 50 °C čeká na slunce, nejpozději 14:00');
+  const usekSlunce = pbox.querySelectorAll('.aqp-pruh')[1].querySelector('.aqp-usek.slunce');
+  check('  úsek podle slunce v pruhu', usekSlunce && usekSlunce.textContent + ' | ' + usekSlunce.title, '☀ 50 | 11:00–16:00: 50 (podle slunce, nejpozději 14:00)');
+  aqProgramStav = null; renderAqProgram();
+  check('  bez stavu nic navíc', !!pbox.querySelector('.aqp-navic'), false);
+  window.fetch = async (url, init) => { if (url === '/api/aquarea/program') poslano.push(JSON.parse(init.body).program);
+    return { ok: true, status: 200, json: async () => ({ ok: true, aquareaProgram: JSON.parse(init.body).program }) }; };
+  pbox.querySelector('.aqp-upravit').click();
+  const sl = od => pbox.querySelector('.aqp-slunce[data-od="' + od + '"]');
+  check('editor: u vody volba slunce, zaškrtnutá s časem', sl('11:00').querySelector('input[type=checkbox]').checked + ' ' + sl('11:00').querySelector('input[type=time]').value
+    + ' ' + sl('04:30').querySelector('input[type=checkbox]').checked + ' ' + sl('04:30').querySelector('input[type=time]').hidden, 'true 14:00 false true');
+  sl('04:30').querySelector('input[type=checkbox]').click();
+  check('  zaškrtnutí nabídne o 3 h později', sl('04:30').querySelector('input[type=time]').value, '07:30');
+  sl('11:00').querySelector('input[type=checkbox]').click();
+  pbox.querySelector('.aqp-predpoved input').click();
+  poslano = [];
+  pbox.querySelector('.aqp-ulozit').click();
+  await pockej(80);
+  check('  uloží slunce i předpověď', JSON.stringify([poslano[0].predpoved, poslano[0].voda.map(r => r.slunce || '-')]), '[true,["07:30","-","-","-"]]');
   check('nic nepřetéká', pbox.scrollWidth <= pbox.clientWidth + 1, true);
   Date.now = puvodniNow;
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }

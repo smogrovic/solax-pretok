@@ -1467,6 +1467,13 @@
   .aqp-sek{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--grey-text);margin:8px 0 4px;}
   .aqp-radek{display:flex;align-items:center;gap:6px;margin:4px 0;}
   .aqp-pozn{font-size:12px;color:var(--grey-text);margin:8px 0 4px;line-height:1.4;}
+  .aqp-volba{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--navy);margin:2px 0 6px;}
+  .aqp-slunce{padding-left:4px;font-size:12px;color:var(--grey-text);}
+  .aqp-slunce .timer-time{width:auto;}
+  .aqp-volba input[type=checkbox]{width:18px;height:18px;flex:0 0 auto;}
+  .aqp-predpoved{margin:6px 0 10px;}
+  .aqp-navic{font-size:13px;color:#b8650f;margin:4px 0 6px;}
+  .aqp-usek.slunce{background-image:linear-gradient(135deg, rgba(255,214,0,0.45), rgba(255,214,0,0) 60%);}
   .aqp-radek .timer-time{flex:1 1 0;min-width:0;}
   .aqp-radek .timer-select{flex:1 1 0;min-width:0;margin:0;}
   .aqp-smazat{flex:0 0 auto;width:30px;height:30px;border:none;border-radius:50%;background:rgba(44,62,80,0.08);color:var(--navy);font-weight:700;}
@@ -8370,6 +8377,7 @@ const aqProgramBoxEl = document.getElementById('aqProgramBox');
 const aqProgramObsahEl = document.getElementById('aqProgramObsah');
 const aqProgramChybaEl = document.getElementById('aqProgramChyba');
 let aqProgramData = null;        // ze serveru
+let aqProgramStav = null;        // co program právě dělá navíc: { korekce, duvod, vodaCeka }
 let aqProgramKoncept = null;     // rozpracovaná úprava (null = není)
 let aqProgramEditor = false;
 const AQ_POSUNY = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
@@ -8453,6 +8461,12 @@ function renderAqProgram() {
   // Teď
   const t = aqProgramUsek(p.topeni), v = aqProgramUsek(p.voda);
   el('div', 'aqp-ted', aqProgramObsahEl, `Teď: topení ${aqPosunText(t.r.posun)} (do ${t.do}), voda ${aqVodaText(v.r.teplota)} (do ${v.do})`);
+  // Co program dělá navíc: posun podle předpovědi, voda čeká na slunce
+  const s = p.zapnuto ? aqProgramStav : null;
+  const navic = [];
+  if (s && s.korekce) navic.push(s.duvod === 'jasno' ? '☀️ jasný den: topení o 1 níž' : '🥶 přijde ochlazení: topení o 1 výš předem');
+  if (s && s.vodaCeka) navic.push(`☀️ ohřev vody na ${s.vodaCeka.teplota} °C čeká na slunce, nejpozději ${s.vodaCeka.nejpozdeji}`);
+  if (navic.length) el('div', 'aqp-navic', aqProgramObsahEl, navic.join(' · '));
   // Pruh přes celý den, jako plán v Panasonicu
   const pruh = (nazev, rady, text, trida) => {
     const radek = el('div', 'aqp-pruh-radek', aqProgramObsahEl);
@@ -8463,7 +8477,8 @@ function renderAqProgram() {
       const hodnota = r.posun !== undefined ? r.posun : r.teplota;
       const u = el('div', 'aqp-usek ' + (hodnota === null ? 'vyp' : trida), pr, (doo - od) >= 120 ? text(hodnota) : '');
       u.style.flex = String(doo - od);
-      u.title = `${hm(od)}–${doo === 1440 ? '24:00' : hm(doo)}: ${text(hodnota)}`;
+      u.title = `${hm(od)}–${doo === 1440 ? '24:00' : hm(doo)}: ${text(hodnota)}` + (r.slunce ? ` (podle slunce, nejpozději ${r.slunce})` : '');
+      if (r.slunce) { u.classList.add('slunce'); if (u.textContent) u.textContent = '☀ ' + u.textContent; }
     }
   };
   pruh('Topení', p.topeni, v => aqPosunText(v).replace(' °C', ''), 'topeni');
@@ -8479,9 +8494,16 @@ function renderAqProgram() {
     renderAqProgram();
   });
   if (!aqProgramEditor) return;
-  if (!aqProgramKoncept) aqProgramKoncept = JSON.parse(JSON.stringify({ topeni: p.topeni, voda: p.voda }));
+  if (!aqProgramKoncept) aqProgramKoncept = JSON.parse(JSON.stringify({ topeni: p.topeni, voda: p.voda, predpoved: !!p.predpoved }));
   const k = aqProgramKoncept;
   const ed = el('div', 'aqp-editor', aqProgramObsahEl);
+  // Volba celého programu: posun topení podle předpovědi
+  const pl = el('label', 'aqp-volba aqp-predpoved', ed);
+  const pc = el('input', '', pl);
+  pc.type = 'checkbox';
+  pc.checked = !!k.predpoved;
+  pc.addEventListener('change', () => { k.predpoved = pc.checked; });
+  el('span', '', pl, 'Topení podle předpovědi: jasný den (9–15 h) o 1 níž, ochlazení o 5 °C+ do 12 h o 1 výš předem');
   const seznam = (nazev, klic, pole, moznosti, text) => {
     el('div', 'aqp-sek', ed, nazev);
     k[klic].forEach((r, i) => {
@@ -8503,6 +8525,28 @@ function renderAqProgram() {
       x.type = 'button';
       x.disabled = k[klic].length <= 1;   // aspoň jeden úsek musí zůstat
       x.addEventListener('click', () => { k[klic].splice(i, 1); renderAqProgram(); });
+      // Voda: ohřev až když svítí (FVE), nejpozději v zadaný čas
+      if (klic === 'voda') {
+        const sl = el('label', 'aqp-volba aqp-slunce', ed);
+        sl.dataset.od = r.od;
+        const sc = el('input', '', sl);
+        sc.type = 'checkbox';
+        sc.checked = !!r.slunce;
+        el('span', '', sl, '☀️ až když svítí, nejpozději');
+        const nej = el('input', 'timer-time', sl);
+        nej.type = 'time';
+        nej.step = '900';
+        nej.value = r.slunce || '';
+        nej.hidden = !r.slunce;
+        sc.addEventListener('change', () => {
+          if (sc.checked) {
+            const m = Math.min(23 * 60 + 45, aqMin(r.od) + 180);
+            r.slunce = r.slunce || String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+          } else delete r.slunce;
+          renderAqProgram();
+        });
+        nej.addEventListener('change', () => { if (nej.value) r.slunce = nej.value; });
+      }
     });
     const plus = el('button', 'mode-btn aqp-pridat', ed, '+ úsek');
     plus.type = 'button';
@@ -8522,12 +8566,13 @@ function renderAqProgram() {
   const vodaMin = aqTc && Number.isFinite(aqTc.tankMin) ? aqTc.tankMin : 40;
   el('div', 'aqp-pozn', ed, `Čerpadlo bere vodu od ${vodaMin} °C — nižší hodnotu pošle jako ${vodaMin} °C. `
     + 'Aby nádrž s ohřevem počkala (třeba po ranní sprše do poledne), dej na ten úsek „Vyp.". '
-    + 'Před prvním úsekem dne platí poslední úsek z předchozího večera.');
+    + 'Před prvním úsekem dne platí poslední úsek z předchozího večera. '
+    + '„Až když svítí": úsek začne, až FVE vyrábí aspoň 1,5 kW, nejpozději v zadaný čas; do té doby platí předchozí úsek.');
   const ulozit = el('button', 'timer-add-btn aqp-ulozit', ed, 'Uložit program');
   ulozit.type = 'button';
   ulozit.addEventListener('click', () => {
     const serad = a => a.slice().sort((x, y) => x.od.localeCompare(y.od));
-    aqProgramUloz({ zapnuto: p.zapnuto, topeni: serad(k.topeni), voda: serad(k.voda) });
+    aqProgramUloz({ zapnuto: p.zapnuto, predpoved: !!k.predpoved, topeni: serad(k.topeni), voda: serad(k.voda) });
   });
 }
 
@@ -12882,6 +12927,7 @@ function applySnapshot(snap) {
   maybeRestoreLogToServer(serverLog, localLog);
   bezpecne(() => renderWeather(snap.weather));
   if (snap.zkratky) bezpecne(() => { zkratkyData = snap.zkratky; renderZkratky(); });
+  if ('aquareaProgramStav' in snap) aqProgramStav = snap.aquareaProgramStav || null;
   if (snap.aquareaProgram) bezpecne(() => { aqProgramData = snap.aquareaProgram; renderAqProgram(); });
   if (snap.pocasiPoloha && Number.isFinite(snap.pocasiPoloha.lat)) bezpecne(() => { pocasiPoloha = snap.pocasiPoloha; });
   if ('pocasiDnes' in snap) bezpecne(() => { pocasiDnesData = snap.pocasiDnes || null; renderKalDen(); });
@@ -13240,6 +13286,10 @@ function connectStream() {
   es.addEventListener('aquareaProgram', e => {
     const p = JSON.parse(e.data).aquareaProgram;
     bezpecne(() => { aqProgramData = p || null; renderAqProgram(); });
+  });
+  es.addEventListener('aquareaProgramStav', e => {
+    aqProgramStav = JSON.parse(e.data).aquareaProgramStav || null;
+    bezpecne(() => { if (!aqProgramEditor) renderAqProgram(); });
   });
   es.addEventListener('pocasiDnes', e => {
     const p = JSON.parse(e.data).pocasiDnes || null;
