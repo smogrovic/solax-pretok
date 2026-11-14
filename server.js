@@ -1675,7 +1675,8 @@ const TOPENI_ZMENY = [
   { d: '2026-11-13', co: 'Ekvitermní křivka na ovladači Aquarea snížena z 33 °C (při −15 °C venku) / 23 °C (při +15 °C) na 31 / 22 °C. Při 0 °C venku teď zhruba 26,5 °C vody místo 28 °C.' },
   { d: '2026-11-13', co: 'Zrušen denní posun křivky +1 v poledne (11–17 h). Posun křivky v programu SMGhome je celý den 0.' },
   { d: '2026-11-13', co: 'Přivřené okruhy ložnice (asi o třetinu) a obýváku (méně) na rozdělovači. Cíl: obývák ~22 °C, ložnice 19–20 °C, dětské pokoje beze změny.' },
-  { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' }
+  { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' },
+  { d: '2026-11-14', co: 'Program vody v SMGhome večer upraven: 4:30 → 48 °C, 7:00 → vypnuto (po ranní sprše se nedohřívá), 11:00 → 50 °C až když FVE vyrábí aspoň 1,5 kW (nejpozději 14:00), 16:00 → 40 °C přes noc. Pozor: 14. 11. zhruba 11–20 h omylem platil polední posun topení +1 (z výchozího programu); od večera je topení celý den 0. Jestli je zapnuté „topení podle předpovědi“, říká `program.predpoved` v exportu.' }
 ];
 
 // Porovnání týdne před změnou nastavení a týdne po ní (den změny se nepočítá, dnešek
@@ -3799,7 +3800,7 @@ app.post('/api/sauna/zapnuto/restore', (req, res) => {
 app.get('/api/topeni', (req, res) => {
   if (!requireAuth(req, res)) return;
   // Návod jde první — kdo data vloží do AI, uvidí ho hned nahoře
-  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), zmenyNastaveni: TOPENI_ZMENY, vodaDny: topeniVodaDny(), tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
+  res.json({ navod: topeniNavod(), model: topeniModel(), analyza: topeniAnalyza(), zmenyNastaveni: TOPENI_ZMENY, program: state.aquareaProgram || null, vodaDny: topeniVodaDny(), tcDny: topeniTcDny(), zaznamy: topeniExportZaznamy() });
 });
 
 app.post('/api/sauna/nahrev/restore', (req, res) => {
