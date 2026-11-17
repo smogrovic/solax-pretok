@@ -1676,7 +1676,7 @@ const TOPENI_ZMENY = [
   { d: '2026-11-13', co: 'Zrušen denní posun křivky +1 v poledne (11–17 h). Posun křivky v programu SMGhome je celý den 0.' },
   { d: '2026-11-13', co: 'Přivřené okruhy ložnice (asi o třetinu) a obýváku (méně) na rozdělovači. Cíl: obývák ~22 °C, ložnice 19–20 °C, dětské pokoje beze změny.' },
   { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' },
-  { d: '2026-11-14', co: 'Program vody v SMGhome večer upraven: 4:30 → 48 °C, 7:00 → vypnuto (po ranní sprše se nedohřívá), 11:00 → 50 °C až když FVE vyrábí aspoň 1,5 kW (nejpozději 14:00), 16:00 → 40 °C přes noc. Pozor: 14. 11. zhruba 11–20 h omylem platil polední posun topení +1 (z výchozího programu); od večera je topení celý den 0. Jestli je zapnuté „topení podle předpovědi“, říká `program.predpoved` v exportu.' }
+  { d: '2026-11-14', co: 'Program vody v SMGhome večer upraven: 4:30 → 48 °C, 7:00 → vypnuto (po ranní sprše se nedohřívá), 11:00 → 50 °C až když FVE vyrábí aspoň 1,5 kW (nejpozději 14:00), 16:00 → 40 °C přes noc. Pozor: polední posun topení +1 (11–17 h, z výchozího programu) podle dat (`tcPosun`) zůstal v programu a platil každý den 14.–17. 11.; období po změně je tím v poledne o kus teplejší, než mělo být. Jestli je zapnuté „topení podle předpovědi“, říká `program.predpoved` v exportu.' }
 ];
 
 // Porovnání týdne před změnou nastavení a týdne po ní (den změny se nepočítá, dnešek
@@ -7970,6 +7970,8 @@ app.post('/api/aquarea/program', async (req, res) => {
   state.aquareaProgram = o.program;
   state.aquareaProgramUpraveno = true;
   aquareaProgramKlic = '';   // nový program se hned dorovná
+  // Hned do zálohy: restart před pravidelným uložením by jinak vrátil starý program
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   broadcast('aquareaProgram', { aquareaProgram: state.aquareaProgram });
   if (zapnul) addLog('Tepelné čerpadlo: program zapnut');
   try { await runAquareaProgram(); } catch {}
