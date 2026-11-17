@@ -10877,8 +10877,9 @@ if (tuyaEnabled) {
 //
 // Data se schválně nikam nezálohují: pravda je v iCloudu a po restartu se stáhnou
 // znovu. Je to jediná řada v celé appce, která zálohu nepotřebuje.
-const ICLOUD_ID = process.env.ICLOUD_APPLE_ID || '';
-const ICLOUD_PASS = process.env.ICLOUD_APP_PASSWORD || '';
+// trim: při kopírování do Renderu se snadno přilepí mezera nebo nový řádek → 401
+const ICLOUD_ID = (process.env.ICLOUD_APPLE_ID || '').trim();
+const ICLOUD_PASS = (process.env.ICLOUD_APP_PASSWORD || '').trim();
 const ICLOUD_URL = (process.env.ICLOUD_CALDAV_URL || 'https://caldav.icloud.com').replace(/\/+$/, '');
 // Nepovinné omezení na konkrétní kalendáře (názvy oddělené čárkou). Prázdné = všechny.
 const ICLOUD_ONLY = (process.env.ICLOUD_CALENDARS || '').split(',').map(s => s.trim()).filter(Boolean);
