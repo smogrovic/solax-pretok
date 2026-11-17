@@ -593,15 +593,14 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), zapnuto: false }];
   renderHuumTimers();
   check('\u0159\u00e1dek \u0159ekne, kdy se zapne', document.querySelector('#huumTimerList .timer-row').textContent.includes('85 \u00b0C \u00b7 zapne se v 17:58'), 'true');
-  check('  i kdy se zkontroluje (20 min předem)', document.querySelector('#huumTimerList .timer-row').textContent.includes('kontrola v 17:38'), 'true');
+  // Předpověď, doladění a kontrola běží na pozadí — v řádku jen cíl a čas zapnutí
   const puvodne = new Date(); puvodne.setHours(18, 10, 0, 0);
   huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), puvodneV: puvodne.getTime(), zapnuto: false,
+    nabeh: { minut: 62, venkuC: 9, zPredpovedi: true, doladeni: 1.11, doladeniMereni: 8 },
     kontrola: { kdy: 1, vSaune: 9.6, venkuC: 4, minut: 62, posunMin: -12 } }];
   renderHuumTimers();
-  check('  po kontrole: teplota a posun', document.querySelector('#huumTimerList .timer-row-text').textContent,
-    '85 °C · zapne se v 17:58 · zkontrolováno (v sauně 10 °C), o 12 min dřív');
-  huumTimersData[0].kontrola.posunMin = 0; renderHuumTimers();
-  check('  beze změny', document.querySelector('#huumTimerList .timer-row-text').textContent.endsWith('beze změny'), true);
+  check('  jen teplota a čas zapnutí', document.querySelector('#huumTimerList .timer-row-text').textContent,
+    '85 °C · zapne se v 17:58');
   huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), zapnuto: true }];
   renderHuumTimers();
   check('  po zapnut\u00ed \u201etop\u00ed\u201c', document.querySelector('#huumTimerList .timer-row').textContent.includes('85 \u00b0C \u00b7 top\u00ed'), 'true');
