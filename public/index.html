@@ -10221,6 +10221,9 @@ function renderHuumTimers() {
         // Čas zapnutí se průběžně přepočítává podle teploty v době zapnutí (předpověď)
         + (!t.zapnuto && t.nabeh && t.nabeh.zPredpovedi && typeof t.nabeh.venkuC === 'number'
           ? ` · počítá s ${Math.round(t.nabeh.venkuC)} °C venku` : '')
+        // Model doladěný podle vlastních nahřátí (×1,2 = sauna se nahřívá o 20 % pomaleji)
+        + (!t.zapnuto && t.nabeh && typeof t.nabeh.doladeni === 'number' && t.nabeh.doladeni !== 1
+          ? ` · doladěno podle ${t.nabeh.doladeniMereni} nahřátí (${t.nabeh.doladeni > 1 ? 'pomalejší' : 'rychlejší'} o ${Math.round(Math.abs(t.nabeh.doladeni - 1) * 100)} %)` : '')
         // Kontrola 20 min předem: čerstvá teplota z kamen a případný posun
         + (t.zapnuto ? '' : t.kontrola && typeof t.kontrola.posunMin === 'number'
           ? ' · zkontrolováno' + (typeof t.kontrola.vSaune === 'number' ? ` (v sauně ${Math.round(t.kontrola.vSaune)} °C)` : '')

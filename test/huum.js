@@ -41,6 +41,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     tiky: [],
     zapnuti: [],
     pripravy: [],
+    budiky: [],
+    zrusene: [],
     pulnoc: Date.UTC(2026, 8, 24),
     hodiny: { hour: 18, minute: 30 },
     // Co má stub odpovědět; sekce si to přepisují
@@ -64,7 +66,9 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
     'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive', 'predpovedTeplota',
-    CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
+    'setTimeout', 'clearTimeout',
+    CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus, saunaKalibrace,'
+         + ' odhadNabehuDoladeny, saunaTimerBudik, SAUNA_DOJEZD_MIN,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
@@ -103,7 +107,10 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     ts => !!ts,
     async zdroj => { h.pripravy.push(zdroj); return ['Světlo v sauně svítí.']; },
     () => !!h.pryc,
-    ms => (h.predpoved ? h.predpoved(ms) : null)
+    ms => (h.predpoved ? h.predpoved(ms) : null),
+    // Budík: skutečný timeout v sadě nikdy nepoběží, jen se zapíše
+    (fn, ms) => { h.budiky.push({ fn, ms }); return h.budiky.length; },
+    id => { h.zrusene.push(id); }
   );
   return h;
 }
@@ -900,6 +907,72 @@ nadpis('18b) Kontrola 20 min před zapnutím posune čas');
   h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
   await h.api.saunaTimerTik(jdu - 30 * MINUTA);
   check('pozdě nastavený: bez kontroly, rovnou start', h.volani.map(v => v.adresa.split('/').pop())[0] + ' ' + !h.zapisy.some(z => /kontrola 20 min/.test(z)), 'start true');
+}
+
+nadpis('18c) Doladění modelu podle vlastních nahřátí');
+{
+  const h = build();
+  const d = h.api.SAUNA_DOJEZD_MIN;
+  // Měření, kde sauna dosáhla cíle za `pomer`× víc, než říká model (bez dojezdu)
+  const mereni = (pomer, o = {}) => {
+    const m = h.api.odhadNabehu(5, 10, 80).minut - d;
+    return { start: 0, odC: 10, venkuC: 5, cilC: 80, cilStartC: 80, zmenyCile: [{ min: 0, cilC: 80 }],
+             prahy: { cil: { min: m * pomer, c: 80 } }, ...o };
+  };
+  check('bez měření nic', h.api.saunaKalibrace([]).pouzito, false);
+  check('dvě měření nestačí', h.api.saunaKalibrace([mereni(1.2), mereni(1.2)]).pouzito, false);
+  const k = h.api.saunaKalibrace([mereni(1.1), mereni(1.3), mereni(1.2)]);
+  check('tři měření → medián', k.faktor + ' ' + k.mereni + ' ' + k.pouzito, '1.2 3 true');
+  const vyrazene = [mereni(3, { teplyStart: true }), mereni(3, { kratke: true }),
+    mereni(3, { zmenyCile: [{ min: 0, cilC: 70 }, { min: 30, cilC: 80 }] }),
+    mereni(3, { prahy: {} }), mereni(3, { odC: 75 })];
+  check('teplý start, bliknutí, změna cíle, nedosažený cíl, skoro teplá sauna se nepočítají',
+    h.api.saunaKalibrace([mereni(1.1), mereni(1.3), mereni(1.2), ...vyrazene]).faktor, 1.2);
+  check('ulétlé hodnoty se ořežou', h.api.saunaKalibrace([mereni(4), mereni(4), mereni(4)]).faktor, 1.5);
+  check('  i dolů', h.api.saunaKalibrace([mereni(0.2), mereni(0.2), mereni(0.2)]).faktor, 0.7);
+  check('bere se jen posledních 8', h.api.saunaKalibrace([...Array(8).fill(mereni(1.4)), ...Array(8).fill(mereni(0.9))]).faktor, 0.9);
+  // Doladěný odhad násobí jen náběh, dojezd zůstává
+  const zaklad = h.api.odhadNabehu(5, 10, 80).minut;
+  const dol = h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: true });
+  check('doladěný odhad', Math.round(dol.minut * 1000), Math.round(((zaklad - d) * 1.2 + d) * 1000));
+  check('  nepoužité doladění = model', h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: false }).minut, zaklad);
+  // Časovač s doladěním zapne dřív a řekne to
+  stavKamen(h);
+  h.state.saunaNahrev = { zaznamy: [mereni(1.2), mereni(1.2), mereni(1.2)] };
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  const cekane = Math.ceil((h.api.odhadNabehu(10, 20, 80).minut - d) * 1.2 + d);
+  check('časovač počítá s doladěním', (jdu - t.zapneV) / MINUTA + ' ' + t.nabeh.doladeni + ' ' + t.nabeh.doladeniMereni, cekane + ' 1.2 3');
+}
+
+nadpis('18d) Budík na přesné zapnutí');
+{
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  await h.api.saunaTimerTik(t.zapneV - 60 * MINUTA);
+  check('daleko → budík se nenatáhne', h.budiky.length, 0);
+  await h.api.saunaTimerTik(t.zapneV - 25 * MINUTA);
+  check('kontrola do 10 min → budík přesně na ni', h.budiky.map(b => b.ms).join(','), String(5 * MINUTA));
+  await h.api.saunaTimerTik(t.zapneV - 20 * MINUTA);
+  check('  po kontrole: zapnutí je za 20 min → starý budík zrušen, nový ne', h.budiky.length + ' ' + h.zrusene.join(','), '1 1');
+  await h.api.saunaTimerTik(t.zapneV - 7 * MINUTA - 13000);
+  const b = h.budiky.slice(-1)[0];
+  check('7 min 13 s před zapnutím → budík na vteřinu přesně', b.ms, 7 * MINUTA + 13000);
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+  const pocet = h.volani.length;
+  const zapneV = t.zapneV;
+  // Budík zavolá tik s vlastním časem (Date.now() v sadě je jinde)
+  const puvodniNow = Date.now;
+  Date.now = () => zapneV - 3;   // timeout přišel o pár ms dřív
+  try { b.fn(); for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); }
+  finally { Date.now = puvodniNow; }
+  check('  budík zapne kamna i o pár ms dřív', h.volani.slice(pocet).some(v => /start/.test(v.adresa)), true);
+  check('  časovač je pryč', h.api.casovace().length, 0);
+  check('budík se uklidí', h.api.saunaTimerBudik(zapneV), null);
 }
 
 nadpis('19) Zapnuto v — zdroj z kamen');
