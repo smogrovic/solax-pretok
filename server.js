@@ -10150,8 +10150,9 @@ function saunaTimerPridej(time, teplota, now = Date.now(), obnova = null) {
   const o = obnova || {};
   const timer = { id: saunaTimerSeq++, time, teplota: t,
     jdu: Number.isFinite(o.jdu) ? o.jdu : timerNextRun(time, now),
-    zapnuto: !!o.zapnuto, zapneV: null };
+    zapnuto: !!o.zapnuto, zapneV: null, kontrola: null };
   saunaTimerPlan(timer, now);
+  timer.puvodneV = timer.zapneV;   // první plán — od něj se počítá kontrola a ukazuje posun
   saunaTimers.push(timer);
   saunaTimers.sort((a, b) => a.jdu - b.jdu);
   return timer;
@@ -10232,6 +10233,26 @@ app.delete('/api/sauna/timer/:id', (req, res) => {
   res.json({ timers: saunaTimers });
 });
 
+// Kontrola 20 min před zapnutím: čerstvá teplota přímo z kamen (stav z pollu může být
+// starý), přepočet a zápis do logu. Jen jednou a jen když je ještě co posouvat.
+const SAUNA_KONTROLA_MIN = 20;
+async function saunaTimerKontrola(t, now = Date.now()) {
+  t.kontrola = { kdy: now };   // označit předem, ať ji další tik nespustí podruhé
+  try { await pollHuum(); } catch { /* počítá se s tím, co je */ }
+  const pred = t.zapneV;
+  saunaTimerPlan(t, now);
+  const h = state.huum || {};
+  const vSaune = typeof h.temperature === 'number' ? Math.round(h.temperature * 10) / 10 : null;
+  const posunMin = Math.round((t.zapneV - (t.puvodneV ?? pred)) / 60000);
+  t.kontrola = { kdy: now, vSaune, venkuC: t.nabeh.venkuC, minut: t.nabeh.minut, posunMin };
+  const kdy = t.zapneV <= now ? 'zapnu hned' : `zapnu v ${fmtPragueTime(t.zapneV)}`;
+  addLog(`Sauna: kontrola ${SAUNA_KONTROLA_MIN} min před zapnutím (časovač ${t.time}) — `
+    + (vSaune !== null ? `v sauně ${Math.round(vSaune)} °C, ` : 'teplota v sauně neznámá, ')
+    + (typeof t.nabeh.venkuC === 'number' ? `venku ${Math.round(t.nabeh.venkuC)} °C, ` : '')
+    + `náběh ${t.nabeh.minut} min → ${kdy}`
+    + (posunMin ? ` (o ${Math.abs(posunMin)} min ${posunMin < 0 ? 'dřív' : 'později'} než původní plán)` : ' (beze změny)'));
+}
+
 // Tik každých 30 s. Zapnutí a příprava jsou dva samostatné kroky jednoho
 // časovače; označí se PŘED provedením, ať je další tik nespustí podruhé.
 let saunaTimerTikBezi = false;
@@ -10243,6 +10264,11 @@ async function saunaTimerTik(now = Date.now()) {
     for (const t of saunaTimers.slice()) {
       if (!t.zapnuto) {
         if (saunaTimerPlan(t, now)) zmena = true;
+        const hranice = Math.min(t.zapneV, t.puvodneV ?? t.zapneV) - SAUNA_KONTROLA_MIN * 60000;
+        if (!t.kontrola && now >= hranice && now < t.zapneV) {
+          await saunaTimerKontrola(t, now);
+          zmena = true;
+        }
         if (now >= t.zapneV) {
           t.zapnuto = true;
           zmena = true;

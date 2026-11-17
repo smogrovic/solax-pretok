@@ -741,6 +741,18 @@ const stavKamen = (h, o = {}) => {
   const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
   check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 92);
   check('zapnutí = příchod − odhad', t.zapneV, jdu - cekane * MINUTA);
+  // Kontrola 20 min předem: kamna netopí a v sauně je pořád 20 °C → čas se nemění
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232, temperature: '20' })) });
+  await h.api.saunaTimerTik(t.zapneV - 25 * MINUTA);
+  check('25 min předem se kamna ještě nekontrolují', h.volani.length, 0);
+  const plan = t.zapneV;
+  await h.api.saunaTimerTik(t.zapneV - 20 * MINUTA);
+  check('20 min předem se načte čerstvý stav kamen', h.volani.map(v => v.adresa.split('/').pop()).join(), 'status');
+  check('  čas zapnutí beze změny', t.zapneV, plan);
+  check('  a zapíše se do logu', h.zapisy.some(z => /kontrola 20 min před zapnutím \(časovač 19:00\) — v sauně 20 °C, venku 10 °C, náběh 92 min → zapnu v 17:28 \(beze změny\)/.test(z)), true);
+  await h.api.saunaTimerTik(t.zapneV - 10 * MINUTA);
+  check('  kontroluje se jen jednou', h.volani.length, 1);
+  h.volani.length = 0;
   h.odpovez = async n => (h.volani[h.volani.length - 1].adresa.endsWith('/start')
     ? { stav: 200, text: '{"ok":true}' }
     : { stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
@@ -836,6 +848,58 @@ const stavKamen = (h, o = {}) => {
   h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232 })) });
   await h.api.saunaTimerTik(jdu - 20 * MINUTA);
   check('nerozjetá kamna se nezamlčí', h.zapisy.some(t => /kamna se nerozjela/.test(t)), true);
+}
+
+nadpis('18b) Kontrola 20 min před zapnutím posune čas');
+{
+  // Plán počítal se sauny z 20 °C; při kontrole má jen 8 °C (stará hodnota z pollu) → zapne dřív
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  const puvodne = t.zapneV;
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232, temperature: '8' })) });
+  await h.api.saunaTimerTik(puvodne - 20 * MINUTA);
+  const nove = jdu - Math.ceil(h.api.odhadNabehu(10, 8, 80).minut) * MINUTA;
+  check('chladnější sauna → zapnutí dřív', t.zapneV, nove);
+  check('  o kolik, je v kontrole', JSON.stringify(t.kontrola), JSON.stringify({ kdy: puvodne - 20 * MINUTA, vSaune: 8, venkuC: 10,
+    minut: Math.round((jdu - nove) / MINUTA), posunMin: Math.round((nove - puvodne) / MINUTA) }));
+  check('  log říká o kolik dřív', h.zapisy.some(z => new RegExp(`v sauně 8 °C, venku 10 °C, náběh \\d+ min → zapnu v \\d\\d:\\d\\d \\(o ${Math.round((puvodne - nove) / MINUTA)} min dřív než původní plán\\)`).test(z)), true);
+  check('  appka se to dozví', h.zpravy.some(z => z.typ === 'saunaTimers'), true);
+}
+{
+  // Teplejší sauna (někdo ji před chvílí vypnul) → zapnutí později
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232, temperature: '55' })) });
+  await h.api.saunaTimerTik(t.puvodneV - 20 * MINUTA);
+  check('teplejší sauna → zapnutí později', t.zapneV > t.puvodneV && t.kontrola.posunMin > 0, true);
+  check('  a log to řekne', h.zapisy.some(z => /min později než původní plán/.test(z)), true);
+}
+{
+  // Kamna neodpoví: kontrola počítá s tím, co je, a nic nespadne
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
+  const t = h.api.casovace()[0];
+  h.odpovez = async () => ({ pad: 'síť' });
+  await h.api.saunaTimerTik(t.zapneV - 20 * MINUTA);
+  check('kamna neodpoví: kontrola proběhne s posledním stavem', t.kontrola.vSaune + ' ' + t.kontrola.posunMin, '20 0');
+}
+{
+  // Nastaveno pozdě (zapnutí už mělo být) → bez kontroly rovnou zapne
+  const h = build();
+  stavKamen(h);
+  const jdu = h.pulnoc + 19 * 3600000;
+  h.api.saunaTimerPridej('19:00', 80, jdu - 30 * MINUTA);
+  h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 231 })) });
+  await h.api.saunaTimerTik(jdu - 30 * MINUTA);
+  check('pozdě nastavený: bez kontroly, rovnou start', h.volani.map(v => v.adresa.split('/').pop())[0] + ' ' + !h.zapisy.some(z => /kontrola 20 min/.test(z)), 'start true');
 }
 
 nadpis('19) Zapnuto v — zdroj z kamen');

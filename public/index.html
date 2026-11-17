@@ -10220,7 +10220,12 @@ function renderHuumTimers() {
       : (typeof t.zapneV === 'number' ? `zapne se v ${fmtSolTime(t.zapneV)}` : 'zapne se podle odhadu')
         // Čas zapnutí se průběžně přepočítává podle teploty v době zapnutí (předpověď)
         + (!t.zapnuto && t.nabeh && t.nabeh.zPredpovedi && typeof t.nabeh.venkuC === 'number'
-          ? ` · počítá s ${Math.round(t.nabeh.venkuC)} °C venku` : ''));
+          ? ` · počítá s ${Math.round(t.nabeh.venkuC)} °C venku` : '')
+        // Kontrola 20 min předem: čerstvá teplota z kamen a případný posun
+        + (t.zapnuto ? '' : t.kontrola && typeof t.kontrola.posunMin === 'number'
+          ? ' · zkontrolováno' + (typeof t.kontrola.vSaune === 'number' ? ` (v sauně ${Math.round(t.kontrola.vSaune)} °C)` : '')
+            + (t.kontrola.posunMin ? `, o ${Math.abs(t.kontrola.posunMin)} min ${t.kontrola.posunMin < 0 ? 'dřív' : 'později'}` : ', beze změny')
+          : typeof t.zapneV === 'number' ? ` · kontrola v ${fmtSolTime(Math.min(t.zapneV, t.puvodneV ?? t.zapneV) - 20 * 60000)}` : ''));
     const x = document.createElement('button');
     x.className = 'timer-del';
     x.type = 'button';
