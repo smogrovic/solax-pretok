@@ -10303,6 +10303,24 @@ function saunaTimerPlan(t, now = Date.now()) {
   return zmena;
 }
 
+// Časovač „Půjdu do sauny v" myslí vždycky dnešek. Čas, který už dnes byl, by
+// timerNextRun tiše posunul na zítřek — za uplynulý se bere, když vyjde na zítřek
+// víc než 6 h dopředu (23:30 → 0:30 je pořád „dnes v noci").
+const SAUNA_ZITRA_MS = 6 * 3600000;
+// → null, když se stihne; jinak { minut, hotovoV, jdu, probehl, text }
+function saunaTimerNestihne(time, teplota, now = Date.now()) {
+  const jdu = timerNextRun(time, now);
+  const probehl = pragueDateString(jdu) !== pragueDateString(now) && jdu - now > SAUNA_ZITRA_MS;
+  const n = saunaTimerNabeh(teplota, now, probehl ? null : jdu);
+  const hotovoV = Math.round((now + n.minut * 60000) / 60000) * 60000;
+  if (!probehl && jdu - n.minut * 60000 > now) return null;
+  const nabeh = n.minut >= 60 ? `${Math.floor(n.minut / 60)} h ${n.minut % 60} min` : `${n.minut} min`;
+  const text = probehl
+    ? `${time} už dnes bylo. Kdybys saunu zapnul teď, bude nahřátá asi v ${fmtPragueTime(hotovoV)}.`
+    : `Sauna se do ${time} nestihne nahřát — potřebuje asi ${nabeh}. Kdybys ji zapnul teď, bude nahřátá asi v ${fmtPragueTime(hotovoV)}.`;
+  return { minut: n.minut, hotovoV, jdu, probehl, text };
+}
+
 app.post('/api/sauna/timer', (req, res) => {
   if (!requireAuth(req, res)) return;
   if (!huumEnabled) return res.status(503).json({ error: 'Kamna HUUM nejsou nastavená.' });
@@ -10312,6 +10330,10 @@ app.post('/api/sauna/timer', (req, res) => {
     return res.status(400).json({ error: 'Chybí čas (HH:MM) nebo teplota.' });
   }
   if (saunaTimers.length >= 10) return res.status(400).json({ error: 'Maximálně 10 časovačů.' });
+  // Nestihne se? Časovač platí pro dnešek: když by kamna měla jet už teď (nebo
+  // čas dnes už byl), nezakládá se — appka ukáže okno s nabídkou zapnout hned
+  const ns = saunaTimerNestihne(time, cil);
+  if (ns) return res.status(409).json({ error: ns.text, nestihne: ns });
   const t = saunaTimerPridej(time, cil);
   const n = t.nabeh;
   addLog(`Sauna: časovač — půjdeš v ${t.time}, zapnu v ${fmtPragueTime(t.zapneV)} (odhad ${n.minut} min`

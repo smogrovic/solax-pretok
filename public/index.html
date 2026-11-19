@@ -5659,7 +5659,10 @@ function potvrzCeka() { return !!potvrzAkce; }
 
 // `pin` = okno si navíc vyžádá kód a předá ho akci. Ostatní volající o tom
 // nevědí a chovají se jako dřív.
-function potvrzZeptej(nadpis, text, akce, sekundy, zpet, pin) {
+// `anoText`: popisek potvrzovacího tlačítka (výchozí „Potvrdit")
+let potvrzAnoText = 'Potvrdit';
+function potvrzZeptej(nadpis, text, akce, sekundy, zpet, pin, anoText) {
+  potvrzAnoText = anoText || 'Potvrdit';
   potvrzAkce = akce;
   potvrzZpetAkce = zpet || renderAutoSlider;
   potvrzDoKdy = Date.now() + (sekundy ? sekundy * 1000 : POTVRZ_MS);
@@ -5681,7 +5684,7 @@ function potvrzTik() {
   if (!potvrzCeka()) return;
   const zbyva = Math.ceil((potvrzDoKdy - Date.now()) / 1000);
   if (zbyva <= 0) { potvrzKonec(false); return; }
-  if (potvrzAnoEl) potvrzAnoEl.textContent = `Potvrdit (${zbyva} s)`;
+  if (potvrzAnoEl) potvrzAnoEl.textContent = `${potvrzAnoText} (${zbyva} s)`;
 }
 
 function potvrzKonec(potvrzeno) {
@@ -10254,6 +10257,13 @@ async function huumTimerPosli(cesta, init) {
     });
     const data = await res.json();
     if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+    // Do zadaného času se sauna nestihne nahřát (nebo ten čas dnes už byl): časovač
+    // se nezaložil, jen info a nabídka zapnout hned
+    if (res.status === 409 && data.nestihne) {
+      huumTopeniEls.hint.textContent = '';
+      if (!potvrzCeka()) potvrzZeptej('Sauna se nestihne nahřát', data.error, huumZapni, null, () => {}, false, 'Zapnout nyní');
+      return;
+    }
     if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
     if (Array.isArray(data.timers)) { huumTimersData = data.timers; renderHuumTimers(); }
     huumTopeniEls.hint.textContent = '';

@@ -66,7 +66,7 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'delay', 'nahrevVzorek', 'nahrevStart', 'validTimerTime', 'pragueTime', 'setInterval',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
     'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive', 'predpovedTeplota',
-    'setTimeout', 'clearTimeout',
+    'setTimeout', 'clearTimeout', 'pragueDateString',
     CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus, saunaKalibrace,'
          + ' odhadNabehuDoladeny, saunaTimerBudik, SAUNA_DOJEZD_MIN,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
@@ -110,7 +110,9 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     ms => (h.predpoved ? h.predpoved(ms) : null),
     // Budík: skutečný timeout v sadě nikdy nepoběží, jen se zapíše
     (fn, ms) => { h.budiky.push({ fn, ms }); return h.budiky.length; },
-    id => { h.zrusene.push(id); }
+    id => { h.zrusene.push(id); },
+    // Den podle stejného času jako stub timerNextRun (UTC, sada je o plánu)
+    ms => new Date(ms === undefined ? Date.now() : ms).toISOString().slice(0, 10)
   );
   return h;
 }
@@ -672,6 +674,10 @@ nadpis('16) Vypnutí topení');
 }
 
 nadpis('17) Časovač „Půjdu do sauny v“');
+// Cesta počítá „dnes" ze skutečných hodin — v téhle sekci je čas těsně po
+// půlnocí testovacího dne (24. 9. 2026 v 1:59 Praha), ať se časovače stihnou
+const puvodniNow17 = Date.now;
+Date.now = () => Date.UTC(2026, 8, 24) + 60000;
 const volejD = async (h, cesta, params) => {
   let out = null, kod = 200;
   const res = { json: v => { out = v; return res; }, status: c => { kod = c; return res; } };
@@ -714,7 +720,7 @@ const volejD = async (h, cesta, params) => {
 }
 {
   const h = build();
-  for (let i = 0; i < 10; i++) await volej(h, 'POST /api/sauna/timer', { time: '0' + (i % 10) + ':00', teplota: 80 });
+  for (let i = 0; i < 10; i++) await volej(h, 'POST /api/sauna/timer', { time: '1' + i + ':00', teplota: 80 });
   const jeste = await volej(h, 'POST /api/sauna/timer', { time: '23:00', teplota: 80 });
   check('víc než deset jich nejde', jeste.kod, 400);
   check('  a řekne se proč', jeste.out.error, 'Maximálně 10 časovačů.');
@@ -730,6 +736,30 @@ const volejD = async (h, cesta, params) => {
   check('zamčená appka časovač nepřidá',
     (await volej(h, 'POST /api/sauna/timer', { time: '18:30', teplota: 85 })).kod, 401);
 }
+{
+  // Nestihne se: v 18:00 časovač na 19:00, náběh ~86 min → nezaloží se, přijde info
+  const h = build();
+  h.state.weather = { tempC: 10 };
+  h.state.huum = { temperature: 20, heating: false, fetchedAt: new Date(Date.now()).toISOString(), error: null };
+  Date.now = () => h.pulnoc + 18 * 3600000;
+  const r = await volej(h, 'POST /api/sauna/timer', { time: '19:00', teplota: 80 });
+  check('nestihne se → 409 a časovač se nezaloží', r.kod + ' ' + h.api.casovace().length, '409 0');
+  check('  řekne náběh a kdy by byla hotová, kdyby se zapnula teď', r.out.nestihne.minut + ' ' + r.out.nestihne.hotovoV,
+    Math.ceil(h.api.odhadNabehu(10, 20, 80).minut) + ' ' + (h.pulnoc + 18 * 3600000 + Math.ceil(h.api.odhadNabehu(10, 20, 80).minut) * 60000));
+  check('  text pro okno', /^Sauna se do 19:00 nestihne nahřát — potřebuje asi 1 h \d+ min\. Kdybys ji zapnul teď, bude nahřátá asi v \d\d:\d\d\.$/.test(r.out.error), true);
+  check('  nic se nezapnulo', h.volani.length, 0);
+  // Čas, který dnes už byl: ne zítra, ale info
+  const p = await volej(h, 'POST /api/sauna/timer', { time: '17:00', teplota: 80 });
+  check('čas, který už dnes byl → taky info, ne zítra', p.kod + ' ' + p.out.nestihne.probehl + ' ' + h.api.casovace().length, '409 true 0');
+  check('  „už dnes bylo"', /^17:00 už dnes bylo\./.test(p.out.error), true);
+  // Stihne se → normálně
+  const s = await volej(h, 'POST /api/sauna/timer', { time: '20:00', teplota: 80 });
+  check('stihne se (20:00) → časovač normálně', s.kod + ' ' + h.api.casovace().length, '200 1');
+  // Přes půlnoc (23:30 → 0:30 + 6 h) se pořád počítá jako dnešní noc
+  Date.now = () => h.pulnoc + 20 * 3600000;
+  check('20:00 → 01:00 (5 h dopředu) jde', (await volej(h, 'POST /api/sauna/timer', { time: '01:00', teplota: 80 })).kod, 200);
+}
+Date.now = puvodniNow17;
 
 nadpis('18) Tik: zapnutí o odhad dřív, přípravu v pevný čas už nedělá');
 const MINUTA = 60000;

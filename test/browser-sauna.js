@@ -587,6 +587,35 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('k\u0159\u00ed\u017eek ho zru\u0161\u00ed', POSLANO[0].metoda, 'DELETE');
   check('  a m\u00ed\u0159\u00ed na spr\u00e1vn\u00e9 id', POSLANO[0].adresa, '/api/sauna/timer/7');
 
+  // Nestihne se: server \u010dasova\u010d nezalo\u017e\u00ed, appka uk\u00e1\u017ee info a nab\u00eddne zapnout hned
+  POSLANO.length = 0;
+  const NESTIHNE = 'Sauna se do 19:00 nestihne nah\u0159\u00e1t \u2014 pot\u0159ebuje asi 1 h 26 min. Kdybys ji zapnul te\u010f, bude nah\u0159\u00e1t\u00e1 asi v 19:26.';
+  window.fetch = async (adresa, opts) => {
+    POSLANO.push({ adresa: String(adresa), metoda: (opts && opts.method) || 'GET',
+                   telo: opts && opts.body ? JSON.parse(opts.body) : null });
+    if (String(adresa) === '/api/sauna/timer') return { ok: false, status: 409, json: async () => ({
+      error: NESTIHNE, nestihne: { minut: 86, hotovoV: 0, probehl: false } }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  };
+  top('huumTimerTime').value = '19:00';
+  top('huumTimerAdd').click();
+  await wait(80);
+  check('nestihne se: vysko\u010d\u00ed okno', okno.hidden, false);
+  check('  s nadpisem', top('potvrzNadpis').textContent, 'Sauna se nestihne nah\u0159\u00e1t');
+  check('  a textem ze serveru', top('potvrzText').textContent, NESTIHNE);
+  check('  tla\u010d\u00edtko \u201eZapnout nyn\u00ed"', top('potvrzAno').textContent.startsWith('Zapnout nyn\u00ed'), true);
+  check('  pod \u010dasova\u010dem \u017e\u00e1dn\u00e1 chyba', huumTopeniEls.hint.textContent, '');
+  top('potvrzAno').click();
+  await wait(80);
+  check('\u201eZapnout nyn\u00ed" pust\u00ed saunu hned', POSLANO.map(p => p.adresa).join(','), '/api/sauna/timer,/api/sauna/huum-start');
+  top('huumTimerAdd').click();
+  await wait(80);
+  top('potvrzZpet').click();
+  await wait(30);
+  check('Zp\u011bt jen zav\u0159e okno, nic nezapne', okno.hidden + ' ' + POSLANO.filter(p => /huum-start/.test(p.adresa)).length, 'true 1');
+  check('oby\u010dejn\u00e9 potvrzen\u00ed m\u00e1 d\u00e1l \u201ePotvrdit"', (potvrzZeptej('a', 'b', () => {}), top('potvrzAno').textContent.startsWith('Potvrdit')), true);
+  top('potvrzZpet').click();
+
   OUT.push('\\n8e4) P\u016fjdu do sauny v');
   check('karta \u010dasova\u010de m\u00e1 nov\u00fd n\u00e1zev', top('huumTimerCard').querySelector('.graph-title').textContent, 'P\u016fjdu do sauny v');
   const zapneV = new Date(); zapneV.setHours(17, 58, 0, 0);
