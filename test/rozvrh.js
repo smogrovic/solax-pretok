@@ -568,7 +568,7 @@ nadpis('6e3) Ráno dětí a ložnice jako pravidla rozvrhu');
     await d.api.runBlindSchedule(CT(9, 59));
     check('  dopoledne ne před 10:00', deti(d.povely).length, 2);
     const p = d.api.pravidla.find(x => x.nazev === 'Pokoje dopoledne');
-    check('  „Pokoje dopoledne": východ, nejdřív 10:00', JSON.stringify(p.kdy), '{"typ":"vychod","posunMin":0,"nejdrive":"10:00"}');
+    check('  „Pokoje dopoledne": pevně 10:00', JSON.stringify(p.kdy), '{"typ":"cas","cas":"10:00"}');
     const bez = build();
     check('bez počasí platí 6:40', bez.api.rozvrhMinuta({ kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' } }, CT(6)), 400);
   }
@@ -944,7 +944,7 @@ nadpis('6f) Předvyplněný rozvrh');
     '[{"cil":"Kuchyň","akce":"tilt","hodnota":25},{"cil":"Kuchyň","akce":"up","hodnota":null}]');
   check('dopoledne bez dětí a bez Hostů, v 7:00 nebo při východu', podle('Dopoledne').kroky.map(k => k.cil).join(',') + ' ' + JSON.stringify(podle('Dopoledne').kdy),
     'Kuchyň,Obývák Okno,Obývák Dveře {"typ":"vychod","posunMin":0,"nejdrive":"07:00"}');
-  check('dopoledne pokoje: ložnice, hosté i děti, nejdřív 10:00', podle('Pokoje dopoledne').kroky.map(k => k.cil).join(',') + ' ' + podle('Pokoje dopoledne').kdy.nejdrive,
+  check('dopoledne pokoje: ložnice, hosté i děti, v 10:00', podle('Pokoje dopoledne').kroky.map(k => k.cil).join(',') + ' ' + podle('Pokoje dopoledne').kdy.cas,
     'Ložnice,Hosté,Miky,Elenka 10:00');
   check('garáž se zavírá ve 23:00 každý den',
     podle('Garáž').kdy.cas + ' ' + podle('Garáž').dny.filter(Boolean).length, '23:00 7');

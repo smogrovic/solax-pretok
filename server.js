@@ -6433,8 +6433,8 @@ const ROZVRH_VYCHOZI = [
   // Děti ve všední den v 6:40 na 50 % — každé jen v den, kdy má Školu
   { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'cas', cas: '06:40' }, kroky: [
     krok('Miky', 'tilt', 50, SKOLA), krok('Elenka', 'tilt', 50, SKOLA)] },
-  // Dopoledne při východu, ale nejdřív v 10:00, se pokoje jen otevírají na 25 %
-  { nazev: 'Pokoje dopoledne', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '10:00' }, kroky: [
+  // V 10:00 se pokoje jen otevírají na 25 %
+  { nazev: 'Pokoje dopoledne', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
     krok('Ložnice', 'tilt', 25, OTEVRIT), krok('Hosté', 'tilt', 25, OTEVRIT),
     krok('Miky', 'tilt', 25, OTEVRIT), krok('Elenka', 'tilt', 25, OTEVRIT)] },
   // Víkend = prázdniny (prázdninový den se počítá jako neděle). Ložnici nechá být

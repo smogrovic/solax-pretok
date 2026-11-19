@@ -57,7 +57,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('příprava podle teploty (cíl −15 / −10 °C)', /cíl −15 °C/.test(txt) && /cíl −10 °C/.test(txt), 'true');
   check('prázdniny: léto a škola v kalendáři', /červenec–srpen/.test(txt) && /Školu/.test(txt), 'true');
   check('děti a ložnice jsou v rozvrhu jako skupiny',
-    txt.includes('Děti ráno') && txt.includes('v 6:40') && txt.includes('Pokoje dopoledne') && txt.includes('nejdřív 10:00')
+    txt.includes('Děti ráno') && txt.includes('v 6:40') && txt.includes('Pokoje dopoledne') && txt.includes('v 10:00 ložnice')
       && txt.includes('Víkend a prázdniny') && txt.includes('jen otevírají'), 'true');
   check('  a zavřená ložnice', txt.includes('Zavřené žaluzie v ložnici'), 'true');
   check('čerpadlo při sauně 10/10 min', txt.includes('10 min zapnuto') && txt.includes('10 min vypnuto'), 'true');
