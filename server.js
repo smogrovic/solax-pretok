@@ -6424,21 +6424,23 @@ const ROZVRH_KROKU_MAX = 10;
 const PRAC = [true, true, true, true, true, false, false];
 const VIKEND = [false, false, false, false, false, true, true];
 const VSE = [true, true, true, true, true, true, true];
-const krok = (cil, akce, hodnota = null) => ({ cil, akce, hodnota });
+const krok = (cil, akce, hodnota = null, volby = {}) => ({ cil, akce, hodnota, ...volby });
+// Volby kroku: `jenSkola` — žaluzie dítěte jen tehdy, když má ten den v kalendáři
+// Školu; `jenOtevrit` — naklopit jen tehdy, když to žaluzii otevře (menší číslo
+// vyhraje): ručně víc otevřenou dopoledne rozvrh zase nepřivře.
+const SKOLA = { jenSkola: true }, OTEVRIT = { jenOtevrit: true };
 const ROZVRH_VYCHOZI = [
-  // Děti ve všední den: 50 % v 6:40, nebo 15 min před východem, co je později;
-  // pak 25 % v 7:00, ale nejdřív při východu — v zimě (východ po sedmé) by jinak
-  // 25 % přišlo dřív než 50 % a zůstalo by 50 %. V 10:00 se naklápí jen ložnice.
-  { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' }, kroky: [
-    krok('Miky', 'tilt', 50), krok('Elenka', 'tilt', 50)] },
-  { nazev: 'Děti po ránu', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '07:00' }, kroky: [
-    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] },
-  { nazev: 'Ložnice a hosté', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
-    krok('Ložnice', 'tilt', 25), krok('Hosté', 'tilt', 25)] },
+  // Děti ve všední den v 6:40 na 50 % — každé jen v den, kdy má Školu
+  { nazev: 'Děti ráno', dny: PRAC, kdy: { typ: 'cas', cas: '06:40' }, kroky: [
+    krok('Miky', 'tilt', 50, SKOLA), krok('Elenka', 'tilt', 50, SKOLA)] },
+  // Dopoledne při východu, ale nejdřív v 10:00, se pokoje jen otevírají na 25 %
+  { nazev: 'Pokoje dopoledne', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '10:00' }, kroky: [
+    krok('Ložnice', 'tilt', 25, OTEVRIT), krok('Hosté', 'tilt', 25, OTEVRIT),
+    krok('Miky', 'tilt', 25, OTEVRIT), krok('Elenka', 'tilt', 25, OTEVRIT)] },
   // Víkend = prázdniny (prázdninový den se počítá jako neděle). Ložnici nechá být
   // tlačítko „Zavřené žaluzie v ložnici".
   { nazev: 'Víkend a prázdniny', dny: VIKEND, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
-    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25), krok('Ložnice', 'tilt', 25)] },
+    krok('Miky', 'tilt', 25, OTEVRIT), krok('Elenka', 'tilt', 25, OTEVRIT), krok('Ložnice', 'tilt', 25, OTEVRIT)] },
   // Kuchyň a obývák v 7:00, nejdřív ale při východu slunce (v zimě po sedmé)
   { nazev: 'Dopoledne', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '07:00' }, kroky: [
     krok('Kuchyň', 'tilt', 25), krok('Obývák Okno', 'tilt', 25), krok('Obývák Dveře', 'up')] },
@@ -6453,6 +6455,18 @@ const ROZVRH_VYCHOZI = [
   { nazev: 'Ložnice po západu', dny: VSE, kdy: { typ: 'zapad', posunMin: 0 },
     odloz: { typ: 'sauna', minut: SAUNA_LOZNICE_MIN }, kroky: [krok('Ložnice', 'down', 100)] }
 ];
+
+// Skupiny, které v doporučeném rozvrhu už nejsou, ale staré migrace (v2–v5) je
+// ve starých zálohách doplňují v podobě z té doby
+const ROZVRH_DRIVE = [
+  { nazev: 'Děti po ránu', dny: PRAC, kdy: { typ: 'vychod', posunMin: 0, nejdrive: '07:00' }, kroky: [
+    krok('Miky', 'tilt', 25), krok('Elenka', 'tilt', 25)] },
+  { nazev: 'Ložnice a hosté', dny: PRAC, kdy: { typ: 'cas', cas: '10:00' }, kroky: [
+    krok('Ložnice', 'tilt', 25), krok('Hosté', 'tilt', 25)] }
+];
+function rozvrhVzor(nazev) {
+  return ROZVRH_DRIVE.find(v => v.nazev === nazev) || ROZVRH_VYCHOZI.find(v => v.nazev === nazev);
+}
 
 let blindRuleSeq = 1;
 let blindRules = [];
@@ -6509,7 +6523,7 @@ function rozvrhMigrace(now = Date.now()) {
   // co dělají, a jdou pozastavit nebo smazat. Doplní se jednou — kdo je pak smaže,
   // nedostane je zpátky.
   if ((state.rozvrhVerze || 0) < 2 && zbyle.length) {
-    for (const v of ROZVRH_VYCHOZI.filter(v => ['Děti ráno', 'Děti po ránu', 'Ložnice a hosté', 'Víkend a prázdniny'].includes(v.nazev))) {
+    for (const v of ['Děti ráno', 'Děti po ránu', 'Ložnice a hosté', 'Víkend a prázdniny'].map(rozvrhVzor).filter(Boolean)) {
       if (zbyle.some(p => p.nazev === v.nazev)) continue;
       zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
       zmeny.push(`přidáno „${v.nazev}"`);
@@ -6538,7 +6552,7 @@ function rozvrhMigrace(now = Date.now()) {
       zmeny.push('„Děti ráno" na 50 %');
     }
     if (!zbyle.some(p => p.nazev === 'Děti po ránu')) {
-      const v = ROZVRH_VYCHOZI.find(x => x.nazev === 'Děti po ránu');
+      const v = rozvrhVzor('Děti po ránu');
       zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
       zmeny.push('přidáno „Děti po ránu" (25 % v 7:00)');
     }
@@ -6563,7 +6577,7 @@ function rozvrhMigrace(now = Date.now()) {
       loz.kroky = [...loz.kroky, { cil: 'Hosté', akce: 'tilt', hodnota: 25 }];
       zmeny.push('Hosté přesunuti do 10:00 („Ložnice a hosté")');
     } else if (dop && !zbyle.some(p => p.nazev === 'Ložnice a hosté')) {
-      const v = ROZVRH_VYCHOZI.find(x => x.nazev === 'Ložnice a hosté');
+      const v = rozvrhVzor('Ložnice a hosté');
       zbyle.push({ id: blindRuleSeq++, zapnuto: true, odloz: null, ...JSON.parse(JSON.stringify(v)), spustenoDne: null });
       zmeny.push('přidáno „Ložnice a hosté" (10:00)');
     }
@@ -6649,17 +6663,25 @@ function prazdninyPlati(at = Date.now()) {
 // dětem žaluzie o prázdninách je menší zlo než zaspat do školy.
 const PRAZDNINY_DETI = ['mik', 'elenk'];
 const PRAZDNINY_KAL_STARI_MS = 24 * 3600000;
-function prazdninyBezSkoly(den, at = Date.now()) {
+// Má dítě (prefix z PRAZDNINY_DETI) ten den v kalendáři „Školu"? → true / false,
+// null = neví se (kalendář chybí, je v chybě, starý, den v něm není, dítě nemá kalendář)
+function diteMaSkolu(dite, den, at = Date.now()) {
   const c = state.calendar;
-  if (!c || c.error || !Array.isArray(c.days) || !Array.isArray(c.kalendare)) return false;
-  if (!c.fetchedAt || at - Date.parse(c.fetchedAt) > PRAZDNINY_KAL_STARI_MS) return false;
+  if (!c || c.error || !Array.isArray(c.days) || !Array.isArray(c.kalendare)) return null;
+  if (!c.fetchedAt || at - Date.parse(c.fetchedAt) > PRAZDNINY_KAL_STARI_MS) return null;
   const d = c.days.find(x => x.d === den);
-  if (!d) return false;
-  const jmena = c.kalendare.map(k => cz(k.nazev || ''));
-  if (!PRAZDNINY_DETI.every(p => jmena.some(j => j.startsWith(p)))) return false;
-  const maSkolu = dite => (d.udalosti || []).some(u =>
+  if (!d) return null;
+  if (!c.kalendare.some(k => cz(k.nazev || '').startsWith(dite))) return null;
+  return (d.udalosti || []).some(u =>
     cz(u.kalendar || '').startsWith(dite) && cz(u.nazev || '').includes('skola'));
-  return PRAZDNINY_DETI.every(dite => !maSkolu(dite));
+}
+// Žaluzie dítěte podle jména cíle („Miky" → 'mik'), jinak null
+function diteZCile(cil) {
+  const n = cz(cil || '');
+  return PRAZDNINY_DETI.find(p => n.startsWith(p)) || null;
+}
+function prazdninyBezSkoly(den, at = Date.now()) {
+  return PRAZDNINY_DETI.every(dite => diteMaSkolu(dite, den, at) === false);
 }
 function prazdninyZitra(at = Date.now()) {
   return pragueDateString(at + 86400000);
@@ -6885,9 +6907,29 @@ function rozvrhKdyPopis(p) {
 }
 
 function rozvrhKrokPopis(k) {
-  if (k.akce === 'poloha') return `${k.cil} sjet do ${k.hodnota} %`;
+  const volby = (k.jenSkola ? ' (jen se školou)' : '') + (k.jenOtevrit ? ' (jen otevřít)' : '');
+  if (k.akce === 'poloha') return `${k.cil} sjet do ${k.hodnota} %${volby}`;
   const bez = k.hodnota === null || k.hodnota === undefined;
-  return `${k.cil} ${ROZVRH_AKCE_SLOVY[k.akce]}${bez ? '' : ` na ${k.hodnota} %`}`;
+  return `${k.cil} ${ROZVRH_AKCE_SLOVY[k.akce]}${bez ? '' : ` na ${k.hodnota} %`}${volby}`;
+}
+
+// Krok „jen se školou": dítě, které ten den v kalendáři Školu nemá, se přeskočí.
+// Když se neví (kalendář chybí nebo je starý), jede se jako do školy.
+function rozvrhKrokBezSkoly(k, at = Date.now()) {
+  if (!k.jenSkola) return false;
+  const dite = diteZCile(k.cil);
+  return !!dite && diteMaSkolu(dite, pragueDateString(at), at) === false;
+}
+
+// Krok „jen otevřít": přeskočí se, když jsou všechny jeho žaluzie už otevřené
+// stejně nebo víc (menší číslo). Naklopení u naklápění, poloha u polohy; žaluzie,
+// která stav nehlásí, se bere jako zavřená a povel dostane.
+async function rozvrhKrokUzOtevreno(k) {
+  if (!k.jenOtevrit || typeof getBlinds !== 'function' || typeof matchBlinds !== 'function') return false;
+  let zaluzie;
+  try { zaluzie = matchBlinds((await getBlinds()).filter(b => b.type === 'cover'), k.cil); } catch { return false; }
+  const pole = k.akce === 'poloha' ? 'closure' : 'orientation';
+  return zaluzie.length > 0 && zaluzie.every(b => typeof b[pole] === 'number' && b[pole] <= k.hodnota);
 }
 
 function rozvrhPopis(p) {
@@ -6901,11 +6943,17 @@ function rozvrhPopis(p) {
 async function rozvrhProved(p, at = Date.now()) {
   let ok = 0;
   const chyby = [];
+  const vynechano = [];
+  // Ruční naklopení ovladačem cloud nezná, dokud si o stav neřekne — u „jen otevřít"
+  // se proto stav načte čerstvý (jednou za skupinu, ne podle minutové mezipaměti)
+  if (p.kroky.some(k => k.jenOtevrit) && typeof blindsCache === 'object' && blindsCache) blindsCache.ts = 0;
   for (const k of p.kroky) {
     const akce = ROZVRH_AKCE_CMD[k.akce];
     const hodnota = k.hodnota === null ? undefined : k.hodnota;
     // Zavřená do rána: ložnici nic neotevře (zatáhnout ji jde dál)
     if (lozniceZavrenoPlati(at) && lozniceOtevira(k.cil, k.akce)) { ok++; continue; }
+    if (rozvrhKrokBezSkoly(k, at)) { ok++; vynechano.push(`${k.cil} bez školy`); continue; }
+    if (await rozvrhKrokUzOtevreno(k)) { ok++; vynechano.push(`${k.cil} už otevřená víc`); continue; }
     try {
       await assistantControlBlinds({ target: k.cil, action: akce, orientation: hodnota });
       ok++;
@@ -6913,7 +6961,7 @@ async function rozvrhProved(p, at = Date.now()) {
       chyby.push(`${k.cil}: ${String(err.message).slice(0, 60)}`);
     }
   }
-  return { ok, celkem: p.kroky.length, chyby };
+  return { ok, celkem: p.kroky.length, chyby, vynechano };
 }
 
 // Po sauně zhasne zahradu dole — za stejných podmínek, za jakých se zatahuje
@@ -6957,10 +7005,11 @@ async function runBlindSchedule(at = Date.now()) {
     neco = true;
     const v = await rozvrhProved(p, at);
     const kdy = poSaune ? ' po sauně' : '';
+    const vyn = v.vynechano && v.vynechano.length ? `; vynecháno: ${v.vynechano.join(', ')}` : '';
     if (v.chyby.length) {
-      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}`, 'error');
+      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — ${v.ok} z ${v.celkem}, chyby: ${v.chyby.join('; ')}${vyn}`, 'error');
     } else {
-      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — hotovo (${v.ok})`);
+      addLog(`Rozvrh žaluzií${kdy}: ${rozvrhPopis(p)} — hotovo (${v.ok})${vyn}`);
     }
   }
   if (neco) broadcast('blindRules', { rules: blindRules, savedAt: blindRulesAt });
@@ -6978,15 +7027,16 @@ async function rozvrhStavTed(at = Date.now()) {
   const dnes = rozvrhDenIndex(at);
   const pouzite = [];
   const cile = new Map();      // cíl → { poloha, naklon }
-  const zapis = p => {
+  const zapis = (p, denAt) => {
     for (const k of p.kroky) {
+      if (rozvrhKrokBezSkoly(k, denAt)) continue;
       const c = cile.get(k.cil) || { poloha: null, naklon: null };
       if (k.akce === 'tilt') c.naklon = k;
       else { c.poloha = k; c.naklon = null; }
       cile.set(k.cil, c);
     }
   };
-  for (const p of blindRules) if (p.zapnuto && vcera >= 0 && p.dny[vcera]) zapis(p);
+  for (const p of blindRules) if (p.zapnuto && vcera >= 0 && p.dny[vcera]) zapis(p, at - 86400000);
   // Dnešek v pořadí, jak šel čas
   const dnesni = [];
   for (const p of blindRules) {
@@ -7000,7 +7050,7 @@ async function rozvrhStavTed(at = Date.now()) {
   const den = pragueDateString(at);
   dnesni.sort((a, b) => a.minuta - b.minuta || a.poradi - b.poradi);
   for (const x of dnesni) {
-    zapis(x.p);
+    zapis(x.p, at);
     if (x.poradi === 0) pouzite.push(x.p);
   }
   // Zapsat PŘED povely, stejně jako tik — ten by jinak pustil dnešní pravidla znovu
@@ -7082,7 +7132,11 @@ function rozvrhKrok(k) {
   if (hodnota !== null) hodnota = Math.round(hodnota);
   // Naklopení ani poloha bez čísla by byl povel bez obsahu
   if ((k.akce === 'tilt' || k.akce === 'poloha') && hodnota === null) return null;
-  return { cil, akce: k.akce, hodnota };
+  const out = { cil, akce: k.akce, hodnota };
+  // Volby se ukládají jen zapnuté, ať se staré zálohy a kroky bez nich nemění
+  if (k.jenSkola === true && diteZCile(cil)) out.jenSkola = true;
+  if (k.jenOtevrit === true && (k.akce === 'tilt' || k.akce === 'poloha')) out.jenOtevrit = true;
+  return out;
 }
 
 function rozvrhPosli(res) {

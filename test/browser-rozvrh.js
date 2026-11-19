@@ -71,6 +71,20 @@ setTimeout(async () => {
   check('  prázdné se neposílá', 'nejdrive' in rozvrhZFormulare().kdy, false);
   check('popis v seznamu', rozvrhKdyText({ kdy: { typ: 'vychod', posunMin: -15, nejdrive: '06:40' } }), 'východ -15 min, nejdřív 06:40');
   kdy.value = 'zapad'; kdy.dispatchEvent(new Event('change'));
+  // Volby kroku: jen se školou, jen otevřít
+  check('krok s volbami v popisu', rozvrhKrokText({ cil: 'Miky', akce: 'tilt', hodnota: 50, jenSkola: true }) + ' | '
+    + rozvrhKrokText({ cil: 'Ložnice', akce: 'tilt', hodnota: 25, jenOtevrit: true }),
+    'Miky — naklopit na 50 % (jen se školou) | Ložnice — naklopit na 25 % (jen otevřít)');
+  const skolaEl = document.getElementById('rozvrhJenSkola'), otevritEl = document.getElementById('rozvrhJenOtevrit');
+  check('  zaškrtávátka jsou ve formuláři', !!skolaEl && !!otevritEl, true);
+  const akceVol = document.getElementById('rozvrhAkce');
+  akceVol.value = 'tilt'; skolaEl.checked = true; otevritEl.checked = true;
+  const kv = rozvrhKrokZFormulare();
+  check('  zaškrtnuté jdou do kroku', !!kv.jenSkola + ' ' + !!kv.jenOtevrit, 'true true');
+  akceVol.value = 'up';
+  check('  „jen otevřít" u vytažení ne', 'jenOtevrit' in rozvrhKrokZFormulare(), false);
+  skolaEl.checked = false; otevritEl.checked = false;
+  check('  nezaškrtnuté v kroku nejsou', JSON.stringify(Object.keys(rozvrhKrokZFormulare())), '["cil","akce","hodnota"]');
 
   R.push('\\n4) Přidání a úprava');
   // Cíle jsou jména, ne adresy zařízení — server je páruje stejně jako u asistenta

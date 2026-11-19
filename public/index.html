@@ -1063,6 +1063,7 @@
     color:var(--grey-text);
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
+  .rozvrh-volba{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;}
   .rozvrh-prazdno{width:100%;text-align:center;font-size:12px;color:var(--grey-text);margin-top:10px;}
   .rozvrh-prazdno[hidden]{display:none;}
   .zapad-row{display:flex;align-items:center;gap:10px;margin-top:8px;}
@@ -3276,6 +3277,10 @@
           <input type="range" min="0" max="100" value="100" id="rozvrhNaklon">
           <span class="blind-tilt-val" id="rozvrhNaklonVal">100 %</span>
         </div>
+        <!-- Volby kroku: dítě jen v den se Školou v kalendáři; „jen otevřít" = menší
+             číslo vyhraje, ručně víc otevřenou žaluzii rozvrh nepřivře -->
+        <label class="rozvrh-volba"><input type="checkbox" id="rozvrhJenSkola"> jen když má dítě v kalendáři Školu</label>
+        <label class="rozvrh-volba"><input type="checkbox" id="rozvrhJenOtevrit"> jen otevřít (víc otevřenou nepřivře)</label>
         <div class="rozvrh-pozn">100 % = zavřeno · o prázdninách se den počítá jako neděle</div>
         <button class="rozvrh-krok-btn" id="rozvrhKrokAdd" type="button">+ Přidat krok</button>
         <button class="timer-add-btn" id="rozvrhAdd">Přidat pravidlo</button>
@@ -4125,9 +4130,9 @@
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
             <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
-            <li>Po–Pá: <b>Děti ráno</b> 50 % (východ −15 min, nejdřív 6:40), <b>Děti po ránu</b> 25 % (7:00, nejdřív při východu).</li>
-            <li>Po–Pá: <b>Dopoledne</b> kuchyň a obývák (7:00, nejdřív při východu), <b>Ložnice a hosté</b> 10:00 25 %.</li>
-            <li><b>Víkend a prázdniny</b>: 10:00 děti i ložnice 25 %. Vše jsou skupiny rozvrhu — jdou pozastavit i smazat.</li>
+            <li>Po–Pá: <b>Děti ráno</b> v 6:40 na 50 % — každé dítě jen v den, kdy má v kalendáři <b>Školu</b>.</li>
+            <li>Po–Pá: <b>Dopoledne</b> kuchyň a obývák (7:00, nejdřív při východu), <b>Pokoje dopoledne</b> ložnice, hosté a děti 25 % (nejdřív 10:00).</li>
+            <li><b>Víkend a prázdniny</b>: 10:00 děti i ložnice 25 %. Pokoje se dopoledne <b>jen otevírají</b> — ručně víc otevřené rozvrh nepřivře.</li>
             <li><b>Zavřené žaluzie v ložnici</b> (Asistent): ložnici to ráno nic neotevře.</li>
             <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
@@ -7434,9 +7439,11 @@ function rozvrhSkupina(p) {
 
 function rozvrhKrokText(k) {
   const h = k.hodnota === undefined ? k.naklopeni : k.hodnota;
-  if (k.akce === 'poloha') return `${k.cil} — sjet do ${h} %`;
+  // Volby kroku: jen v den se Školou (děti), jen když to žaluzii otevře
+  const volby = (k.jenSkola ? ' (jen se školou)' : '') + (k.jenOtevrit ? ' (jen otevřít)' : '');
+  if (k.akce === 'poloha') return `${k.cil} — sjet do ${h} %${volby}`;
   const akce = k.akce === 'up' ? 'vytáhnout' : (k.akce === 'down' ? 'zatáhnout' : 'naklopit');
-  return `${k.cil} — ${akce}${h === null || h === undefined ? '' : ` na ${h} %`}`;
+  return `${k.cil} — ${akce}${h === null || h === undefined ? '' : ` na ${h} %`}${volby}`;
 }
 
 // Dny určuje box skupiny, takže se píšou jen u smíšených („Ostatní"), kde je
@@ -7476,11 +7483,17 @@ function rozvrhKresliKroky() {
 
 function rozvrhKrokZFormulare() {
   const akce = rozvrhAkceEl ? rozvrhAkceEl.value : 'up';
-  return {
+  const k = {
     cil: rozvrhCilEl ? rozvrhCilEl.value : '',
     akce,
     hodnota: rozvrhNaklonEl ? Number(rozvrhNaklonEl.value) : null
   };
+  // Server si nesmyslné kombinace (škola u kuchyně, „jen otevřít" u vytažení) sám zahodí
+  const skola = document.getElementById('rozvrhJenSkola');
+  const otevrit = document.getElementById('rozvrhJenOtevrit');
+  if (skola && skola.checked) k.jenSkola = true;
+  if (otevrit && otevrit.checked && (akce === 'tilt' || akce === 'poloha')) k.jenOtevrit = true;
+  return k;
 }
 
 // Jedno číslo, dva významy: u naklopení jsou to lamely, u polohy výška. Bez popisku
