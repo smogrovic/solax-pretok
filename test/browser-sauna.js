@@ -772,6 +772,55 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   check('  a \u0159ekne kolik toho bylo',
     /zkop\u00edrov\u00e1no/.test(document.getElementById('nahrevStav').textContent), 'true');
 
+  OUT.push('\\n8g) Souhrn a cena saunování');
+  const souhrn = document.getElementById('nahrevSouhrn');
+  const tabObal = document.getElementById('nahrevTabObal');
+  saunaAnalyzaData = null;
+  renderSaunaNahrev();
+  check('bez analýzy prázdno a tabulka schovaná', souhrn.textContent + '|' + tabObal.hidden, '|true');
+  // 19. 11. 19:09 (Praha) a jedno saunování se změnou cíle
+  const s19 = Date.UTC(2026, 10, 19, 18, 9);
+  saunaAnalyzaData = {
+    saunovani: [
+      { start: s19 - 2 * 24 * H, topiDo: s19 - 2 * 24 * H + 176 * MIN, venkuC: 10.5, odC: 11, cilC: 75, zmenaCile: true,
+        nabehMin: 90, saunovaniMin: 86, celkemMin: 176, kwh: 13.4, kwhNt: 11, kwhVt: 2.4, nabehKwh: 10, udrzKwh: 3.4, cena: 53 },
+      { start: s19, topiDo: s19 + 147 * MIN, venkuC: 8.3, odC: 11, cilC: 75, zmenaCile: false,
+        nabehMin: 105, saunovaniMin: 42, celkemMin: 147, kwh: 12.6, kwhNt: 10, kwhVt: 2.6, nabehKwh: 11, udrzKwh: 1.6, cena: 49.2 }
+    ],
+    prumer: { pocet: 2, cena: 51.1, kwh: 13, nabehKwh: 10.5, udrzKwh: 2.5, nabehMin: 97.5, saunovaniMin: 64, celkemMin: 161.5, hodinaNavicKc: 8 },
+    cenik: { nt: 3.42394, vt: 4.32625, hdoNt: [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]] },
+    fit: { pouzit: false, zaznamu: 14, chybaPrahuMin: { fit: 1.6, vychozi: 1.7 } }
+  };
+  renderSaunaNahrev();
+  const stSouhrn = souhrn.textContent;
+  check('průměrná cena a kWh', /51 Kč · 13,0 kWh/.test(stSouhrn), 'true');
+  check('  náběh v hodinách a minutách', /1 h 38 min/.test(stSouhrn), 'true');
+  check('  hodina saunování navíc', /asi 8 Kč/.test(stSouhrn), 'true');
+  check('  model: výchozí s chybou na prazích', /výchozí \\(14 náběhů\\) · ±1,7 min/.test(stSouhrn), 'true');
+  check('  VT časy z HDO', /8–9, 12–13, 15–16, 19–20 h/.test(stSouhrn), 'true');
+  check('  hodina ve VT o ~7,5 Kč dráž', /o 7,5 Kč víc/.test(stSouhrn), 'true');
+  check('tabulka viditelná', tabObal.hidden, false);
+  const tr = [...document.querySelectorAll('#nahrevTab tr')].map(r => [...r.children].map(c => c.textContent));
+  check('hlavička + 2 saunování + průměr', tr.length, 4);
+  check('nejnovější nahoře, den a čas v Praze', tr[1].slice(0, 2).join(' '), '19.11. čt 19:09–21:36');
+  check('  hodnoty', tr[1].slice(2).join(' '), '8° 11° 105 42 12,6 2,6 49');
+  check('změna cíle má hvězdičku', tr[2][0], '17.11. út*');
+  check('  a vysvětlivku', /měnil cíl/.test(tabObal.textContent), 'true');
+  check('řádek průměru', tr[3].join('|'), 'průměr||||98|64|13,0||51');
+  renderSaunaNahrev();
+  check('opakované vykreslení nezdvojí vysvětlivku', tabObal.querySelectorAll('.nahrev-tab-pozn').length, 1);
+  // Široká tabulka se posouvá ve své kartě, stránka do strany nejede
+  check('tabulka nerozšíří stránku', document.documentElement.scrollWidth <= window.innerWidth, true);
+  document.getElementById('nahrevKopirBtn').click();
+  await wait(60);
+  check('kopie dat nese i analýzu', JSON.parse(zkopirovano).analyza.prumer.pocet, 2);
+  // Doladění z měření se v odhadu před zapnutím projeví i v appce
+  const sDol = odhadNabehuJs({ ...model, doladeni: { faktor: 1.1, pouzito: true } }, 10, 20, 80).minut;
+  check('odhad v appce násobí doladěním', (sDol / odhadNabehuJs(model, 10, 20, 80).minut).toFixed(2), '1.10');
+  check('  nepoužité doladění nic nemění',
+    odhadNabehuJs({ ...model, doladeni: { faktor: 1.1, pouzito: false } }, 10, 20, 80).minut, odhadNabehuJs(model, 10, 20, 80).minut);
+  saunaAnalyzaData = null;
+
   OUT.push('\\n9) Měřák 3EM zůstal nedotčený');
   saunaData = { powerW: 6200, fetchedAt: new Date().toISOString(), topi: true,
     since: T - 10 * MIN, blockUntil: T + 30 * MIN, limitW: 500 };

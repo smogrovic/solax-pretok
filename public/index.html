@@ -1064,6 +1064,15 @@
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
   .rozvrh-volba{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;}
+  .nahrev-souhrn .wbsrc-note{margin-top:6px;}
+  .nahrev-tab-obal{overflow-x:auto;margin:10px 0 4px;-webkit-overflow-scrolling:touch;}
+  .nahrev-tab-obal[hidden]{display:none;}
+  .nahrev-tab{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;font-variant-numeric:tabular-nums;}
+  .nahrev-tab th{font-weight:600;color:var(--muted);text-align:right;padding:3px 5px;border-bottom:1px solid var(--line, rgba(127,127,127,.25));}
+  .nahrev-tab td{text-align:right;padding:3px 5px;}
+  .nahrev-tab th:first-child,.nahrev-tab td:first-child,.nahrev-tab th:nth-child(2),.nahrev-tab td:nth-child(2){text-align:left;}
+  .nahrev-tab tr.prumer td{font-weight:600;border-top:1px solid var(--line, rgba(127,127,127,.25));}
+  .nahrev-mereni-nadpis{margin-top:12px;}
   .rozvrh-prazdno{width:100%;text-align:center;font-size:12px;color:var(--grey-text);margin-top:10px;}
   .rozvrh-prazdno[hidden]{display:none;}
   .zapad-row{display:flex;align-items:center;gap:10px;margin-top:8px;}
@@ -3793,8 +3802,12 @@
       <!-- Podklad pro předpověď „za jak dlouho bude hotovo". Sbírá se samo pokaždé,
            co se sauna nahřívá — z appky i z měřáku, takže i nahřívání puštěná
            z appky HUUM se započítají. -->
-      <button class="sbal-btn" data-sbal="nahrev" type="button" aria-expanded="false">Jak dlouho se nahřívá<i>▾</i></button>
+      <button class="sbal-btn" data-sbal="nahrev" type="button" aria-expanded="false">Nahřívání a cena<i>▾</i></button>
       <div class="card stats-card" data-sbal-obsah="nahrev">
+        <!-- Souhrn a cena po saunováních: počítá server (saunaAnalyza) -->
+        <div class="nahrev-souhrn" id="nahrevSouhrn"></div>
+        <div class="nahrev-tab-obal" id="nahrevTabObal" hidden><table class="nahrev-tab" id="nahrevTab"></table></div>
+        <div class="graph-title nahrev-mereni-nadpis">Jednotlivá měření</div>
         <div class="wbsrc-list" id="nahrevList"></div>
         <div class="wbsrc-note" id="nahrevPozn"></div>
         <button class="sbal-btn" id="nahrevKopirBtn" type="button">Zkopírovat data<i id="nahrevStav">▾</i></button>
@@ -9946,8 +9959,11 @@ function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
   if (cilC <= tStartC) return { minut: 0, hotovoV: now, dosazitelne: true };
   const tMax = m.a + m.b * venkuC;
   if (cilC >= m.termostat || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC))
+  let minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC))
     + (typeof m.dojezd === 'number' ? m.dojezd : 0);
+  // Doladění podle vlastních nahřátí násobí celý odhad (jako na serveru)
+  const dol = m.doladeni;
+  if (dol && dol.pouzito && typeof dol.faktor === 'number') minut *= dol.faktor;
   return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
 }
 
@@ -10522,7 +10538,112 @@ function nahrevMin(v) {
   return v === null || v === undefined ? null : Math.round(v) + ' min';
 }
 
+// ---- Souhrn a cena po saunováních (počítá server, viz saunaAnalyza) ----
+let saunaAnalyzaData = null;
+const nahrevSouhrnEl = document.getElementById('nahrevSouhrn');
+const nahrevTabEl = document.getElementById('nahrevTab');
+const nahrevTabObalEl = document.getElementById('nahrevTabObal');
+const nahrevCislo = (v, des = 1) => typeof v === 'number' ? v.toFixed(des).replace('.', ',') : '–';
+const nahrevDelka = min => typeof min !== 'number' ? '–'
+  : (min < 60 ? `${Math.round(min)} min` : `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, '0')} min`);
+const nahrevHM = ts => typeof ts === 'number'
+  ? new Date(ts).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Prague' }) : '–';
+// VT úseky z časů nízkého tarifu: [[0,8],[9,12]…] → „8–9, 12–13…“
+function nahrevVtText(nt) {
+  if (!Array.isArray(nt)) return '';
+  const vt = [];
+  let od = 0;
+  for (const [a, b] of [...nt].sort((x, y) => x[0] - y[0])) { if (a > od) vt.push([od, a]); od = Math.max(od, b); }
+  if (od < 24) vt.push([od, 24]);
+  const h = x => String(x).replace('.', ',');
+  return vt.map(([a, b]) => `${h(a)}–${h(b)}`).join(', ');
+}
+
+function renderSaunaSouhrn() {
+  if (!nahrevSouhrnEl) return;
+  const a = saunaAnalyzaData;
+  nahrevSouhrnEl.textContent = '';
+  if (nahrevTabEl) nahrevTabEl.textContent = '';
+  if (nahrevTabObalEl) {
+    nahrevTabObalEl.hidden = true;
+    nahrevTabObalEl.querySelectorAll('.nahrev-tab-pozn').forEach(x => x.remove());
+  }
+  if (!a || !Array.isArray(a.saunovani)) return;
+  const radek = (popis, hodnota) => {
+    const r = document.createElement('div');
+    r.className = 'stat-row';
+    const s1 = document.createElement('span'); s1.textContent = popis;
+    const s2 = document.createElement('span'); s2.className = 'stat-val'; s2.textContent = hodnota;
+    r.appendChild(s1); r.appendChild(s2);
+    nahrevSouhrnEl.appendChild(r);
+  };
+  const p = a.prumer;
+  if (p) {
+    radek('Průměrně za saunování', `${Math.round(p.cena)} Kč · ${nahrevCislo(p.kwh)} kWh`);
+    radek('  z toho náběh / udržování', `${nahrevCislo(p.nabehKwh)} / ${nahrevCislo(p.udrzKwh)} kWh`);
+    radek('Náběh na cíl', nahrevDelka(p.nabehMin));
+    radek('Saunování / celkem zapnuto', `${nahrevDelka(p.saunovaniMin)} / ${nahrevDelka(p.celkemMin)}`);
+    if (typeof p.hodinaNavicKc === 'number') radek('Hodina saunování navíc', `asi ${Math.round(p.hodinaNavicKc)} Kč`);
+  }
+  const f = a.fit;
+  if (f) {
+    const chyba = f.chybaPrahuMin && typeof f.chybaPrahuMin[f.pouzit ? 'fit' : 'vychozi'] === 'number'
+      ? ` · ±${nahrevCislo(f.chybaPrahuMin[f.pouzit ? 'fit' : 'vychozi'])} min` : '';
+    radek('Model náběhu', (f.pouzit ? `z měření (${f.zaznamu} náběhů)` : `výchozí (${f.zaznamu} náběhů)`) + chyba);
+  }
+  const pozn = document.createElement('div');
+  pozn.className = 'wbsrc-note';
+  const cen = a.cenik || {};
+  const vt = nahrevVtText(cen.hdoNt);
+  const rozdil = typeof cen.vt === 'number' && typeof cen.nt === 'number' ? (cen.vt - cen.nt) * 8.4 : null;
+  pozn.textContent = (p ? `Z ${p.pocet} saunování s měřeným příkonem. ` : 'Cena se počítá ze saunování s měřeným příkonem. ')
+    + (vt ? `Vysoký tarif je ${vt} h` + (rozdil ? ` — hodina topení v něm stojí asi o ${nahrevCislo(Math.round(rozdil * 2) / 2)} Kč víc. ` : '. ')
+      + 'Nejlevněji: zapnout ve 20:00, nebo tak, aby náběh skončil do 19:00. ' : '')
+    + 'Bez stálých plateb (saunování je nezmění).';
+  nahrevSouhrnEl.appendChild(pozn);
+
+  const radky = a.saunovani.filter(s => s.kwh !== null || s.nabehMin !== null);
+  if (!nahrevTabEl || !radky.length) return;
+  const hlava = ['Den', 'Topení', 'Venku', 'Start', 'Náběh', 'Sauna', 'kWh', 'VT', 'Kč'];
+  const thead = document.createElement('tr');
+  for (const t of hlava) { const th = document.createElement('th'); th.textContent = t; thead.appendChild(th); }
+  nahrevTabEl.appendChild(thead);
+  const dny = ['ne', 'po', 'út', 'st', 'čt', 'pá', 'so'];
+  const bunky = (tr, hodnoty) => {
+    for (const v of hodnoty) { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); }
+    nahrevTabEl.appendChild(tr);
+  };
+  // Nejnovější nahoře, jako seznam měření
+  for (const s of [...radky].reverse()) {
+    const d = new Date(s.start);
+    const den = d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).replace(/\s/g, '');
+    const wd = dny[new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Prague' })).getDay()];
+    bunky(document.createElement('tr'), [
+      `${den} ${wd}${s.zmenaCile ? '*' : ''}`,
+      `${nahrevHM(s.start)}–${nahrevHM(s.topiDo)}`,
+      typeof s.venkuC === 'number' ? Math.round(s.venkuC) + '°' : '–',
+      typeof s.odC === 'number' ? Math.round(s.odC) + '°' : '–',
+      typeof s.nabehMin === 'number' ? String(s.nabehMin) : '–',
+      typeof s.saunovaniMin === 'number' ? String(s.saunovaniMin) : '–',
+      nahrevCislo(s.kwh), nahrevCislo(s.kwhVt), typeof s.cena === 'number' ? String(Math.round(s.cena)) : '–'
+    ]);
+  }
+  if (p) {
+    const tr = document.createElement('tr');
+    tr.className = 'prumer';
+    bunky(tr, ['průměr', '', '', '', String(Math.round(p.nabehMin)), String(Math.round(p.saunovaniMin)),
+      nahrevCislo(p.kwh), '', String(Math.round(p.cena))]);
+  }
+  if (nahrevTabObalEl) nahrevTabObalEl.hidden = false;
+  const z = document.createElement('div');
+  z.className = 'wbsrc-note nahrev-tab-pozn';
+  z.textContent = 'Náběh a sauna v minutách, kWh celkem a z toho ve VT.'
+    + (radky.some(s => s.zmenaCile) ? ' * během náběhu se měnil cíl.' : '');
+  if (nahrevTabObalEl) nahrevTabObalEl.appendChild(z);
+}
+
 function renderSaunaNahrev() {
+  bezpecne(renderSaunaSouhrn);
   if (!nahrevListEl) return;
   const zaznamy = (saunaNahrevData && saunaNahrevData.zaznamy) || [];
   nahrevListEl.textContent = '';
@@ -10579,7 +10700,7 @@ async function nahrevZkopiruj() {
   if (!nahrevKopirBtnEl) return;
   // Celá historie a k ní model, se kterým appka zrovna počítá
   const model = huumData && huumData.odhad ? huumData.odhad.model : null;
-  const text = JSON.stringify({ ...(saunaNahrevData || { zaznamy: [] }), model }, null, 1);
+  const text = JSON.stringify({ ...(saunaNahrevData || { zaznamy: [] }), model, analyza: saunaAnalyzaData }, null, 1);
   const kb = Math.max(1, Math.round(text.length / 1024));
   let doSchranky = false;
   try {
@@ -13028,6 +13149,7 @@ function applySnapshot(snap) {
   // součty, a slučovat ji po restartu by jen vyrábělo duplicity. Server ji drží
   // v Upstashi.
   saunaNahrevData = snap.saunaNahrev || null;
+  saunaAnalyzaData = snap.saunaAnalyza || null;
   bezpecne(renderSaunaNahrev);
   topeniData = snap.topeni || null;
   bezpecne(renderTopeni);
@@ -13527,7 +13649,9 @@ function connectStream() {
     bezpecne(renderTopeni);
   });
   es.addEventListener('saunaNahrev', e => {
-    saunaNahrevData = JSON.parse(e.data).saunaNahrev || null;
+    const d = JSON.parse(e.data);
+    saunaNahrevData = d.saunaNahrev || null;
+    if ('saunaAnalyza' in d) saunaAnalyzaData = d.saunaAnalyza || null;
     bezpecne(renderSaunaNahrev);
   });
   es.addEventListener('saunaDays', e => {

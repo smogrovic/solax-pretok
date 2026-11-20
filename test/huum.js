@@ -943,9 +943,10 @@ nadpis('18c) Doladění modelu podle vlastních nahřátí');
 {
   const h = build();
   const d = h.api.SAUNA_DOJEZD_MIN;
-  // Měření, kde sauna dosáhla cíle za `pomer`× víc, než říká model (bez dojezdu)
+  // Měření, kde sauna dosáhla cíle za `pomer`× víc, než říká celý odhad (i s dojezdem
+  // — dosažení cíle dojezd obsahuje; dřív se bral bez něj a zpoždění se počítalo dvakrát)
   const mereni = (pomer, o = {}) => {
-    const m = h.api.odhadNabehu(5, 10, 80).minut - d;
+    const m = h.api.odhadNabehu(5, 10, 80).minut;
     return { start: 0, odC: 10, venkuC: 5, cilC: 80, cilStartC: 80, zmenyCile: [{ min: 0, cilC: 80 }],
              prahy: { cil: { min: m * pomer, c: 80 } }, ...o };
   };
@@ -961,10 +962,12 @@ nadpis('18c) Doladění modelu podle vlastních nahřátí');
   check('ulétlé hodnoty se ořežou', h.api.saunaKalibrace([mereni(4), mereni(4), mereni(4)]).faktor, 1.5);
   check('  i dolů', h.api.saunaKalibrace([mereni(0.2), mereni(0.2), mereni(0.2)]).faktor, 0.7);
   check('bere se jen posledních 8', h.api.saunaKalibrace([...Array(8).fill(mereni(1.4)), ...Array(8).fill(mereni(0.9))]).faktor, 0.9);
-  // Doladěný odhad násobí jen náběh, dojezd zůstává
+  // Doladěný odhad násobí celý odhad i s dojezdem (dojezd se nepřičítá podruhé)
   const zaklad = h.api.odhadNabehu(5, 10, 80).minut;
   const dol = h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: true });
-  check('doladěný odhad', Math.round(dol.minut * 1000), Math.round(((zaklad - d) * 1.2 + d) * 1000));
+  check('doladěný odhad', Math.round(dol.minut * 1000), Math.round(zaklad * 1.2 * 1000));
+  // Měření přesně podle modelu (dojezd v něm) → faktor 1, ne 1,1 jako dřív
+  check('měření přesně podle modelu → faktor 1', h.api.saunaKalibrace([mereni(1), mereni(1), mereni(1)]).faktor, 1);
   check('  nepoužité doladění = model', h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: false }).minut, zaklad);
   // Časovač s doladěním zapne dřív a řekne to
   stavKamen(h);
@@ -972,7 +975,7 @@ nadpis('18c) Doladění modelu podle vlastních nahřátí');
   const jdu = h.pulnoc + 19 * 3600000;
   h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
   const t = h.api.casovace()[0];
-  const cekane = Math.ceil((h.api.odhadNabehu(10, 20, 80).minut - d) * 1.2 + d);
+  const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut * 1.2);
   check('časovač počítá s doladěním', (jdu - t.zapneV) / MINUTA + ' ' + t.nabeh.doladeni + ' ' + t.nabeh.doladeniMereni, cekane + ' 1.2 3');
 }
 

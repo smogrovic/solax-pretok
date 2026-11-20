@@ -835,6 +835,7 @@ function snapshot() {
     heatpump: heatpumpPayload(),
     saunaDays: state.saunaDays,
     saunaNahrev: state.saunaNahrev,
+    saunaAnalyza: saunaAnalyza(),
     topeni: topeniPayload(),
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
@@ -1900,7 +1901,13 @@ function recordSaunaDay(w, dtH) {
 const NAHREV_PRAHY = [60, 70, 80];
 // Měření se NIKDY nemažou ani neořezávají — sbírá se podklad pro analýzu modelu.
 // Nesmyslná měření (teplý start, bliknutí) se jen označí a vyřadí si je analýza.
-const NAHREV_BODU_MAX = 90;       // strop vzorků na měření (~3 h po dvou minutách)
+// Strop vzorků na měření: 4 h po dvou minutách a rezerva. Dřív 90 (3 h) — delší
+// saunování pak přišlo o konec a cena by vyšla nižší.
+const NAHREV_BODU_MAX = 150;
+// Nové zapnutí do 15 min po konci předchozího měření = pořád totéž saunování
+const NAHREV_NAVAZUJE_MS = 15 * 60000;
+// Kamna zapnutá z appky/časovače, ale měřák do 3 min nevidí nad 1 kW → relé nesepnulo
+const NAHREV_RELE_MIN = 3, NAHREV_RELE_W = 1000;
 const NAHREV_STROP_MS = 4 * 3600000;
 
 // ---- Model náběhu sauny ----
@@ -1922,18 +1929,34 @@ const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.3);
 const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
 const SAUNA_DOJEZD_MIN = saunaEnvNum('SAUNA_DOJEZD_MIN', 8);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
+const SAUNA_MODEL_VYCHOZI = Object.freeze({ rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A,
+  b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT, dojezd: SAUNA_DOJEZD_MIN });
+
+// Model, se kterým se zrovna počítá: přefitovaný z vlastních měření, pokud je
+// znatelně lepší než výchozí konstanty (viz saunaFit), jinak výchozí.
+function saunaModel() {
+  const f = typeof saunaFitAktualni === 'function' ? saunaFitAktualni() : null;
+  return f && f.pouzit ? f.model : SAUNA_MODEL_VYCHOZI;
+}
+
+// Čas na teplotu bez dojezdu (průběžné prahy 60/70 °C). null = nedosažitelné.
+function saunaModelMin(m, venkuC, tStartC, cilC, rozjezdMin = m.rozjezd) {
+  if (cilC <= tStartC) return 0;
+  const tMax = m.a + m.b * venkuC;
+  if (cilC >= m.termostat || cilC >= tMax) return null;
+  return Math.max(0, rozjezdMin) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC));
+}
 
 // → { minut, hotovoV, dosazitelne }, nebo null, když chybí vstup. Nikdy nepadá.
 // `rozjezdMin`: kolik z rozjezdu ještě zbývá — u kamen, která už hřejí, je to méně.
-function odhadNabehu(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin = SAUNA_ROZJEZD_MIN) {
+function odhadNabehu(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin, m = saunaModel()) {
   if (typeof venkuC !== 'number' || typeof tStartC !== 'number' || typeof cilC !== 'number'
       || !Number.isFinite(venkuC) || !Number.isFinite(tStartC) || !Number.isFinite(cilC)) return null;
   const naMinutu = ms => Math.round(ms / 60000) * 60000;
   if (cilC <= tStartC) return { minut: 0, hotovoV: naMinutu(now), dosazitelne: true };
-  const tMax = SAUNA_TMAX_A + SAUNA_TMAX_B * venkuC;
-  if (cilC >= SAUNA_TERMOSTAT || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  const minut = Math.max(0, rozjezdMin) + SAUNA_TAU_MIN * Math.log((tMax - tStartC) / (tMax - cilC))
-    + Math.max(0, SAUNA_DOJEZD_MIN);
+  const t = saunaModelMin(m, venkuC, tStartC, cilC, typeof rozjezdMin === 'number' ? rozjezdMin : m.rozjezd);
+  if (t === null) return { minut: null, hotovoV: null, dosazitelne: false };
+  const minut = t + Math.max(0, m.dojezd);
   return { minut, hotovoV: naMinutu(now + minut * 60000), dosazitelne: true };
 }
 
@@ -1941,8 +1964,10 @@ function odhadNabehu(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin = SAUNA
 // Model má pevné konstanty, sauna se ale chová podle počasí, větru a vlhkosti jinak.
 // Z posledních měření (start z chladna, cíl se neměnil a byl dosažen) se porovná,
 // za kolik minut sauna cíle skutečně dosáhla, s tím, co by předpověděl model ze stejné
-// startovní a venkovní teploty. Medián poměru pak násobí náběh (bez dojezdu — ten se
-// v měření nevidí, měří se dosažení cíle). Málo měření → bez doladění.
+// startovní a venkovní teploty — CELÝ odhad i s dojezdem, protože dosažení cíle
+// dojezd obsahuje. (Dřív se poměr bral bez dojezdu a dojezd se pak přičetl znovu:
+// zpoždění se tak počítalo dvakrát a časovač pouštěl saunu ~9 min zbytečně brzy.)
+// Medián poměru pak násobí celý odhad. Málo měření → bez doladění.
 const SAUNA_KAL_MIN_MERENI = 3, SAUNA_KAL_MERENI = 8, SAUNA_KAL_MEZE = [0.7, 1.5];
 function saunaKalibrace(zaznamy = state.saunaNahrev && state.saunaNahrev.zaznamy) {
   if (!Array.isArray(zaznamy)) return null;
@@ -1954,9 +1979,9 @@ function saunaKalibrace(zaznamy = state.saunaNahrev && state.saunaNahrev.zaznamy
     const cil = typeof r.cilStartC === 'number' ? r.cilStartC : r.cilC;
     const o = odhadNabehu(r.venkuC, r.odC, cil, r.start);
     if (!o || !o.dosazitelne || typeof o.minut !== 'number') continue;
-    const model = o.minut - Math.max(0, SAUNA_DOJEZD_MIN);
-    if (model < 15 || r.prahy.cil.min < 10) continue;                    // skoro teplá sauna nic neřekne
-    pomery.push(r.prahy.cil.min / model);
+    // Skoro teplá sauna nic neřekne (rozhoduje samotný náběh, dojezd je u všech stejný)
+    if (o.minut - Math.max(0, saunaModel().dojezd) < 15 || r.prahy.cil.min < 10) continue;
+    pomery.push(r.prahy.cil.min / o.minut);
   }
   if (pomery.length < SAUNA_KAL_MIN_MERENI) return { faktor: 1, mereni: pomery.length, pouzito: false };
   pomery.sort((a, b) => a - b);
@@ -1966,12 +1991,210 @@ function saunaKalibrace(zaznamy = state.saunaNahrev && state.saunaNahrev.zaznamy
   return { faktor, mereni: pomery.length, pouzito: true };
 }
 // Odhad náběhu doladěný podle vlastních měření (časovač i odhad v appce)
-function odhadNabehuDoladeny(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin = SAUNA_ROZJEZD_MIN, kal = saunaKalibrace()) {
+function odhadNabehuDoladeny(venkuC, tStartC, cilC, now = Date.now(), rozjezdMin, kal = saunaKalibrace()) {
   const o = odhadNabehu(venkuC, tStartC, cilC, now, rozjezdMin);
   if (!o || typeof o.minut !== 'number' || !kal || !kal.pouzito || o.minut === 0) return o;
-  const dojezd = Math.max(0, SAUNA_DOJEZD_MIN);
-  const minut = Math.max(0, o.minut - dojezd) * kal.faktor + dojezd;
+  const minut = o.minut * kal.faktor;
   return { ...o, minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, faktor: kal.faktor };
+}
+
+// ---- Přefitování modelu z vlastních měření ----
+// Bere se jen studený start (odC ≤ 50, sauna došla aspoň na 50 °C) a z každého
+// měření jen úsek NA PLNÝ VÝKON: do posledního bodu před prvním poklesem příkonu
+// pod 7 kW po 45. minutě. Tím vypadne regulace před cílem i druhá pauza kamen
+// (~67. min); první pauza (~31. min) je v každém náběhu, model s ní počítá.
+// Měření bez příkonu (do 10. 10.) se berou do teploty cíl − 4 °C, kde kamna
+// začínají ubírat. Snížený cíl během náběhu → jen do snížení.
+//   T(t) = T0                                    pro t ≤ rozjezd
+//   T(t) = m − (m − T0) · e^(−(t − rozjezd)/τ)    jinak, m = a + b · venku
+// Fit = nejmenší čtverce přes všechny body najednou (Nelder–Mead s mezemi).
+// `b` se drží na 0,3, dokud nejsou aspoň 3 náběhy pod 0 °C venku; pak se uvolní
+// a bere, jen když vyjde 0–1. Nový model se použije, jen když je na prazích
+// 60/70 °C přesnější aspoň o 0,3 min, nebo když se odhad posune o víc než 2 min
+// — menší rozdíly jsou pod přesností čidla.
+const SAUNA_FIT_PLNY_W = 7000, SAUNA_FIT_PLNY_OD_MIN = 45, SAUNA_FIT_TOPI_W = 1000;
+const SAUNA_FIT_MIN_ZAZNAMU = 4, SAUNA_FIT_MRAZ_ZAZNAMU = 3;
+const SAUNA_FIT_ZLEPSENI_MIN = 0.3, SAUNA_FIT_POSUN_MIN = 2;
+const SAUNA_FIT_MEZE = { tau: [20, 2000], a: [80, 600], rozjezd: [0, 20], b: [-1, 2] };
+const SAUNA_FIT_REFERENCE = { venkuC: 8, odC: 10, cilC: 75 };   // posun odhadu se měří na tomhle
+
+function saunaFitUsek(r) {
+  if (!r || r.kratke || r.teplyStart || !Array.isArray(r.body)) return null;
+  if (typeof r.maxC !== 'number' || r.maxC < 50 || typeof r.odC !== 'number' || r.odC > 50) return null;
+  const body = r.body.filter(b => b && typeof b.min === 'number' && typeof b.c === 'number');
+  if (body.length < 5) return null;
+  const sW = r.body.filter(b => b && typeof b.w === 'number');
+  if (sW.length && !sW.some(b => b.w > SAUNA_FIT_TOPI_W)) return null;   // kamna vůbec netopila
+  let hend;
+  if (sW.length) {
+    const pokles = sW.find(b => b.min > SAUNA_FIT_PLNY_OD_MIN && b.w < SAUNA_FIT_PLNY_W);
+    const pred = pokles ? body.filter(b => b.min < pokles.min) : body;
+    hend = pred.length ? pred[pred.length - 1].min : null;
+  } else {
+    const cil = typeof r.cilStartC === 'number' ? r.cilStartC : (typeof r.cilC === 'number' ? r.cilC : 80);
+    const pred = body.filter(b => b.c < cil - 4);
+    hend = pred.length ? pred[pred.length - 1].min : null;
+  }
+  if (hend === null) return null;
+  let cilPred = null;
+  for (const z of Array.isArray(r.zmenyCile) ? r.zmenyCile : []) {
+    if (cilPred !== null && typeof z.cilC === 'number' && z.cilC < cilPred && z.min < hend) {
+      const pred = body.filter(b => b.min <= z.min);
+      hend = pred.length ? pred[pred.length - 1].min : 0;
+      break;
+    }
+    if (typeof z.cilC === 'number') cilPred = z.cilC;
+  }
+  const usek = body.filter(b => b.min <= hend);
+  if (usek.length < 5) return null;
+  const venky = usek.filter(b => typeof b.venkuC === 'number').map(b => b.venkuC);
+  const venkuC = venky.length ? venky.reduce((a, x) => a + x, 0) / venky.length
+    : (typeof r.venkuC === 'number' ? r.venkuC : null);
+  if (venkuC === null) return null;
+  return { r, body: usek, venkuC, odC: r.odC, hend };
+}
+
+function saunaFitT(p, venkuC, t0, t) {
+  const m = p.a + p.b * venkuC;
+  return t <= p.rozjezd ? t0 : m - (m - t0) * Math.exp(-(t - p.rozjezd) / p.tau);
+}
+
+// Nelder–Mead bez závislostí. `f` dostane vektor, meze řeší volající (ořezem).
+function saunaNelderMead(f, x0, kroky, iteraci = 800) {
+  const n = x0.length;
+  let simplex = [x0.slice()];
+  for (let i = 0; i < n; i++) { const x = x0.slice(); x[i] += kroky[i]; simplex.push(x); }
+  let hodnoty = simplex.map(f);
+  for (let it = 0; it < iteraci; it++) {
+    const poradi = hodnoty.map((v, i) => i).sort((a, b) => hodnoty[a] - hodnoty[b]);
+    simplex = poradi.map(i => simplex[i]); hodnoty = poradi.map(i => hodnoty[i]);
+    if (Math.abs(hodnoty[n] - hodnoty[0]) < 1e-9 * (1 + Math.abs(hodnoty[0]))) break;
+    const stred = Array(n).fill(0);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) stred[j] += simplex[i][j] / n;
+    const bod = k => stred.map((s, j) => s + k * (simplex[n][j] - s));
+    const xr = bod(-1), fr = f(xr);
+    if (fr < hodnoty[0]) {
+      const xe = bod(-2), fe = f(xe);
+      if (fe < fr) { simplex[n] = xe; hodnoty[n] = fe; } else { simplex[n] = xr; hodnoty[n] = fr; }
+    } else if (fr < hodnoty[n - 1]) {
+      simplex[n] = xr; hodnoty[n] = fr;
+    } else {
+      const xc = bod(fr < hodnoty[n] ? -0.5 : 0.5), fc = f(xc);
+      if (fc < Math.min(fr, hodnoty[n])) { simplex[n] = xc; hodnoty[n] = fc; } else {
+        for (let i = 1; i <= n; i++) {
+          simplex[i] = simplex[i].map((v, j) => simplex[0][j] + 0.5 * (v - simplex[0][j]));
+          hodnoty[i] = f(simplex[i]);
+        }
+      }
+    }
+  }
+  const i = hodnoty.indexOf(Math.min(...hodnoty));
+  return { x: simplex[i], f: hodnoty[i] };
+}
+
+// Průměrná chyba modelu na prazích 60/70 °C (bez dojezdu) přes vybraná měření
+function saunaFitChybaPrahu(m, useky) {
+  let soucet = 0, n = 0;
+  for (const u of useky) {
+    for (const p of [60, 70]) {
+      const pr = u.r.prahy && u.r.prahy[p];
+      if (!pr || typeof pr.min !== 'number') continue;
+      const t = saunaModelMin(m, u.venkuC, u.odC, p);
+      if (t === null) continue;
+      soucet += Math.abs(t - pr.min); n++;
+    }
+  }
+  return n ? soucet / n : null;
+}
+
+// Dojezd = průměr (skutečný čas do cíle − model bez dojezdu), jen měření bez změny cíle
+function saunaFitDojezd(m, useky) {
+  const rozdily = [];
+  for (const u of useky) {
+    const r = u.r;
+    if (!r.prahy || !r.prahy.cil || typeof r.prahy.cil.min !== 'number' || typeof r.cilC !== 'number') continue;
+    if (Array.isArray(r.zmenyCile) && r.zmenyCile.length > 1) continue;
+    const t = saunaModelMin(m, u.venkuC, u.odC, r.cilC);
+    if (t !== null) rozdily.push(r.prahy.cil.min - t);
+  }
+  return rozdily.length ? rozdily.reduce((a, x) => a + x, 0) / rozdily.length : null;
+}
+
+const saunaZaokr = (x, k = 10) => Math.round(x * k) / k;
+function saunaFit(zaznamy, vychozi = SAUNA_MODEL_VYCHOZI) {
+  const useky = (Array.isArray(zaznamy) ? zaznamy : []).map(saunaFitUsek).filter(Boolean);
+  const bodu = useky.reduce((a, u) => a + u.body.length, 0);
+  const out = { zaznamu: useky.length, bodu, pouzit: false, model: null, vychozi };
+  if (useky.length < SAUNA_FIT_MIN_ZAZNAMU) {
+    out.duvod = `málo měření (${useky.length} z ${SAUNA_FIT_MIN_ZAZNAMU})`;
+    return out;
+  }
+  const mez = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
+  const fitni = volneB => {
+    const z = x => ({ tau: mez(x[0], SAUNA_FIT_MEZE.tau), a: mez(x[1], SAUNA_FIT_MEZE.a),
+      rozjezd: mez(x[2], SAUNA_FIT_MEZE.rozjezd), b: volneB ? mez(x[3], SAUNA_FIT_MEZE.b) : vychozi.b });
+    const sse = x => {
+      const p = z(x);
+      let s = 0;
+      for (const u of useky) for (const b of u.body) { const d = saunaFitT(p, u.venkuC, u.odC, b.min) - b.c; s += d * d; }
+      return s;
+    };
+    const x0 = volneB ? [120, 140, 5, vychozi.b] : [120, 140, 5];
+    const k = volneB ? [30, 20, 2, 0.3] : [30, 20, 2];
+    // Dvakrát: druhý běh z výsledku prvního, Nelder–Mead jinak rád uvízne
+    let v = saunaNelderMead(sse, x0, k);
+    v = saunaNelderMead(sse, v.x, k.map(x => x / 4));
+    return { p: z(v.x), sse: v.f };
+  };
+  const mraz = useky.filter(u => u.venkuC < 0).length;
+  let fit = fitni(false);
+  let bVolne = false;
+  if (mraz >= SAUNA_FIT_MRAZ_ZAZNAMU) {
+    const volny = fitni(true);
+    if (volny.p.b >= 0 && volny.p.b <= 1) { fit = volny; bVolne = true; }
+  }
+  const p = fit.p;
+  const model = { rozjezd: saunaZaokr(p.rozjezd), tau: saunaZaokr(p.tau), a: saunaZaokr(p.a), b: saunaZaokr(p.b, 100),
+    termostat: vychozi.termostat, dojezd: 0 };
+  const dojezd = saunaFitDojezd(model, useky);
+  model.dojezd = dojezd === null ? vychozi.dojezd : saunaZaokr(Math.max(0, dojezd));
+  const chybaFit = saunaFitChybaPrahu(model, useky);
+  const chybaVych = saunaFitChybaPrahu(vychozi, useky);
+  const ref = m => {
+    const t = saunaModelMin(m, SAUNA_FIT_REFERENCE.venkuC, SAUNA_FIT_REFERENCE.odC, SAUNA_FIT_REFERENCE.cilC);
+    return t === null ? null : t + m.dojezd;
+  };
+  const refFit = ref(model), refVych = ref(vychozi);
+  const posun = refFit !== null && refVych !== null ? refFit - refVych : null;
+  const zlepseni = chybaFit !== null && chybaVych !== null ? chybaVych - chybaFit : null;
+  Object.assign(out, {
+    model, bVolne, mrazZaznamu: mraz,
+    rmseC: saunaZaokr(Math.sqrt(fit.sse / Math.max(1, bodu)), 100),
+    chybaPrahuMin: { fit: chybaFit === null ? null : saunaZaokr(chybaFit, 100), vychozi: chybaVych === null ? null : saunaZaokr(chybaVych, 100) },
+    referenceMin: { fit: refFit === null ? null : saunaZaokr(refFit), vychozi: refVych === null ? null : saunaZaokr(refVych),
+      ...SAUNA_FIT_REFERENCE }
+  });
+  out.pouzit = (zlepseni !== null && zlepseni >= SAUNA_FIT_ZLEPSENI_MIN)
+    || (posun !== null && Math.abs(posun) > SAUNA_FIT_POSUN_MIN);
+  out.duvod = out.pouzit
+    ? (zlepseni !== null && zlepseni >= SAUNA_FIT_ZLEPSENI_MIN
+      ? `na prazích přesnější o ${saunaZaokr(zlepseni, 100)} min` : `odhad se posunul o ${saunaZaokr(posun)} min`)
+    : 'rozdíl proti výchozímu modelu je pod přesností čidla';
+  return out;
+}
+
+// Fit se počítá, jen když přibude nebo se změní měření (otisk = počty bodů)
+let saunaFitCache = { otisk: null, vysledek: null };
+function saunaFitAktualni(zaznamy = state.saunaNahrev && state.saunaNahrev.zaznamy) {
+  if (!Array.isArray(zaznamy)) return null;
+  const otisk = zaznamy.length + ':' + zaznamy.map(r => r && [r.start, Array.isArray(r.body) ? r.body.length : 0,
+    r.konec, r.maxC, r.odC, r.cilC, r.prahy && r.prahy.cil ? r.prahy.cil.min : ''].join('/')).join(',');
+  if (saunaFitCache.otisk !== otisk) {
+    let v = null;
+    try { v = saunaFit(zaznamy); } catch (err) { v = { pouzit: false, duvod: 'chyba: ' + err.message }; }
+    saunaFitCache = { otisk, vysledek: v };
+  }
+  return saunaFitCache.vysledek;
 }
 
 // Pro appku: vstupy modelu a u běžícího topení odhad na cíl (nebo na prahy)
@@ -1980,8 +2203,9 @@ function saunaOdhad(now = Date.now()) {
   const h = state.huum || {};
   const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
   const tStartC = vSaune !== null ? vSaune : venkuC;
-  const model = { rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A, b: SAUNA_TMAX_B, termostat: SAUNA_TERMOSTAT,
-    dojezd: SAUNA_DOJEZD_MIN };
+  const m = saunaModel();
+  const model = { rozjezd: m.rozjezd, tau: m.tau, a: m.a, b: m.b, termostat: m.termostat, dojezd: m.dojezd,
+    zdroj: m === SAUNA_MODEL_VYCHOZI ? 'vychozi' : 'mereni' };
   const kal = saunaKalibrace();
   if (kal) model.doladeni = kal;
   const out = { venkuC, tStartC, model, cile: [] };
@@ -1992,7 +2216,7 @@ function saunaOdhad(now = Date.now()) {
   const cile = cil !== null ? [cil] : SAUNA_ODHAD_PRAHY;
   // Kamna už topí: rozjezd se počítá jen ten, co ještě nedoběhl
   const zbyva = b && typeof b.start === 'number'
-    ? Math.max(0, SAUNA_ROZJEZD_MIN - (now - b.start) / 60000) : SAUNA_ROZJEZD_MIN;
+    ? Math.max(0, m.rozjezd - (now - b.start) / 60000) : m.rozjezd;
   for (const c of cile) {
     if (tStartC !== null && c <= tStartC) continue;      // už dosažené
     const o = odhadNabehuDoladeny(venkuC, tStartC, c, now, zbyva, kal);
@@ -2085,6 +2309,10 @@ function nahrevStart(duvod, now = Date.now()) {
     body: [],
     maxC: null
   };
+  const pred = n.zaznamy[n.zaznamy.length - 1];
+  if (pred && typeof pred.konec === 'number' && now >= pred.konec && now - pred.konec <= NAHREV_NAVAZUJE_MS) {
+    n.bezici.navazuje = pred.start;
+  }
   nahrevCil(huum.targetTemperature, now);
   // Teplota na startu je zároveň první bod křivky
   if (n.bezici.odC !== null) nahrevVzorek(n.bezici.odC, now);
@@ -2125,6 +2353,41 @@ function nahrevVzorek(c, now = Date.now()) {
   }
   // Cíl navíc k pevným prahům: při cíli 79 by se na 80 nikdy nedostalo
   if (typeof b.cilC === 'number' && c >= b.cilC && !b.prahy.cil) b.prahy.cil = { min, c };
+  nahrevReleKontrola(b, min);
+}
+
+// Výpadek spojení s kamny: teplota není, příkon z měřáku ano. Bod se zapíše
+// i tak (c: null), ať v křivce i ve spotřebě nejsou díry — dřív chyběly celé
+// desetiminutové úseky a práh 60 °C se zapsal až na 64 °C.
+function nahrevBezSpojeni(now = Date.now()) {
+  const b = state.saunaNahrev && state.saunaNahrev.bezici;
+  if (!b) return;
+  if (now - b.start > NAHREV_STROP_MS) { nahrevKonec(now); return; }
+  const bod = { min: Math.round((now - b.start) / 6000) / 10, c: null, bezSpojeni: true };
+  bod.topi = typeof saunaTopi === 'function' ? saunaTopi() : null;
+  const sa = state.sauna;
+  if (sa && typeof sa.powerW === 'number' && sa.fetchedAt && now - new Date(sa.fetchedAt).getTime() <= 10 * 60000) {
+    bod.w = Math.round(sa.powerW);
+  }
+  if (b.body.length < NAHREV_BODU_MAX) b.body.push(bod);
+  nahrevReleKontrola(b, bod.min);
+}
+
+// Případ z 30. 9.: kamna „topila", ale relé nesepnulo a sauna stála.
+// Hlídá se jen zapnutí z appky/časovače — start z odběru už odběr viděl.
+function nahrevReleKontrola(b, min) {
+  if (!b || b.releVarovani || b.duvod === 'odber' || min < NAHREV_RELE_MIN) return;
+  if (state.huum && state.huum.heating === false) return;     // mezitím vypnuto
+  // Rozhoduje čtení měřáku až z doby po zapnutí — starší nula by dala planý poplach
+  const sa = state.sauna;
+  const cteno = sa && sa.fetchedAt ? new Date(sa.fetchedAt).getTime() : 0;
+  if (!sa || typeof sa.powerW !== 'number' || cteno < b.start + (NAHREV_RELE_MIN - 1) * 60000) return;
+  if (sa.powerW > NAHREV_RELE_W || b.body.some(x => typeof x.w === 'number' && x.w > NAHREV_RELE_W)) return;
+  b.releVarovani = min;
+  addLog(`Sauna: kamna zapnutá ${Math.round(min)} min, ale měřák nevidí odběr — relé nebo jistič?`);
+  if (typeof sendPushToAll === 'function') {
+    sendPushToAll('🧖 Sauna nehřeje', 'Kamna jsou zapnutá, ale neodebírají proud. Zkontroluj jistič a relé.');
+  }
 }
 
 // Měření, které začalo už teplé (první vzorek nad prvním prahem), o nahřívání
@@ -2151,7 +2414,7 @@ function nahrevKonec(now = Date.now()) {
   n.zaznamy.push(b);
   const pozn = b.teplyStart ? ', začalo už teplé' : (b.kratke ? ', jen bliknutí' : '');
   addLog(`Sauna: nahřívání zapsáno (${Math.round((now - b.start) / 60000)} min${pozn})`);
-  broadcast('saunaNahrev', { saunaNahrev: n });
+  broadcast('saunaNahrev', { saunaNahrev: n, saunaAnalyza: typeof saunaAnalyza === 'function' ? saunaAnalyza() : null });
   // Hned do vlastního klíče v úložišti — na desetiminutovou zálohu se nečeká,
   // nasazení mezitím by čerstvé měření ztratilo
   if (typeof storeNahrevUloz === 'function') storeNahrevUloz().catch(() => {});
@@ -2207,8 +2470,136 @@ function nahrevObnov(telo, now = Date.now()) {
     n.bezici = b;
     zmena = true;
   }
-  if (zmena) broadcast('saunaNahrev', { saunaNahrev: n });
+  if (zmena) broadcast('saunaNahrev', { saunaNahrev: n, saunaAnalyza: saunaAnalyza() });
   return true;
+}
+
+// ---------- Cena a souhrn saunování ----------
+// Jedno saunování = měření a k němu ta, co navázala do 15 min (12. 11.: časovač
+// dotopil, pak se zapnulo znovu z odběru). Energie = Σ příkon × doba do dalšího
+// bodu (příkon z počátečního bodu intervalu), rozdělená na nízký a vysoký tarif
+// podle místního času v Praze (včetně přechodu letní/zimní) po krocích 0,1 min.
+// Náběh = energie do dosažení cíle, udržování = zbytek. Stálé platby se
+// nepočítají, saunování je nezmění.
+const SAUNA_CENA_KROK_MS = 6000;
+
+function nahrevNavazujeNa(pred, r) {
+  if (!pred || !r) return false;
+  if (r.navazuje === pred.start) return true;
+  return typeof pred.konec === 'number' && r.start >= pred.konec && r.start - pred.konec <= NAHREV_NAVAZUJE_MS;
+}
+
+function saunaSkupiny(zaznamy) {
+  const serazene = (Array.isArray(zaznamy) ? zaznamy : [])
+    .filter(r => r && typeof r.start === 'number' && Array.isArray(r.body))
+    .sort((a, b) => a.start - b.start);
+  const skupiny = [];
+  let pred = null;
+  for (const r of serazene) {
+    const posledni = skupiny[skupiny.length - 1];
+    if (posledni && pred && posledni[posledni.length - 1] === pred && nahrevNavazujeNa(pred, r)) posledni.push(r);
+    else if (!r.kratke) skupiny.push([r]);
+    pred = r;
+  }
+  return skupiny;
+}
+
+function saunaSaunovani(skupina, cenik = CENIK, jeNizky = hdoNizky) {
+  const prvni = skupina[0], posl = skupina[skupina.length - 1];
+  let cilAt = null, cilC = null;
+  for (const r of skupina) {
+    if (r.prahy && r.prahy.cil && typeof r.prahy.cil.min === 'number') {
+      cilAt = r.start + r.prahy.cil.min * 60000; cilC = r.cilC; break;
+    }
+  }
+  if (cilC === null && typeof posl.cilC === 'number') cilC = posl.cilC;
+  const wh = { nt: 0, vt: 0, nabeh: 0, udrz: 0 };
+  let mereno = false, topiDo = null;
+  const pridej = (od, doo, w) => {
+    for (let t = od; t < doo;) {
+      let krok = doo - t;
+      if (cilAt !== null && cilAt > t && cilAt < t + krok) krok = cilAt - t;
+      const nizky = jeNizky(t);
+      if (nizky !== jeNizky(t + krok - 1)) krok = Math.min(krok, SAUNA_CENA_KROK_MS);
+      const e = w * krok / 3600000;
+      wh[nizky ? 'nt' : 'vt'] += e;
+      wh[cilAt !== null && t >= cilAt ? 'udrz' : 'nabeh'] += e;
+      t += krok;
+    }
+  };
+  for (const r of skupina) {
+    const body = r.body.filter(b => b && typeof b.min === 'number').sort((a, b) => a.min - b.min);
+    for (let i = 0; i < body.length; i++) {
+      const b = body[i];
+      if (typeof b.w !== 'number') continue;
+      mereno = true;
+      const dalsi = body[i + 1];
+      if (b.w > SAUNA_ON_W) topiDo = r.start + (dalsi ? dalsi.min : b.min) * 60000;
+      if (dalsi && dalsi.min > b.min) pridej(r.start + b.min * 60000, r.start + dalsi.min * 60000, Math.max(0, b.w));
+    }
+  }
+  if (!mereno && typeof posl.konec === 'number') topiDo = posl.konec;
+  const kwh = x => Math.round(x / 100) / 10;
+  const minut = ms => Math.round(ms / 60000);
+  const nabehMin = cilAt !== null && !prvni.teplyStart ? minut(cilAt - prvni.start) : null;
+  const zmenaCile = skupina.some(r => Array.isArray(r.zmenyCile) && r.zmenyCile.length > 1)
+    || new Set(skupina.map(r => r.cilC).filter(c => typeof c === 'number')).size > 1;
+  return {
+    start: prvni.start, topiDo, konec: typeof posl.konec === 'number' ? posl.konec : null,
+    venkuC: typeof prvni.venkuC === 'number' ? Math.round(prvni.venkuC * 10) / 10 : null,
+    odC: typeof prvni.odC === 'number' ? prvni.odC : null, cilC,
+    zaznamu: skupina.length, zmenaCile, teplyStart: !!prvni.teplyStart,
+    nabehMin,
+    saunovaniMin: cilAt !== null && topiDo !== null && topiDo > cilAt ? minut(topiDo - cilAt) : (cilAt !== null ? 0 : null),
+    celkemMin: topiDo !== null ? minut(topiDo - prvni.start) : null,
+    ...(mereno ? {
+      kwhNt: kwh(wh.nt), kwhVt: kwh(wh.vt), kwh: kwh(wh.nt + wh.vt),
+      nabehKwh: kwh(wh.nabeh), udrzKwh: kwh(wh.udrz),
+      cena: Math.round((wh.nt * cenik.nt + wh.vt * cenik.vt) / 100) / 10
+    } : { kwhNt: null, kwhVt: null, kwh: null, nabehKwh: null, udrzKwh: null, cena: null })
+  };
+}
+
+// Průměry jen ze saunování s měřeným příkonem a dosaženým cílem
+function saunaPrumery(radky, cenik = CENIK) {
+  const plne = radky.filter(r => r.cena !== null && r.nabehMin !== null);
+  if (!plne.length) return null;
+  const pr = k => plne.reduce((a, r) => a + (r[k] || 0), 0) / plne.length;
+  const p = { pocet: plne.length };
+  for (const k of ['cena', 'kwh', 'nabehKwh', 'udrzKwh', 'nabehMin', 'saunovaniMin', 'celkemMin']) p[k] = pr(k);
+  p.hodinaNavicKc = p.saunovaniMin > 0 ? p.udrzKwh / p.saunovaniMin * 60 * cenik.nt : null;
+  for (const k of Object.keys(p)) if (typeof p[k] === 'number' && k !== 'pocet') p[k] = Math.round(p[k] * 10) / 10;
+  return p;
+}
+
+let saunaAnalyzaCache = { otisk: null, vysledek: null };
+function saunaAnalyza(zaznamy = state.saunaNahrev && state.saunaNahrev.zaznamy) {
+  if (!Array.isArray(zaznamy)) return null;
+  const otisk = zaznamy.map(r => r && [r.start, Array.isArray(r.body) ? r.body.length : 0, r.konec, r.maxC, r.cilC,
+    r.prahy && r.prahy.cil ? r.prahy.cil.min : ''].join('/')).join(',')
+    + '|' + (typeof HDO_NT !== 'undefined' ? HDO_NT.join(';') : '');
+  if (saunaAnalyzaCache.otisk === otisk) return saunaAnalyzaCache.vysledek;
+  let v;
+  try {
+    const saunovani = saunaSkupiny(zaznamy).map(s => saunaSaunovani(s));
+    const fit = saunaFitAktualni(zaznamy);
+    v = {
+      saunovani,
+      prumer: saunaPrumery(saunovani),
+      cenik: { nt: CENIK.nt, vt: CENIK.vt, nazev: CENIK.nazev, hdoNt: HDO_NT },
+      fit: fit ? { pouzit: !!fit.pouzit, duvod: fit.duvod || null, zaznamu: fit.zaznamu, bodu: fit.bodu,
+        model: fit.model, vychozi: fit.vychozi, bVolne: fit.bVolne, mrazZaznamu: fit.mrazZaznamu,
+        rmseC: fit.rmseC, chybaPrahuMin: fit.chybaPrahuMin, referenceMin: fit.referenceMin } : null,
+      poznamka: 'saunovani = jedno saunování (měření navázaná do 15 min se sčítají). Časy v ms (UTC), minuty od zapnutí. '
+        + 'Energie = Σ příkon × doba do dalšího bodu, VT/NT podle HDO v Praze, cena bez stálých plateb. '
+        + 'nabehMin = do dosažení cíle, saunovaniMin = od cíle do posledního topení. prumer jen z měřených saunování s dosaženým cílem. '
+        + 'fit = přefitovaný model náběhu (pouzit = appka s ním počítá místo výchozího).'
+    };
+  } catch (err) {
+    v = { chyba: err.message };
+  }
+  saunaAnalyzaCache = { otisk, vysledek: v };
+  return v;
 }
 
 // ---------- Kdy se saunování zaplo ----------
@@ -2894,7 +3285,22 @@ const CENIK = { vt: 4.32625, nt: 3.42394, mesicne: 163.35 + 671.55 + 15.57, naze
   // Zálohy a začátek zúčtovacího období (vyúčtování vždy od 1. 9.) — odhad doplatku na stránce Spotřeba
   zaloha: 4500, obdobiOd: 9 };
 // Nízký tarif (HDO) — stejné časy každý den; VT jen 8–9, 12–13, 15–16 a 19–20 h
-const HDO_NT = [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]];
+// (Mariánovice, signál EVV2, ověřeno 28. 10. – 3. 11. 2026). ČEZ Distribuce časy
+// na jaře a na podzim mění — pak stačí v Render → Environment nastavit HDO_NT,
+// třeba „0-8,9-12,13-15,16-19,20-24“ (hodiny, i s desetinami: „6.5-8“).
+function hdoZTextu(text) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  const useky = [];
+  for (const kus of text.split(',')) {
+    const m = /^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$/.exec(kus);
+    if (!m) return null;
+    const od = Number(m[1]), doo = Number(m[2]);
+    if (!(od >= 0 && doo <= 24 && od < doo)) return null;
+    useky.push([od, doo]);
+  }
+  return useky.length ? useky : null;
+}
+const HDO_NT = hdoZTextu(process.env.HDO_NT) || [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]];
 function hdoNizky(at) {
   const { hour, minute } = pragueTime(at);
   const h = hour + minute / 60;
@@ -10217,6 +10623,7 @@ async function pollHuum() {
     // Razítko se schválně NEobnovuje — stejně jako u Infigy znamená „kdy naposledy
     // dorazila data", ne „kdy jsme se ptali". Zmrzlá teplota nesmí vypadat čerstvě.
     state.huum = { ...state.huum, error: err.message };
+    if (typeof nahrevBezSpojeni === 'function') nahrevBezSpojeni();
   } finally {
     huumPollRunning = false;
   }
@@ -10267,8 +10674,8 @@ function saunaTimerNabeh(cil, now = Date.now(), jdu = null) {
   const vSaune = typeof h.temperature === 'number' && cerstve(h.fetchedAt) ? h.temperature : null;
   const kal = typeof saunaKalibrace === 'function' ? saunaKalibrace() : null;
   const spocitej = (venkuC, odC) => {
-    let o = odhadNabehuDoladeny(venkuC, odC, cil, now, SAUNA_ROZJEZD_MIN, kal);
-    if (o && !o.dosazitelne) o = odhadNabehuDoladeny(venkuC, odC, SAUNA_NEDOSAZ_CIL, now, SAUNA_ROZJEZD_MIN, kal);
+    let o = odhadNabehuDoladeny(venkuC, odC, cil, now, undefined, kal);
+    if (o && !o.dosazitelne) o = odhadNabehuDoladeny(venkuC, odC, SAUNA_NEDOSAZ_CIL, now, undefined, kal);
     return o && typeof o.minut === 'number' ? o : null;
   };
   let venkuC = venkuTed;
