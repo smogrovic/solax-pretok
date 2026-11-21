@@ -62,7 +62,8 @@ nadpis('1) Model náběhu — kontrolní hodnoty z předání (bez dojezdu)');
   check('−20 °C venku, z 10 na 80 °C → 102 min', Math.round(h.api.saunaModelMin(m, -20, 10, 80)), 102);
   check('−20 °C venku, z 10 na 85 °C → 114 min', Math.round(h.api.saunaModelMin(m, -20, 10, 85)), 114);
   check('cíl pod startem → 0', h.api.saunaModelMin(m, 8, 50, 40), 0);
-  check('cíl na termostatu → nedosažitelné (null, žádná výjimka)', h.api.saunaModelMin(m, 8, 10, 90), null);
+  check('cíl 90 (konec stupnice) je dosažitelný', h.api.saunaModelMin(m, 8, 10, 90) > 0, true);
+  check('cíl na stropu 91 → nedosažitelné (null, žádná výjimka)', h.api.saunaModelMin(m, 8, 10, 91), null);
   check('odhad = model + dojezd 8 min', (h.api.odhadNabehu(8.3, 11, 60, 0).minut - 59.5).toFixed(1), '8.0');
   check('bez měření se počítá s výchozím modelem', h.api.saunaModel() === m, true);
 }

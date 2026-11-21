@@ -836,13 +836,18 @@ const stavKamen = (h, o = {}) => {
   check('pozdě nastavený časovač zapne hned', h.volani.some(v => v.adresa.endsWith('/start')), true);
 }
 {
-  // Nedosažitelný cíl (90 = termostat) se plánuje jako 85
+  // Cíl 90 (konec stupnice) se plánuje podle modelu na 90, nedosažitelný (91) jako 85
   const h = build();
   stavKamen(h);
   const jdu = h.pulnoc + 19 * 3600000;
   h.api.saunaTimerPridej('19:00', 90, jdu - 5 * 3600000);
-  check('cíl 90 se plánuje podle 85',
-    h.api.casovace()[0].zapneV, jdu - Math.ceil(h.api.odhadNabehu(10, 20, 85).minut) * MINUTA);
+  check('cíl 90 se plánuje na 90',
+    h.api.casovace()[0].zapneV, jdu - Math.ceil(h.api.odhadNabehu(10, 20, 90).minut) * MINUTA);
+  const h2 = build();
+  stavKamen(h2);
+  h2.api.saunaTimerPridej('19:00', 91, jdu - 5 * 3600000);
+  check('nedosažitelný cíl 91 se plánuje podle 85',
+    h2.api.casovace()[0].zapneV, jdu - Math.ceil(h2.api.odhadNabehu(10, 20, 85).minut) * MINUTA);
 }
 {
   // Bez venkovní teploty model nepočítá — rezerva 120 min

@@ -1926,7 +1926,8 @@ const SAUNA_ROZJEZD_MIN = saunaEnvNum('SAUNA_ROZJEZD_MIN', 5.2);
 const SAUNA_TAU_MIN = saunaEnvNum('SAUNA_TAU_MIN', 114.7);
 const SAUNA_TMAX_A = saunaEnvNum('SAUNA_TMAX_A', 138.5);
 const SAUNA_TMAX_B = saunaEnvNum('SAUNA_TMAX_B', 0.3);
-const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 90);
+// Strop odhadu: 91, ať cíl 90 (nejvyšší na stupnici) nehlásí „nad možnosti kamen"
+const SAUNA_TERMOSTAT = saunaEnvNum('SAUNA_TERMOSTAT', 91);
 const SAUNA_DOJEZD_MIN = saunaEnvNum('SAUNA_DOJEZD_MIN', 8);
 const SAUNA_ODHAD_PRAHY = [60, 70, 80, 85];
 const SAUNA_MODEL_VYCHOZI = Object.freeze({ rozjezd: SAUNA_ROZJEZD_MIN, tau: SAUNA_TAU_MIN, a: SAUNA_TMAX_A,
