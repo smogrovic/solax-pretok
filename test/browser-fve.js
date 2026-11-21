@@ -91,26 +91,21 @@ setTimeout(() => {
     const d = new Date(dnes); d.setDate(d.getDate() - o);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   };
-  usageDaysData = [{ d: den(0), grid: 3000, pv: 9000 }, { d: den(1), grid: 12000, pv: 0 }];
+  // List 7 dní: jako 24 h — celý dům a pod ním dům, bazén, auto, sečtené za 7 uzavřených dnů
+  usageDaysData = [{ d: den(0), grid: 3000, pv: 9000 }, { d: den(1), grid: 12000, pv: 0 }, { d: den(3), grid: 1000, pv: 3000 }];
+  poolDaysData = [{ d: den(1), grid: 1000, pv: 2000 }, { d: den(9), grid: 50000, pv: 0 }];
+  wbDaysData = [{ d: den(2), grid: 2000, pv: 4000 }, { d: den(5), grid: 0, pv: 5000 }];
   renderUsageSrc();
-  const radky = document.querySelectorAll('#usageSrcList .wbsrc-row');
-  check('karta má 7 dní a součet', radky.length, 8);
-  check('dnešek ukazuje celkovou spotřebu', /12,0 kWh/.test(radky[0].textContent), true);
-  check('  a podíl z FVE', /75 %/.test(radky[0].textContent), true);
-  check('den jen ze sítě má 0 %', /0 %/.test(radky[1].textContent), true);
-  const celkem = radky[radky.length - 1];
-  check('součet je za celých 7 dní', /Celkem za 7 dní/.test(celkem.textContent), true);
-  check('  a sečte oba dny', /24,0 kWh/.test(celkem.textContent), true);
-  // Celý dům: k domu se přičte bazén a auto (ze sítě i z FVE)
-  poolDaysData = [{ d: den(0), grid: 1000, pv: 2000 }];
-  wbDaysData = [{ d: den(0), grid: 2000, pv: 4000 }, { d: den(2), grid: 0, pv: 5000 }];
-  renderUsageSrc();
-  const cele = document.querySelectorAll('#usageSrcList .wbsrc-row');
-  check('celý dům: dům + bazén + auto', /21,0 kWh/.test(cele[0].querySelector('.wbsrc-head').textContent), true);
-  check('  ze sítě sečteno', /ze sítě 6,0 kWh/.test(cele[0].textContent), true);
-  check('  z FVE sečteno', cele[0].textContent.includes('15,0 kWh z FVE (71 %)'), true);
-  check('den jen s autem se ukáže', /5,0 kWh/.test(cele[2].textContent), true);
-  check('celkem za 7 dní ze všech tří', /Celkem za 7 dní/.test(cele[7].textContent) && /38,0 kWh/.test(cele[7].textContent), true);
+  const radky = [...document.querySelectorAll('#usageSrcList .wbsrc-row')];
+  check('žádné jednotlivé dny: celý dům + dům, bazén, auto', radky.map(r => r.querySelector('.wbsrc-day').textContent).join(' | '),
+    'Celý dům za 7 dní | Dům (bez auta a bazénu) | Bazén | Auto');
+  const hl = r => r.querySelector('.wbsrc-head').textContent;
+  check('dům: uzavřené dny, dnešek ani starší ne', /16,0 kWh/.test(hl(radky[1])), true);
+  check('bazén: jen do 7 dní zpět', /3,0 kWh/.test(hl(radky[2])), true);
+  check('auto ze sítě i z FVE', /11,0 kWh/.test(hl(radky[3])), true);
+  check('celý dům = součet', /30,0 kWh/.test(hl(radky[0])), true);
+  check('  ze sítě sečteno', /ze sítě 16,0 kWh/.test(radky[0].textContent), true);
+  check('  z FVE sečteno', radky[0].textContent.includes('14,0 kWh z FVE (47 %)'), true);
   check('text pod kartou mluví o celém domě', /Celý dům včetně auta, bazénu/.test(document.querySelector('.prehled-karta > .wbsrc-note:last-child').textContent), true);
   poolDaysData = [];
   wbDaysData = [];

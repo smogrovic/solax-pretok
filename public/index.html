@@ -9623,18 +9623,12 @@ function srcRadek(popis, grid, pv, celkovy, texty) {
 const usageSrc24El = document.getElementById('usageSrc24');
 function renderUsageSrc24() {
   if (!usageSrc24El) return;
-  const t = { prazdno: 'nic', prazdnoCelkem: 'zatím bez dat' };
   const s = k => h24Soucet(k);
-  const casti = [
+  renderOdkudSouhrn(usageSrc24El, 'Celý dům za 24 h', [
     ['Dům (bez auta a bazénu)', s('dumGrid'), s('dum') - s('dumGrid')],
     ['Bazén', s('poolGrid'), s('pool') - s('poolGrid')],
     ['Auto', s('wbGrid'), s('wb') - s('wbGrid')]
-  ].map(([p, g, v]) => [p, Math.max(0, g), Math.max(0, v)]);
-  const frag = document.createDocumentFragment();
-  frag.appendChild(srcRadek('Celý dům za 24 h', casti.reduce((a, c) => a + c[1], 0), casti.reduce((a, c) => a + c[2], 0), true, t));
-  for (const [p, g, v] of casti) frag.appendChild(srcRadek(p, g, v, false, t));
-  usageSrc24El.textContent = '';
-  usageSrc24El.appendChild(frag);
+  ]);
 }
 
 // Dva listy grafu „Odkud šla spotřeba“: 24 h / 7 dní (volba se pamatuje)
@@ -9666,25 +9660,29 @@ function renderPoolSrc() {
     { prazdno: 'nic nejelo', prazdnoCelkem: 'zatím nic nejelo' });
 }
 
-// Celý dům po dnech: dům (bez auta a bazénu) + bazén + auto. Server je dělí jedním
-// řetězem, takže součet sedí na celou spotřebu i na celý odběr ze sítě.
-function celyDumDny() {
-  const dny = new Map();
-  for (const rada of [usageDaysData, poolDaysData, wbDaysData]) {
-    for (const r of rada || []) {
-      if (!r || typeof r.d !== 'string') continue;
-      const c = dny.get(r.d) || { d: r.d, grid: 0, pv: 0 };
-      c.grid += Number(r.grid) || 0;
-      c.pv += Number(r.pv) || 0;
-      dny.set(r.d, c);
-    }
-  }
-  return [...dny.values()];
+// List „7 dní“: stejně jako 24 h — celý dům a pod ním dům / bazén / auto, sečtené
+// za sedm UZAVŘENÝCH dnů (stejné okno jako sloupec 7 dní v tabulce nad tím)
+function renderUsageSrc() {
+  const klice = new Set(tydenKlice());
+  const soucet = rada => (rada || []).filter(x => x && klice.has(x.d))
+    .reduce((a, x) => [a[0] + (Number(x.grid) || 0), a[1] + (Number(x.pv) || 0)], [0, 0]);
+  renderOdkudSouhrn(usageSrcListEl, 'Celý dům za 7 dní', [
+    ['Dům (bez auta a bazénu)', ...soucet(usageDaysData)],
+    ['Bazén', ...soucet(poolDaysData)],
+    ['Auto', ...soucet(wbDaysData)]
+  ]);
 }
 
-function renderUsageSrc() {
-  renderSrcKarta(usageSrcListEl, celyDumDny(),
-    { prazdno: 'bez dat', prazdnoCelkem: 'zatím bez dat' });
+// Celý dům (součet) a pod ním jednotlivé části — [popis, ze sítě Wh, z FVE Wh]
+function renderOdkudSouhrn(el, nadpis, casti) {
+  if (!el) return;
+  const t = { prazdno: 'nic', prazdnoCelkem: 'zatím bez dat' };
+  const c = casti.map(([p, g, v]) => [p, Math.max(0, g), Math.max(0, v)]);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(srcRadek(nadpis, c.reduce((a, x) => a + x[1], 0), c.reduce((a, x) => a + x[2], 0), true, t));
+  for (const [p, g, v] of c) frag.appendChild(srcRadek(p, g, v, false, t));
+  el.textContent = '';
+  el.appendChild(frag);
 }
 
 // "Wallbox celkem" na Přehledu = nabito dnes (od půlnoci) v kWh

@@ -113,8 +113,8 @@ setTimeout(() => {
   check('graf FVE má výšku', fveChartCanvas.style.height !== '', true);
   check('graf wallboxu má výšku', wbChartCanvas.style.height !== '', true);
   check('součty pod grafem FVE jsou vyplněné', /kWh/.test(document.getElementById('feedinTotal').textContent), true);
-  check('karta spotřeby má 7 dní + součet',
-    document.querySelectorAll('#usageSrcList .wbsrc-row').length, 8);
+  check('karta spotřeby (7 dní) má celý dům + dům, bazén, auto',
+    document.querySelectorAll('#usageSrcList .wbsrc-row').length, 4);
 
   // bezpecne() smí spolknout jen jeden render, zbytek musí doběhnout
   RENDER_CHYBY.length = 0;
