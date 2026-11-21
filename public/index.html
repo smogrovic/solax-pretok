@@ -1083,6 +1083,8 @@
   .term-zbyva.hori{color:var(--red);}
   .term-hotovo{border:1px solid rgba(44,62,80,.2);background:var(--bg);color:var(--navy);border-radius:10px;font-size:12px;padding:5px 8px;white-space:nowrap;}
   .term-prazdno{font-size:13px;color:var(--grey-text);padding:6px 0;}
+  .term-skupina{font-size:13px;font-weight:700;color:var(--orange-dark);margin-top:10px;padding-bottom:2px;border-bottom:1px solid rgba(44,62,80,.12);}
+  .term-skupina + .term-radek{border-top:none;}
   .term-form{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
   .term-form input,.term-form textarea,.term-form select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid rgba(44,62,80,.15);border-radius:12px;font-size:15px;background:var(--bg);color:var(--navy);font-family:inherit;min-width:0;}
   .term-form textarea{min-height:90px;resize:vertical;}
@@ -3949,6 +3951,20 @@
       </div>
       <div id="termKarty"></div>
       <button class="sbal-btn term-nova" id="termNovaBtn" type="button">+ Nová karta</button>
+      <!-- Hromadné vložení údajů: [Název karty] a pod tím řádky „Klíč: hodnota“.
+           Stejný klíč přepíše, nový přibude; neznámá karta se založí. -->
+      <button class="sbal-btn" data-sbal="termvloz" type="button" aria-expanded="false">Vložit údaje<i>▾</i></button>
+      <div class="card" data-sbal-obsah="termvloz">
+        <div class="term-form">
+          <label for="termVlozText">Vlož text ve tvaru <b>[Název karty]</b> a pod něj řádky <b>Klíč: hodnota</b>. Stejný klíč se přepíše, nový přibude, neznámá karta se založí.</label>
+          <textarea id="termVlozText" placeholder="[BMW 4 Gran Coupé]&#10;VIN: …&#10;SPZ: …"></textarea>
+          <div class="term-f-tlacitka">
+            <button type="button" id="termVlozSchranka">Vložit ze schránky</button>
+            <button type="button" class="ulozit" id="termVlozBtn">Doplnit do karet</button>
+          </div>
+          <div class="zavlaha-hint" id="termVlozHint"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -14348,7 +14364,7 @@ async function termPost(adresa, telo) {
 function termRadek(k, x, sKartou) {
   const r = termEl('div', 'term-radek');
   const t = termEl('div', 'term-text');
-  t.appendChild(termEl('div', 'term-nazev', (sKartou ? `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}: ` : '')
+  t.appendChild(termEl('div', 'term-nazev', (sKartou ? `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}${x.skupina ? ' – ' + x.skupina : ''}: ` : '')
     + x.nazev + (x.opakovani ? ' ↻' : '')));
   const pod = [x.datum ? termDatumCz(x.datum) : 'bez data'];
   if (x.pozn) pod.push(x.pozn);
@@ -14396,11 +14412,28 @@ function termFormular(u) {
   f.appendChild(hlava);
   f.appendChild(termEl('label', '', 'Údaje (VIN, SPZ, olej, pojišťovna… — každý na řádek)'));
   f.appendChild(pole('textarea', k.udaje, v => { k.udaje = v; }, { maxLength: 3000, className: 'term-f-udaje' }));
+  f.appendChild(termEl('label', '', 'Pododdíly (třeba osoby), oddělené čárkou — nepovinné'));
+  const skupinyEl = pole('input', (k.skupiny || []).join(', '), v => {
+    k.skupiny = v.split(',').map(s => s.trim()).filter(Boolean);
+  }, { maxLength: 300, placeholder: 'Lukáš, Zuzka…', className: 'term-f-skupiny' });
+  // Po dopsání se nabídka u termínů přestaví
+  skupinyEl.addEventListener('change', () => renderTerminy());
+  f.appendChild(skupinyEl);
   f.appendChild(termEl('label', '', 'Termíny'));
   k.terminy.forEach((x, i) => {
     const b = termEl('div', 'term-f-termin');
     const n = pole('input', x.nazev, v => { x.nazev = v; }, { maxLength: 80, placeholder: 'Co (STK, pojištění…)', className: 'cely term-f-tnazev' });
     b.appendChild(n);
+    if ((k.skupiny || []).length || x.skupina) {
+      const sel = document.createElement('select');
+      sel.className = 'cely term-f-skupina';
+      const volby = ['', ...(k.skupiny || [])];
+      if (x.skupina && !volby.includes(x.skupina)) volby.push(x.skupina);
+      for (const s of volby) { const o = termEl('option', '', s || '— bez pododdílu —'); o.value = s; sel.appendChild(o); }
+      sel.value = x.skupina || '';
+      sel.addEventListener('change', () => { x.skupina = sel.value || undefined; });
+      b.appendChild(sel);
+    }
     b.appendChild(pole('input', x.datum, v => { x.datum = v || null; }, { type: 'date', className: 'term-f-datum' }));
     b.appendChild(pole('select', x.opakovani || 0, v => { x.opakovani = Number(v) || 0; }, { className: 'term-f-opak' }));
     b.appendChild(pole('input', x.pozn, v => { x.pozn = v; }, { maxLength: 300, placeholder: 'Poznámka', className: 'cely term-f-pozn' }));
@@ -14481,12 +14514,92 @@ function renderTerminy() {
     c.appendChild(h);
     if (k.udaje) c.appendChild(termEl('div', 'term-udaje', k.udaje));
     const serazene = [...k.terminy].sort((a, b) => (a.datum || '9999').localeCompare(b.datum || '9999'));
-    for (const x of serazene) c.appendChild(termRadek(k, x, false));
-    if (!k.terminy.length) c.appendChild(termEl('div', 'term-prazdno', 'Zatím bez termínů.'));
+    const skupiny = Array.isArray(k.skupiny) ? k.skupiny : [];
+    if (skupiny.length) {
+      // Pododdíly (osoby): každý svůj nadpis, i prázdný — ať je vidět, komu co chybí
+      const bez = serazene.filter(x => !x.skupina || !skupiny.includes(x.skupina));
+      for (const x of bez) c.appendChild(termRadek(k, x, false));
+      for (const s of skupiny) {
+        c.appendChild(termEl('div', 'term-skupina', s));
+        const jeho = serazene.filter(x => x.skupina === s);
+        for (const x of jeho) c.appendChild(termRadek(k, x, false));
+        if (!jeho.length) c.appendChild(termEl('div', 'term-prazdno', 'Zatím nic.'));
+      }
+    } else {
+      for (const x of serazene) c.appendChild(termRadek(k, x, false));
+      if (!k.terminy.length) c.appendChild(termEl('div', 'term-prazdno', 'Zatím bez termínů.'));
+    }
     termKartyEl.appendChild(c);
   }
   if (termUprava && termUprava.id === 'nova') termKartyEl.appendChild(termFormular(termUprava));
   if (termNovaBtnEl) termNovaBtnEl.hidden = !!termUprava;
+}
+
+// Hromadné vložení údajů do karet. Vrací { karty, zmeny, nove } — nic neposílá.
+//   [BMW 4 Gran Coupé]      ← karta podle názvu (stačí začátek, bez ohledu na velikost)
+//   VIN: …                  ← řádek se stejným klíčem se přepíše, jinak přibude
+const termKlic = r => { const m = /^\s*([^:]{1,40}):/.exec(r); return m ? m[1].trim().toLowerCase() : null; };
+const termNorm = t => (t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+function termSlucUdaje(karty, text) {
+  const out = karty.map(k => ({ ...k, terminy: k.terminy.slice() }));
+  const zmeny = [], nove = [];
+  let k = null;
+  for (const surovy of String(text || '').split(/\r?\n/)) {
+    const r = surovy.trim();
+    if (!r) continue;
+    const hl = /^\[(.+)\]$/.exec(r);
+    if (hl) {
+      const n = termNorm(hl[1]);
+      k = out.find(x => termNorm(x.nazev) === n) || out.find(x => termNorm(x.nazev).startsWith(n) || n.startsWith(termNorm(x.nazev)));
+      if (!k) { k = { nazev: hl[1].trim().slice(0, 80), ikona: '📌', udaje: '', terminy: [] }; out.push(k); nove.push(k.nazev); }
+      continue;
+    }
+    if (!k) continue;
+    const radky = k.udaje ? k.udaje.split('\n') : [];
+    const klic = termKlic(r);
+    const i = klic ? radky.findIndex(x => termKlic(x) === klic) : radky.findIndex(x => x.trim() === r);
+    if (i >= 0 && radky[i].trim() === r) continue;
+    if (i >= 0) radky[i] = r; else radky.push(r);
+    k.udaje = radky.join('\n');
+    if (!zmeny.includes(k.nazev)) zmeny.push(k.nazev);
+  }
+  return { karty: out, zmeny, nove };
+}
+
+const termVlozTextEl = document.getElementById('termVlozText');
+const termVlozHintEl = document.getElementById('termVlozHint');
+const termVlozBtnEl = document.getElementById('termVlozBtn');
+if (termVlozBtnEl) {
+  termVlozBtnEl.addEventListener('click', async () => {
+    const r = termSlucUdaje((terminyData && terminyData.karty) || [], termVlozTextEl.value);
+    if (!r.zmeny.length && !r.nove.length) {
+      termVlozHintEl.textContent = /\[.+\]/.test(termVlozTextEl.value) ? 'Nic nového, všechno už v kartách je.' : 'Chybí [Název karty] na prvním řádku.';
+      return;
+    }
+    termVlozBtnEl.disabled = true;
+    const ok = await termPost('/api/terminy', { karty: r.karty });
+    termVlozBtnEl.disabled = false;
+    if (ok) {
+      termVlozTextEl.value = '';
+      termVlozHintEl.textContent = 'Doplněno: ' + [...new Set([...r.zmeny, ...r.nove])].join(', ')
+        + (r.nove.length ? ` (nové karty: ${r.nove.join(', ')})` : '') + '.';
+    } else {
+      termVlozHintEl.textContent = termHintEl.textContent;
+    }
+    renderTerminy();
+  });
+}
+const termVlozSchrankaEl = document.getElementById('termVlozSchranka');
+if (termVlozSchrankaEl) {
+  termVlozSchrankaEl.addEventListener('click', async () => {
+    try {
+      termVlozTextEl.value = await navigator.clipboard.readText();
+      termVlozHintEl.textContent = '';
+    } catch {
+      termVlozHintEl.textContent = 'Schránka nejde přečíst — podrž prst v poli a dej Vložit.';
+      termVlozTextEl.focus();
+    }
+  });
 }
 
 if (termNovaBtnEl) {

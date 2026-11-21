@@ -134,6 +134,60 @@ setTimeout(async () => {
   await pockej();
   check('smazání pošle karty bez ní', poslano[0].body.karty.map(k => k.id).join(','), 'bmw4');
 
+  R.push('\\n6b) Vložit údaje');
+  const zaklad = [
+    { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'Pojišťovna: Direct\\nVIN: staré', terminy: [] },
+    { id: 'vw', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [{ id: 't1', nazev: 'STK', datum: '2028-01-29', opakovani: 0, pozn: '' }] }];
+  const r1 = termSlucUdaje(zaklad, '[bmw 4]\\nVIN: WBA1\\nSPZ: 1AB 2345\\n\\n[VW Multivan]\\nOMV karta: 1234\\n[Chata]\\nRevize kotle: 2027');
+  check('karta podle začátku názvu, bez ohledu na velikost', r1.karty[0].udaje, 'Pojišťovna: Direct\\nVIN: WBA1\\nSPZ: 1AB 2345');
+  check('  stejný klíč přepíše, nový přibude', r1.karty[1].udaje, 'OMV karta: 1234');
+  check('  termíny zůstanou', r1.karty[1].terminy.length, 1);
+  check('neznámá karta se založí', r1.nove.join() + ' | ' + r1.karty[2].udaje, 'Chata | Revize kotle: 2027');
+  check('původní data se nemění', zaklad[0].udaje, 'Pojišťovna: Direct\\nVIN: staré');
+  check('podruhé už nic', termSlucUdaje(r1.karty, '[BMW 4 Gran Coupé]\\nVIN: WBA1').zmeny.length, 0);
+  terminyData = { predemDni: 14, karty: zaklad };
+  renderTerminy();
+  sbalNastav('termvloz', true);
+  const pole = document.getElementById('termVlozText');
+  pole.value = 'VIN: bez hlavičky';
+  document.getElementById('termVlozBtn').click();
+  await pockej();
+  check('bez [Název] poradí', document.getElementById('termVlozHint').textContent, 'Chybí [Název karty] na prvním řádku.');
+  pole.value = '[VW Multivan]\\nVIN: WV2\\nOMV karta: 1234';
+  odpoved = { telo: { ok: true, terminy: { predemDni: 14, karty: zaklad } } };
+  poslano.length = 0;
+  document.getElementById('termVlozBtn').click();
+  await pockej();
+  check('pošle karty s doplněnými údaji', poslano[0].url + ' ' + poslano[0].body.karty[1].udaje, '/api/terminy VIN: WV2\\nOMV karta: 1234');
+  check('  řekne, co doplnil, a pole vyprázdní', document.getElementById('termVlozHint').textContent + '|' + pole.value, 'Doplněno: VW Multivan.|');
+
+  R.push('\\n6c) Pododdíly (osoby)');
+  terminyData = { predemDni: 14, karty: [{ id: 'ockovani', nazev: 'Očkování', ikona: '💉', udaje: '',
+    skupiny: ['Lukáš', 'Zuzka', 'Miky', 'Elenka'],
+    terminy: [{ id: 'tet', nazev: 'Tetanus', datum: den(20), opakovani: 0, pozn: '', skupina: 'Lukáš' }] }] };
+  renderTerminy();
+  const ok = document.querySelector('#termKarty [data-karta="ockovani"]');
+  check('nadpisy pododdílů', [...ok.querySelectorAll('.term-skupina')].map(e => e.textContent).join(','), 'Lukáš,Zuzka,Miky,Elenka');
+  check('tetanus pod Lukášem', ok.querySelector('.term-skupina').nextElementSibling.querySelector('.term-nazev').textContent, 'Tetanus');
+  check('prázdný pododdíl řekne zatím nic', ok.querySelectorAll('.term-prazdno').length, 3);
+  check('nahoře je vidět komu', document.querySelector('#termBlizke .term-nazev').textContent, '💉 Očkování – Lukáš: Tetanus');
+  ok.querySelector('.term-upravit').click();
+  const fo = document.querySelector('#termKarty [data-karta="ockovani"] .term-form');
+  check('formulář má pododdíly', fo.querySelector('.term-f-skupiny').value, 'Lukáš, Zuzka, Miky, Elenka');
+  fo.querySelector('.term-f-pridat').click();
+  const fo2 = document.querySelector('#termKarty [data-karta="ockovani"] .term-form');
+  const novy = [...fo2.querySelectorAll('.term-f-termin')].pop();
+  const nn2 = novy.querySelector('.term-f-tnazev'); nn2.value = 'Tetanus'; nn2.dispatchEvent(new Event('input'));
+  const sel = novy.querySelector('.term-f-skupina');
+  check('termín jde přiřadit osobě', [...sel.options].map(o => o.value).join(','), ',Lukáš,Zuzka,Miky,Elenka');
+  sel.value = 'Elenka'; sel.dispatchEvent(new Event('change'));
+  odpoved = { telo: { ok: true, terminy: terminyData } };
+  poslano.length = 0;
+  fo2.querySelector('.ulozit').click();
+  await pockej();
+  const ul = poslano[0].body.karty[0];
+  check('uloží pododdíly i přiřazení', ul.skupiny.join(',') + ' | ' + ul.terminy[1].skupina, 'Lukáš,Zuzka,Miky,Elenka | Elenka');
+
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };
   renderTerminy();

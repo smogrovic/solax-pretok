@@ -37,6 +37,17 @@ nadpis('1) Výchozí data');
   check('žádná SPZ', /\b\d[A-Z]{1,2}\d?\s?\d{3,4}\b/.test(vse), false);
   check('výchozí data se ověřením nezmění', JSON.stringify(h.api.terminyOver(t.karty).karty), JSON.stringify(t.karty));
   check('kontrola běží hodinově', h.plan[0], 3600000);
+  const ock = t.karty[4];
+  check('očkování má pododdíly Lukáš, Zuzka, Miky, Elenka', ock.skupiny.join(','), 'Lukáš,Zuzka,Miky,Elenka');
+  check('  tetanus je Lukášův', ock.terminy[0].skupina, 'Lukáš');
+  // Karta ze zálohy z doby před pododdíly se doplní
+  const h2 = build();
+  h2.state.terminy = { karty: [{ id: 'ockovani', nazev: 'Naše očkování', ikona: '💉', udaje: '',
+    terminy: [{ id: 'my-tetanus', nazev: 'Tetanus', datum: '2037-02-01', opakovani: 0, pozn: '' }] }], upozorneno: {} };
+  const m = h2.api.terminyData().karty[0];
+  check('stará karta dostane pododdíly i Lukášův tetanus', m.skupiny.length + ' ' + m.terminy[0].skupina, '4 Lukáš');
+  m.skupiny = ['Zuzka'];
+  check('  ale jen jednou (úpravy zůstanou)', h2.api.terminyData().karty[0].skupiny.join(), 'Zuzka');
 }
 
 nadpis('2) Kontrola dat z appky');
@@ -48,6 +59,10 @@ nadpis('2) Kontrola dat z appky');
   check('nejsou karty', h.api.terminyOver(null).chyba, 'Chybí karty.');
   const o = h.api.terminyOver([{ nazev: 'Pes', terminy: [{ nazev: 'Vzteklina', datum: '' }, { nazev: 'X', datum: '2027-01-01', opakovani: 12 }] }]);
   check('prázdné datum = bez data, chybějící id se doplní', o.karty[0].terminy[0].datum + ' ' + /^t/.test(o.karty[0].terminy[0].id) + ' ' + /^k/.test(o.karty[0].id), 'null true true');
+  const sk = h.api.terminyOver([{ nazev: 'Očkování', skupiny: [' Zuzka ', '', 'Zuzka', 'Miky'], terminy: [{ nazev: 'Tetanus', skupina: 'Miky' }, { nazev: 'X', skupina: '' }] }]).karty[0];
+  check('pododdíly: bez prázdných a dvojic', sk.skupiny.join(','), 'Zuzka,Miky');
+  check('  termín si pododdíl nese, prázdný ne', sk.terminy[0].skupina + ' ' + ('skupina' in sk.terminy[1]), 'Miky false');
+  check('karta bez pododdílů je nemá', 'skupiny' in h.api.terminyOver([{ nazev: 'A' }]).karty[0], false);
   check('špatné opakování', /opakování/.test(h.api.terminyOver([{ nazev: 'A', terminy: [{ nazev: 'B', opakovani: -1 }] }]).chyba), true);
   const dvojite = h.api.terminyOver([{ id: 'a', nazev: 'A', terminy: [{ id: 'a', nazev: 'B' }] }]);
   check('duplicitní id se přečísluje', dvojite.karty[0].terminy[0].id !== 'a', true);
@@ -91,6 +106,10 @@ nadpis('4) Upozornění');
   check('  a pak už nic', h.push.length, 2);
   // Termín přidaný, když už je blízko / prošlý
   h.api.terminyKontrola(poledne(2027, 4, 19));
+  const h3 = build();
+  h3.api.terminyData().karty = [{ id: 'o', nazev: 'Očkování', skupiny: ['Miky'], terminy: [{ id: 'm', nazev: 'Tetanus', datum: '2027-03-15', opakovani: 0, pozn: '', skupina: 'Miky' }] }];
+  h3.api.terminyKontrola(poledne(2027, 3, 1));
+  check('upozornění řekne komu', h3.push[0], '📅 Očkování – Miky: Tetanus — Za 14 dní (15. 3. 2027)');
   check('pojistka zítra (s poznámkou)', h.push[2], '📅 BMW 4: Pojištění — Zítra (20. 4. 2027) · Direct');
   const h2 = build();
   h2.api.terminyData().karty = [{ id: 'm', nazev: 'BMW R 1300 GS', terminy: [{ id: 's', nazev: 'Servis', datum: '2026-09-10', opakovani: 12, pozn: '' }] }];

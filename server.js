@@ -2973,7 +2973,8 @@ if (typeof scheduleEvery === 'function') scheduleEvery(() => pripominkySezona(),
 // ani čísla karet; ty si člověk dopíše v appce a drží se jen v záloze (Upstash).
 const TERMINY_PREDEM_DNI = 14;
 const TERMINY_PUSH_OD_H = 8, TERMINY_PUSH_DO_H = 20;     // v noci se nepípá
-const TERMINY_MEZE = { karet: 30, terminu: 40, nazev: 80, udaje: 3000, pozn: 300, ikona: 8, opakovani: 120 };
+const TERMINY_MEZE = { karet: 30, terminu: 40, nazev: 80, udaje: 3000, pozn: 300, ikona: 8, opakovani: 120,
+  skupin: 12, skupina: 40 };
 
 function terminyVychozi() {
   const t = (id, nazev, datum, opakovani = 0, pozn = '') => ({ id, nazev, datum, opakovani, pozn });
@@ -2994,16 +2995,25 @@ function terminyVychozi() {
       { id: 'eso', nazev: 'Eso — očkování', ikona: '🐕', udaje: '',
         terminy: [t('eso-vzteklina', 'Vzteklina', '2028-01-20'), t('eso-nobivac', 'Kombinace Nobivac', '2027-05-22', 12)] },
       { id: 'ockovani', nazev: 'Naše očkování', ikona: '💉', udaje: '',
-        terminy: [t('my-tetanus', 'Tetanus', '2037-02-01')] }
+        terminy: [{ ...t('my-tetanus', 'Tetanus', '2037-02-01'), skupina: 'Lukáš' }], skupiny: TERMINY_OSOBY.slice() }
     ],
     upozorneno: {}
   };
 }
+// Pododdíly karty očkování: kdo
+const TERMINY_OSOBY = ['Lukáš', 'Zuzka', 'Miky', 'Elenka'];
 
 function terminyData() {
   if (!state.terminy) state.terminy = terminyVychozi();
-  if (!state.terminy.upozorneno || typeof state.terminy.upozorneno !== 'object') state.terminy.upozorneno = {};
-  return state.terminy;
+  const t = state.terminy;
+  if (!t.upozorneno || typeof t.upozorneno !== 'object') t.upozorneno = {};
+  // Karta očkování z doby před pododdíly (i ze zálohy): dostane osoby a tetanus patří Lukášovi
+  const ock = t.karty.find(k => k.id === 'ockovani');
+  if (ock && !Array.isArray(ock.skupiny)) {
+    ock.skupiny = TERMINY_OSOBY.slice();
+    for (const x of ock.terminy) if (x.id === 'my-tetanus' && !x.skupina) x.skupina = 'Lukáš';
+  }
+  return t;
 }
 
 function terminyPayload() {
@@ -3044,9 +3054,18 @@ function terminyOver(karty) {
       if (!Number.isInteger(op) || op < 0 || op > TERMINY_MEZE.opakovani) return { chyba: `Špatné opakování u „${tn}“.` };
       const tid = platneId(x.id) ? x.id : noveId('t');
       ids.add(tid);
-      terminy.push({ id: tid, nazev: tn, datum, opakovani: op, pozn: text(x.pozn, TERMINY_MEZE.pozn) });
+      const tx = { id: tid, nazev: tn, datum, opakovani: op, pozn: text(x.pozn, TERMINY_MEZE.pozn) };
+      const sk = text(x.skupina, TERMINY_MEZE.skupina);
+      if (sk) tx.skupina = sk;
+      terminy.push(tx);
     }
-    out.push({ id, nazev, ikona: text(k.ikona, TERMINY_MEZE.ikona), udaje: text(k.udaje, TERMINY_MEZE.udaje), terminy });
+    const karta = { id, nazev, ikona: text(k.ikona, TERMINY_MEZE.ikona), udaje: text(k.udaje, TERMINY_MEZE.udaje), terminy };
+    // Pododdíly (u očkování osoby): pořadí, jak je člověk napsal, bez prázdných a dvojic
+    if (Array.isArray(k.skupiny)) {
+      if (k.skupiny.length > TERMINY_MEZE.skupin) return { chyba: `Nejvýš ${TERMINY_MEZE.skupin} pododdílů.` };
+      karta.skupiny = [...new Set(k.skupiny.map(s => text(s, TERMINY_MEZE.skupina)).filter(Boolean))];
+    }
+    out.push(karta);
   }
   return { karty: out };
 }
@@ -3090,7 +3109,7 @@ function terminyKontrola(now = Date.now()) {
       if (dni < 0 && t.upozorneno[x.id + '|' + x.datum + '|predem']) { t.upozorneno[klic] = now; continue; }
       t.upozorneno[klic] = now;
       const kdy = dni > 1 ? `za ${dni} dní` : dni === 1 ? 'zítra' : dni === 0 ? 'dnes' : `prošlo před ${-dni} dny`;
-      const nadpis = `📅 ${k.nazev}: ${x.nazev}`;
+      const nadpis = `📅 ${k.nazev}${x.skupina ? ' – ' + x.skupina : ''}: ${x.nazev}`;
       const telo = `${kdy[0].toUpperCase() + kdy.slice(1)} (${terminyDatumCz(x.datum)})${x.pozn ? ' · ' + x.pozn : ''}`;
       poslano.push(nadpis + ' — ' + telo);
       if (typeof sendPushToAll === 'function') sendPushToAll(nadpis, telo);
