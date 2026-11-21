@@ -18,6 +18,9 @@ const HISTORIE = ${JSON.stringify(HISTORIE)};
 
 (async () => {
  try {
+  // Tabulka spotřeby je pod sbalovacím tlačítkem — výchozí stav sbalená
+  check('tabulka spotřeby je sbalená a tak se jmenuje', document.querySelector('[data-sbal-obsah="sptabulka"]').hidden + ' ' + document.querySelector('.sbal-btn[data-sbal="sptabulka"]').textContent.trim().replace('▾', ''), 'true Tabulka spotřeby');
+  sbalNastav('sptabulka', false);
   await wait(150);
   const slide = document.getElementById('spotrebaSlide');
   check('stránka Spotřeba je hned za FVE', slide.previousElementSibling.dataset.title, 'FVE');

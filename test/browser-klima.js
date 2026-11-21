@@ -127,6 +127,15 @@ setTimeout(async () => {
     .querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
   const nazev = c => c.id === 'tempAutoCard' ? 'Teplotní automatika'
     : (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
+  // Zimní věta „Zapne AUTO při rozdílu…“ jen jednou, dole v boxu (ne i u obýváku)
+  const puvodniRezim = autoModeData;
+  autoModeData = 'winter';
+  renderTempAutoThreshold();
+  check('zimní věta jen dole v boxu', [document.getElementById('tempAutoOffHintObyvak').textContent === '',
+    /Zapne AUTO při rozdílu/.test(document.getElementById('tempAutoOffHint').textContent)].join(' '), 'true true');
+  autoModeData = puvodniRezim;
+  renderTempAutoThreshold();
+  check('  v létě obě nápovědy zůstanou', /Vypne pod/.test(document.getElementById('tempAutoOffHintObyvak').textContent), true);
   // Teplotní automatika je nahoře (dřív na stránce Asistent)
   check('pořadí karet sedí', karty.map(nazev).join(' | '),
     'Teplotní automatika | seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Časovač');

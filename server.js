@@ -314,6 +314,7 @@ const state = {
   topeni: { bezici: null, zaznamy: [] },        // hodinové průměry pro analýzu topení (stránka FVE)  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),
+  hodiny24: [],      // FVE: Wh po hodinách za posledních ~26 h (viz hodinyPricti)
   terminy: null,     // stránka Termíny: { karty, upozorneno } — null = výchozí (terminyVychozi)
   nakup: [],         // nákupní seznam: { id, text, t }
   nakupOblibene: null, // pravidelně kupované (výchozí doplní nakupOblibeneVychozi)
@@ -841,6 +842,7 @@ function snapshot() {
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
     terminy: terminyPayload(),
+    hodiny24: state.hodiny24 || [],
     nakup: state.nakup,
     nakupOblibene: state.nakupOblibene,
     oznameni: state.oznameni,
@@ -1332,6 +1334,28 @@ function recordGridSplit({ wbW, poolW, loadW, importW, dtH }) {
   recordUsageDay(dumW, poBazenu, dtH);
 
   return { auto, bazen, dumW, dum: Math.min(dumW, poBazenu) };
+}
+
+// ---------- Posledních 24 h po hodinách (FVE: Přehled spotřeby) ----------
+// Denní řady umí jen „dnes" a uzavřené dny; klouzavých 24 h z nich nejde. Tady se
+// ze stejných vzorků sčítají Wh do hodinových košů (start hodiny v ms). Appka si
+// z nich poskládá posledních 24 h (nejstarší koš poměrem). Klíče:
+// feed/imp = přetok/odběr, wb/pool/dum = spotřeba okruhů a *Grid jejich díl ze sítě
+// (týž řetěz auto → bazén → dům jako denní karty), b1/b2/sauna = bojlery a sauna.
+const HODINY24_MAX = 26;
+function hodinyPricti(v, dtH, now = Date.now()) {
+  if (!(dtH > 0) || !v) return;
+  if (!Array.isArray(state.hodiny24)) state.hodiny24 = [];
+  const h = Math.floor(now / 3600000) * 3600000;
+  let r = state.hodiny24[state.hodiny24.length - 1];
+  if (!r || r.h !== h) {
+    r = { h };
+    state.hodiny24.push(r);
+    state.hodiny24 = state.hodiny24.filter(x => x.h > h - HODINY24_MAX * 3600000);
+  }
+  for (const [k, w] of Object.entries(v)) {
+    if (typeof w === 'number' && w > 0) r[k] = Math.round(((r[k] || 0) + w * dtH) * 10) / 10;
+  }
 }
 
 // ---------- Topení v domě (podklad pro analýzu) ----------
@@ -3926,6 +3950,21 @@ function updateRuntimes() {
   const saunaW = (typeof state.sauna.powerW === 'number' && cerstve(state.sauna.fetchedAt))
     ? state.sauna.powerW : null;
   if (saunaW !== null) recordSaunaDay(saunaW, dtH);
+  // Posledních 24 h: totéž po hodinách
+  hodinyPricti({
+    feed: feedKw !== null && feedKw > 0 ? feedKw * 1000 : 0,
+    imp: importW,
+    wb: Math.max(0, wbW),
+    wbGrid: podil ? podil.auto : (feedKw !== null ? Math.min(Math.max(0, wbW), importW) : 0),
+    pool: podil ? poolW : 0,
+    poolGrid: podil ? podil.bazen : 0,
+    dum: podil ? podil.dumW : 0,
+    dumGrid: podil ? podil.dum : 0,
+    b1: Math.max(0, b1W),
+    b2: Math.max(0, b2Kw) * 1000,
+    sauna: saunaW !== null ? Math.max(0, saunaW) : 0
+  }, dtH, now);
+  if (typeof broadcast === 'function') broadcast('hodiny24', { hodiny24: state.hodiny24 });
   // Topení: spotřeba domu jen ze čerstvých dat střídače, jinak hodina zůstane bez ní
   topeniVzorek({
     dumW: podil ? podil.dumW : null,
@@ -14465,6 +14504,8 @@ function storeSnapshot() {
     tydenReport: state.tydenReport || null,
     // Časovač vypnutí sauny musí přežít nasazení
     saunaVypnoutV: state.saunaVypnoutV || null,
+    // Hodinové koše posledních 24 h — nasazení by jinak přehled vynulovalo
+    hodiny24: state.hodiny24 || [],
     push: Array.from(pushSubscriptions.values())
   };
   return { v: 1, at: Date.now(), posts, primo };
@@ -14482,6 +14523,17 @@ function storeApplyPrimo(p) {
     }
   }
   if (typeof p.wbAuto === 'boolean') state.wbAuto = p.wbAuto;
+  // Hodinové koše: co přišlo ze zálohy a server ještě nemá (podle startu hodiny)
+  if (Array.isArray(p.hodiny24)) {
+    const mam = new Map((state.hodiny24 || []).map(x => [x.h, x]));
+    for (const x of p.hodiny24) {
+      if (!x || !Number.isFinite(x.h) || x.h > now || x.h <= now - HODINY24_MAX * 3600000 || mam.has(x.h)) continue;
+      const k = { h: x.h };
+      for (const [kl, v] of Object.entries(x)) if (kl !== 'h' && kl.length <= 10 && Number.isFinite(v) && v >= 0) k[kl] = v;
+      mam.set(x.h, k);
+    }
+    state.hodiny24 = [...mam.values()].sort((a, b) => a.h - b.h);
+  }
   if (Number.isFinite(p.sekackaOfflineOd) && p.sekackaOfflineOd > 0 && p.sekackaOfflineOd <= now
       && state.sekacka && !state.sekacka.offlineOd && !state.sekacka.kdy) {
     state.sekacka.offlineOd = p.sekackaOfflineOd;

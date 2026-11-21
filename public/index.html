@@ -1065,6 +1065,14 @@
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
   .rozvrh-volba{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;}
+  .prehled-tab{display:grid;grid-template-columns:1fr auto auto;column-gap:14px;row-gap:7px;width:100%;font-size:14px;align-items:baseline;}
+  .prehled-tab > b{font-size:12px;color:var(--grey-text);text-align:right;}
+  .prehled-tab > .stat-val{text-align:right;white-space:nowrap;}
+  .prehled-odkud{margin-top:14px;}
+  .prehled-listy{display:flex;gap:6px;width:100%;margin:2px 0 8px;}
+  .prehled-list{flex:1;padding:7px;border-radius:10px;border:1px solid rgba(44,62,80,.15);background:var(--bg);color:var(--navy);font-size:13px;font-weight:600;}
+  .prehled-list.aktivni{background:var(--orange);border-color:var(--orange);color:#fff;}
+  .prehled-karta .wbsrc-list[hidden]{display:none;}
   /* Termíny */
   #termKarty > .card{margin-top:12px;}
   #terminySlide .card{align-items:stretch;}
@@ -3038,32 +3046,28 @@
 
 
       <button class="sbal-btn" data-sbal="fve" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
-      <div class="card stats-card" data-sbal-obsah="fve">
-        <div class="graph-title">Odkud šla spotřeba (7 dní)</div>
-        <div class="wbsrc-list" id="usageSrcList"></div>
-        <div class="wbsrc-note">Celý dům včetně auta, bazénu, obou bojlerů a sauny. Rozpad na auto a bazén je na jejich stránkách.</div>
-      </div>
-
-      <div class="card stats-card" data-sbal-obsah="fve">
-        <div class="graph-title">Dnes</div>
-        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span></div>
-        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span></div>
-        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbOverview">– kWh</span></div>
-        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolToday">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 1</span><span class="stat-val" id="statB1Today">– kWh</span></div>
-        <div class="stat-row"><span>Bojler 2</span><span class="stat-val" id="statB2Today">– kWh</span></div>
-        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaToday">– kWh</span></div>
-      </div>
-
-      <div class="card stats-card" data-sbal-obsah="fve">
-        <div class="graph-title">Posledních 7 dní</div>
-        <div class="stat-row"><span>Přetok do sítě</span><span class="stat-val" id="statFeedinYest">–</span></div>
-        <div class="stat-row"><span>Odběr ze sítě</span><span class="stat-val" id="statImportYest">–</span></div>
-        <div class="stat-row"><span>Wallbox celkem</span><span class="stat-val" id="wbYest">– kWh</span></div>
-        <div class="stat-row"><span>Bazén celkem</span><span class="stat-val" id="statPoolYest">– kWh</span></div>
-        <div class="stat-row"><span>Ohřev vody miko TČ</span><span class="stat-val" id="statBojleryTyden">– kWh</span></div>
-        <div class="stat-row"><span>Sauna</span><span class="stat-val" id="statSaunaYest">– kWh</span></div>
+      <!-- Jedna karta: nahoře 24 h a 7 dní vedle sebe, pod tím „odkud šla spotřeba“
+           na dvou listech (24 h / 7 dní) -->
+      <div class="card stats-card prehled-karta" data-sbal-obsah="fve">
+        <div class="prehled-tab">
+          <span></span><b>24 h</b><b>7 dní</b>
+          <span>Přetok do sítě</span><span class="stat-val" id="statFeedinToday">–</span><span class="stat-val" id="statFeedinYest">–</span>
+          <span>Odběr ze sítě</span><span class="stat-val" id="statImportToday">–</span><span class="stat-val" id="statImportYest">–</span>
+          <span>Wallbox</span><span class="stat-val" id="wbOverview">–</span><span class="stat-val" id="wbYest">–</span>
+          <span>Bazén</span><span class="stat-val" id="statPoolToday">–</span><span class="stat-val" id="statPoolYest">–</span>
+          <span>Bojler 1</span><span class="stat-val" id="statB1Today">–</span><span class="stat-val" id="statB1Tyden">–</span>
+          <span>Bojler 2</span><span class="stat-val" id="statB2Today">–</span><span class="stat-val" id="statB2Tyden">–</span>
+          <span>Sauna</span><span class="stat-val" id="statSaunaToday">–</span><span class="stat-val" id="statSaunaYest">–</span>
+        </div>
         <div class="wbsrc-note" id="tydenNote"></div>
+        <div class="graph-title prehled-odkud">Odkud šla spotřeba</div>
+        <div class="prehled-listy" role="tablist">
+          <button type="button" class="prehled-list aktivni" data-list="24" role="tab">24 h</button>
+          <button type="button" class="prehled-list" data-list="7" role="tab">7 dní</button>
+        </div>
+        <div class="wbsrc-list" id="usageSrc24"></div>
+        <div class="wbsrc-list" id="usageSrcList" hidden></div>
+        <div class="wbsrc-note">Celý dům včetně auta, bazénu, obou bojlerů a sauny. Rozpad na auto a bazén je i na jejich stránkách.</div>
       </div>
 
       <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
@@ -3113,8 +3117,8 @@
         <div class="graph-title">Po měsících</div>
         <div id="spGraf"></div>
       </div>
-      <div class="card stats-card sp-karta">
-        <div class="graph-title">Tabulka (MWh)</div>
+      <button class="sbal-btn" data-sbal="sptabulka" type="button" aria-expanded="false">Tabulka spotřeby<i>▾</i></button>
+      <div class="card stats-card sp-karta" data-sbal-obsah="sptabulka">
         <div class="sp-tabulka-obal" id="spTabulkaObal"></div>
         <div class="wbsrc-note" id="spPozn"></div>
       </div>
@@ -5535,7 +5539,8 @@ const statFeedinTodayEl = document.getElementById('statFeedinToday');
 const statImportTodayEl = document.getElementById('statImportToday');
 const statPoolTodayEl = document.getElementById('statPoolToday');
 const statSaunaTodayEl = document.getElementById('statSaunaToday');
-const statBojleryTydenEl = document.getElementById('statBojleryTyden');
+const statB1TydenEl = document.getElementById('statB1Tyden');
+const statB2TydenEl = document.getElementById('statB2Tyden');
 const tydenNoteEl = document.getElementById('tydenNote');
 const statB1TodayEl = document.getElementById('statB1Today');
 const statB2TodayEl = document.getElementById('statB2Today');
@@ -5589,19 +5594,38 @@ function denKwh(dny, posun) {
   return fmtWhKwh(wh);
 }
 
+// ---- Posledních 24 h z hodinových košů serveru (hodiny24: { h, feed, imp, wb, … } Wh) ----
+let hodiny24Data = [];
+const H24_MS = 24 * 3600000;
+// Součet klíče za posledních 24 h. Nejstarší koš leží napůl mimo okno — bere se poměrem.
+function h24Soucet(klic, now = Date.now()) {
+  const od = now - H24_MS;
+  let wh = 0;
+  for (const x of hodiny24Data || []) {
+    if (!x || typeof x.h !== 'number' || x.h + 3600000 <= od || x.h > now) continue;
+    const podil = x.h < od ? (x.h + 3600000 - od) / 3600000 : 1;
+    wh += (Number(x[klic]) || 0) * podil;
+  }
+  return wh;
+}
+// Kolik hodin z posledních 24 má data (po nasazení se okno teprve plní)
+function h24Hodin(now = Date.now()) {
+  const kose = (hodiny24Data || []).filter(x => x && typeof x.h === 'number' && x.h + 3600000 > now - H24_MS && x.h <= now);
+  if (!kose.length) return 0;
+  return Math.min(24, (now - Math.max(Math.min(...kose.map(x => x.h)), now - H24_MS)) / 3600000);
+}
+
 function renderStats() {
-  const midnight = new Date();
-  midnight.setHours(0, 0, 0, 0);
-  const pts = history.filter(p => p.t >= midnight.getTime());
-  statFeedinTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, p.kw))) : '–';
-  statImportTodayEl.textContent = pts.length >= 2 ? formatKwh(integrateKwh(pts, p => Math.max(0, -p.kw))) : '–';
-  // Dnešní energie bojlerů (z denní akumulace na serveru)
-  const wh = runtimeData && runtimeData.wh;
-  if (statB1TodayEl) statB1TodayEl.textContent = wh ? fmtWhKwh(wh.b1) : '– kWh';
-  if (statB2TodayEl) statB2TodayEl.textContent = wh ? fmtWhKwh(wh.b2) : '– kWh';
-  // Bazén a sauna mají vlastní denní řady (poolDays = síť + FVE, saunaDays = Wh)
-  if (statPoolTodayEl) statPoolTodayEl.textContent = denKwh(poolDaysData, 0);
-  if (statSaunaTodayEl) statSaunaTodayEl.textContent = denKwh(saunaDaysData, 0);
+  const ma = (hodiny24Data || []).length > 0;
+  const set24 = (el, klic) => { if (el) el.textContent = ma ? fmtWhKwh(h24Soucet(klic)) : '–'; };
+  set24(statFeedinTodayEl, 'feed');
+  set24(statImportTodayEl, 'imp');
+  set24(wbOverviewEl, 'wb');
+  set24(statPoolTodayEl, 'pool');
+  set24(statB1TodayEl, 'b1');
+  set24(statB2TodayEl, 'b2');
+  set24(statSaunaTodayEl, 'sauna');
+  bezpecne(renderUsageSrc24);
   renderYesterday();
   renderSolinator(); // rozpočet solinátoru se počítá z téže doby běhu
 }
@@ -5633,7 +5657,8 @@ function tydenSoucet(dny, hodnota) {
 function renderYesterday() {
   const zeSite = tydenSoucet(siteDnyData, r => (Number(r.feed) || 0));
   const doSite = tydenSoucet(siteDnyData, r => (Number(r.imp) || 0));
-  const bojlery = tydenSoucet(siteDnyData, r => (Number(r.b1) || 0) + (Number(r.b2) || 0));
+  const b1 = tydenSoucet(siteDnyData, r => (Number(r.b1) || 0));
+  const b2 = tydenSoucet(siteDnyData, r => (Number(r.b2) || 0));
   const auto = tydenSoucet(wbDaysData, r => (Number(r.grid) || 0) + (Number(r.pv) || 0));
   const bazen = tydenSoucet(poolDaysData, r => (Number(r.grid) || 0) + (Number(r.pv) || 0));
   const sauna = tydenSoucet(saunaDaysData, r => (Number(r.wh) || 0));
@@ -5642,17 +5667,19 @@ function renderYesterday() {
   set(statImportYestEl, doSite);
   set(wbYestEl, auto);
   set(statPoolYestEl, bazen);
-  set(statBojleryTydenEl, bojlery);
+  set(statB1TydenEl, b1);
+  set(statB2TydenEl, b2);
   set(statSaunaYestEl, sauna);
   // Řada sítě a bojlerů se plní až od nasazení, takže první týden je neúplná.
   // Ať to nevypadá jako celý týden, když je to jeden den.
   if (tydenNoteEl) {
-    const dnu = Math.max(zeSite.kolik, bojlery.kolik, auto.kolik, bazen.kolik, sauna.kolik);
-    tydenNoteEl.textContent = dnu >= TYDEN_DNU
-      ? 'Sedm uzavřených dnů, dnešek se nepočítá.'
+    const dnu = Math.max(zeSite.kolik, b1.kolik, auto.kolik, bazen.kolik, sauna.kolik);
+    const hod = Math.floor(h24Hodin());
+    tydenNoteEl.textContent = (hod < 23 ? `24 h: zatím ${hod} h dat, okno se plní. ` : '24 h = do teď. ') + (dnu >= TYDEN_DNU
+      ? '7 dní = sedm uzavřených dnů, dnešek se nepočítá.'
       : dnu === 0
-        ? 'Zatím není z čeho počítat — první den se uzavře o půlnoci.'
-        : `Zatím jen ${dnu} ${dnu === 1 ? 'uzavřený den' : dnu < 5 ? 'uzavřené dny' : 'uzavřených dnů'} — řada se plní od nasazení.`;
+        ? '7 dní: první den se uzavře o půlnoci.'
+        : `7 dní: zatím jen ${dnu} ${dnu === 1 ? 'uzavřený den' : dnu < 5 ? 'uzavřené dny' : 'uzavřených dnů'}.`);
   }
 }
 
@@ -9520,7 +9547,8 @@ function wbSrcDenNadpis(dateStr) {
 // Nakreslit jí pruh „všechno z FVE" by bylo pohodlné a nepravdivé.
 function renderSrcKarta(el, dnyData, texty) {
   if (!el) return;
-  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  const frag = document.createDocumentFragment();
+  const radek = (popis, grid, pv, celkovy) => frag.appendChild(srcRadek(popis, grid, pv, celkovy, texty));
   // Posledních sedm dní včetně dneška — i ty, kdy se nic nedělo
   const dny = [];
   for (let i = 0; i < WB_SRC_DNU; i++) {
@@ -9530,8 +9558,19 @@ function renderSrcKarta(el, dnyData, texty) {
     const klic = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     dny.push((dnyData || []).find(r => r.d === klic) || { d: klic, grid: 0, pv: 0 });
   }
-  const frag = document.createDocumentFragment();
-  const radek = (popis, grid, pv, celkovy) => {
+  for (const r of dny) radek(wbSrcDenNadpis(r.d), r.grid || 0, r.pv || 0, false);
+  radek('Celkem za 7 dní',
+    dny.reduce((a, r) => a + (r.grid || 0), 0),
+    dny.reduce((a, r) => a + (r.pv || 0), 0), true);
+
+  el.textContent = '';
+  el.appendChild(frag);
+}
+
+// Jeden řádek „odkud“: popisek, součet a pruh ze sítě / z FVE
+function srcRadek(popis, grid, pv, celkovy, texty) {
+  const kwh = wh => (wh / 1000).toFixed(1).replace('.', ',') + ' kWh';
+  {
     const row = document.createElement('div');
     row.className = 'wbsrc-row' + (celkovy ? ' wbsrc-total' : '');
     const head = document.createElement('div');
@@ -9576,16 +9615,45 @@ function renderSrcKarta(el, dnyData, texty) {
       prazdno.textContent = celkovy ? texty.prazdnoCelkem : texty.prazdno;
       row.appendChild(prazdno);
     }
-    frag.appendChild(row);
-  };
+    return row;
+  }
+}
 
-  for (const r of dny) radek(wbSrcDenNadpis(r.d), r.grid || 0, r.pv || 0, false);
-  radek('Celkem za 7 dní',
-    dny.reduce((a, r) => a + (r.grid || 0), 0),
-    dny.reduce((a, r) => a + (r.pv || 0), 0), true);
+// List „24 h“: celý dům a pod tím dům / bazén / auto, každé se svým pruhem síť × FVE
+const usageSrc24El = document.getElementById('usageSrc24');
+function renderUsageSrc24() {
+  if (!usageSrc24El) return;
+  const t = { prazdno: 'nic', prazdnoCelkem: 'zatím bez dat' };
+  const s = k => h24Soucet(k);
+  const casti = [
+    ['Dům (bez auta a bazénu)', s('dumGrid'), s('dum') - s('dumGrid')],
+    ['Bazén', s('poolGrid'), s('pool') - s('poolGrid')],
+    ['Auto', s('wbGrid'), s('wb') - s('wbGrid')]
+  ].map(([p, g, v]) => [p, Math.max(0, g), Math.max(0, v)]);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(srcRadek('Celý dům za 24 h', casti.reduce((a, c) => a + c[1], 0), casti.reduce((a, c) => a + c[2], 0), true, t));
+  for (const [p, g, v] of casti) frag.appendChild(srcRadek(p, g, v, false, t));
+  usageSrc24El.textContent = '';
+  usageSrc24El.appendChild(frag);
+}
 
-  el.textContent = '';
-  el.appendChild(frag);
+// Dva listy grafu „Odkud šla spotřeba“: 24 h / 7 dní (volba se pamatuje)
+function prehledList(list) {
+  try { localStorage.setItem('prehledList', list); } catch {}
+  for (const b of document.querySelectorAll('.prehled-list')) {
+    const ano = b.dataset.list === list;
+    b.classList.toggle('aktivni', ano);
+    b.setAttribute('aria-selected', String(ano));
+  }
+  if (usageSrc24El) usageSrc24El.hidden = list !== '24';
+  const l7 = document.getElementById('usageSrcList');
+  if (l7) l7.hidden = list !== '7';
+}
+for (const b of document.querySelectorAll('.prehled-list')) b.addEventListener('click', () => prehledList(b.dataset.list));
+{
+  let v = '24';
+  try { v = localStorage.getItem('prehledList') === '7' ? '7' : '24'; } catch {}
+  prehledList(v);
 }
 
 function renderWbSrc() {
@@ -9622,10 +9690,8 @@ function renderUsageSrc() {
 // "Wallbox celkem" na Přehledu = nabito dnes (od půlnoci) v kWh
 function renderWbToday() {
   if (!wbOverviewEl) return;
-  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-  const pts = wallboxHistory.filter(p => p.t >= midnight.getTime());
-  const kwh = pts.length >= 2 ? integrateWbKwh(pts) : 0;
-  wbOverviewEl.textContent = kwh.toFixed(1).replace('.', ',') + ' kWh';
+  // Přehled ukazuje posledních 24 h z hodinových košů serveru (viz renderStats)
+  wbOverviewEl.textContent = (hodiny24Data || []).length ? fmtWhKwh(h24Soucet('wb')) : '–';
 }
 
 // ---------- Graf na stránce Wallbox: výkon + dráhy režimů na jedné ose ----------
@@ -12008,7 +12074,8 @@ function loadTempAutoWinterRoomsLocal() {
 // Jeden jezdec. Obsluha je společná schválně — je v ní příznak „táhne se prstem",
 // bez kterého se na iOS hodnota při tažení vracela zpět (range input tam nedostane focus).
 // Duplikovat ji dvakrát by koledovalo o návrat té chyby.
-function setupThresholdSlider({ sliderId, valId, hintId, labelId, roomKey, roomLabel }) {
+// `zimniNapoveda: false` — zimní věta („Zapne AUTO při rozdílu…“) je jen jednou, dole v boxu
+function setupThresholdSlider({ sliderId, valId, hintId, labelId, roomKey, roomLabel, zimniNapoveda = true }) {
   const slider = document.getElementById(sliderId);
   const valEl = document.getElementById(valId);
   const hintEl = document.getElementById(hintId);
@@ -12025,8 +12092,8 @@ function setupThresholdSlider({ sliderId, valId, hintId, labelId, roomKey, roomL
     if (labelEl) labelEl.textContent = `${roomLabel} — ${isWinterUi() ? 'držet na' : 'zapnout při'}`;
     if (!hintEl) return;
     hintEl.textContent = isWinterUi()
-      ? `Zapne AUTO při rozdílu ${WINTER_ON_DIFF} °C (pod ${fmtC(shown - WINTER_ON_DIFF)} i nad ${fmtC(shown + WINTER_ON_DIFF)})`
-        + ` · vypne do ${WINTER_OFF_DIFF} °C od cíle`
+      ? (!zimniNapoveda ? '' : `Zapne AUTO při rozdílu ${WINTER_ON_DIFF} °C (pod ${fmtC(shown - WINTER_ON_DIFF)} i nad ${fmtC(shown + WINTER_ON_DIFF)})`
+        + ` · vypne do ${WINTER_OFF_DIFF} °C od cíle`)
       : `Vypne pod ${fmtC(shown - 1)} · chladí na ${fmtC(tempAutoCoolFor(roomKey, shown))}`;
   }
   function render() {
@@ -12083,7 +12150,7 @@ function applyThresholds(d) {
 }
 
 const thresholdSliders = [
-  setupThresholdSlider({ sliderId: 'tempAutoOnSliderObyvak', valId: 'tempAutoOnValObyvak', hintId: 'tempAutoOffHintObyvak', labelId: 'tempAutoLabelObyvak', roomKey: 'obyvak', roomLabel: 'Obývák' }),
+  setupThresholdSlider({ sliderId: 'tempAutoOnSliderObyvak', valId: 'tempAutoOnValObyvak', hintId: 'tempAutoOffHintObyvak', labelId: 'tempAutoLabelObyvak', roomKey: 'obyvak', roomLabel: 'Obývák', zimniNapoveda: false }),
   setupThresholdSlider({ sliderId: 'tempAutoOnSlider', valId: 'tempAutoOnVal', hintId: 'tempAutoOffHint', labelId: 'tempAutoLabel', roomKey: null, roomLabel: 'Ostatní pokoje' })
 ];
 function renderTempAutoThreshold() {
@@ -13218,6 +13285,8 @@ function applySnapshot(snap) {
   bezpecne(renderHuum);
   pripData = snap.pripominky || null;
   terminyData = snap.terminy || null;
+  hodiny24Data = Array.isArray(snap.hodiny24) ? snap.hodiny24 : [];
+  bezpecne(renderStats);
   bezpecne(renderTerminy);
   rohlikData = snap.rohlik || null;
   nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
@@ -13698,6 +13767,10 @@ function connectStream() {
   es.addEventListener('pripominky', e => {
     pripData = JSON.parse(e.data).pripominky || null;
     bezpecne(renderPripominky);
+  });
+  es.addEventListener('hodiny24', e => {
+    hodiny24Data = JSON.parse(e.data).hodiny24 || [];
+    bezpecne(renderStats);
   });
   es.addEventListener('terminy', e => {
     terminyData = JSON.parse(e.data).terminy || null;

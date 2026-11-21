@@ -111,7 +111,7 @@ setTimeout(() => {
   check('  z FVE sečteno', cele[0].textContent.includes('15,0 kWh z FVE (71 %)'), true);
   check('den jen s autem se ukáže', /5,0 kWh/.test(cele[2].textContent), true);
   check('celkem za 7 dní ze všech tří', /Celkem za 7 dní/.test(cele[7].textContent) && /38,0 kWh/.test(cele[7].textContent), true);
-  check('text pod kartou mluví o celém domě', /Celý dům včetně auta, bazénu/.test(document.querySelector('[data-sbal-obsah="fve"] .wbsrc-note').textContent), true);
+  check('text pod kartou mluví o celém domě', /Celý dům včetně auta, bazénu/.test(document.querySelector('.prehled-karta > .wbsrc-note:last-child').textContent), true);
   poolDaysData = [];
   wbDaysData = [];
   usageDaysData = [];

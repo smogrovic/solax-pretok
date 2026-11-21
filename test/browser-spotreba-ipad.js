@@ -18,6 +18,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
  try {
+  sbalNastav('sptabulka', false);
   await wait(150);
   check('široký displej', sirokyDisplej(), true);
   spotrebaData = { mesice: ${JSON.stringify(HISTORIE)}, rucneDo: '2026-10',
