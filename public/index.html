@@ -1075,7 +1075,11 @@
   .prehled-karta .wbsrc-list[hidden]{display:none;}
   /* Termíny */
   #termKarty > .card{margin-top:12px;}
-  #terminySlide .card{align-items:stretch;}
+  body[data-rezim="full"] .page > #terminyOblast + .card{margin-top:12px;}
+  .term-udaj-radek{display:flex;align-items:center;gap:8px;}
+  .term-kopir{border:1px solid rgba(44,62,80,.2);background:var(--bg);color:var(--navy);border-radius:8px;font-size:11px;padding:2px 7px;flex:0 0 auto;}
+  .term-oblast.card,.term-oblast .card{align-items:stretch;}
+  #terminyOblast[hidden]{display:none;}
   .term-blizke{width:100%;}
   .term-hlava{display:flex;align-items:center;gap:8px;}
   .term-hlava .graph-title{flex:1;margin:0;text-align:left;font-size:15px;}
@@ -3904,6 +3908,32 @@
   <!-- Stránka: Připomínky (vidí ji všichni, i děti — ať můžou odťuknout) -->
   <div class="slide" data-title="Připomínky" id="pripominkySlide">
     <div class="page">
+      <!-- Termíny (auta, motorka, pes, očkování): nahoře nejbližší, celé po rozbalení.
+           Jen ve full — údaje (VIN, SPZ) do dětského mobilu nepatří. -->
+      <div class="card jen-full term-oblast" data-emoji="📅" id="termBlizkeKarta">
+        <div class="graph-title">Nejbližší termíny</div>
+        <div class="term-blizke" id="termBlizke"></div>
+        <div class="zavlaha-hint" id="termHint"></div>
+      </div>
+      <button class="sbal-btn jen-full" data-sbal="terminy" type="button" aria-expanded="false">Všechny termíny<i>▾</i></button>
+      <div class="jen-full term-oblast" id="terminyOblast" data-sbal-obsah="terminy">
+        <div id="termKarty"></div>
+        <button class="sbal-btn term-nova" id="termNovaBtn" type="button">+ Nová karta</button>
+        <!-- Hromadné vložení údajů: [Název karty] a pod tím řádky „Klíč: hodnota“.
+             Stejný klíč přepíše, nový přibude; neznámá karta se založí. -->
+        <button class="sbal-btn" data-sbal="termvloz" type="button" aria-expanded="false">Vložit údaje<i>▾</i></button>
+        <div class="card" data-sbal-obsah="termvloz">
+          <div class="term-form">
+            <label for="termVlozText">Vlož text ve tvaru <b>[Název karty]</b> a pod něj řádky <b>Klíč: hodnota</b>. Stejný klíč se přepíše, nový přibude, neznámá karta se založí.</label>
+            <textarea id="termVlozText" placeholder="[BMW 4 Gran Coupé]&#10;VIN: …&#10;SPZ: …"></textarea>
+            <div class="term-f-tlacitka">
+              <button type="button" id="termVlozSchranka">Vložit ze schránky</button>
+              <button type="button" class="ulozit" id="termVlozBtn">Doplnit do karet</button>
+            </div>
+            <div class="zavlaha-hint" id="termVlozHint"></div>
+          </div>
+        </div>
+      </div>
       <div class="card">
         <div class="graph-title">Připomínky</div>
         <div class="prip-seznam" id="pripSeznam"></div>
@@ -3945,34 +3975,6 @@
   </div>
 
   <!-- Stránka: Log/Nastavení (dřív Logika automatiky; log je nahoře pod rozbalením) -->
-  <!-- Stránka: Termíny — auta, motorka, pes, očkování… Údaje (VIN, SPZ) jen
-       v záloze na serveru, do repozitáře nepatří. Push 14 dní předem. -->
-  <div class="slide" data-title="Termíny" id="terminySlide" data-rezim="full">
-    <div class="page">
-      <div class="card" data-emoji="📅">
-        <div class="graph-title">Nejbližší termíny</div>
-        <div class="term-blizke" id="termBlizke"></div>
-        <div class="zavlaha-hint" id="termHint"></div>
-      </div>
-      <div id="termKarty"></div>
-      <button class="sbal-btn term-nova" id="termNovaBtn" type="button">+ Nová karta</button>
-      <!-- Hromadné vložení údajů: [Název karty] a pod tím řádky „Klíč: hodnota“.
-           Stejný klíč přepíše, nový přibude; neznámá karta se založí. -->
-      <button class="sbal-btn" data-sbal="termvloz" type="button" aria-expanded="false">Vložit údaje<i>▾</i></button>
-      <div class="card" data-sbal-obsah="termvloz">
-        <div class="term-form">
-          <label for="termVlozText">Vlož text ve tvaru <b>[Název karty]</b> a pod něj řádky <b>Klíč: hodnota</b>. Stejný klíč se přepíše, nový přibude, neznámá karta se založí.</label>
-          <textarea id="termVlozText" placeholder="[BMW 4 Gran Coupé]&#10;VIN: …&#10;SPZ: …"></textarea>
-          <div class="term-f-tlacitka">
-            <button type="button" id="termVlozSchranka">Vložit ze schránky</button>
-            <button type="button" class="ulozit" id="termVlozBtn">Doplnit do karet</button>
-          </div>
-          <div class="zavlaha-hint" id="termVlozHint"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="slide" data-title="Log/Nastavení">
     <div class="page">
       <button class="sbal-btn jen-full" data-sbal="log" type="button" aria-expanded="false">Log<i>▾</i></button>
@@ -4308,6 +4310,19 @@
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="potvrzZpet" type="button">Zpět</button>
       <button class="potvrz-ano" id="potvrzAno" type="button">Potvrdit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Termíny: Hotovo u oleje (kolik má najeto) nebo nové datum -->
+<div class="potvrz" id="termOkno" hidden>
+  <div class="potvrz-box">
+    <div class="potvrz-nadpis" id="termOknoNadpis"></div>
+    <div class="potvrz-text" id="termOknoText"></div>
+    <input class="pin-input" id="termOknoPole" type="number" autocomplete="off" hidden>
+    <div class="potvrz-btns">
+      <button class="potvrz-zpet" id="termOknoZpet" type="button">Zpět</button>
+      <button class="potvrz-ano" id="termOknoAno" type="button">Uložit</button>
     </div>
   </div>
 </div>
@@ -13774,6 +13789,7 @@ function connectStream() {
   es.addEventListener('terminy', e => {
     terminyData = JSON.parse(e.data).terminy || null;
     bezpecne(renderTerminy);
+    bezpecne(renderPripominky);
   });
   es.addEventListener('saunaZapnuto', e => {
     saunaZapnutoData = JSON.parse(e.data).saunaZapnuto || null;
@@ -14163,7 +14179,29 @@ function pripDefinice() {
     vlastni.push(def);
   }
   vlastni.sort((a, b) => a.vytvoreno - b.vytvoreno);
-  return PRIPOMINKY.concat(vlastni);
+  return PRIPOMINKY.concat(vlastni, termPripominky());
+}
+
+// Termíny do 14 dní (a prošlé) svítí jako ostatní připomínky — na displeji
+// vyskočí panel s Hotovo. Hotovo vede na totéž co na kartě termínu (olej se
+// zeptá na kilometry, STK na nové datum). Jen ve full — děti termíny nevidí.
+function termPripominky() {
+  // terminyData je deklarovaná níž — při prvním vykreslení ještě nemusí existovat
+  let data = null;
+  try { data = terminyData; } catch { return []; }
+  if (!data || (typeof rezimApky === 'string' && rezimApky !== 'full')) return [];
+  const predem = data.predemDni || 14;
+  const out = [];
+  for (const k of data.karty || []) {
+    for (const x of k.terminy || []) {
+      if (!x.datum || termDni(x.datum) > predem) continue;
+      const kdo = x.skupina ? ' – ' + x.skupina : '';
+      out.push({ id: 'term_' + x.id, ikona: k.ikona || '📅',
+        nazev: x.posledni ? `Objednat ${x.nazev.toLowerCase()} – ${k.nazev}` : `${k.nazev}${kdo}: ${x.nazev}`,
+        termin: { k, x } });
+    }
+  }
+  return out;
 }
 const PRIP_DEN_ZLOM_H = 3;     // ve 3:00 se denní připomínky (pes) vynulují
 const PRIP_SEKACKA_MS = 3600000;   // jak dlouho sekačka mlčí, než se připomínka rozsvítí
@@ -14213,6 +14251,10 @@ const pripZNastennych = w => w - pripPosun(w - pripPosun(w));
 // → { sviti, text, dalsi }. `dalsi` je okamžik další akce, pokud je hotovo a čeká
 // se — tlačítko pak místo „Hotovo" odpočítává, kolik zbývá.
 function pripominkaStav(def, p, now = Date.now()) {
+  if (def.termin) {
+    const x = def.termin.x, dni = termDni(x.datum, termDnes(now));
+    return { sviti: true, text: termZbyva(dni)[0].toUpperCase() + termZbyva(dni).slice(1) + ' (' + termDatumCz(x.datum) + ')', dalsi: null };
+  }
   p = p || {};
   const hotovo = Number(p.hotovo) || 0;
   // „Aktivovat teď“: svítí, dokud se po aktivaci neodťukne — bez ohledu na čas
@@ -14322,6 +14364,10 @@ function pripSviticich(now = Date.now()) {
 
 // Hotovo, a do pěti vteřin „Zpět" — ze seznamu i z panelu u zvonečku
 function pripOdtukni(def, kdy) {
+  if (def.termin) {
+    termHotovo(def.termin.x).then(ok => { if (ok) { bezpecne(renderTerminy); bezpecne(renderPripominky); } });
+    return;
+  }
   // Odťuknutí ruší ruční aktivaci hned (server to udělá taky) — jinak by do jeho
   // odpovědi připomínka svítila dál
   if (pripData && pripData[def.id] && (pripZpet[def.id] || 0) <= Date.now()) pripData[def.id].aktivovano = 0;
@@ -14425,11 +14471,76 @@ async function termPost(adresa, telo) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
     if (data.terminy) terminyData = data.terminy;
+    bezpecne(renderPripominky);
     return true;
   } catch (err) {
     termHintEl.textContent = err.message || 'Nepodařilo se uložit.';
     return false;
   }
+}
+
+// Údaje po řádcích; u VIN tlačítko, které hodnotu zkopíruje (do formulářů pojišťovny…)
+const TERM_KOPIROVAT = /^(vin)$/i;
+function termUdaje(udaje) {
+  const box = termEl('div', 'term-udaje');
+  for (const radek of udaje.split('\n')) {
+    const m = /^\s*([^:]{1,40}):\s*(.+)$/.exec(radek);
+    if (!m || !TERM_KOPIROVAT.test(m[1].trim())) { box.appendChild(termEl('div', '', radek)); continue; }
+    const r = termEl('div', 'term-udaj-radek');
+    r.appendChild(termEl('span', '', radek));
+    const b = termEl('button', 'term-kopir', 'Kopírovat');
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      const hodnota = m[2].trim();
+      try { await navigator.clipboard.writeText(hodnota); b.textContent = 'Zkopírováno ✓'; }
+      catch { b.textContent = 'Nejde — podrž prst na textu'; }
+      setTimeout(() => { b.textContent = 'Kopírovat'; }, 2000);
+    });
+    r.appendChild(b);
+    box.appendChild(r);
+  }
+  return box;
+}
+
+// Hotovo u termínu — co se má zeptat:
+//  olej (posledni + km): kolik má najeto → server zapíše „Poslední olej: dnes, km“ a dá rok dopředu
+//  opakovaný (Nobivac): rovnou posun o interval
+//  jednorázový (STK, pojistka): nové datum
+async function termHotovo(x) {
+  if (x.posledni) {
+    const km = await termOkno(`${x.nazev} hotový`, x.km ? 'Kolik má najeto? (nepovinné)' : '', x.km ? 'number' : null, '');
+    if (km === null) return false;
+    return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, x.km && km !== '' ? { km } : {});
+  }
+  if (x.opakovani && x.datum) return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, {});
+  const vychozi = x.datum ? termPosunJs(x.datum, 12) : '';
+  const datum = await termOkno(`${x.nazev}: nové datum`, 'Kdy je další termín?', 'date', vychozi);
+  if (!datum) return false;
+  return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, { datum });
+}
+function termPosunJs(datum, mesicu) {
+  const [r, m, d] = datum.split('-').map(Number);
+  const c = new Date(Date.UTC(r, m - 1 + mesicu, 1));
+  c.setUTCDate(Math.min(d, new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 0)).getUTCDate()));
+  return c.toISOString().slice(0, 10);
+}
+// Malé okno s jedním polem (číslo / datum) nebo jen potvrzení. → hodnota, nebo null = Zpět
+function termOkno(nadpis, text, typ, vychozi) {
+  const okno = document.getElementById('termOkno');
+  if (!okno) return Promise.resolve(null);
+  const pole = document.getElementById('termOknoPole');
+  document.getElementById('termOknoNadpis').textContent = nadpis;
+  document.getElementById('termOknoText').textContent = text || '';
+  pole.hidden = !typ;
+  if (typ) { pole.type = typ; pole.value = vychozi || ''; pole.inputMode = typ === 'number' ? 'numeric' : ''; }
+  okno.hidden = false;
+  if (typ) setTimeout(() => { try { pole.focus(); } catch {} }, 50);
+  return new Promise(hotovo => {
+    const ano = document.getElementById('termOknoAno'), zpet = document.getElementById('termOknoZpet');
+    const konec = v => { okno.hidden = true; ano.onclick = zpet.onclick = null; hotovo(v); };
+    ano.onclick = () => konec(typ ? pole.value.trim() : '');
+    zpet.onclick = () => konec(null);
+  });
 }
 
 // Řádek termínu (v kartě i v přehledu nahoře)
@@ -14445,17 +14556,23 @@ function termRadek(k, x, sKartou) {
   if (x.datum) {
     const dni = termDni(x.datum);
     r.appendChild(termEl('span', termTrida(dni), termZbyva(dni)));
-    // Opakované (očkování psa) se odklikne a posune o interval
-    if (x.opakovani && dni <= TERM_BLIZKO_DNI) {
-      const b = termEl('button', 'term-hotovo', 'Hotovo');
+    // Opakované (očkování psa) se odklikne a posune o interval; olej jde odkliknout
+    // kdykoli (kilometry přijdou dřív než rok); jednorázové chce nové datum
+    if (x.posledni || (x.opakovani && dni <= TERM_BLIZKO_DNI) || (!x.opakovani && dni <= TERM_BLIZKO_DNI)) {
+      const b = termEl('button', 'term-hotovo', x.opakovani || x.posledni ? 'Hotovo' : 'Nové datum');
       b.type = 'button';
       b.addEventListener('click', async () => {
         b.disabled = true;
-        if (await termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`)) renderTerminy();
+        if (await termHotovo(x)) { renderTerminy(); bezpecne(renderPripominky); }
         b.disabled = false;
       });
       r.appendChild(b);
     }
+  } else if (x.posledni) {
+    const b = termEl('button', 'term-hotovo', 'Hotovo');
+    b.type = 'button';
+    b.addEventListener('click', async () => { if (await termHotovo(x)) { renderTerminy(); bezpecne(renderPripominky); } });
+    r.appendChild(b);
   }
   return r;
 }
@@ -14584,7 +14701,7 @@ function renderTerminy() {
     });
     h.appendChild(upr);
     c.appendChild(h);
-    if (k.udaje) c.appendChild(termEl('div', 'term-udaje', k.udaje));
+    if (k.udaje) c.appendChild(termUdaje(k.udaje));
     const serazene = [...k.terminy].sort((a, b) => (a.datum || '9999').localeCompare(b.datum || '9999'));
     const skupiny = Array.isArray(k.skupiny) ? k.skupiny : [];
     if (skupiny.length) {

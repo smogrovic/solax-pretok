@@ -25,9 +25,14 @@ setTimeout(async () => {
  try {
   const pockej = () => new Promise(r => setTimeout(r, 30));
   const den = n => termDnes(Date.now() + n * 86400000);
-  const slide = document.getElementById('terminySlide');
-  check('stránka Termíny existuje a je za Recepty', slide.previousElementSibling.id, 'nakupSlide');
-  check('  jen ve full režimu', slide.dataset.rezim, 'full');
+  // Termíny jsou na stránce Připomínky: nahoře nejbližší, celé pod „Všechny termíny“
+  check('samostatná stránka Termíny není', !!document.getElementById('terminySlide'), false);
+  const prip = document.getElementById('pripominkySlide');
+  check('nejbližší termíny jsou nahoře na Připomínkách', prip.querySelector('.page > .card').id, 'termBlizkeKarta');
+  check('  zbytek je pod tlačítkem Všechny termíny', document.getElementById('termKarty').closest('[data-sbal-obsah]').dataset.sbalObsah, 'terminy');
+  check('  vše jen ve full (údaje do dětského mobilu nepatří)', document.getElementById('termBlizkeKarta').classList.contains('jen-full')
+    && document.getElementById('terminyOblast').classList.contains('jen-full'), true);
+  sbalNastav('terminy', false);
 
   terminyData = { predemDni: 14, karty: [
     { id: 'bmw4', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: X\\nPojišťovna: Direct', terminy: [
@@ -54,18 +59,18 @@ setTimeout(async () => {
   R.push('\\n2) Karty');
   const karty = [...document.querySelectorAll('#termKarty > .card')];
   check('dvě karty', karty.map(k => k.querySelector('.graph-title').textContent).join(' | '), '🚗 BMW 4 | 🐕 Eso');
-  check('údaje po řádcích', karty[0].querySelector('.term-udaje').textContent, 'VIN: X\\nPojišťovna: Direct');
+  check('údaje po řádcích', [...karty[0].querySelector('.term-udaje').children].map(e => e.firstChild.textContent).join(' | '), 'VIN: X | Pojišťovna: Direct');
   check('termíny podle data, bez data na konci', [...karty[1].querySelectorAll('.term-nazev')].map(e => e.textContent).join(','),
     'Odčervení,Nobivac ↻,Vzteklina');
   check('daleký termín v měsících', /za 13 měs\./.test(karty[0].textContent), true);
   check('bez data se řekne', /bez data/.test(karty[1].textContent), true);
-  check('Hotovo jen u opakovaného', document.querySelectorAll('#termKarty .term-hotovo').length, 1);
+  check('Hotovo u opakovaného, Nové datum u blízkých jednorázových', [...document.querySelectorAll('#termKarty .term-hotovo')].map(b => b.textContent).join(','), 'Nové datum,Nové datum,Hotovo');
 
   R.push('\\n3) Hotovo posune opakovaný');
   odpoved = { telo: { ok: true, terminy: { predemDni: 14, karty: terminyData.karty.map(k => k.id === 'eso'
     ? { ...k, terminy: k.terminy.map(x => x.id === 'nob' ? { ...x, datum: den(405) } : x) } : k) } } };
   poslano.length = 0;
-  document.querySelector('#termKarty .term-hotovo').click();
+  [...document.querySelectorAll('#termKarty .term-hotovo')].find(b => b.textContent === 'Hotovo').click();
   await pockej();
   check('pošle hotovo', poslano[0].url, '/api/terminy/nob/hotovo');
   check('  a překreslí s novým datem', document.querySelectorAll('#termBlizke .term-radek').length, 2);
@@ -187,6 +192,66 @@ setTimeout(async () => {
   await pockej();
   const ul = poslano[0].body.karty[0];
   check('uloží pododdíly i přiřazení', ul.skupiny.join(',') + ' | ' + ul.terminy[1].skupina, 'Lukáš,Zuzka,Miky,Elenka | Elenka');
+
+  R.push('\\n6d) VIN ke zkopírování');
+  terminyData = { predemDni: 14, karty: [{ id: 'bmw4', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: WBA123\\nSPZ: 1AB', terminy: [] }] };
+  renderTerminy();
+  const kop = [...document.querySelectorAll('#termKarty .term-kopir')];
+  check('u VIN je tlačítko Kopírovat (u SPZ ne)', kop.length, 1);
+  let schranka = null;
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async t => { schranka = t; }, readText: async () => '' } });
+  kop[0].click();
+  await pockej();
+  check('  zkopíruje jen hodnotu', schranka, 'WBA123');
+  check('  a řekne to', kop[0].textContent, 'Zkopírováno ✓');
+
+  R.push('\\n6e) Olej: Hotovo se zeptá na kilometry');
+  const olej = { id: 'gs-olej', nazev: 'Olej', datum: den(5), opakovani: 12, pozn: '', posledni: 'Poslední olej', km: true };
+  const stk = { id: 'gs-stk', nazev: 'STK', datum: den(3), opakovani: 0, pozn: '' };
+  terminyData = { predemDni: 14, karty: [{ id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [olej, stk, { ...olej, id: 'x-olej', datum: den(300) }] }] };
+  renderTerminy();
+  const hot = [...document.querySelectorAll('#termKarty .term-hotovo')];
+  check('olej má Hotovo i daleko, STK Nové datum', hot.map(b => b.textContent).join(','), 'Nové datum,Hotovo,Hotovo');
+  poslano.length = 0;
+  hot[1].click();
+  await pockej();
+  const okno = document.getElementById('termOkno');
+  check('otevře se okno s kilometry', !okno.hidden && document.getElementById('termOknoPole').type, 'number');
+  document.getElementById('termOknoPole').value = '12345';
+  odpoved = { telo: { ok: true, terminy: terminyData } };
+  document.getElementById('termOknoAno').click();
+  await pockej();
+  check('  pošle hotovo s km', poslano[0].url + ' ' + JSON.stringify(poslano[0].body), '/api/terminy/gs-olej/hotovo {"km":"12345"}');
+  poslano.length = 0;
+  hot[1].click();
+  await pockej();
+  document.getElementById('termOknoZpet').click();
+  await pockej();
+  check('  Zpět nic nepošle', poslano.length + ' ' + okno.hidden, '0 true');
+  hot[0].click();
+  await pockej();
+  check('STK se zeptá na nové datum (o rok dál)', document.getElementById('termOknoPole').type + ' ' + document.getElementById('termOknoPole').value, 'date ' + termPosunJs(den(3), 12));
+  odpoved = { telo: { ok: true, terminy: terminyData } };
+  document.getElementById('termOknoAno').click();
+  await pockej();
+  check('  a pošle ho', JSON.stringify(poslano[0].body), JSON.stringify({ datum: termPosunJs(den(3), 12) }));
+
+  R.push('\\n6f) Termín do 14 dní svítí mezi připomínkami');
+  const defs = pripDefinice().filter(d => d.termin);
+  check('olej a STK do 14 dní jsou připomínky (daleký olej ne)', defs.map(d => d.nazev).join(' | '), 'Objednat olej – BMW R 1300 GS | BMW R 1300 GS: STK');
+  check('  svítí s textem', pripominkaStav(defs[0], null).sviti + ' ' + pripominkaStav(defs[0], null).text, 'true Za 5 dní (' + termDatumCz(den(5)) + ')');
+  renderPripominky();
+  check('  jsou v seznamu Připomínek', [...document.querySelectorAll('#pripSeznam .prip-radek')].filter(r => /^term_/.test(r.dataset.id)).length, 2);
+  check('  i v emoji u zvonečku', !!document.querySelector('#pripEmoji [data-id="term_gs-olej"]'), true);
+  poslano.length = 0;
+  pripOdtukni(defs[0]);
+  await pockej();
+  check('Hotovo z připomínky = totéž okno s km', !okno.hidden && document.getElementById('termOknoNadpis').textContent, 'Olej hotový');
+  document.getElementById('termOknoZpet').click();
+  await pockej();
+  pouzijRezim('miky');
+  check('dětský režim termíny mezi připomínky nedává', pripDefinice().some(d => d.termin), false);
+  pouzijRezim('full');
 
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };

@@ -68,7 +68,7 @@ setTimeout(async () => {
 
   R.push('1) Ve full režimu je všechno jako dřív');
   pouzijRezim('full');
-  check('záložek je čtrnáct', zalozky().length, 14);
+  check('záložek je třináct', zalozky().length, 13);
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
   check('tlačítko prázdnin (nahoře na FVE) je vidět', vidim(document.getElementById('prazdninyBtn')), true);
   check('teplotní automatika je na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
@@ -316,7 +316,7 @@ setTimeout(async () => {
   document.getElementById('potvrzAno').click();
   await pockej();
   check('správný kód přepne na full', rezimApky, 'full');
-  check('  a vrátí všechny záložky', zalozky().length, 14);
+  check('  a vrátí všechny záložky', zalozky().length, 13);
   check('  i scény a prázdniny', vidim(document.getElementById('prazdninyBtn')), true);
   check('  a teplotní automatika zpátky na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
 

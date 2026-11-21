@@ -3007,31 +3007,76 @@ function terminyVychozi() {
       { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗',
         udaje: 'Poslední olej: 3. 8. 2026, 97 000 km\nPojišťovna: Direct\nGeometrie: 11. 11. 2026 hotová\nKoupit nové letní pneu',
         terminy: [t('bmw4-stk', 'STK', '2028-08-03'), t('bmw4-znamka', 'Dálniční známka', '2027-05-05'),
-          t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct')] },
+          t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct'), terminOlej('bmw4', '2027-08-03')] },
       { id: 'vw', nazev: 'VW Multivan', ikona: '🚐',
         udaje: 'Poslední olej: 20. 5. 2026, 51 000 km\nPojišťovna: Generali (Pastell)',
         terminy: [t('vw-stk', 'STK', '2028-01-29'), t('vw-znamka', 'Dálniční známka', '2027-01-28'),
-          t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali')] },
+          t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali'), terminOlej('vw', '2027-05-20')] },
       { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️',
-        udaje: 'Poslední olej: 10. 9. 2025, 2 300 km\nServis: každých 10 000 km nebo po roce\nPojišťovna: povinné + havarijní Generali',
+        udaje: 'Poslední olej: 7. 9. 2026\nServis: každých 10 000 km nebo po roce\nPojišťovna: povinné + havarijní Generali',
         terminy: [t('gs-stk', 'STK', '2031-05-01'), t('gs-poj', 'Pojištění', '2027-09-03', 0, 'Generali'),
-          t('gs-servis', 'Servis a olej (po roce)', '2026-09-10', 12, 'nebo po 10 000 km')] },
+          terminOlej('gs', '2027-09-07')] },
       { id: 'eso', nazev: 'Eso — očkování', ikona: '🐕', udaje: '',
         terminy: [t('eso-vzteklina', 'Vzteklina', '2028-01-20'), t('eso-nobivac', 'Kombinace Nobivac', '2027-05-22', 12)] },
       { id: 'ockovani', nazev: 'Naše očkování', ikona: '💉', udaje: '',
         terminy: [{ ...t('my-tetanus', 'Tetanus', '2037-02-01'), skupina: 'Lukáš' }], skupiny: TERMINY_OSOBY.slice() }
     ],
-    upozorneno: {}
+    upozorneno: {},
+    migrace: Object.keys(TERMINY_MIGRACE)
   };
 }
 // Pododdíly karty očkování: kdo
 const TERMINY_OSOBY = ['Lukáš', 'Zuzka', 'Miky', 'Elenka'];
+// Olej: po roce (nebo po kilometrech — ty hlídá člověk). Hotovo zapíše do údajů
+// „Poslední olej: datum, km“ a další termín dá rok od toho dne.
+const TERMIN_OLEJ_ZAPIS = 'Poslední olej';
+function terminOlej(karta, datum) {
+  return { id: karta + '-olej', nazev: 'Olej', datum, opakovani: 12, pozn: 'po roce nebo po kilometrech',
+    posledni: TERMIN_OLEJ_ZAPIS, km: true };
+}
+
+// Jednorázové úpravy uložených dat (mají se stát jednou, i když je člověk pak změní)
+const TERMINY_MIGRACE = {
+  // Olej do termínů: auta rok od posledního oleje v údajích, motorka od 7. 9. 2026
+  olej(t) {
+    for (const id of ['bmw4', 'vw', 'gs']) {
+      const k = t.karty.find(x => x.id === id);
+      if (!k || k.terminy.some(x => x.posledni)) continue;
+      let datum = null;
+      if (id === 'gs') {
+        k.terminy = k.terminy.filter(x => x.id !== 'gs-servis');
+        k.udaje = terminyUdajNastav(k.udaje, TERMIN_OLEJ_ZAPIS, '7. 9. 2026');
+        datum = '2026-09-07';
+      } else {
+        const m = /posledn[ií] olej:\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/i.exec(k.udaje || '');
+        if (m) datum = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      }
+      k.terminy.push(terminOlej(id, datum ? terminyPosun(datum, 12) : null));
+    }
+  }
+};
+
+// Řádek „Klíč: hodnota“ v údajích: přepíše ten se stejným klíčem, jinak přidá nahoru
+function terminyUdajNastav(udaje, klic, hodnota) {
+  const radky = (udaje || '').split('\n').filter(Boolean);
+  const k = klic.toLowerCase();
+  const i = radky.findIndex(r => r.split(':')[0].trim().toLowerCase() === k);
+  const novy = `${klic}: ${hodnota}`;
+  if (i >= 0) radky[i] = novy; else radky.unshift(novy);
+  return radky.join('\n');
+}
 
 function terminyData() {
   if (!state.terminy) state.terminy = terminyVychozi();
   const t = state.terminy;
   if (!t.upozorneno || typeof t.upozorneno !== 'object') t.upozorneno = {};
   // Karta očkování z doby před pododdíly (i ze zálohy): dostane osoby a tetanus patří Lukášovi
+  if (!Array.isArray(t.migrace)) t.migrace = [];
+  for (const [nazev, uprav] of Object.entries(TERMINY_MIGRACE)) {
+    if (t.migrace.includes(nazev)) continue;
+    try { uprav(t); } catch {}
+    t.migrace.push(nazev);
+  }
   const ock = t.karty.find(k => k.id === 'ockovani');
   if (ock && !Array.isArray(ock.skupiny)) {
     ock.skupiny = TERMINY_OSOBY.slice();
@@ -3081,6 +3126,9 @@ function terminyOver(karty) {
       const tx = { id: tid, nazev: tn, datum, opakovani: op, pozn: text(x.pozn, TERMINY_MEZE.pozn) };
       const sk = text(x.skupina, TERMINY_MEZE.skupina);
       if (sk) tx.skupina = sk;
+      // Hotovo zapíše „<posledni>: datum[, km]“ do údajů (olej)
+      const po = text(x.posledni, TERMINY_MEZE.skupina);
+      if (po) { tx.posledni = po; if (x.km === true) tx.km = true; }
       terminy.push(tx);
     }
     const karta = { id, nazev, ikona: text(k.ikona, TERMINY_MEZE.ikona), udaje: text(k.udaje, TERMINY_MEZE.udaje), terminy };
@@ -3152,21 +3200,45 @@ app.post('/api/terminy', (req, res) => {
   const t = terminyData();
   t.karty = o.karty;
   state.terminyUpraveno = true;
+  // Upozornění na termíny, které už neexistují nebo mají jiné datum, se zahodí
+  const plati = new Set(o.karty.flatMap(k => k.terminy.map(x => x.id + '|' + x.datum)));
+  for (const kl of Object.keys(t.upozorneno)) if (!plati.has(kl.split('|').slice(0, 2).join('|'))) delete t.upozorneno[kl];
   if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
   broadcast('terminy', { terminy: terminyPayload() });
   res.json({ ok: true, terminy: terminyPayload() });
 });
 
-// Hotovo u termínu, co se opakuje: posune o interval (očkování psa každý rok)
+// Hotovo u termínu:
+//  - { datum: 'YYYY-MM-DD' } → nové datum (třeba nová STK), jde u kteréhokoli
+//  - olej (`posledni`): další termín rok OD DNEŠKA a do údajů „Poslední olej: dnes, km“
+//  - ostatní opakované: posun o interval od původního data (očkování psa)
 app.post('/api/terminy/:id/hotovo', (req, res) => {
   const t = terminyData();
+  const telo = req.body || {};
   for (const k of t.karty) {
     const x = k.terminy.find(y => y.id === req.params.id);
     if (!x) continue;
-    if (!x.datum || !x.opakovani) return res.status(400).json({ error: 'Termín se neopakuje — nastav nové datum.' });
-    x.datum = terminyPosun(x.datum, x.opakovani);
+    if (telo.datum !== undefined) {
+      const o = terminyOver([{ nazev: 'x', terminy: [{ nazev: 'x', datum: telo.datum }] }]);
+      if (o.chyba || !o.karty[0].terminy[0].datum) return res.status(400).json({ error: 'Špatné datum.' });
+      x.datum = o.karty[0].terminy[0].datum;
+    } else if (x.posledni) {
+      let km = null;
+      if (telo.km !== undefined && telo.km !== null && telo.km !== '') {
+        km = Number(String(telo.km).replace(/\s/g, ''));
+        if (!Number.isInteger(km) || km < 0 || km > 2000000) return res.status(400).json({ error: 'Kilometry musí být celé číslo.' });
+      }
+      const dnes = pragueDateString();
+      const kmText = km === null ? '' : ', ' + km.toLocaleString('cs-CZ').replace(/\s/g, ' ') + ' km';
+      k.udaje = terminyUdajNastav(k.udaje, x.posledni, terminyDatumCz(dnes) + kmText);
+      x.datum = terminyPosun(dnes, x.opakovani || 12);
+    } else if (x.datum && x.opakovani) {
+      x.datum = terminyPosun(x.datum, x.opakovani);
+    } else {
+      return res.status(400).json({ error: 'Termín se neopakuje — nastav nové datum.' });
+    }
     state.terminyUpraveno = true;
-    addLog(`Termíny: ${k.nazev} — ${x.nazev} hotovo, další ${terminyDatumCz(x.datum)}`);
+    addLog(`Termíny: ${k.nazev} — ${x.nazev} hotovo, další ${x.datum ? terminyDatumCz(x.datum) : '?'}`);
     if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
     broadcast('terminy', { terminy: terminyPayload() });
     return res.json({ ok: true, terminy: terminyPayload() });
@@ -3185,7 +3257,8 @@ app.post('/api/terminy/restore', (req, res) => {
         if (typeof k === 'string' && k.length <= 80 && Number.isFinite(v)) upozorneno[k] = v;
       }
     }
-    state.terminy = { karty: o.karty, upozorneno };
+    const migrace = Array.isArray(z.migrace) ? z.migrace.filter(m => typeof m === 'string' && m.length <= 40).slice(0, 50) : [];
+    state.terminy = { karty: o.karty, upozorneno, migrace };
     broadcast('terminy', { terminy: terminyPayload() });
   }
   res.json({ ok: true });
@@ -14385,6 +14458,7 @@ const STORE_POSTS = [
   '/api/sauna/nahrev/restore',
   '/api/sauna/zapnuto/restore',
   '/api/pripominky/restore',
+  '/api/terminy/restore',
   '/api/nakup/restore',
   '/api/nakup/oblibene/restore',
   '/api/rohlik/vyber/restore',

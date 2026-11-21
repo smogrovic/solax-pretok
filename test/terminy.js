@@ -84,6 +84,45 @@ nadpis('3) Posun a hotovo u opakovaných');
   check('neznámý → 404', h.volej('/api/terminy/:id/hotovo', {}, { id: 'nic' }).s, 404);
 }
 
+nadpis('3b) Olej: po roce, Hotovo zapíše datum a kilometry');
+{
+  const h = build();
+  const t = h.api.terminyData();
+  const olej = id => t.karty.find(k => k.id === id).terminy.find(x => x.posledni);
+  check('motorka: olej rok od 7. 9. 2026', olej('gs').datum + ' ' + olej('gs').opakovani, '2027-09-07 12');
+  check('  starý „servis“ termín je pryč', t.karty.find(k => k.id === 'gs').terminy.some(x => x.id === 'gs-servis'), false);
+  check('  v údajích poslední olej 7. 9. 2026', /^Poslední olej: 7\. 9\. 2026$/m.test(t.karty.find(k => k.id === 'gs').udaje), true);
+  check('auta: rok od posledního oleje', olej('bmw4').datum + ' ' + olej('vw').datum, '2027-08-03 2027-05-20');
+  const puvodniNow = Date.now;
+  Date.now = () => Date.UTC(2026, 10, 21, 11);
+  const r = h.volej('/api/terminy/:id/hotovo', { km: '12 345' }, { id: 'gs-olej' });
+  check('Hotovo s kilometry', r.ok + ' ' + olej('gs').datum, 'true 2027-11-21');
+  check('  do údajů se zapíše dnešek a km', t.karty.find(k => k.id === 'gs').udaje.split('\n')[0], 'Poslední olej: 21. 11. 2026, 12 345 km');
+  check('  ostatní údaje zůstanou', /Servis: každých 10 000 km/.test(t.karty.find(k => k.id === 'gs').udaje), true);
+  h.volej('/api/terminy/:id/hotovo', {}, { id: 'bmw4-olej' });
+  check('bez kilometrů jen datum', t.karty[0].udaje.split('\n')[0], 'Poslední olej: 21. 11. 2026');
+  check('  a řádek se nezdvojí', t.karty[0].udaje.match(/Poslední olej/g).length, 1);
+  check('nesmyslné km → 400', h.volej('/api/terminy/:id/hotovo', { km: 'hodně' }, { id: 'vw-olej' }).s, 400);
+  const d = h.volej('/api/terminy/:id/hotovo', { datum: '2030-08-03' }, { id: 'bmw4-stk' });
+  check('nové datum u STK', d.ok + ' ' + t.karty[0].terminy[0].datum, 'true 2030-08-03');
+  check('  špatné datum → 400', h.volej('/api/terminy/:id/hotovo', { datum: '2030-02-31' }, { id: 'bmw4-stk' }).s, 400);
+  Date.now = puvodniNow;
+  // Migrace starých uložených dat (bez oleje) — jen jednou
+  const h2 = build();
+  h2.state.terminy = { upozorneno: {}, karty: [
+    { id: 'bmw4', nazev: 'BMW 4', ikona: '', udaje: 'VIN: X\nPoslední olej: 3. 8. 2026, 97 000 km', terminy: [] },
+    { id: 'gs', nazev: 'GS', ikona: '', udaje: 'Poslední olej: 10. 9. 2025, 2 300 km', terminy: [{ id: 'gs-servis', nazev: 'Servis', datum: '2026-09-10', opakovani: 12, pozn: '' }] }] };
+  const m = h2.api.terminyData();
+  check('migrace: auto dostane olej z údajů', m.karty[0].terminy[0].datum + ' ' + m.karty[0].udaje, '2027-08-03 VIN: X\nPoslední olej: 3. 8. 2026, 97 000 km');
+  check('  motorka 7. 9. 2026 místo servisu', m.karty[1].terminy.map(x => x.id + ':' + x.datum).join() + ' | ' + m.karty[1].udaje, 'gs-olej:2027-09-07 | Poslední olej: 7. 9. 2026');
+  m.karty[1].terminy = [];
+  check('  jen jednou (smazaný olej se nevrátí)', h2.api.terminyData().karty[1].terminy.length, 0);
+  // Obnova ze zálohy si pamatuje, co už se migrovalo
+  const h3 = build();
+  h3.volej('/api/terminy/restore', { terminy: { karty: [{ id: 'gs', nazev: 'GS', terminy: [] }], upozorneno: {}, migrace: ['olej'] } });
+  check('obnova nese migrace — olej se znovu nepřidá', h3.api.terminyData().karty[0].terminy.length, 0);
+}
+
 nadpis('4) Upozornění');
 {
   const h = build();

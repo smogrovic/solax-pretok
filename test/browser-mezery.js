@@ -25,7 +25,7 @@ setTimeout(() => {
 
   const slepene = [];
   const stranky = Array.from(document.querySelectorAll('.slide'));
-  check('stránek je čtrnáct', stranky.length, 14);
+  check('stránek je třináct', stranky.length, 13);
 
   for (const slide of stranky) {
     const karty = Array.from(slide.querySelectorAll('.page > .card')).filter(viditelna);
@@ -87,7 +87,7 @@ setTimeout(() => {
     klice.join(', '),
     // a k tomu každý časovač (casovac-…), ten ukazuje nastavené i sbalený
     'fve, odhad, topeni, sptabulka, aqprogram, klima, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
-    + 'wallbox, bazen, solinator, nahrev, sauna, zavlaha, termvloz, log');
+    + 'wallbox, bazen, solinator, nahrev, sauna, zavlaha, terminy, termvloz, log');
   // Přehled spotřeby na FVE: odkud šla spotřeba, dnešek i týden (z bývalé stránky Přehled)
   check('Přehled spotřeby na FVE je jedna karta (24 h, 7 dní, odkud)',
     document.querySelectorAll('.card[data-sbal-obsah="fve"]').length, 1);
