@@ -190,7 +190,15 @@ setTimeout(async () => {
   const slide = document.querySelector('.slide[data-title="Ovládání"]');
   check('sekačka je na Ovládání', slide.contains(document.getElementById('sekSekatBtn')), true);
   check('  vysavač taky', slide.contains(document.getElementById('vysUklidBtn')), true);
-  check('  tlačítka jsou zamykatelná', !!document.getElementById('sekSekatBtn').closest('.card.lockable'), true);
+  check('  tlačítka jsou zamykatelná', !!document.getElementById('sekSekatBtn').closest('.lockable')
+    && !!document.getElementById('vysUklidBtn').closest('.lockable'), true);
+  // Stav a tlačítka v jednom boxu (dřív dvě karty pod sebou)
+  check('  sekačka: tlačítka ve stejném boxu jako stav', document.getElementById('sekSekatBtn').closest('.card') === document.getElementById('sekLight').closest('.card'), true);
+  check('  vysavač taky', document.getElementById('vysUklidBtn').closest('.card') === document.getElementById('vysKarta'), true);
+  setLocked(true);
+  check('  zamčeno: stav vidět, tlačítka ne', [document.getElementById('sekLight').getClientRects().length > 0,
+    document.getElementById('sekSekatBtn').getClientRects().length > 0].join(' '), 'true false');
+  setLocked(false);
   // Pořadí karet: světla, sekačka, vysavač, bojler, oběhové čerpadlo, pak zbytek
   const emoji = [...slide.querySelectorAll(':scope > .page > .card[data-emoji]')].map(c => c.dataset.emoji).join('');
   check('pořadí: světla, sekačka, vysavač, bojler, oběh, televize, zámek', emoji, '💡🌱🧹🛁🔄📺🔑');

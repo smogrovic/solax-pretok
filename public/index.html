@@ -2640,6 +2640,7 @@
   .sek-btn.hlavni{background:var(--green);color:#fff;}
   .sek-btn.stop{background:rgba(229,83,75,0.12);color:var(--red);}
   .sek-btn:disabled{opacity:0.45;}
+  .sek-ovladani{width:100%;margin-top:12px;}
   .sek-baterie{font-size:26px;font-weight:700;color:var(--navy);margin-top:6px;}
   .zavlaha-hint{width:100%;font-size:11px;color:var(--muted);margin-top:8px;}
   .zavlaha-hint:empty{display:none;}
@@ -3454,15 +3455,15 @@
           <div class="sek-baterie" id="sekBaterie">– %</div>
           <div class="zavlaha-meta" id="sekMeta"></div>
         </div>
-      </div>
-
-      <div class="card lockable jen-full">
-        <div class="sek-tlacitka">
-          <button class="sek-btn hlavni" id="sekSekatBtn" type="button">Sekat</button>
-          <button class="sek-btn stop" id="sekStopBtn" type="button">Zastavit</button>
-          <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
+        <!-- Tlačítka ve stejném boxu jako stav; zámek schová jen je -->
+        <div class="sek-ovladani lockable">
+          <div class="sek-tlacitka">
+            <button class="sek-btn hlavni" id="sekSekatBtn" type="button">Sekat</button>
+            <button class="sek-btn stop" id="sekStopBtn" type="button">Zastavit</button>
+            <button class="sek-btn" id="sekDokBtn" type="button">Do doku</button>
+          </div>
+          <div class="zavlaha-hint" id="sekHint"></div>
         </div>
-        <div class="zavlaha-hint" id="sekHint"></div>
       </div>
 
       <!-- Vysavač Xiaomi X20+ — ovládá ho most na NASu přes cloud Xiaomi -->
@@ -3475,15 +3476,15 @@
           <div class="sek-baterie" id="vysBaterie">– %</div>
           <div class="zavlaha-meta" id="vysMeta"></div>
         </div>
-      </div>
-
-      <div class="card lockable jen-full">
-        <div class="sek-tlacitka">
-          <button class="sek-btn hlavni" id="vysUklidBtn" type="button">Vysát vše</button>
-          <button class="sek-btn stop" id="vysStopBtn" type="button">Zastavit</button>
-          <button class="sek-btn" id="vysDokBtn" type="button">Do doku</button>
+        <!-- Tlačítka ve stejném boxu jako stav; zámek schová jen je -->
+        <div class="sek-ovladani lockable">
+          <div class="sek-tlacitka">
+            <button class="sek-btn hlavni" id="vysUklidBtn" type="button">Vysát vše</button>
+            <button class="sek-btn stop" id="vysStopBtn" type="button">Zastavit</button>
+            <button class="sek-btn" id="vysDokBtn" type="button">Do doku</button>
+          </div>
+          <div class="zavlaha-hint" id="vysHint"></div>
         </div>
-        <div class="zavlaha-hint" id="vysHint"></div>
       </div>
 
       <div class="card lockable jen-full" data-emoji="🛁">
