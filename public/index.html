@@ -1076,6 +1076,9 @@
   /* Termíny */
   #termKarty > .card{margin-top:12px;}
   body[data-rezim="full"] .page > #terminyOblast + .card{margin-top:12px;}
+  .term-okno-popis{display:block;font-size:12px;color:var(--grey-text);margin:8px 0 4px;text-align:left;width:100%;}
+  .term-okno-popis[hidden],.term-okno-pole[hidden]{display:none;}
+  .term-okno-pole{width:100%;box-sizing:border-box;}
   .term-udaj-radek{display:flex;align-items:center;gap:8px;}
   .term-kopir{border:1px solid rgba(44,62,80,.2);background:var(--bg);color:var(--navy);border-radius:8px;font-size:11px;padding:2px 7px;flex:0 0 auto;}
   .term-oblast.card,.term-oblast .card{align-items:stretch;}
@@ -4319,7 +4322,10 @@
   <div class="potvrz-box">
     <div class="potvrz-nadpis" id="termOknoNadpis"></div>
     <div class="potvrz-text" id="termOknoText"></div>
-    <input class="pin-input" id="termOknoPole" type="number" autocomplete="off" hidden>
+    <label class="term-okno-popis" id="termOknoDatumPopis" for="termOknoDatum">Kdy</label>
+    <input class="pin-input term-okno-pole" id="termOknoDatum" type="date" autocomplete="off">
+    <label class="term-okno-popis" id="termOknoKmPopis" for="termOknoKm">Kolik má najeto (km, nepovinné)</label>
+    <input class="pin-input term-okno-pole" id="termOknoKm" type="number" inputmode="numeric" autocomplete="off">
     <div class="potvrz-btns">
       <button class="potvrz-zpet" id="termOknoZpet" type="button">Zpět</button>
       <button class="potvrz-ano" id="termOknoAno" type="button">Uložit</button>
@@ -14503,20 +14509,24 @@ function termUdaje(udaje) {
 }
 
 // Hotovo u termínu — co se má zeptat:
-//  olej (posledni + km): kolik má najeto → server zapíše „Poslední olej: dnes, km“ a dá rok dopředu
+//  olej / STK (posledni): kdy se to udělalo (dnes, jde přepsat na starší) a u oleje
+//    kolik má najeto → server zapíše „Poslední …: datum[, km]“ a další dá o interval od toho dne
 //  opakovaný (Nobivac): rovnou posun o interval
-//  jednorázový (STK, pojistka): nové datum
+//  jednorázový (pojistka…): nové datum
 async function termHotovo(x) {
   if (x.posledni) {
-    const km = await termOkno(`${x.nazev} hotový`, x.km ? 'Kolik má najeto? (nepovinné)' : '', x.km ? 'number' : null, '');
-    if (km === null) return false;
-    return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, x.km && km !== '' ? { km } : {});
+    const v = await termOkno(`${x.nazev} hotovo`, 'Zapíše se do údajů a další termín se spočítá od tohohle data.',
+      { datum: termDnes(), max: termDnes(), datumPopis: 'Kdy', km: !!x.km });
+    if (!v) return false;
+    const telo = { kdy: v.datum };
+    if (x.km && v.km !== '') telo.km = v.km;
+    return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, telo);
   }
   if (x.opakovani && x.datum) return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, {});
-  const vychozi = x.datum ? termPosunJs(x.datum, 12) : '';
-  const datum = await termOkno(`${x.nazev}: nové datum`, 'Kdy je další termín?', 'date', vychozi);
-  if (!datum) return false;
-  return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, { datum });
+  const v = await termOkno(`${x.nazev}: nové datum`, 'Kdy je další termín?',
+    { datum: x.datum ? termPosunJs(x.datum, 12) : '', datumPopis: 'Další termín' });
+  if (!v || !v.datum) return false;
+  return termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`, { datum: v.datum });
 }
 function termPosunJs(datum, mesicu) {
   const [r, m, d] = datum.split('-').map(Number);
@@ -14524,22 +14534,28 @@ function termPosunJs(datum, mesicu) {
   c.setUTCDate(Math.min(d, new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 0)).getUTCDate()));
   return c.toISOString().slice(0, 10);
 }
-// Malé okno s jedním polem (číslo / datum) nebo jen potvrzení. → hodnota, nebo null = Zpět
-function termOkno(nadpis, text, typ, vychozi) {
+// Okno s datem (a případně kilometry). → { datum, km }, nebo null = Zpět
+function termOkno(nadpis, text, { datum = '', max = '', datumPopis = 'Kdy', km = false } = {}) {
   const okno = document.getElementById('termOkno');
   if (!okno) return Promise.resolve(null);
-  const pole = document.getElementById('termOknoPole');
-  document.getElementById('termOknoNadpis').textContent = nadpis;
-  document.getElementById('termOknoText').textContent = text || '';
-  pole.hidden = !typ;
-  if (typ) { pole.type = typ; pole.value = vychozi || ''; pole.inputMode = typ === 'number' ? 'numeric' : ''; }
+  const $ = id => document.getElementById(id);
+  $('termOknoNadpis').textContent = nadpis;
+  $('termOknoText').textContent = text || '';
+  $('termOknoDatumPopis').textContent = datumPopis;
+  $('termOknoDatum').value = datum;
+  $('termOknoDatum').max = max;
+  $('termOknoKm').value = '';
+  $('termOknoKm').hidden = $('termOknoKmPopis').hidden = !km;
   okno.hidden = false;
-  if (typ) setTimeout(() => { try { pole.focus(); } catch {} }, 50);
   return new Promise(hotovo => {
-    const ano = document.getElementById('termOknoAno'), zpet = document.getElementById('termOknoZpet');
-    const konec = v => { okno.hidden = true; ano.onclick = zpet.onclick = null; hotovo(v); };
-    ano.onclick = () => konec(typ ? pole.value.trim() : '');
-    zpet.onclick = () => konec(null);
+    const konec = v => { okno.hidden = true; $('termOknoAno').onclick = $('termOknoZpet').onclick = null; hotovo(v); };
+    $('termOknoAno').onclick = () => {
+      const d = $('termOknoDatum').value;
+      if (max && d > max) { $('termOknoText').textContent = 'Datum nemůže být v budoucnu.'; return; }
+      if (!d) { $('termOknoText').textContent = 'Vyber datum.'; return; }
+      konec({ datum: d, km: $('termOknoKm').value.trim() });
+    };
+    $('termOknoZpet').onclick = () => konec(null);
   });
 }
 

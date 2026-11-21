@@ -3006,15 +3006,15 @@ function terminyVychozi() {
     karty: [
       { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗',
         udaje: 'Poslední olej: 3. 8. 2026, 97 000 km\nPojišťovna: Direct\nGeometrie: 11. 11. 2026 hotová\nKoupit nové letní pneu',
-        terminy: [t('bmw4-stk', 'STK', '2028-08-03'), t('bmw4-znamka', 'Dálniční známka', '2027-05-05'),
+        terminy: [terminStk('bmw4', '2028-08-03'), t('bmw4-znamka', 'Dálniční známka', '2027-05-05'),
           t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct'), terminOlej('bmw4', '2027-08-03')] },
       { id: 'vw', nazev: 'VW Multivan', ikona: '🚐',
         udaje: 'Poslední olej: 20. 5. 2026, 51 000 km\nPojišťovna: Generali (Pastell)',
-        terminy: [t('vw-stk', 'STK', '2028-01-29'), t('vw-znamka', 'Dálniční známka', '2027-01-28'),
+        terminy: [terminStk('vw', '2028-01-29'), t('vw-znamka', 'Dálniční známka', '2027-01-28'),
           t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali'), terminOlej('vw', '2027-05-20')] },
       { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️',
         udaje: 'Poslední olej: 7. 9. 2026\nServis: každých 10 000 km nebo po roce\nPojišťovna: povinné + havarijní Generali',
-        terminy: [t('gs-stk', 'STK', '2031-05-01'), t('gs-poj', 'Pojištění', '2027-09-03', 0, 'Generali'),
+        terminy: [terminStk('gs', '2031-05-01'), t('gs-poj', 'Pojištění', '2027-09-03', 0, 'Generali'),
           terminOlej('gs', '2027-09-07')] },
       { id: 'eso', nazev: 'Eso — očkování', ikona: '🐕', udaje: '',
         terminy: [t('eso-vzteklina', 'Vzteklina', '2028-01-20'), t('eso-nobivac', 'Kombinace Nobivac', '2027-05-22', 12)] },
@@ -3035,13 +3035,31 @@ function terminOlej(karta, datum) {
     posledni: TERMIN_OLEJ_ZAPIS, km: true };
 }
 
+// STK: nové auto 4 roky, pak každé 2; motorka 6 let, pak každé 4. Datum první STK
+// je v termínu, Hotovo se zeptá, kdy byla, a další dá o interval „pak“ dál.
+const TERMIN_STK_ZAPIS = 'Poslední STK';
+const TERMIN_STK_MESICU = { bmw4: 24, vw: 24, gs: 48 };
+function terminStk(karta, datum) {
+  const m = TERMIN_STK_MESICU[karta] || 24;
+  return { id: karta + '-stk', nazev: 'STK', datum, opakovani: m, pozn: `pak každé ${m / 12} roky`, posledni: TERMIN_STK_ZAPIS };
+}
+
 // Jednorázové úpravy uložených dat (mají se stát jednou, i když je člověk pak změní)
 const TERMINY_MIGRACE = {
+  // STK jako opakovaný termín (2 roky auta, 4 motorka) se zápisem „Poslední STK“
+  stk(t) {
+    for (const id of Object.keys(TERMIN_STK_MESICU)) {
+      const k = t.karty.find(x => x.id === id);
+      const x = k && k.terminy.find(y => y.id === id + '-stk' || /^stk$/i.test(y.nazev));
+      if (!x || x.posledni) continue;
+      Object.assign(x, { ...terminStk(id, x.datum), id: x.id, nazev: x.nazev });
+    }
+  },
   // Olej do termínů: auta rok od posledního oleje v údajích, motorka od 7. 9. 2026
   olej(t) {
     for (const id of ['bmw4', 'vw', 'gs']) {
       const k = t.karty.find(x => x.id === id);
-      if (!k || k.terminy.some(x => x.posledni)) continue;
+      if (!k || k.terminy.some(x => x.posledni === TERMIN_OLEJ_ZAPIS)) continue;
       let datum = null;
       if (id === 'gs') {
         k.terminy = k.terminy.filter(x => x.id !== 'gs-servis');
@@ -3223,12 +3241,19 @@ app.post('/api/terminy/:id/hotovo', (req, res) => {
       if (o.chyba || !o.karty[0].terminy[0].datum) return res.status(400).json({ error: 'Špatné datum.' });
       x.datum = o.karty[0].terminy[0].datum;
     } else if (x.posledni) {
+      // Kdy se to udělalo: výchozí dnes, jde zadat i zapomenuté starší datum (ne budoucí)
+      let dnes = pragueDateString();
+      if (telo.kdy !== undefined && telo.kdy !== null && telo.kdy !== '') {
+        const o = terminyOver([{ nazev: 'x', terminy: [{ nazev: 'x', datum: telo.kdy }] }]);
+        const kdy = !o.chyba && o.karty[0].terminy[0].datum;
+        if (!kdy || kdy > dnes) return res.status(400).json({ error: 'Datum musí být dnes nebo dřív.' });
+        dnes = kdy;
+      }
       let km = null;
       if (telo.km !== undefined && telo.km !== null && telo.km !== '') {
         km = Number(String(telo.km).replace(/\s/g, ''));
         if (!Number.isInteger(km) || km < 0 || km > 2000000) return res.status(400).json({ error: 'Kilometry musí být celé číslo.' });
       }
-      const dnes = pragueDateString();
       const kmText = km === null ? '' : ', ' + km.toLocaleString('cs-CZ').replace(/\s/g, ' ') + ' km';
       k.udaje = terminyUdajNastav(k.udaje, x.posledni, terminyDatumCz(dnes) + kmText);
       x.datum = terminyPosun(dnes, x.opakovani || 12);
