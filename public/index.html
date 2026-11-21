@@ -67,6 +67,12 @@
      ŠÍŘKA, ne zařízení — telefon se na tenhle práh nikdy nedostane, takže se ho to
      nedotkne, a na notebooku to funguje taky. Sloupec je schválně pořád široký jako
      telefon (.page má 340 px), takže se nemusela předělat jediná karta. */
+  @media (max-width: 999px) {
+    .slide{
+      padding-left:max(12px, env(safe-area-inset-left));
+      padding-right:max(12px, env(safe-area-inset-right));
+    }
+  }
   @media (min-width: 1000px) {
     .slide{
       width:33.3333vw;
@@ -473,7 +479,9 @@
   .kal-blok-cas{font-size:9px;}
   .page{
     width:100%;
-    max-width:340px;
+    /* Telefon: boxy přes skoro celou šířku (okraj 12 px). iPad má sloupec 340 px
+       jako dřív — tři stránky vedle sebe, tam je to akorát. */
+    max-width:400px;
     display:flex;
     flex-direction:column;
     align-items:center;
@@ -481,6 +489,7 @@
        box na ní seděl jinde než na sousedce. Při listování to poskakovalo. */
     margin:0 auto auto;
   }
+  @media (min-width: 1000px) { .page{max-width:340px;} }
   .topbar{
     text-align:center;
     margin-bottom:10px;
@@ -1079,6 +1088,8 @@
   .term-okno-popis{display:block;font-size:12px;color:var(--grey-text);margin:8px 0 4px;text-align:left;width:100%;}
   .term-okno-popis[hidden],.term-okno-pole[hidden]{display:none;}
   .term-okno-pole{width:100%;box-sizing:border-box;}
+  .term-udaj-tucne{display:block;}
+  #terminyOblast,#termKarty{width:100%;}
   .term-udaj-radek{display:flex;align-items:center;gap:8px;}
   .term-kopir{border:1px solid rgba(44,62,80,.2);background:var(--bg);color:var(--navy);border-radius:8px;font-size:11px;padding:2px 7px;flex:0 0 auto;}
   .term-oblast.card,.term-oblast .card{align-items:stretch;}
@@ -3927,7 +3938,7 @@
         <button class="sbal-btn" data-sbal="termvloz" type="button" aria-expanded="false">Vložit údaje<i>▾</i></button>
         <div class="card" data-sbal-obsah="termvloz">
           <div class="term-form">
-            <label for="termVlozText">Vlož text ve tvaru <b>[Název karty]</b> a pod něj řádky <b>Klíč: hodnota</b>. Stejný klíč se přepíše, nový přibude, neznámá karta se založí.</label>
+            <label for="termVlozText">Vlož text ve tvaru <b>[Název karty] 🚗</b>, pod něj řádky <b>Klíč: hodnota</b> a termíny <b>+ STK: 3. 8. 2028 | každé 2 roky</b>. Stejný klíč nebo termín se přepíše, nový přibude, neznámá karta se založí.</label>
             <textarea id="termVlozText" placeholder="[BMW 4 Gran Coupé]&#10;VIN: …&#10;SPZ: …"></textarea>
             <div class="term-f-tlacitka">
               <button type="button" id="termVlozSchranka">Vložit ze schránky</button>
@@ -14487,13 +14498,19 @@ async function termPost(adresa, telo) {
 
 // Údaje po řádcích; u VIN tlačítko, které hodnotu zkopíruje (do formulářů pojišťovny…)
 const TERM_KOPIROVAT = /^(vin)$/i;
+const TERM_NAHORE = ['spz', 'vin'];            // v tomhle pořadí nahoře a tučně
 function termUdaje(udaje) {
   const box = termEl('div', 'term-udaje');
-  for (const radek of udaje.split('\n')) {
+  const klic = r => { const m = /^\s*([^:]{1,40}):/.exec(r); return m ? m[1].trim().toLowerCase() : ''; };
+  const poradi = r => { const i = TERM_NAHORE.indexOf(klic(r)); return i < 0 ? TERM_NAHORE.length : i; };
+  const radky = udaje.split('\n').filter(r => r.trim()).map((r, i) => [r, i])
+    .sort((a, b) => poradi(a[0]) - poradi(b[0]) || a[1] - b[1]).map(x => x[0]);
+  for (const radek of radky) {
     const m = /^\s*([^:]{1,40}):\s*(.+)$/.exec(radek);
-    if (!m || !TERM_KOPIROVAT.test(m[1].trim())) { box.appendChild(termEl('div', '', radek)); continue; }
+    const tucne = TERM_NAHORE.includes(klic(radek));
+    if (!m || !TERM_KOPIROVAT.test(m[1].trim())) { box.appendChild(termEl(tucne ? 'b' : 'div', tucne ? 'term-udaj-tucne' : '', radek)); continue; }
     const r = termEl('div', 'term-udaj-radek');
-    r.appendChild(termEl('span', '', radek));
+    r.appendChild(termEl('b', '', radek));
     const b = termEl('button', 'term-kopir', 'Kopírovat');
     b.type = 'button';
     b.addEventListener('click', async () => {
@@ -14567,6 +14584,7 @@ function termRadek(k, x, sKartou) {
     + x.nazev + (x.opakovani ? ' ↻' : '')));
   const pod = [x.datum ? termDatumCz(x.datum) : 'bez data'];
   if (x.pozn) pod.push(x.pozn);
+  if (x.naposledy) pod.push('naposledy ' + x.naposledy);
   t.appendChild(termEl('div', 'term-pod', pod.join(' · ')));
   r.appendChild(t);
   if (x.datum) {
@@ -14740,33 +14758,76 @@ function renderTerminy() {
   if (termNovaBtnEl) termNovaBtnEl.hidden = !!termUprava;
 }
 
-// Hromadné vložení údajů do karet. Vrací { karty, zmeny, nove } — nic neposílá.
-//   [BMW 4 Gran Coupé]      ← karta podle názvu (stačí začátek, bez ohledu na velikost)
-//   VIN: …                  ← řádek se stejným klíčem se přepíše, jinak přibude
+// Hromadné vložení do karet. Vrací { karty, zmeny, nove } — nic neposílá.
+//   [BMW 4 Gran Coupé] 🚗   ← karta podle názvu (stačí začátek, velikost nehraje roli), emoji = ikona
+//   VIN: …                  ← údaj: řádek se stejným klíčem se přepíše, jinak přibude
+//   + STK: 3. 8. 2028 | každé 2 roky | naposledy 3. 8. 2026 | poznámka
+//                           ← termín podle názvu (přepíše datum a ostatní, nebo přibude);
+//                             „bez data“ = bez data; Olej a STK si pamatují „naposledy“
 const termKlic = r => { const m = /^\s*([^:]{1,40}):/.exec(r); return m ? m[1].trim().toLowerCase() : null; };
 const termNorm = t => (t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+function termDatumZTextu(t) {
+  const m = /^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/.exec(t.trim()) || null;
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(t.trim()) ? t.trim() : null;
+}
+function termOpakovaniZTextu(t) {
+  const s = termNorm(t);
+  if (/^kazdy rok$|^rocne$/.test(s)) return 12;
+  let m = /^kazd[a-z]* (\d+) (rok|roky|roku|let)$/.exec(s);
+  if (m) return Number(m[1]) * 12;
+  m = /^kazd[a-z]* (\d+) (mesic|mesice|mesicu)$/.exec(s);
+  return m ? Number(m[1]) : null;
+}
 function termSlucUdaje(karty, text) {
-  const out = karty.map(k => ({ ...k, terminy: k.terminy.slice() }));
+  const out = karty.map(k => ({ ...k, terminy: k.terminy.map(x => ({ ...x })) }));
   const zmeny = [], nove = [];
+  const zmena = k => { if (!zmeny.includes(k.nazev)) zmeny.push(k.nazev); };
   let k = null;
   for (const surovy of String(text || '').split(/\r?\n/)) {
     const r = surovy.trim();
     if (!r) continue;
-    const hl = /^\[(.+)\]$/.exec(r);
+    const hl = /^\[(.+)\]\s*(\S{1,8})?$/.exec(r);
     if (hl) {
       const n = termNorm(hl[1]);
       k = out.find(x => termNorm(x.nazev) === n) || out.find(x => termNorm(x.nazev).startsWith(n) || n.startsWith(termNorm(x.nazev)));
       if (!k) { k = { nazev: hl[1].trim().slice(0, 80), ikona: '📌', udaje: '', terminy: [] }; out.push(k); nove.push(k.nazev); }
+      if (hl[2] && k.ikona !== hl[2]) { k.ikona = hl[2]; zmena(k); }
       continue;
     }
     if (!k) continue;
+    const tm = /^\+\s*([^:]{1,80}):\s*(.*)$/.exec(r);
+    if (tm) {
+      const nazev = tm[1].trim();
+      const kusy = tm[2].split('|').map(x => x.trim());
+      const x = k.terminy.find(y => termNorm(y.nazev) === termNorm(nazev)) || (() => {
+        const n = { nazev, datum: null, opakovani: 0, pozn: '' };
+        k.terminy.push(n);
+        return n;
+      })();
+      x.datum = /^bez data$/i.test(kusy[0]) ? null : (termDatumZTextu(kusy[0]) || x.datum);
+      const pozn = [];
+      for (const kus of kusy.slice(1)) {
+        const op = termOpakovaniZTextu(kus);
+        if (op) { x.opakovani = op; continue; }
+        const np = /^naposledy\s+(.+)$/i.exec(kus);
+        if (np) { x.naposledy = np[1].trim(); continue; }
+        if (kus) pozn.push(kus);
+      }
+      if (pozn.length) x.pozn = pozn.join(', ');
+      // Olej a STK: Hotovo se ptá na datum (olej i na km) a pamatuje si „naposledy“
+      if (/^olej$/i.test(nazev)) { x.posledni = 'Poslední olej'; x.km = true; if (!x.opakovani) x.opakovani = 12; }
+      if (/^stk$/i.test(nazev)) x.posledni = 'Poslední STK';
+      zmena(k);
+      continue;
+    }
     const radky = k.udaje ? k.udaje.split('\n') : [];
     const klic = termKlic(r);
     const i = klic ? radky.findIndex(x => termKlic(x) === klic) : radky.findIndex(x => x.trim() === r);
     if (i >= 0 && radky[i].trim() === r) continue;
     if (i >= 0) radky[i] = r; else radky.push(r);
     k.udaje = radky.join('\n');
-    if (!zmeny.includes(k.nazev)) zmeny.push(k.nazev);
+    zmena(k);
   }
   return { karty: out, zmeny, nove };
 }

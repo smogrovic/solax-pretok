@@ -272,6 +272,32 @@ setTimeout(async () => {
   check('dětský režim termíny mezi připomínky nedává', pripDefinice().some(d => d.termin), false);
   pouzijRezim('full');
 
+  R.push('\\n6g) Vložení celých karet i s termíny');
+  const vstup = '[BMW 4 Gran Coupé] 🚗\\nSPZ: 5SP 1\\nVIN: WBA1\\nPojišťovna: Direct\\nOstatní: geometrie hotová, koupit pneu\\n'
+    + '+ STK: 3. 8. 2028 | každé 2 roky\\n+ Dálniční známka: 5. 5. 2027\\n+ Pojištění: bez data | Direct\\n'
+    + '+ Olej: 3. 8. 2027 | každý rok | naposledy 3. 8. 2026, 97 000 km\\n\\n[Nová chata]\\n+ Revize kotle: 1. 3. 2027 | každých 6 měsíců';
+  const im = termSlucUdaje([], vstup);
+  const bmw = im.karty[0];
+  check('karty založené i s ikonou', im.karty.map(k => k.ikona + ' ' + k.nazev).join(' | '), '🚗 BMW 4 Gran Coupé | 📌 Nová chata');
+  check('  údaje v pořadí', bmw.udaje, 'SPZ: 5SP 1\\nVIN: WBA1\\nPojišťovna: Direct\\nOstatní: geometrie hotová, koupit pneu');
+  check('  termíny', bmw.terminy.map(x => x.nazev + ':' + x.datum + ':' + x.opakovani).join(' | '),
+    'STK:2028-08-03:24 | Dálniční známka:2027-05-05:0 | Pojištění:null:0 | Olej:2027-08-03:12');
+  check('  olej: naposledy, km, zápis', [bmw.terminy[3].naposledy, bmw.terminy[3].km, bmw.terminy[3].posledni].join(' | '), '3. 8. 2026, 97 000 km | true | Poslední olej');
+  check('  STK si pamatuje naposledy', bmw.terminy[0].posledni, 'Poslední STK');
+  check('  poznámka u pojištění', bmw.terminy[2].pozn, 'Direct');
+  check('  půlroční interval', im.karty[1].terminy[0].opakovani, 6);
+  const znovu = termSlucUdaje(im.karty, '[BMW 4]\\n+ STK: 1. 1. 2029');
+  check('znovu vložený termín přepíše datum, nezdvojí se', znovu.karty[0].terminy.filter(x => x.nazev === 'STK').map(x => x.datum + '/' + x.opakovani).join(), '2029-01-01/24');
+
+  R.push('\\n6h) Hlavička: SPZ, VIN nahoře a tučně; naposledy u termínu');
+  terminyData = { predemDni: 14, karty: [{ id: 'k', nazev: 'BMW', ikona: '🚗', udaje: 'Pojišťovna: Direct\\nVIN: WBA1\\nSPZ: 5SP 1', terminy: [
+    { id: 'o', nazev: 'Olej', datum: den(200), opakovani: 12, pozn: '', posledni: 'Poslední olej', km: true, naposledy: '3. 8. 2026, 97 000 km' }] }] };
+  renderTerminy();
+  const ud = [...document.querySelectorAll('#termKarty .term-udaje > *')];
+  check('pořadí SPZ, VIN, zbytek', ud.map(e => e.textContent.replace('Kopírovat', '')).join(' | '), 'SPZ: 5SP 1 | VIN: WBA1 | Pojišťovna: Direct');
+  check('  SPZ a VIN tučně, zbytek ne', ud.map(e => !!(e.tagName === 'B' || e.querySelector('b'))).join(','), 'true,true,false');
+  check('naposledy u oleje', /naposledy 3\. 8\. 2026, 97 000 km/.test(document.querySelector('#termKarty .term-pod').textContent), true);
+
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };
   renderTerminy();

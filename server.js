@@ -3005,17 +3005,17 @@ function terminyVychozi() {
   return {
     karty: [
       { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗',
-        udaje: 'Poslední olej: 3. 8. 2026, 97 000 km\nPojišťovna: Direct\nGeometrie: 11. 11. 2026 hotová\nKoupit nové letní pneu',
+        udaje: 'Pojišťovna: Direct\nOstatní: geometrie 11. 11. 2026 hotová, koupit nové letní pneu',
         terminy: [terminStk('bmw4', '2028-08-03'), t('bmw4-znamka', 'Dálniční známka', '2027-05-05'),
-          t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct'), terminOlej('bmw4', '2027-08-03')] },
+          t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct'), terminOlej('bmw4', '2027-08-03', '3. 8. 2026, 97 000 km')] },
       { id: 'vw', nazev: 'VW Multivan', ikona: '🚐',
-        udaje: 'Poslední olej: 20. 5. 2026, 51 000 km\nPojišťovna: Generali (Pastell)',
+        udaje: 'Pojišťovna: Generali (Pastell)',
         terminy: [terminStk('vw', '2028-01-29'), t('vw-znamka', 'Dálniční známka', '2027-01-28'),
-          t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali'), terminOlej('vw', '2027-05-20')] },
+          t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali'), terminOlej('vw', '2027-05-20', '20. 5. 2026, 51 000 km')] },
       { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️',
-        udaje: 'Poslední olej: 7. 9. 2026\nServis: každých 10 000 km nebo po roce\nPojišťovna: povinné + havarijní Generali',
+        udaje: 'Pojišťovna: povinné + havarijní Generali\nServis: každých 10 000 km nebo po roce',
         terminy: [terminStk('gs', '2031-05-01'), t('gs-poj', 'Pojištění', '2027-09-03', 0, 'Generali'),
-          terminOlej('gs', '2027-09-07')] },
+          terminOlej('gs', '2027-09-07', '7. 9. 2026')] },
       { id: 'eso', nazev: 'Eso — očkování', ikona: '🐕', udaje: '',
         terminy: [t('eso-vzteklina', 'Vzteklina', '2028-01-20'), t('eso-nobivac', 'Kombinace Nobivac', '2027-05-22', 12)] },
       { id: 'ockovani', nazev: 'Naše očkování', ikona: '💉', udaje: '',
@@ -3030,9 +3030,11 @@ const TERMINY_OSOBY = ['Lukáš', 'Zuzka', 'Miky', 'Elenka'];
 // Olej: po roce (nebo po kilometrech — ty hlídá člověk). Hotovo zapíše do údajů
 // „Poslední olej: datum, km“ a další termín dá rok od toho dne.
 const TERMIN_OLEJ_ZAPIS = 'Poslední olej';
-function terminOlej(karta, datum) {
-  return { id: karta + '-olej', nazev: 'Olej', datum, opakovani: 12, pozn: 'po roce nebo po kilometrech',
+function terminOlej(karta, datum, naposledy) {
+  const x = { id: karta + '-olej', nazev: 'Olej', datum, opakovani: 12, pozn: 'po roce nebo po kilometrech',
     posledni: TERMIN_OLEJ_ZAPIS, km: true };
+  if (naposledy) x.naposledy = naposledy;
+  return x;
 }
 
 // STK: nové auto 4 roky, pak každé 2; motorka 6 let, pak každé 4. Datum první STK
@@ -3046,7 +3048,27 @@ function terminStk(karta, datum) {
 
 // Jednorázové úpravy uložených dat (mají se stát jednou, i když je člověk pak změní)
 const TERMINY_MIGRACE = {
-  // STK jako opakovaný termín (2 roky auta, 4 motorka) se zápisem „Poslední STK“
+  // (pořadí = pořadí spuštění; „naposledy“ až po olej a STK, ať přesune i to, co ty zapsaly)
+  stk(t) { terminyMigraceStk(t); },
+  olej(t) { terminyMigraceOlej(t); },
+  // „Poslední olej/STK: …“ z hlavičky karty k termínu (naposledy)
+  naposledy(t) {
+    for (const k of t.karty) {
+      for (const x of k.terminy) {
+        if (!x.posledni || x.naposledy) continue;
+        const klic = x.posledni.toLowerCase();
+        const radky = (k.udaje || '').split('\n');
+        const i = radky.findIndex(r => r.split(':')[0].trim().toLowerCase() === klic);
+        if (i < 0) continue;
+        x.naposledy = radky[i].slice(radky[i].indexOf(':') + 1).trim().slice(0, TERMINY_MEZE.nazev);
+        radky.splice(i, 1);
+        k.udaje = radky.join('\n');
+      }
+    }
+  },
+};
+// STK jako opakovaný termín (2 roky auta, 4 motorka) se zápisem „Poslední STK“
+const TERMINY_MIGRACE_FN = {
   stk(t) {
     for (const id of Object.keys(TERMIN_STK_MESICU)) {
       const k = t.karty.find(x => x.id === id);
@@ -3073,6 +3095,8 @@ const TERMINY_MIGRACE = {
     }
   }
 };
+function terminyMigraceStk(t) { TERMINY_MIGRACE_FN.stk(t); }
+function terminyMigraceOlej(t) { TERMINY_MIGRACE_FN.olej(t); }
 
 // Řádek „Klíč: hodnota“ v údajích: přepíše ten se stejným klíčem, jinak přidá nahoru
 function terminyUdajNastav(udaje, klic, hodnota) {
@@ -3147,6 +3171,9 @@ function terminyOver(karty) {
       // Hotovo zapíše „<posledni>: datum[, km]“ do údajů (olej)
       const po = text(x.posledni, TERMINY_MEZE.skupina);
       if (po) { tx.posledni = po; if (x.km === true) tx.km = true; }
+      // Kdy se to dělalo naposledy (u oleje i km) — ukazuje se u termínu
+      const nap = text(x.naposledy, TERMINY_MEZE.nazev);
+      if (nap) tx.naposledy = nap;
       terminy.push(tx);
     }
     const karta = { id, nazev, ikona: text(k.ikona, TERMINY_MEZE.ikona), udaje: text(k.udaje, TERMINY_MEZE.udaje), terminy };
@@ -3255,7 +3282,7 @@ app.post('/api/terminy/:id/hotovo', (req, res) => {
         if (!Number.isInteger(km) || km < 0 || km > 2000000) return res.status(400).json({ error: 'Kilometry musí být celé číslo.' });
       }
       const kmText = km === null ? '' : ', ' + km.toLocaleString('cs-CZ').replace(/\s/g, ' ') + ' km';
-      k.udaje = terminyUdajNastav(k.udaje, x.posledni, terminyDatumCz(dnes) + kmText);
+      x.naposledy = terminyDatumCz(dnes) + kmText;
       x.datum = terminyPosun(dnes, x.opakovani || 12);
     } else if (x.datum && x.opakovani) {
       x.datum = terminyPosun(x.datum, x.opakovani);
