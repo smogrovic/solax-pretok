@@ -1,5 +1,5 @@
-// Stránka Asistent: pevná tlačítka pod polem na instrukce, pořadí karet
-// a přepínač „nejsme doma".
+// Tlačítka scén, prázdnin a ložnice a přepínač automatiky — dřív stránka Asistent,
+// teď nahoře na FVE (stránka Asistent i pole na instrukce jsou pryč).
 //
 // Tlačítka se staví ze seznamu ze serveru — v appce tak nemůže svítit tlačítko na
 // něco, co server neumí. Proto se tady nekontroluje jen jejich existence, ale i to,
@@ -36,7 +36,7 @@ setTimeout(async () => {
  try {
   const MIN = 60000;
   const pockej = () => new Promise(r => setTimeout(r, 30));
-  const slide = document.querySelector('.slide[data-title="Asistent"]');
+  const slide = document.querySelector('.slide[data-title="FVE"]');
 
   R.push('1) Tlačítka pod instrukcemi');
   renderSceny([
@@ -49,11 +49,11 @@ setTimeout(async () => {
   check('jsou čtyři', tlacitka.length, 4);
   check('  s popisky ze serveru', tlacitka.map(b => b.textContent).join(' | '),
     'Zapni saunu | Zahrada OFF | Zamkni dům | Jdu do sprchy');
-  // Musí být ve stejné kartě jako pole na instrukce, ne někde dole pod logem
-  check('jsou v kartě s polem na instrukce',
-    document.getElementById('asstScenes').closest('.card').contains(document.getElementById('asstInput')), true);
-  check('  a pod ním', document.getElementById('asstInput').compareDocumentPosition(
-    document.getElementById('asstScenes')) & Node.DOCUMENT_POSITION_FOLLOWING ? 'pod' : 'nad', 'pod');
+  // Stránka Asistent je zrušená: scény jsou nahoře na FVE hned pod přepínačem automatiky
+  check('stránka Asistent je pryč', !!document.querySelector('.slide[data-title="Asistent"]'), false);
+  check('  i pole na instrukce', !!document.getElementById('asstInput'), false);
+  check('scény jsou na FVE', slide.contains(document.getElementById('asstScenes')), true);
+  check('  hned pod automatikou', document.getElementById('asstScenes').closest('.card').previousElementSibling.id, 'autoCard');
 
   poslano.length = 0;
   tlacitka[3].click();
@@ -125,19 +125,15 @@ setTimeout(async () => {
   // pořadí na obrazovce nepatří
   const karty = [...slide.querySelectorAll(':scope > .page > .card')]
     .filter(c => !c.classList.contains('lock-panel') && getComputedStyle(c).display !== 'none');
-  const popis = c => (c.querySelector('.asst-log-title, .shelly-label') || {}).textContent
-    || (c.classList.contains('asszistant-card') ? 'pole pro asistenta' : c.id || '?');
-  // Teplotní automatika má být PŘED automatikou — dřív to bylo obráceně
-  const iTemp = karty.findIndex(c => c.id === 'tempAutoCard');
-  const iAuto = karty.findIndex(c => c.querySelector('#autoModeSlider'));
-  check('teplotní automatika je dřív než automatika', iTemp < iAuto, true);
-  check('  a jsou vedle sebe', iAuto - iTemp, 1);
-  check('pořadí karet sedí', karty.map(popis).join(' | '),
-    'pole pro asistenta | Teplotní automatika | Automatika: –');
-  // Nad polem nic nestojí — co se do něj píše, je vidět z placeholderu
-  check('žádný popisek nad polem', document.querySelectorAll('.asst-hint').length, 0);
-  check('  ale pole říká, co do něj patří',
-    /zapni bojler/.test(document.getElementById('asstInput').placeholder), true);
+  const popis = c => (c.querySelector('.shelly-label') || {}).textContent
+    || (c.classList.contains('asszistant-card') ? 'scény' : c.id || '?');
+  // Nahoře na FVE: přepínač automatiky, pod ním scény, pak teprve elektrárna
+  check('pořadí karet nahoře na FVE', karty.slice(0, 2).map(popis).join(' | '), 'Automatika: – | scény');
+  check('  pak elektrárna', !!karty[2].querySelector('.nodes'), true);
+  // Teplotní automatika je nahoře na Klimatu
+  const klima = document.querySelector('.slide[data-title="Klima"]');
+  const klimaKarty = [...klima.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
+  check('teplotní automatika je první na Klimatu', klimaKarty[0].id, 'tempAutoCard');
   // Výpis patří k ostatním výpisům, ne mezi ovládání
   const logKarta = document.getElementById('asstLogCard');
   check('„Co asistent udělal" je pryč z Asistenta', slide.contains(logKarta), false);
@@ -198,7 +194,7 @@ setTimeout(async () => {
   // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
   // zítřek se má počítat jako víkend, i když je středa.
   const praz = document.getElementById('prazdninyBtn');
-  check('tlačítko je na Asistentovi', slide.contains(praz), true);
+  check('tlačítko je na FVE', slide.contains(praz), true);
   renderPrazdniny({ zitra: false, dnes: false });
   check('  a je vypnuté', praz.classList.contains('on'), false);
   check('  s výzvou', praz.textContent, 'Zítra jsou prázdniny');

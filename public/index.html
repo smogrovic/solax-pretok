@@ -531,9 +531,10 @@
      (#heatpumpCard `hidden`, dětská karta v plném režimu a naopak). Jinak by
      mezera z pravidla výš (nebo z vlastní třídy .pool-card/.stats-card) posunula
      první box o 12 px níž než na ostatních stránkách. */
-  .page > .card:not(:not(.lock-panel, [hidden]) ~ .card),
-  body[data-rezim="full"] .page > .card:not(:not(.lock-panel, [hidden], .jen-deti) ~ .card),
-  body:is([data-rezim="miky"], [data-rezim="elenka"]) .page > .card:not(:not(.lock-panel, [hidden], .jen-full) ~ .card){margin-top:0;}
+  /* .error-banner: na FVE stojí nad kartami a má vlastní spodní okraj */
+  .page > .card:not(:not(.lock-panel, [hidden], .error-banner) ~ .card),
+  body[data-rezim="full"] .page > .card:not(:not(.lock-panel, [hidden], .error-banner, .jen-deti) ~ .card),
+  body:is([data-rezim="miky"], [data-rezim="elenka"]) .page > .card:not(:not(.lock-panel, [hidden], .error-banner, .jen-full) ~ .card){margin-top:0;}
   .nodes{
     width:100%;
     display:grid;
@@ -1064,6 +1065,36 @@
   }
   .rozvrh-pozn{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;}
   .rozvrh-volba{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px;}
+  /* Termíny */
+  #termKarty > .card{margin-top:12px;}
+  #terminySlide .card{align-items:stretch;}
+  .term-blizke{width:100%;}
+  .term-hlava{display:flex;align-items:center;gap:8px;}
+  .term-hlava .graph-title{flex:1;margin:0;text-align:left;font-size:15px;}
+  .term-upravit{border:none;background:none;color:var(--grey-text);font-size:15px;padding:4px 6px;}
+  .term-udaje{white-space:pre-wrap;font-size:13px;color:var(--navy);line-height:1.45;margin:6px 0 4px;overflow-wrap:anywhere;}
+  .term-radek{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid rgba(44,62,80,.08);}
+  .term-radek:first-child{border-top:none;}
+  .term-text{flex:1;min-width:0;}
+  .term-nazev{font-size:14px;color:var(--navy);font-weight:600;overflow-wrap:anywhere;}
+  .term-pod{font-size:12px;color:var(--grey-text);margin-top:2px;}
+  .term-zbyva{font-size:12px;font-weight:600;white-space:nowrap;color:var(--grey-text);}
+  .term-zbyva.brzy{color:var(--orange-dark);}
+  .term-zbyva.hori{color:var(--red);}
+  .term-hotovo{border:1px solid rgba(44,62,80,.2);background:var(--bg);color:var(--navy);border-radius:10px;font-size:12px;padding:5px 8px;white-space:nowrap;}
+  .term-prazdno{font-size:13px;color:var(--grey-text);padding:6px 0;}
+  .term-form{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+  .term-form input,.term-form textarea,.term-form select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid rgba(44,62,80,.15);border-radius:12px;font-size:15px;background:var(--bg);color:var(--navy);font-family:inherit;min-width:0;}
+  .term-form textarea{min-height:90px;resize:vertical;}
+  .term-form label{font-size:12px;color:var(--grey-text);}
+  .term-f-hlava{display:grid;grid-template-columns:64px 1fr;gap:8px;}
+  .term-f-termin{border:1px solid rgba(44,62,80,.1);border-radius:12px;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .term-f-termin .cely{grid-column:1 / -1;}
+  .term-f-tlacitka{display:flex;gap:8px;flex-wrap:wrap;}
+  .term-f-tlacitka button{flex:1;min-width:100px;padding:10px;border-radius:12px;border:1px solid rgba(44,62,80,.15);background:var(--bg);color:var(--navy);font-size:14px;}
+  .term-f-tlacitka .ulozit{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:700;}
+  .term-f-tlacitka .smazat{color:var(--red);}
+  .term-nova{margin-top:12px;}
   .nahrev-souhrn .wbsrc-note{margin-top:6px;}
   .nahrev-tab-obal{overflow-x:auto;margin:10px 0 4px;-webkit-overflow-scrolling:touch;}
   .nahrev-tab-obal[hidden]{display:none;}
@@ -1536,7 +1567,7 @@
     margin:-8px 0 0 -8px;border:2px solid rgba(255,255,255,0.4);
     border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;
   }
-  /* Pevná tlačítka pod polem asistenta — rovnou něco udělají. */
+  /* Pevná tlačítka scén (nahoře na FVE) — rovnou něco udělají. */
   .asst-scenes{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -2792,9 +2823,10 @@
 <div class="prip-panel" id="pripPanel" hidden></div>
 <div class="slider-wrap" id="sliderWrap">
 
-  <!-- Asistent (první stránka) -->
-  <div class="slide" id="assistantSlide" data-title="Asistent">
+  <!-- Stránka: FVE -->
+  <div class="slide slide-stats" data-title="FVE" data-rezim="full">
     <div class="page">
+      <div class="error-banner" id="errorBanner"></div>
       <div class="card lock-panel">
         <div class="lock-icon">🔒</div>
         <div class="lock-text">Ovládání je zamčené</div>
@@ -2803,17 +2835,28 @@
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
       </div>
-      <!-- Dětský režim: místo celé stránky tři tlačítka na žaluzie v jednom pokoji -->
-      <div class="card lockable jen-deti">
-        <div class="asst-log-title" id="detiNadpis">Žaluzie</div>
-        <div class="deti-tlacitka" id="detiTlacitka"></div>
+      <!-- Přepínač automatiky a scény: dřív na stránce Asistent -->
+      <div class="card lockable jen-full" id="autoCard">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="autoLight"></div>
+            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
+          </div>
+          <input type="range" min="0" max="3" step="1" value="1" id="autoModeSlider"
+                 aria-label="Režim automatiky" list="autoModeTicks">
+          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
+          <div class="mode-scale">
+            <span data-mode="0">Vypnuto</span>
+            <span data-mode="1">Jsme pryč</span>
+            <span data-mode="2">Zapnuto</span>
+            <span data-mode="3">Zima</span>
+          </div>
+          <div class="mode-hint" id="autoModeHint"></div>
+          <div class="away-hint" id="awayHint"></div>
+        </div>
       </div>
       <div class="card lockable asszistant-card jen-full">
         <div class="asst-reply" id="asstReply"></div>
-        <div class="asst-row">
-          <input type="text" id="asstInput" class="asst-input" placeholder="Např. zapni bojler, zatáhni žaluzie v ložnici…" autocomplete="off">
-          <button class="asst-send" id="asstSend">▶</button>
-        </div>
         <div class="asst-scenes" id="asstScenes"></div>
         <!-- Druhá řada téže mřížky: „Otevři dveře" a prázdniny vedle sebe. Dveře
              sem patří kvůli rozměru řady, prázdniny proto, že rozvrh žaluzií jede
@@ -2833,62 +2876,6 @@
           <button class="asst-scene alarm-btn" id="alarmVypBtn" type="button">Odkóduj alarm</button>
         </div>
       </div>
-      <div class="card lockable tempauto-card" id="tempAutoCard">
-        <div class="asst-log-title">Teplotní automatika</div>
-        <div class="tempauto-list" id="tempAutoListOwn"></div>
-        <div class="tempauto-thr jen-full">
-          <div class="tempauto-thr-row">
-            <span class="tempauto-thr-label" id="tempAutoLabelObyvak">Obývák — zapnout při</span>
-            <span class="tempauto-thr-val" id="tempAutoOnValObyvak">22 °C</span>
-          </div>
-          <input type="range" min="22" max="26" step="1" value="22" id="tempAutoOnSliderObyvak">
-          <div class="tempauto-thr-hint" id="tempAutoOffHintObyvak"></div>
-        </div>
-        <div class="tempauto-list" id="tempAutoList"></div>
-        <div class="tempauto-thr jen-full">
-          <div class="tempauto-thr-row">
-            <span class="tempauto-thr-label" id="tempAutoLabel">Ostatní pokoje — zapnout při</span>
-            <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
-          </div>
-          <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSlider">
-          <div class="tempauto-thr-hint" id="tempAutoOffHint"></div>
-        </div>
-      </div>
-
-      <div class="card lockable jen-full" style="margin-top:12px">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="autoLight"></div>
-            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
-          </div>
-          <input type="range" min="0" max="3" step="1" value="1" id="autoModeSlider"
-                 aria-label="Režim automatiky" list="autoModeTicks">
-          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
-          <div class="mode-scale">
-            <span data-mode="0">Vypnuto</span>
-            <span data-mode="1">Jsme pryč</span>
-            <span data-mode="2">Zapnuto</span>
-            <span data-mode="3">Zima</span>
-          </div>
-          <div class="mode-hint" id="autoModeHint"></div>
-          <div class="away-hint" id="awayHint"></div>
-        </div>
-      </div>
-
-      <button class="refresh-btn" id="refreshBtn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
-          <path d="M21 3v6h-6"/>
-        </svg>
-        <span id="refreshLabel">Aktualizovat</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Stránka: FVE -->
-  <div class="slide slide-stats" data-title="FVE" data-rezim="full">
-    <div class="page">
-      <div class="error-banner" id="errorBanner"></div>
       <div class="card" data-emoji="🔆">
         <div class="nodes">
           <div class="node">
@@ -3097,6 +3084,14 @@
         <textarea class="diag-zaloha" id="topeniZaloha" readonly hidden></textarea>
       </div>
 
+      <button class="refresh-btn" id="refreshBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+        <span id="refreshLabel">Aktualizovat</span>
+      </button>
+
       <div class="meta">
         <div class="updated" id="updatedAt">Načítám…</div>
         <div class="updated" id="weatherInfo"></div>
@@ -3133,6 +3128,28 @@
         <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
+      </div>
+      <!-- Teplotní automatika: dřív na stránce Asistent -->
+      <div class="card lockable tempauto-card" id="tempAutoCard">
+        <div class="asst-log-title">Teplotní automatika</div>
+        <div class="tempauto-list" id="tempAutoListOwn"></div>
+        <div class="tempauto-thr jen-full">
+          <div class="tempauto-thr-row">
+            <span class="tempauto-thr-label" id="tempAutoLabelObyvak">Obývák — zapnout při</span>
+            <span class="tempauto-thr-val" id="tempAutoOnValObyvak">22 °C</span>
+          </div>
+          <input type="range" min="22" max="26" step="1" value="22" id="tempAutoOnSliderObyvak">
+          <div class="tempauto-thr-hint" id="tempAutoOffHintObyvak"></div>
+        </div>
+        <div class="tempauto-list" id="tempAutoList"></div>
+        <div class="tempauto-thr jen-full">
+          <div class="tempauto-thr-row">
+            <span class="tempauto-thr-label" id="tempAutoLabel">Ostatní pokoje — zapnout při</span>
+            <span class="tempauto-thr-val" id="tempAutoOnVal">22 °C</span>
+          </div>
+          <input type="range" min="18" max="25" step="1" value="22" id="tempAutoOnSlider">
+          <div class="tempauto-thr-hint" id="tempAutoOffHint"></div>
+        </div>
       </div>
       <div class="card lockable blinds-card" data-emoji="🌬️">
         <div class="blinds-list" id="airconList">
@@ -3191,6 +3208,11 @@
         <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
+      </div>
+      <!-- Dětský režim: místo celé stránky tři tlačítka na žaluzie v jednom pokoji -->
+      <div class="card lockable jen-deti">
+        <div class="asst-log-title" id="detiNadpis">Žaluzie</div>
+        <div class="deti-tlacitka" id="detiTlacitka"></div>
       </div>
       <div class="card lockable blinds-card" data-emoji="🪟">
         <div class="blinds-list" id="blindsList1">
@@ -3916,6 +3938,20 @@
   </div>
 
   <!-- Stránka: Log/Nastavení (dřív Logika automatiky; log je nahoře pod rozbalením) -->
+  <!-- Stránka: Termíny — auta, motorka, pes, očkování… Údaje (VIN, SPZ) jen
+       v záloze na serveru, do repozitáře nepatří. Push 14 dní předem. -->
+  <div class="slide" data-title="Termíny" id="terminySlide" data-rezim="full">
+    <div class="page">
+      <div class="card" data-emoji="📅">
+        <div class="graph-title">Nejbližší termíny</div>
+        <div class="term-blizke" id="termBlizke"></div>
+        <div class="zavlaha-hint" id="termHint"></div>
+      </div>
+      <div id="termKarty"></div>
+      <button class="sbal-btn term-nova" id="termNovaBtn" type="button">+ Nová karta</button>
+    </div>
+  </div>
+
   <div class="slide" data-title="Log/Nastavení">
     <div class="page">
       <button class="sbal-btn jen-full" data-sbal="log" type="button" aria-expanded="false">Log<i>▾</i></button>
@@ -4004,7 +4040,7 @@
         <div class="logic-sec" data-rezim="full">
           <div class="logic-h">Obecné</div>
           <ul class="logic-list">
-            <li>Hlavní přepínač (Asistent): <b>vypnuto · zapnuto · zima</b>.</li>
+            <li>Hlavní přepínač (nahoře na FVE): <b>vypnuto · zapnuto · zima</b>.</li>
             <li>Přebytek = <b>přetok do sítě + nabíjení baterie</b>.</li>
             <li>Každou <b>neděli ve 20:00</b> přijde notifikace s <b>týdenním přehledem</b> spotřeby, FVE, auta, TČ a sauny.</li>
           </ul>
@@ -4057,7 +4093,7 @@
             <li>Při nahřívání: <b>cíl −15 °C</b> → žaluzie v ložnici nahoru, <b>cíl −10 °C</b> → světlo v sauně a po západu zahrada dole (i při západu během saunování).</li>
             <li>Sauna <b>běží</b>, když topí kamna nebo svítí světlo při <b>≥ 60 °C</b>. <b class="sauna-po-min">15 min</b> po jejím konci se zatáhne ložnice a zhasne zahrada, rozsvítila-li ji sauna.</li>
             <li>Notifikace po <b>2 h</b> topení, pak po 6 h. Při topení jde nastavit <b>vypnutí za 5–30 min</b>.</li>
-            <li><b>Zapni saunu</b> (Asistent): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
+            <li><b>Zapni saunu</b> (FVE): kamna na <b>80 °C</b>. <b>Půjdu do sauny v</b> je zapne o odhad náběhu dřív.</li>
           </ul>
           <div class="zapad-row">
             <span class="zapad-label">Ložnice a zahrada po sauně</span>
@@ -4142,11 +4178,11 @@
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
-            <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na Asistentovi, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
+            <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na FVE, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
             <li>Po–Pá: <b>Děti ráno</b> v 6:40 na 50 % — každé dítě jen v den, kdy má v kalendáři <b>Školu</b>.</li>
             <li>Po–Pá: <b>Dopoledne</b> kuchyň a obývák (7:00, nejdřív při východu), <b>Pokoje dopoledne</b> v 10:00 ložnice, hosté a děti 25 %.</li>
             <li><b>Víkend a prázdniny</b>: 10:00 děti i ložnice 25 %. Pokoje se dopoledne <b>jen otevírají</b> — ručně víc otevřené rozvrh nepřivře.</li>
-            <li><b>Zavřené žaluzie v ložnici</b> (Asistent): ložnici to ráno nic neotevře.</li>
+            <li><b>Zavřené žaluzie v ložnici</b> (FVE): ložnici to ráno nic neotevře.</li>
             <li>Stojí na <b>vypnuto</b> a když <b>jsme pryč</b>.</li>
           </ul>
           <div class="zapad-row">
@@ -4496,6 +4532,19 @@ function rezimNacti() {
 let rezimApky = rezimNacti();
 const rezimPokoj = () => REZIMY[rezimApky].pokoj || null;
 
+// Teplotní automatika je nahoře na stránce Klima. Klima je jen pro full, dítě ale
+// má mít řádek svého pokoje — v dětském režimu se karta přestěhuje na Žaluzie
+// pod dětská tlačítka.
+function rezimPresunTempAuto() {
+  const karta = document.getElementById('tempAutoCard');
+  if (!karta) return;
+  const deti = rezimApky !== 'full';
+  const kotva = deti
+    ? (document.getElementById('detiTlacitka') || {}).closest && document.getElementById('detiTlacitka').closest('.card')
+    : document.querySelector('.slide[data-title="Klima"] .page > .lock-panel');
+  if (kotva && kotva.nextElementSibling !== karta) kotva.after(karta);
+}
+
 function pouzijRezim(novy) {
   if (novy && REZIMY[novy]) {
     rezimApky = novy;
@@ -4510,6 +4559,7 @@ function pouzijRezim(novy) {
     sec.hidden = !sec.dataset.rezim.split(/\s+/).includes(rezimApky);
   }
   rezimRenderPrepinac();
+  bezpecne(rezimPresunTempAuto);
   bezpecne(rebuildDots);
   // Až když nějaké žaluzie jsou. Prázdné vykreslení při startu by schovalo
   // druhou stránku dřív, než data vůbec dorazí.
@@ -11458,11 +11508,6 @@ function renderAssistantLog(entries) {
   }
 }
 
-function hideAssistantSlide() {
-  const slide = document.getElementById('assistantSlide');
-  if (slide) { slide.remove(); rebuildDots(); }
-}
-
 // Pevná tlačítka. Seznam chodí ze serveru, takže v appce nemůže být tlačítko na něco,
 // co server neumí — a popisky se nemůžou rozejít s tím, co se doopravdy stane.
 const asstScenesEl = document.getElementById('asstScenes');
@@ -13156,6 +13201,8 @@ function applySnapshot(snap) {
   saunaZapnutoData = snap.saunaZapnuto || null;
   bezpecne(renderHuum);
   pripData = snap.pripominky || null;
+  terminyData = snap.terminy || null;
+  bezpecne(renderTerminy);
   rohlikData = snap.rohlik || null;
   nakupData = Array.isArray(snap.nakup) ? snap.nakup : [];
   jidelnicekData = snap.jidelnicek || null;
@@ -13635,6 +13682,10 @@ function connectStream() {
   es.addEventListener('pripominky', e => {
     pripData = JSON.parse(e.data).pripominky || null;
     bezpecne(renderPripominky);
+  });
+  es.addEventListener('terminy', e => {
+    terminyData = JSON.parse(e.data).terminy || null;
+    bezpecne(renderTerminy);
   });
   es.addEventListener('saunaZapnuto', e => {
     saunaZapnutoData = JSON.parse(e.data).saunaZapnuto || null;
@@ -14233,6 +14284,216 @@ function pripDatumZavri(ulozit) {
 if (pripDatumOknoEl) {
   document.getElementById('pripDatumAno').addEventListener('click', () => pripDatumZavri(true));
   document.getElementById('pripDatumZpet').addEventListener('click', () => pripDatumZavri(false));
+}
+
+// ---------- Termíny (auta, motorka, pes, očkování…) ----------
+// Karty s volným textem (údaje) a termíny s datem. Server posílá push 14 dní
+// předem a v den termínu; tady se jen ukazuje, upravuje a odklikává.
+let terminyData = null;          // { karty, predemDni }
+let termUprava = null;           // { id, k } — rozpracovaná karta ('nova' = nová)
+const termKartyEl = document.getElementById('termKarty');
+const termBlizkeEl = document.getElementById('termBlizke');
+const termHintEl = document.getElementById('termHint');
+const termNovaBtnEl = document.getElementById('termNovaBtn');
+const TERM_BLIZKO_DNI = 60;
+const TERM_OPAK = [[0, 'neopakuje se'], [6, 'každých 6 měsíců'], [12, 'každý rok'], [24, 'každé 2 roky'],
+  [36, 'každé 3 roky'], [60, 'každých 5 let'], [120, 'každých 10 let']];
+
+function termDnes(now = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date(now));
+}
+function termDni(datum, dnes = termDnes()) {
+  return Math.round((Date.parse(datum + 'T00:00:00Z') - Date.parse(dnes + 'T00:00:00Z')) / 86400000);
+}
+function termDatumCz(datum) {
+  const [r, m, d] = datum.split('-').map(Number);
+  return `${d}. ${m}. ${r}`;
+}
+function termZbyva(dni) {
+  if (dni < 0) return `prošlo před ${-dni} d`;
+  if (dni === 0) return 'dnes';
+  if (dni === 1) return 'zítra';
+  if (dni < TERM_BLIZKO_DNI) return `za ${dni} dní`;
+  if (dni < 730) return `za ${Math.round(dni / 30.44)} měs.`;
+  return `za ${(dni / 365.25).toFixed(1).replace('.', ',')} roku`;
+}
+function termTrida(dni) {
+  const predem = (terminyData && terminyData.predemDni) || 14;
+  return 'term-zbyva' + (dni <= predem ? ' hori' : dni <= TERM_BLIZKO_DNI ? ' brzy' : '');
+}
+function termEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+async function termPost(adresa, telo) {
+  termHintEl.textContent = '';
+  try {
+    const res = await fetch(adresa, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(telo || {})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nepodařilo se uložit.');
+    if (data.terminy) terminyData = data.terminy;
+    return true;
+  } catch (err) {
+    termHintEl.textContent = err.message || 'Nepodařilo se uložit.';
+    return false;
+  }
+}
+
+// Řádek termínu (v kartě i v přehledu nahoře)
+function termRadek(k, x, sKartou) {
+  const r = termEl('div', 'term-radek');
+  const t = termEl('div', 'term-text');
+  t.appendChild(termEl('div', 'term-nazev', (sKartou ? `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}: ` : '')
+    + x.nazev + (x.opakovani ? ' ↻' : '')));
+  const pod = [x.datum ? termDatumCz(x.datum) : 'bez data'];
+  if (x.pozn) pod.push(x.pozn);
+  t.appendChild(termEl('div', 'term-pod', pod.join(' · ')));
+  r.appendChild(t);
+  if (x.datum) {
+    const dni = termDni(x.datum);
+    r.appendChild(termEl('span', termTrida(dni), termZbyva(dni)));
+    // Opakované (očkování psa) se odklikne a posune o interval
+    if (x.opakovani && dni <= TERM_BLIZKO_DNI) {
+      const b = termEl('button', 'term-hotovo', 'Hotovo');
+      b.type = 'button';
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        if (await termPost(`/api/terminy/${encodeURIComponent(x.id)}/hotovo`)) renderTerminy();
+        b.disabled = false;
+      });
+      r.appendChild(b);
+    }
+  }
+  return r;
+}
+
+function termFormular(u) {
+  const k = u.k;
+  const karta = termEl('div', 'card');
+  karta.dataset.karta = u.id;
+  karta.appendChild(termEl('div', 'graph-title', u.id === 'nova' ? 'Nová karta' : 'Upravit kartu'));
+  const f = termEl('div', 'term-form');
+  const pole = (tag, hodnota, nastav, attrs = {}) => {
+    const e = document.createElement(tag);
+    if (tag === 'select') {
+      for (const [v, popis] of TERM_OPAK) { const o = termEl('option', '', popis); o.value = String(v); e.appendChild(o); }
+      if (!TERM_OPAK.some(([v]) => v === hodnota)) { const o = termEl('option', '', `každých ${hodnota} měs.`); o.value = String(hodnota); e.appendChild(o); }
+    }
+    Object.assign(e, attrs);
+    e.value = hodnota === null || hodnota === undefined ? '' : String(hodnota);
+    e.addEventListener('input', () => nastav(e.value));
+    e.addEventListener('change', () => nastav(e.value));
+    return e;
+  };
+  const hlava = termEl('div', 'term-f-hlava');
+  hlava.appendChild(pole('input', k.ikona, v => { k.ikona = v; }, { maxLength: 8, placeholder: '🚗', ariaLabel: 'Ikona' }));
+  hlava.appendChild(pole('input', k.nazev, v => { k.nazev = v; }, { maxLength: 80, placeholder: 'Název (např. BMW 4)', className: 'term-f-nazev' }));
+  f.appendChild(hlava);
+  f.appendChild(termEl('label', '', 'Údaje (VIN, SPZ, olej, pojišťovna… — každý na řádek)'));
+  f.appendChild(pole('textarea', k.udaje, v => { k.udaje = v; }, { maxLength: 3000, className: 'term-f-udaje' }));
+  f.appendChild(termEl('label', '', 'Termíny'));
+  k.terminy.forEach((x, i) => {
+    const b = termEl('div', 'term-f-termin');
+    const n = pole('input', x.nazev, v => { x.nazev = v; }, { maxLength: 80, placeholder: 'Co (STK, pojištění…)', className: 'cely term-f-tnazev' });
+    b.appendChild(n);
+    b.appendChild(pole('input', x.datum, v => { x.datum = v || null; }, { type: 'date', className: 'term-f-datum' }));
+    b.appendChild(pole('select', x.opakovani || 0, v => { x.opakovani = Number(v) || 0; }, { className: 'term-f-opak' }));
+    b.appendChild(pole('input', x.pozn, v => { x.pozn = v; }, { maxLength: 300, placeholder: 'Poznámka', className: 'cely term-f-pozn' }));
+    const pryc = termEl('button', 'cely term-hotovo', 'Odebrat termín');
+    pryc.type = 'button';
+    pryc.addEventListener('click', () => { k.terminy.splice(i, 1); renderTerminy(); });
+    b.appendChild(pryc);
+    f.appendChild(b);
+  });
+  const tl = termEl('div', 'term-f-tlacitka');
+  const pridat = termEl('button', 'term-f-pridat', '+ Termín');
+  pridat.type = 'button';
+  pridat.addEventListener('click', () => { k.terminy.push({ nazev: '', datum: null, opakovani: 0, pozn: '' }); renderTerminy(); });
+  tl.appendChild(pridat);
+  f.appendChild(tl);
+  const tl2 = termEl('div', 'term-f-tlacitka');
+  const ulozit = termEl('button', 'ulozit', 'Uložit');
+  ulozit.type = 'button';
+  ulozit.addEventListener('click', () => termUloz(u, false));
+  const zrusit = termEl('button', 'zrusit', 'Zrušit');
+  zrusit.type = 'button';
+  zrusit.addEventListener('click', () => { termUprava = null; termHintEl.textContent = ''; renderTerminy(); });
+  tl2.appendChild(ulozit);
+  tl2.appendChild(zrusit);
+  if (u.id !== 'nova') {
+    const smazat = termEl('button', 'smazat', 'Smazat kartu');
+    smazat.type = 'button';
+    smazat.addEventListener('click', () => {
+      if (window.confirm(`Smazat kartu „${k.nazev}“ i se všemi termíny?`)) termUloz(u, true);
+    });
+    tl2.appendChild(smazat);
+  }
+  f.appendChild(tl2);
+  karta.appendChild(f);
+  return karta;
+}
+
+async function termUloz(u, smazat) {
+  const karty = ((terminyData && terminyData.karty) || []).map(k => k);
+  // Prázdné řádky termínů se nepošlou — server by je odmítl
+  const k = { ...u.k, terminy: u.k.terminy.filter(x => (x.nazev || '').trim() || x.datum) };
+  const i = karty.findIndex(x => x.id === u.id);
+  if (smazat) { if (i >= 0) karty.splice(i, 1); }
+  else if (i >= 0) karty[i] = k;
+  else karty.push(k);
+  if (await termPost('/api/terminy', { karty })) { termUprava = null; }
+  renderTerminy();
+}
+
+function renderTerminy() {
+  if (!termKartyEl || !termBlizkeEl) return;
+  const karty = (terminyData && terminyData.karty) || [];
+  const dnes = termDnes();
+  // Nahoře: co je do dvou měsíců nebo už prošlo, nejbližší první
+  termBlizkeEl.textContent = '';
+  const blizke = [];
+  for (const k of karty) for (const x of k.terminy) {
+    if (x.datum && termDni(x.datum, dnes) <= TERM_BLIZKO_DNI) blizke.push([k, x]);
+  }
+  blizke.sort((a, b) => a[1].datum.localeCompare(b[1].datum));
+  for (const [k, x] of blizke) termBlizkeEl.appendChild(termRadek(k, x, true));
+  if (!blizke.length) termBlizkeEl.appendChild(termEl('div', 'term-prazdno', 'V příštích dvou měsících nic nekončí.'));
+
+  termKartyEl.textContent = '';
+  for (const k of karty) {
+    if (termUprava && termUprava.id === k.id) { termKartyEl.appendChild(termFormular(termUprava)); continue; }
+    const c = termEl('div', 'card');
+    c.dataset.karta = k.id;
+    const h = termEl('div', 'term-hlava');
+    h.appendChild(termEl('div', 'graph-title', `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}`));
+    const upr = termEl('button', 'term-upravit', '✎ Upravit');
+    upr.type = 'button';
+    upr.addEventListener('click', () => {
+      termUprava = { id: k.id, k: JSON.parse(JSON.stringify(k)) };
+      renderTerminy();
+    });
+    h.appendChild(upr);
+    c.appendChild(h);
+    if (k.udaje) c.appendChild(termEl('div', 'term-udaje', k.udaje));
+    const serazene = [...k.terminy].sort((a, b) => (a.datum || '9999').localeCompare(b.datum || '9999'));
+    for (const x of serazene) c.appendChild(termRadek(k, x, false));
+    if (!k.terminy.length) c.appendChild(termEl('div', 'term-prazdno', 'Zatím bez termínů.'));
+    termKartyEl.appendChild(c);
+  }
+  if (termUprava && termUprava.id === 'nova') termKartyEl.appendChild(termFormular(termUprava));
+  if (termNovaBtnEl) termNovaBtnEl.hidden = !!termUprava;
+}
+
+if (termNovaBtnEl) {
+  termNovaBtnEl.addEventListener('click', () => {
+    termUprava = { id: 'nova', k: { nazev: '', ikona: '📌', udaje: '', terminy: [{ nazev: '', datum: null, opakovani: 0, pozn: '' }] } };
+    renderTerminy();
+  });
 }
 
 async function pripPost(adresa, telo) {

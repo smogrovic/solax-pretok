@@ -33,7 +33,7 @@ setTimeout(() => {
     ['bojlery na FVE', slide('FVE').querySelector('.boilers-card'), '🛁'],
     ['oběhové čerpadlo', document.getElementById('obehCard'), '🔄'],
     ['zámek', document.getElementById('nukiCard'), '🔑'],
-    ['FVE', slide('FVE').querySelector('.card'), '🔆'],
+    ['FVE', slide('FVE').querySelector('.nodes').closest('.card'), '🔆'],
     ['kamna HUUM', karta('huumLight'), '🔥'],
     ['sauna', karta('saunaLight'), '🔥'],
     ['závlaha', karta('zavlahaLight'), '💧'],

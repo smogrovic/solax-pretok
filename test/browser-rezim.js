@@ -70,7 +70,8 @@ setTimeout(async () => {
   pouzijRezim('full');
   check('záložek je čtrnáct', zalozky().length, 14);
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
-  check('pole pro asistenta je vidět', vidim(document.getElementById('asstInput')), true);
+  check('tlačítko prázdnin (nahoře na FVE) je vidět', vidim(document.getElementById('prazdninyBtn')), true);
+  check('teplotní automatika je na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
   // Rozvrh je ve full sbalený pod tlačítkem — jde k němu, jen se na něj musí ťuknout
   check('tlačítko na rozvrh je vidět',
@@ -157,9 +158,13 @@ setTimeout(async () => {
   pouzijRezim('miky');
   check('zbydou jeho záložky a Připomínky', zalozky().join(' · '),
     // Nákup vidí i děti — ať můžou připsat, co chtějí koupit
-    'Asistent · Žaluzie · Ovládání · Bazén · Připomínky · Recepty/Nákup · Log/Nastavení');
+    'Žaluzie · Ovládání · Bazén · Připomínky · Recepty/Nákup · Log/Nastavení');
+  // Klima je jen pro full — dítě má řádek svého pokoje na Žaluziích pod svými tlačítky
+  check('teplotní automatika se přestěhuje na Žaluzie', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Žaluzie"]'), true);
+  check('  hned pod dětská tlačítka', document.getElementById('detiTlacitka').closest('.card').nextElementSibling.id, 'tempAutoCard');
+  check('  a je vidět', vidim(document.getElementById('tempAutoCard')), true);
   // Asistent umí zapnout bojler i odemknout dům — do dětské ruky nepatří
-  check('pole pro asistenta zmizí', vidim(document.getElementById('asstInput')), false);
+  check('tlačítko prázdnin zmizí', vidim(document.getElementById('prazdninyBtn')), false);
   check('  i scénáře', vidim(document.getElementById('asstScenes')), false);
   check('  i jezdec automatiky', vidim(document.getElementById('autoModeSlider')), false);
   check('bazén už nejde spínat', vidim(document.getElementById('poolOnBtn')), false);
@@ -312,7 +317,8 @@ setTimeout(async () => {
   await pockej();
   check('správný kód přepne na full', rezimApky, 'full');
   check('  a vrátí všechny záložky', zalozky().length, 14);
-  check('  i pole pro asistenta', vidim(document.getElementById('asstInput')), true);
+  check('  i scény a prázdniny', vidim(document.getElementById('prazdninyBtn')), true);
+  check('  a teplotní automatika zpátky na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
 
   // Kód se chce i OPAČNÝM směrem — jinak by stačilo přepnout tam a zpátky
   document.querySelector('#rezimBtns .rezim-btn[data-rezim="elenka"]').click();

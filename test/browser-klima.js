@@ -125,9 +125,11 @@ setTimeout(async () => {
   // Teplota v pokojích je to, kvůli čemu se na stránku kouká — patří nad časovač
   const karty = [...document.querySelector('.slide[data-title="Klima"]')
     .querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
-  const nazev = c => (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
+  const nazev = c => c.id === 'tempAutoCard' ? 'Teplotní automatika'
+    : (c.querySelector('.graph-title') || {}).textContent || 'seznam klimatizací';
+  // Teplotní automatika je nahoře (dřív na stránce Asistent)
   check('pořadí karet sedí', karty.map(nazev).join(' | '),
-    'seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Časovač');
+    'Teplotní automatika | seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Časovač');
 
   R.push('\\nTepelné čerpadlo');
   const box = document.getElementById('aquareaBox');

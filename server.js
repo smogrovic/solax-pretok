@@ -314,6 +314,7 @@ const state = {
   topeni: { bezici: null, zaznamy: [] },        // hodinové průměry pro analýzu topení (stránka FVE)  // jak dlouho se sauna nahřívá (podklad pro předpověď)
   saunaZapnuto: { od: 0, naposledy: 0 },  // kdy se dnešní saunování poprvé zaplo (reset 3 h po posledním topení)
   pripominky: pripominkyVychozi(),
+  terminy: null,     // stránka Termíny: { karty, upozorneno } — null = výchozí (terminyVychozi)
   nakup: [],         // nákupní seznam: { id, text, t }
   nakupOblibene: null, // pravidelně kupované (výchozí doplní nakupOblibeneVychozi)
   oznameni: null,    // upozornění přes celou appku: { id, text, od }
@@ -839,6 +840,7 @@ function snapshot() {
     topeni: topeniPayload(),
     saunaZapnuto: state.saunaZapnuto,
     pripominky: state.pripominky,
+    terminy: terminyPayload(),
     nakup: state.nakup,
     nakupOblibene: state.nakupOblibene,
     oznameni: state.oznameni,
@@ -2963,6 +2965,191 @@ app.post('/api/pripominky/:id/zapnuto', (req, res) => {
 
 // Sezóna BIO: jednou za hodinu, poprvé až po načtení zálohy (ta nese, co se viděla naposledy)
 if (typeof scheduleEvery === 'function') scheduleEvery(() => pripominkySezona(), 3600000, 6 * 60000);
+
+// ---------- Termíny (auta, motorka, pes, očkování…) ----------
+// Stránka Termíny: karty (auto, pes…) s volným textem (údaje) a termíny s datem
+// (STK, dálniční známka, pojistka, očkování). Push 14 dní předem a v den termínu.
+// Repo je veřejné — výchozí data proto nesou JEN data a názvy, žádné VIN, SPZ
+// ani čísla karet; ty si člověk dopíše v appce a drží se jen v záloze (Upstash).
+const TERMINY_PREDEM_DNI = 14;
+const TERMINY_PUSH_OD_H = 8, TERMINY_PUSH_DO_H = 20;     // v noci se nepípá
+const TERMINY_MEZE = { karet: 30, terminu: 40, nazev: 80, udaje: 3000, pozn: 300, ikona: 8, opakovani: 120 };
+
+function terminyVychozi() {
+  const t = (id, nazev, datum, opakovani = 0, pozn = '') => ({ id, nazev, datum, opakovani, pozn });
+  return {
+    karty: [
+      { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗',
+        udaje: 'Poslední olej: 3. 8. 2026, 97 000 km\nPojišťovna: Direct\nGeometrie: 11. 11. 2026 hotová\nKoupit nové letní pneu',
+        terminy: [t('bmw4-stk', 'STK', '2028-08-03'), t('bmw4-znamka', 'Dálniční známka', '2027-05-05'),
+          t('bmw4-poj', 'Pojištění', '2027-04-20', 0, 'Direct')] },
+      { id: 'vw', nazev: 'VW Multivan', ikona: '🚐',
+        udaje: 'Poslední olej: 20. 5. 2026, 51 000 km\nPojišťovna: Generali (Pastell)',
+        terminy: [t('vw-stk', 'STK', '2028-01-29'), t('vw-znamka', 'Dálniční známka', '2027-01-28'),
+          t('vw-poj', 'Pojištění', null, 0, 'Pastell – Generali')] },
+      { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️',
+        udaje: 'Poslední olej: 10. 9. 2025, 2 300 km\nServis: každých 10 000 km nebo po roce\nPojišťovna: povinné + havarijní Generali',
+        terminy: [t('gs-stk', 'STK', '2031-05-01'), t('gs-poj', 'Pojištění', '2027-09-03', 0, 'Generali'),
+          t('gs-servis', 'Servis a olej (po roce)', '2026-09-10', 12, 'nebo po 10 000 km')] },
+      { id: 'eso', nazev: 'Eso — očkování', ikona: '🐕', udaje: '',
+        terminy: [t('eso-vzteklina', 'Vzteklina', '2028-01-20'), t('eso-nobivac', 'Kombinace Nobivac', '2027-05-22', 12)] },
+      { id: 'ockovani', nazev: 'Naše očkování', ikona: '💉', udaje: '',
+        terminy: [t('my-tetanus', 'Tetanus', '2037-02-01')] }
+    ],
+    upozorneno: {}
+  };
+}
+
+function terminyData() {
+  if (!state.terminy) state.terminy = terminyVychozi();
+  if (!state.terminy.upozorneno || typeof state.terminy.upozorneno !== 'object') state.terminy.upozorneno = {};
+  return state.terminy;
+}
+
+function terminyPayload() {
+  const t = terminyData();
+  return { karty: t.karty, predemDni: TERMINY_PREDEM_DNI };
+}
+
+// Ověří karty z appky. → { karty } nebo { chyba }
+function terminyOver(karty) {
+  if (!Array.isArray(karty)) return { chyba: 'Chybí karty.' };
+  if (karty.length > TERMINY_MEZE.karet) return { chyba: `Nejvýš ${TERMINY_MEZE.karet} karet.` };
+  const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const ids = new Set();
+  const noveId = p => { let id; do { id = p + Math.random().toString(36).slice(2, 9); } while (ids.has(id)); return id; };
+  const platneId = v => typeof v === 'string' && /^[a-z0-9-]{1,24}$/i.test(v) && !ids.has(v);
+  const out = [];
+  for (const k of karty) {
+    if (!k || typeof k !== 'object') return { chyba: 'Vadná karta.' };
+    const nazev = text(k.nazev, TERMINY_MEZE.nazev);
+    if (!nazev) return { chyba: 'Karta musí mít název.' };
+    const id = platneId(k.id) ? k.id : noveId('k');
+    ids.add(id);
+    const terminy = [];
+    const vstup = Array.isArray(k.terminy) ? k.terminy : [];
+    if (vstup.length > TERMINY_MEZE.terminu) return { chyba: `Nejvýš ${TERMINY_MEZE.terminu} termínů na kartu.` };
+    for (const x of vstup) {
+      if (!x || typeof x !== 'object') return { chyba: 'Vadný termín.' };
+      const tn = text(x.nazev, TERMINY_MEZE.nazev);
+      if (!tn) return { chyba: 'Termín musí mít název.' };
+      let datum = null;
+      if (x.datum !== null && x.datum !== undefined && x.datum !== '') {
+        if (typeof x.datum !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x.datum)
+            || Number.isNaN(Date.parse(x.datum + 'T12:00:00Z'))
+            || new Date(x.datum + 'T12:00:00Z').toISOString().slice(0, 10) !== x.datum) return { chyba: `Špatné datum u „${tn}“.` };
+        datum = x.datum;
+      }
+      const op = Number(x.opakovani) || 0;
+      if (!Number.isInteger(op) || op < 0 || op > TERMINY_MEZE.opakovani) return { chyba: `Špatné opakování u „${tn}“.` };
+      const tid = platneId(x.id) ? x.id : noveId('t');
+      ids.add(tid);
+      terminy.push({ id: tid, nazev: tn, datum, opakovani: op, pozn: text(x.pozn, TERMINY_MEZE.pozn) });
+    }
+    out.push({ id, nazev, ikona: text(k.ikona, TERMINY_MEZE.ikona), udaje: text(k.udaje, TERMINY_MEZE.udaje), terminy });
+  }
+  return { karty: out };
+}
+
+// Dny od dneška (Praha) do data 'YYYY-MM-DD'; záporné = prošlo
+function terminyDni(datum, now = Date.now()) {
+  const d = s => Date.parse(s + 'T00:00:00Z');
+  return Math.round((d(datum) - d(pragueDateString(now))) / 86400000);
+}
+
+// Posune datum o měsíce (31. 1. + 1 měsíc → 28./29. 2.)
+function terminyPosun(datum, mesicu) {
+  const [r, m, d] = datum.split('-').map(Number);
+  const cil = new Date(Date.UTC(r, m - 1 + mesicu, 1));
+  const posledni = new Date(Date.UTC(cil.getUTCFullYear(), cil.getUTCMonth() + 1, 0)).getUTCDate();
+  cil.setUTCDate(Math.min(d, posledni));
+  return cil.toISOString().slice(0, 10);
+}
+
+function terminyDatumCz(datum) {
+  const [r, m, d] = datum.split('-').map(Number);
+  return `${d}. ${m}. ${r}`;
+}
+
+// Hodinová kontrola: 14 dní předem jedna zpráva, v den termínu druhá. Klíč nese
+// i datum, takže po obnovení (nové datum) se upozorní znovu. Co prošlo dřív, než
+// se o tom appka dozvěděla, ohlásí jednou jako „prošlo“.
+function terminyKontrola(now = Date.now()) {
+  const { hour } = pragueTime(now);
+  if (hour < TERMINY_PUSH_OD_H || hour >= TERMINY_PUSH_DO_H) return [];
+  const t = terminyData();
+  const poslano = [];
+  for (const k of t.karty) {
+    for (const x of k.terminy) {
+      if (!x.datum) continue;
+      const dni = terminyDni(x.datum, now);
+      if (dni > TERMINY_PREDEM_DNI) continue;
+      const klic = x.id + '|' + x.datum + '|' + (dni <= 0 ? 'den' : 'predem');
+      if (t.upozorneno[klic]) continue;
+      // Den D, když už odešlo i „předem“, se hlásí; jinak prošlé hlásí jen jednou
+      if (dni < 0 && t.upozorneno[x.id + '|' + x.datum + '|predem']) { t.upozorneno[klic] = now; continue; }
+      t.upozorneno[klic] = now;
+      const kdy = dni > 1 ? `za ${dni} dní` : dni === 1 ? 'zítra' : dni === 0 ? 'dnes' : `prošlo před ${-dni} dny`;
+      const nadpis = `📅 ${k.nazev}: ${x.nazev}`;
+      const telo = `${kdy[0].toUpperCase() + kdy.slice(1)} (${terminyDatumCz(x.datum)})${x.pozn ? ' · ' + x.pozn : ''}`;
+      poslano.push(nadpis + ' — ' + telo);
+      if (typeof sendPushToAll === 'function') sendPushToAll(nadpis, telo);
+    }
+  }
+  if (poslano.length) {
+    addLog(`Termíny: upozornění (${poslano.length})`);
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  return poslano;
+}
+
+app.post('/api/terminy', (req, res) => {
+  const o = terminyOver(req.body && req.body.karty);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  const t = terminyData();
+  t.karty = o.karty;
+  state.terminyUpraveno = true;
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  broadcast('terminy', { terminy: terminyPayload() });
+  res.json({ ok: true, terminy: terminyPayload() });
+});
+
+// Hotovo u termínu, co se opakuje: posune o interval (očkování psa každý rok)
+app.post('/api/terminy/:id/hotovo', (req, res) => {
+  const t = terminyData();
+  for (const k of t.karty) {
+    const x = k.terminy.find(y => y.id === req.params.id);
+    if (!x) continue;
+    if (!x.datum || !x.opakovani) return res.status(400).json({ error: 'Termín se neopakuje — nastav nové datum.' });
+    x.datum = terminyPosun(x.datum, x.opakovani);
+    state.terminyUpraveno = true;
+    addLog(`Termíny: ${k.nazev} — ${x.nazev} hotovo, další ${terminyDatumCz(x.datum)}`);
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+    broadcast('terminy', { terminy: terminyPayload() });
+    return res.json({ ok: true, terminy: terminyPayload() });
+  }
+  res.status(404).json({ error: 'Termín nenalezen.' });
+});
+
+app.post('/api/terminy/restore', (req, res) => {
+  const z = req.body && req.body.terminy;
+  const o = terminyOver(z && z.karty);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  if (!state.terminyUpraveno) {
+    const upozorneno = {};
+    if (z.upozorneno && typeof z.upozorneno === 'object') {
+      for (const [k, v] of Object.entries(z.upozorneno)) {
+        if (typeof k === 'string' && k.length <= 80 && Number.isFinite(v)) upozorneno[k] = v;
+      }
+    }
+    state.terminy = { karty: o.karty, upozorneno };
+    broadcast('terminy', { terminy: terminyPayload() });
+  }
+  res.json({ ok: true });
+});
+
+// Hodinově; poprvé až po načtení zálohy (ta nese, co už se ohlásilo)
+if (typeof scheduleEvery === 'function') scheduleEvery(() => terminyKontrola(), 3600000, 8 * 60000);
 
 // ---------- Nákupní seznam ----------
 // Odrážky „co koupit". Zámek se neuplatňuje (stránku Připomínky vidí i děti).
@@ -14195,6 +14382,8 @@ function storeSnapshot() {
     '/api/sauna/nahrev/restore': { zaznamy: state.saunaNahrev.zaznamy, bezici: state.saunaNahrev.bezici },
     '/api/sauna/zapnuto/restore': { od: state.saunaZapnuto.od, naposledy: state.saunaZapnuto.naposledy },
     '/api/pripominky/restore': { pripominky: state.pripominky },
+    // Jen co člověk opravdu uložil (výchozí data jsou v kódu); nese i odeslaná upozornění
+    ...(state.terminy ? { '/api/terminy/restore': { terminy: state.terminy } } : {}),
     '/api/nakup/restore': { nakup: state.nakup },
     '/api/nakup/oblibene/restore': { polozky: state.nakupOblibene || [], doplneno: NAKUP_OBLIBENE_DOPLNENI },
     '/api/rohlik/vyber/restore': { vyber: state.rohlikVyber },
