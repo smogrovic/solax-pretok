@@ -93,8 +93,13 @@ nadpis('3b) Olej: po roce, Hotovo zapíše datum a kilometry');
   check('  starý „servis“ termín je pryč', t.karty.find(k => k.id === 'gs').terminy.some(x => x.id === 'gs-servis'), false);
   check('  „naposledy 7. 9. 2026“ je u oleje, ne v hlavičce', olej('gs').naposledy + ' | ' + /Poslední olej/.test(t.karty.find(k => k.id === 'gs').udaje), '7. 9. 2026 | false');
   check('auta: rok od posledního oleje', olej('bmw4').datum + ' ' + olej('vw').datum, '2027-08-03 2027-05-20');
-  const puvodniNow = Date.now;
-  Date.now = () => Date.UTC(2026, 10, 21, 11);
+  // „Dnes" = 21. 11. 2026 i pro `new Date()` (pragueDateString), ne jen Date.now
+  const PuvodniDate = Date;
+  const TED = Date.UTC(2026, 10, 21, 11);
+  globalThis.Date = class extends PuvodniDate {
+    constructor(...a) { super(...(a.length ? a : [TED])); }
+    static now() { return TED; }
+  };
   const r = h.volej('/api/terminy/:id/hotovo', { km: '12 345' }, { id: 'gs-olej' });
   check('Hotovo s kilometry', r.ok + ' ' + olej('gs').datum, 'true 2027-11-21');
   check('  u oleje se zapíše dnešek a km', olej('gs').naposledy, '21. 11. 2026, 12 345 km');
@@ -118,7 +123,7 @@ nadpis('3b) Olej: po roce, Hotovo zapíše datum a kilometry');
   check('Hotovo STK auta → za 2 roky od data', stk('vw').datum + ' | ' + stk('vw').naposledy, '2028-11-20 | 20. 11. 2026');
   h.volej('/api/terminy/:id/hotovo', {}, { id: 'gs-stk' });
   check('Hotovo STK motorky → za 4 roky', stk('gs').datum, '2030-11-21');
-  Date.now = puvodniNow;
+  globalThis.Date = PuvodniDate;
   // Migrace starých uložených dat (bez oleje) — jen jednou
   const h2 = build();
   h2.state.terminy = { upozorneno: {}, karty: [

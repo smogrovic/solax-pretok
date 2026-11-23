@@ -67,8 +67,8 @@ function build({ user = 'ja@doma.cz', pass = 'tajne-heslo',
     'saunaZapnutoTopi', 'saunaZapnutoKontrola',
     'timerNextRun', 'fmtPragueTime', 'cerstve', 'saunaPriprava', 'awayActive', 'predpovedTeplota',
     'setTimeout', 'clearTimeout', 'pragueDateString',
-    CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus, saunaKalibrace,'
-         + ' odhadNabehuDoladeny, saunaTimerBudik, SAUNA_DOJEZD_MIN,'
+    CODE + '\n; return { huumMap, huumNum, huumStavText, HUUM_STAVY, huumStatus,'
+         + ' saunaTimerBudik, SAUNA_DOJEZD_MIN,'
          + ' huumChyba, huumTelo, fetchHuum, pollHuum, huumPayload, huumSvetlo,'
          + ' checkHuumNahrata, HUUM_NAHRATA_C, huumMezeTeplot, huumPovel,'
          + ' huumOverStav, HUUM_OVERENI_MS, saunaTimerPridej,'
@@ -763,7 +763,7 @@ Date.now = puvodniNow17;
 
 nadpis('18) Tik: zapnutí o odhad dřív, přípravu v pevný čas už nedělá');
 const MINUTA = 60000;
-// Sauna 20 °C, venku 10 °C: model dá na 80 °C 5,9 + 118,7·ln((142,5−20)/(142,5−80)) ≈ 85,8 → 86 min
+// Sauna 20 °C, venku 10 °C: model dá na 80 °C 5,3 + 107,8·ln((136,3−20)/(136,3−80)) + 12 ≈ 95,5 → 96 min
 const stavKamen = (h, o = {}) => {
   h.state.weather = { tempC: 10 };
   h.state.huum = { temperature: 20, heating: false, fetchedAt: new Date().toISOString(), error: null, ...o };
@@ -776,7 +776,7 @@ const stavKamen = (h, o = {}) => {
   h.api.saunaTimerPridej('19:00', 80, od);
   const t = h.api.casovace()[0];
   const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
-  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 92);
+  check('model: z 20 °C na 80 °C při 10 °C venku', cekane, 96);
   check('zapnutí = příchod − odhad', t.zapneV, jdu - cekane * MINUTA);
   // Kontrola 20 min předem: kamna netopí a v sauně je pořád 20 °C → čas se nemění
   h.odpovez = async () => ({ stav: 200, text: JSON.stringify(odpoved({ statusCode: 232, temperature: '20' })) });
@@ -786,7 +786,7 @@ const stavKamen = (h, o = {}) => {
   await h.api.saunaTimerTik(t.zapneV - 20 * MINUTA);
   check('20 min předem se načte čerstvý stav kamen', h.volani.map(v => v.adresa.split('/').pop()).join(), 'status');
   check('  čas zapnutí beze změny', t.zapneV, plan);
-  check('  a zapíše se do logu', h.zapisy.some(z => /kontrola 20 min před zapnutím \(časovač 19:00\) — v sauně 20 °C, venku 10 °C, náběh 92 min → zapnu v 17:28 \(beze změny\)/.test(z)), true);
+  check('  a zapíše se do logu', h.zapisy.some(z => /kontrola 20 min před zapnutím \(časovač 19:00\) — v sauně 20 °C, venku 10 °C, náběh 96 min → zapnu v 17:24 \(beze změny\)/.test(z)), true);
   await h.api.saunaTimerTik(t.zapneV - 10 * MINUTA);
   check('  kontroluje se jen jednou', h.volani.length, 1);
   h.volani.length = 0;
@@ -944,44 +944,20 @@ nadpis('18b) Kontrola 20 min před zapnutím posune čas');
   check('pozdě nastavený: bez kontroly, rovnou start', h.volani.map(v => v.adresa.split('/').pop())[0] + ' ' + !h.zapisy.some(z => /kontrola 20 min/.test(z)), 'start true');
 }
 
-nadpis('18c) Doladění modelu podle vlastních nahřátí');
+nadpis('18c) Pevný vzorec — žádné samovolné doladění');
 {
   const h = build();
-  const d = h.api.SAUNA_DOJEZD_MIN;
-  // Měření, kde sauna dosáhla cíle za `pomer`× víc, než říká celý odhad (i s dojezdem
-  // — dosažení cíle dojezd obsahuje; dřív se bral bez něj a zpoždění se počítalo dvakrát)
-  const mereni = (pomer, o = {}) => {
-    const m = h.api.odhadNabehu(5, 10, 80).minut;
-    return { start: 0, odC: 10, venkuC: 5, cilC: 80, cilStartC: 80, zmenyCile: [{ min: 0, cilC: 80 }],
-             prahy: { cil: { min: m * pomer, c: 80 } }, ...o };
-  };
-  check('bez měření nic', h.api.saunaKalibrace([]).pouzito, false);
-  check('dvě měření nestačí', h.api.saunaKalibrace([mereni(1.2), mereni(1.2)]).pouzito, false);
-  const k = h.api.saunaKalibrace([mereni(1.1), mereni(1.3), mereni(1.2)]);
-  check('tři měření → medián', k.faktor + ' ' + k.mereni + ' ' + k.pouzito, '1.2 3 true');
-  const vyrazene = [mereni(3, { teplyStart: true }), mereni(3, { kratke: true }),
-    mereni(3, { zmenyCile: [{ min: 0, cilC: 70 }, { min: 30, cilC: 80 }] }),
-    mereni(3, { prahy: {} }), mereni(3, { odC: 75 })];
-  check('teplý start, bliknutí, změna cíle, nedosažený cíl, skoro teplá sauna se nepočítají',
-    h.api.saunaKalibrace([mereni(1.1), mereni(1.3), mereni(1.2), ...vyrazene]).faktor, 1.2);
-  check('ulétlé hodnoty se ořežou', h.api.saunaKalibrace([mereni(4), mereni(4), mereni(4)]).faktor, 1.5);
-  check('  i dolů', h.api.saunaKalibrace([mereni(0.2), mereni(0.2), mereni(0.2)]).faktor, 0.7);
-  check('bere se jen posledních 8', h.api.saunaKalibrace([...Array(8).fill(mereni(1.4)), ...Array(8).fill(mereni(0.9))]).faktor, 0.9);
-  // Doladěný odhad násobí celý odhad i s dojezdem (dojezd se nepřičítá podruhé)
-  const zaklad = h.api.odhadNabehu(5, 10, 80).minut;
-  const dol = h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: true });
-  check('doladěný odhad', Math.round(dol.minut * 1000), Math.round(zaklad * 1.2 * 1000));
-  // Měření přesně podle modelu (dojezd v něm) → faktor 1, ne 1,1 jako dřív
-  check('měření přesně podle modelu → faktor 1', h.api.saunaKalibrace([mereni(1), mereni(1), mereni(1)]).faktor, 1);
-  check('  nepoužité doladění = model', h.api.odhadNabehuDoladeny(5, 10, 80, 0, undefined, { faktor: 1.2, pouzito: false }).minut, zaklad);
-  // Časovač s doladěním zapne dřív a řekne to
+  // Měření o 20 % pomalejší než vzorec: dřív by je appka „doladila" násobkem,
+  // teď se vzorec mění jen ručně (konstanty v server.js)
+  const mereni = () => ({ start: 0, odC: 10, venkuC: 5, cilC: 80, cilStartC: 80, zmenyCile: [{ min: 0, cilC: 80 }],
+    prahy: { cil: { min: h.api.odhadNabehu(5, 10, 80).minut * 1.2, c: 80 } } });
   stavKamen(h);
-  h.state.saunaNahrev = { zaznamy: [mereni(1.2), mereni(1.2), mereni(1.2)] };
+  h.state.saunaNahrev = { zaznamy: [mereni(), mereni(), mereni()] };
   const jdu = h.pulnoc + 19 * 3600000;
   h.api.saunaTimerPridej('19:00', 80, jdu - 5 * 3600000);
   const t = h.api.casovace()[0];
-  const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut * 1.2);
-  check('časovač počítá s doladěním', (jdu - t.zapneV) / MINUTA + ' ' + t.nabeh.doladeni + ' ' + t.nabeh.doladeniMereni, cekane + ' 1.2 3');
+  const cekane = Math.ceil(h.api.odhadNabehu(10, 20, 80).minut);
+  check('časovač počítá čistě podle vzorce', (jdu - t.zapneV) / MINUTA + ' ' + ('doladeni' in t.nabeh), cekane + ' false');
 }
 
 nadpis('18d) Budík na přesné zapnutí');

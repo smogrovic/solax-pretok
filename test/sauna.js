@@ -15,6 +15,8 @@ const CODE = KONST + '\n'
   + fn('function saunaPayload() {') + '\n'
   + fn('function saunaOmyl(now) {') + '\n'
   + fn('function updateSauna(powerW) {') + '\n'
+  + 'const SAUNA_ALERT_NATOP_MS = 20 * 60000;\n'
+  + fn('function saunaKamnaZapnuta(now = Date.now()) {') + '\n'
   + fn('function checkSaunaForgotten() {') + '\n'
   + fn('function saunaOznameniZrus() {') + '\n'
   + fn('function recordSaunaDay(w, dtH) {') + '\n'
@@ -243,6 +245,43 @@ nadpis('3) Hlídání zapomenuté sauny');
   check('ruční zprávu sauna nepřepíše', h.state.oznameni.id, 'o_rucni');
   h.posun(31); h.api.updateSauna(0);
   check('  ani po dotopení nesmaže', h.state.oznameni && h.state.oznameni.id, 'o_rucni');
+  delete globalThis.oznameniNastav; delete globalThis.oznameniZrus;
+}
+{
+  // Skutečnost z 22. 11.: poslední nátop ve 2:35, blokace bazénu doběhla až 3:05 —
+  // ve 3:00 přišlo „pořád topí", i když sauna jen chladla
+  const h = build();
+  h.api.updateSauna(6000);
+  for (let t = 0; t < 155; t += 5) { h.posun(5); h.api.updateSauna(6000); }
+  for (let t = 0; t < 28; t += 2) { h.posun(2); h.api.updateSauna(30); }
+  check('vypnutá kamna, jen dobíhá blokace → bez hlášky', h.pushes.length, 0);
+  check('  topení (blokace) přitom pořád běží', h.state.sauna.since > 0, 'true');
+}
+{
+  // Termostat u horké sauny: pauza 18 min, kamna dál zapnutá → hlásí se
+  const h = build();
+  h.api.updateSauna(6000);
+  for (let t = 0; t < 165; t += 5) { h.posun(5); h.api.updateSauna(6000); }
+  h.posun(16); h.api.updateSauna(30);
+  check('pauza termostatu (bez HUUM) se bere jako zapnutá kamna', h.pushes.length, 1);
+}
+{
+  // HUUM rozhoduje, když je čerstvý: kamna vypnutá → nic, i kdyby odběr chvíli běžel
+  const oz = [];
+  globalThis.oznameniNastav = (text, now) => { h.state.oznameni = { id: 'o_' + oz.length, text, od: now }; oz.push(text); return { ok: true }; };
+  globalThis.oznameniZrus = id => { if (h.state.oznameni && h.state.oznameni.id === id) h.state.oznameni = null; };
+  const h = build();
+  h.state.oznameni = null;
+  h.state.huum.heating = true;
+  h.api.updateSauna(6000);
+  for (let t = 0; t < 215; t += 5) { h.posun(5); h.state.huum.fetchedAt = new Date(h.now).toISOString(); h.api.updateSauna(6000); }
+  check('HUUM zapnutá → po 3:35 push i červené upozornění', h.pushes.length >= 1 && !!h.state.oznameni, 'true');
+  const pred = h.pushes.length;
+  h.state.huum.heating = false;
+  h.posun(1); h.state.huum.fetchedAt = new Date(h.now).toISOString(); h.api.updateSauna(30);
+  check('  HUUM vypnutá → červené upozornění zmizí hned', h.state.oznameni, 'null');
+  h.posun(40); h.state.huum.fetchedAt = new Date(h.now).toISOString(); h.api.updateSauna(30);
+  check('  a další push už nepřijde', h.pushes.length, pred);
   delete globalThis.oznameniNastav; delete globalThis.oznameniZrus;
 }
 
@@ -551,13 +590,13 @@ nadpis('Model náběhu');
   const T = Date.UTC(2026, 8, 24, 16, 0, 0);
   const o = (v, s0, c) => h.api.odhadNabehu(v, s0, c, T);
   const blizko = (x, y) => x !== null && Math.abs(x - y) <= 0.5;
-  // Zadání modelu: rozjezd 5,2 + τ 114,7 · ln(…) + dojezd 8, T_max = 138,5 + 0,3 · venku
-  check('venku 14,94, start 27, cíl 60 → ~51 min', blizko(o(14.94, 27, 60).minut, 51.5), 'true');
-  check('venku 14,94, start 27, cíl 80 → ~83 min', blizko(o(14.94, 27, 80).minut, 83.4), 'true');
-  check('venku −20, start 10, cíl 85 → ~122 min', blizko(o(-20, 10, 85).minut, 121.9), 'true');
-  check('venku −20, start −20, cíl 85 → ~147 min', blizko(o(-20, -20, 85).minut, 147.0), 'true');
-  check('venku 10, start 20, cíl 80 → 91,3 min', o(10, 20, 80).minut.toFixed(1), '91.3');
-  check('rozjezd i dojezd se připočítají (cíl těsně nad startem ≈ 5,3 + 8 min)', blizko(o(10, 20, 20.01).minut, 13.3), 'true');
+  // Pevný vzorec (23. 11. 2026): rozjezd 5,3 + τ 107,8 · ln(…) + dojezd 12, T_max = 131,3 + 0,5 · venku
+  check('venku 14,94, start 27, cíl 60 → ~55 min', blizko(o(14.94, 27, 60).minut, 55.0), 'true');
+  check('venku 14,94, start 27, cíl 80 → ~87 min', blizko(o(14.94, 27, 80).minut, 86.6), 'true');
+  check('venku −20, start 10, cíl 85 → ~138 min', blizko(o(-20, 10, 85).minut, 138.1), 'true');
+  check('venku −20, start −20, cíl 85 → ~164 min', blizko(o(-20, -20, 85).minut, 163.8), 'true');
+  check('venku 10, start 20, cíl 80 → 95,5 min', o(10, 20, 80).minut.toFixed(1), '95.5');
+  check('rozjezd i dojezd se připočítají (cíl těsně nad startem ≈ 5,3 + 12 min)', blizko(o(10, 20, 20.01).minut, 17.3), 'true');
   check('cíl 90 (konec stupnice) je dosažitelný', o(10, 20, 90).dosazitelne, 'true');
   check('cíl 91 je nedosažitelný (strop)', JSON.stringify(o(10, 20, 91)), '{"minut":null,"hotovoV":null,"dosazitelne":false}');
   check('cíl nad stropem taky, bez výjimky', o(-600, 20, 80).dosazitelne, 'false');
@@ -576,7 +615,7 @@ nadpis('Model náběhu');
     bezCile.api.saunaOdhad(bezCile.now).cile.map(c => c.c).join(','), '70,80,85');
   const netopi = build({ venku: 10, huum: { temperature: 20, heating: false, fetchedAt: new Date(h.now).toISOString() } });
   const n = netopi.api.saunaOdhad(netopi.now);
-  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd + ' ' + n.model.dojezd, '0 20 10 114.7 5.2 8');
+  check('když netopí, jen vstupy a model', n.cile.length + ' ' + n.tStartC + ' ' + n.venkuC + ' ' + n.model.tau + ' ' + n.model.rozjezd + ' ' + n.model.dojezd, '0 20 10 107.8 5.3 12');
   // Kamna už hřejí: z rozjezdu zbývá jen to, co ještě neuběhlo
   const hreje = build({ venku: 10, huum: { temperature: 40, targetTemperature: 80, heating: true,
     fetchedAt: new Date(h.now).toISOString() } });

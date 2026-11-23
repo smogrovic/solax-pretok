@@ -1,5 +1,5 @@
 // Ověření: analýza nahřívání sauny — model náběhu (kontrolní hodnoty z předání),
-// přefitování z vlastních měření, doladění bez dvojího dojezdu, cena saunování
+// kontrolní fit z vlastních měření (appka ho nepoužívá), cena saunování
 // podle VT/NT (časy HDO v Praze i přes přechod letní/zimní čas), sčítání
 // navazujících měření, body při výpadku spojení a hlídání relé.
 const { between, fn, suite } = require('./zdroj');
@@ -21,7 +21,7 @@ function build({ env = {} } = {}) {
   h.api = new Function('process', 'state', 'addLog', 'sendPushToAll', 'broadcast', 'cerstve',
     'saunaTopi', 'storeNahrevUloz', 'SAUNA_ON_W',
     CODE + '\n; return { odhadNabehu, saunaModel, saunaModelMin, SAUNA_MODEL_VYCHOZI, saunaFit, saunaFitUsek,'
-      + ' saunaFitAktualni, saunaKalibrace, odhadNabehuDoladeny, saunaSkupiny, saunaSaunovani, saunaPrumery,'
+      + ' saunaFitAktualni, saunaSkupiny, saunaSaunovani, saunaPrumery,'
       + ' saunaAnalyza, hdoNizky, hdoZTextu, HDO_NT, CENIK, nahrevStart, nahrevBezSpojeni, nahrevReleKontrola,'
       + ' nahrevVzorek, NAHREV_BODU_MAX, nahrevNavazujeNa, saunaOdhad };'
   )({ env }, h.state, t => h.log.push(t), (a, b) => h.push.push(a + ' — ' + b),
@@ -52,20 +52,23 @@ function mereni(p, { venku = 8, od = 10, cil = 75, start = Date.UTC(2026, 10, 10
     zmenyCile: [{ min: 0, cilC: cil, zdroj: 'appka' }], prahy, body, maxC: Math.max(...body.map(b => b.c)) };
 }
 
-nadpis('1) Model náběhu — kontrolní hodnoty z předání (bez dojezdu)');
+nadpis('1) Model náběhu — pevný vzorec proti skutečným měřením (bez dojezdu)');
 {
   const h = build();
   const m = h.api.SAUNA_MODEL_VYCHOZI;
-  check('8,3 °C venku, z 11 na 60 °C → 59,5 min', h.api.saunaModelMin(m, 8.3, 11, 60).toFixed(1), '59.5');
-  check('11,5 °C venku, z 11 na 61 °C → 60,4 min', h.api.saunaModelMin(m, 11.5, 11, 61).toFixed(1), '60.4');
-  check('5,6 °C venku, z 9 na 75 °C → 85,4 min', h.api.saunaModelMin(m, 5.6, 9, 75).toFixed(1), '85.4');
-  check('−20 °C venku, z 10 na 80 °C → 102 min', Math.round(h.api.saunaModelMin(m, -20, 10, 80)), 102);
-  check('−20 °C venku, z 10 na 85 °C → 114 min', Math.round(h.api.saunaModelMin(m, -20, 10, 85)), 114);
+  // Skutečnost: 19. 11. (8,3 °C venku, z 11 °C) 60 °C za 58,8 min, 70 °C za 74,8 min
+  check('8,3 °C venku, z 11 na 60 °C → 59,2 min (měřeno 58,8)', h.api.saunaModelMin(m, 8.3, 11, 60).toFixed(1), '59.2');
+  check('  na 70 °C → 74,6 min (měřeno 74,8)', h.api.saunaModelMin(m, 8.3, 11, 70).toFixed(1), '74.6');
+  // 22. 11. (3,8 °C venku, z 10 °C) 60 °C za 58,7, cíl 75 °C za 102,7 min
+  check('3,8 °C venku, z 10 na 60 °C → 61,4 min (měřeno 58,7)', h.api.saunaModelMin(m, 3.83, 10, 60).toFixed(1), '61.4');
+  check('  na cíl 75 i s dojezdem → 98 min (měřeno 102,7)', Math.round(h.api.odhadNabehu(3.83, 10, 75, 0).minut), 98);
+  check('−20 °C venku, z 10 na 80 °C → 112 min', Math.round(h.api.saunaModelMin(m, -20, 10, 80)), 112);
+  check('−20 °C venku, z 10 na 85 °C → 126 min', Math.round(h.api.saunaModelMin(m, -20, 10, 85)), 126);
   check('cíl pod startem → 0', h.api.saunaModelMin(m, 8, 50, 40), 0);
   check('cíl 90 (konec stupnice) je dosažitelný', h.api.saunaModelMin(m, 8, 10, 90) > 0, true);
   check('cíl na stropu 91 → nedosažitelné (null, žádná výjimka)', h.api.saunaModelMin(m, 8, 10, 91), null);
-  check('odhad = model + dojezd 8 min', (h.api.odhadNabehu(8.3, 11, 60, 0).minut - 59.5).toFixed(1), '8.0');
-  check('bez měření se počítá s výchozím modelem', h.api.saunaModel() === m, true);
+  check('odhad = model + dojezd 12 min', (h.api.odhadNabehu(8.3, 11, 60, 0).minut - h.api.saunaModelMin(m, 8.3, 11, 60)).toFixed(1), '12.0');
+  check('počítá se s pevným vzorcem', h.api.saunaModel() === m, true);
 }
 
 nadpis('2) Úsek na plný výkon');
@@ -80,6 +83,12 @@ nadpis('2) Úsek na plný výkon');
   const bezW = mereni(p, { cil: 75, sW: false });
   const ub = h.api.saunaFitUsek(bezW);
   check('staré měření bez příkonu: do cíle − 4 °C', ub.body.every(b => b.c < 71) && ub.body.length > 10, true);
+  // Saunování 4 h na cíli a pak chladnutí: dřív úsek končil až posledním bodem
+  // pod cíl − 4 °C při chladnutí — hodiny držení na cíli šly do fitu a ten uletěl
+  const chladne = mereni(p, { cil: 75, sW: false, delka: 220 });
+  for (let t = 222; t <= 240; t += 2) chladne.body.push({ min: t, c: 76 - (t - 220) / 2, venkuC: 8 });
+  const uch = h.api.saunaFitUsek(chladne);
+  check('  chladnutí po saunování do úseku nejde', uch.hend < 120 && uch.body.every(b => b.c < 71), true);
   const snizeny = mereni(p, { cil: 75 });
   snizeny.zmenyCile = [{ min: 0, cilC: 80 }, { min: 40, cilC: 75 }];
   check('cíl snížený během náběhu → jen do snížení', h.api.saunaFitUsek(snizeny).hend, 40);
@@ -97,56 +106,55 @@ nadpis('2) Úsek na plný výkon');
   check('bod bez teploty (výpadek) fit nerozhodí', h.api.saunaFitUsek(vypadek).body.every(b => typeof b.c === 'number'), true);
 }
 
-nadpis('3) Přefitování');
+nadpis('3) Kontrolní fit (appka ho nepoužívá)');
 {
   const h = build();
   const vych = h.api.SAUNA_MODEL_VYCHOZI;
   const varianty = [[8, 10], [12, 18], [3, 6], [15, 20], [6, 11], [10, 14]];
-  // Data přesně z výchozího modelu i s dojezdem 8 min → nic se nemění
-  const stejne = varianty.map(([v, o], i) => mereni(vych, { venku: v, od: o, start: Date.UTC(2026, 9, 10 + i, 17) }));
+  // Data přesně z pevného vzorce i s jeho dojezdem → fit nic lepšího nenajde
+  const stejne = varianty.map(([v, o], i) => mereni(vych, { venku: v, od: o, dojezd: vych.dojezd, start: Date.UTC(2026, 9, 10 + i, 17) }));
   const f0 = h.api.saunaFit(stejne);
-  check('data podle výchozího modelu → fit se nepoužije', f0.pouzit, false);
+  check('data podle vzorce → přefitovat netřeba', f0.lepsi + ' ' + /sedí/.test(f0.duvod), 'false true');
   check('  a vyjde skoro stejný', Math.abs(f0.model.tau - vych.tau) < 3 && Math.abs(f0.model.rozjezd - vych.rozjezd) < 0.6, true);
-  check('  dojezd ~8 min', Math.abs(f0.model.dojezd - 8) < 0.6, true);
-  check('  b drží na 0,3', f0.model.b, 0.3);
-  check('tři měření nestačí', h.api.saunaFit(stejne.slice(0, 3)).pouzit + ' ' + /málo/.test(h.api.saunaFit(stejne.slice(0, 3)).duvod), 'false true');
+  check('  dojezd ~ jako ve vzorci', Math.abs(f0.model.dojezd - vych.dojezd) < 0.6, true);
+  check('  b drží na pevné hodnotě', f0.model.b, vych.b);
+  check('tři měření nestačí', h.api.saunaFit(stejne.slice(0, 3)).lepsi + ' ' + /málo/.test(h.api.saunaFit(stejne.slice(0, 3)).duvod), 'false true');
   // Pomalejší sauna (třeba po výměně kamenů)
-  const jina = { rozjezd: 7, tau: 140, a: 145, b: 0.3, termostat: 90, dojezd: 5 };
+  const jina = { rozjezd: 7, tau: 140, a: 145, b: vych.b, termostat: 90, dojezd: 5 };
   const pomale = varianty.map(([v, o], i) => mereni(jina, { venku: v, od: o, dojezd: 5, start: Date.UTC(2026, 9, 10 + i, 17) }));
   const f1 = h.api.saunaFit(pomale);
-  check('pomalejší sauna → nový model se použije', f1.pouzit, true);
+  check('pomalejší sauna → hlásí, že je čas přefitovat', f1.lepsi + ' ' + /pošli data/.test(f1.duvod), 'true true');
   check('  τ vyjde ~140', Math.abs(f1.model.tau - 140) < 4, true);
   check('  a vyjde ~145', Math.abs(f1.model.a - 145) < 3, true);
   check('  rozjezd ~7 min', Math.abs(f1.model.rozjezd - 7) < 0.6, true);
   check('  dojezd ~5 min', Math.abs(f1.model.dojezd - 5) < 0.6, true);
-  check('  chyba na prazích klesla', f1.chybaPrahuMin.fit < f1.chybaPrahuMin.vychozi, true);
-  // Appka pak počítá s novým modelem
+  check('  chyba na prazích by klesla', f1.chybaPrahuMin.fit < f1.chybaPrahuMin.vychozi, true);
+  // Appka ale počítá dál s pevným vzorcem — přefitování dělá člověk
   h.state.saunaNahrev.zaznamy = pomale;
-  check('aktivní model = přefitovaný', h.api.saunaModel().tau, f1.model.tau);
-  check('odhad v appce ho hlásí jako „z měření“', h.api.saunaOdhad().model.zdroj, 'mereni');
-  check('  a odhad počítá s ním', h.api.odhadNabehu(8, 10, 75, 0).minut.toFixed(1),
-    (h.api.saunaModelMin(f1.model, 8, 10, 75) + f1.model.dojezd).toFixed(1));
-  h.state.saunaNahrev.zaznamy = stejne;
-  check('bez znatelného rozdílu zůstává výchozí', h.api.saunaOdhad().model.zdroj, 'vychozi');
+  check('aktivní model = pevný vzorec', h.api.saunaModel() === vych, true);
+  check('  odhad v appce nese jeho konstanty', h.api.saunaOdhad().model.tau, vych.tau);
+  check('  bez doladění', 'doladeni' in h.api.saunaOdhad().model, false);
+  check('  a analýza fit jen ukáže', h.api.saunaAnalyza(pomale).fit.lepsi + ' ' + ('pouzit' in h.api.saunaAnalyza(pomale).fit), 'true false');
   // Mráz: b se uvolní až po třech nábězích pod nulou
-  const sB = { rozjezd: 5.2, tau: 115, a: 138, b: 0.6, termostat: 90 };
+  const sB = { rozjezd: 5.2, tau: 115, a: 138, b: 0.8, termostat: 90 };
   const sezona = [...varianty, [-10, 2], [-5, 4], [-15, 0]]
     .map(([v, o], i) => mereni(sB, { venku: v, od: o, cil: 70, start: Date.UTC(2026, 11, 1 + i, 17) }));
   const f2 = h.api.saunaFit(sezona);
-  check('3 náběhy v mrazu → b se fituje', f2.bVolne + ' ' + (Math.abs(f2.model.b - 0.6) < 0.08), 'true true');
-  check('2 náběhy v mrazu → b pořád 0,3', h.api.saunaFit(sezona.slice(0, -1)).model.b, 0.3);
+  check('3 náběhy v mrazu → b se fituje', f2.bVolne + ' ' + (Math.abs(f2.model.b - 0.8) < 0.08), 'true true');
+  check('2 náběhy v mrazu → b pořád pevné', h.api.saunaFit(sezona.slice(0, -1)).model.b, vych.b);
 }
 
-nadpis('4) Doladění bez dvojího dojezdu');
+nadpis('4) Uletělý fit appku nerozhodí');
 {
+  // Skutečnost z 11/2026: fit uvízl na mezi (a = 80, τ 61), odhad posunul o 46 min
+  // a appka ho vzala. Teď se odhad počítá jen z pevného vzorce, ať fit vyjde jakkoli.
   const h = build();
   const vych = h.api.SAUNA_MODEL_VYCHOZI;
-  const z = [8, 12, 3].map((v, i) => mereni(vych, { venku: v, od: 10, start: Date.UTC(2026, 9, 1 + i, 17) }));
-  const k = h.api.saunaKalibrace(z);
-  check('sauna přesně podle modelu i s dojezdem → faktor 1', k.faktor, 1);
-  const o = h.api.odhadNabehu(8, 10, 75, 0).minut;
-  check('doladěný odhad = celý odhad × faktor', h.api.odhadNabehuDoladeny(8, 10, 75, 0, undefined, { faktor: 1.1, pouzito: true }).minut.toFixed(2),
-    (o * 1.1).toFixed(2));
+  const divne = [[8, 10], [12, 18], [3, 6], [15, 20]].map(([v, o], i) =>
+    mereni({ rozjezd: 0, tau: 60, a: 80, b: 0.3 }, { venku: v, od: o, cil: 70, dojezd: 0, start: Date.UTC(2026, 9, 1 + i, 17) }));
+  h.state.saunaNahrev.zaznamy = divne;
+  check('odhad z 10 °C na 75 = pevný vzorec', h.api.odhadNabehu(8, 10, 75, 0).minut.toFixed(1),
+    (h.api.saunaModelMin(vych, 8, 10, 75) + vych.dojezd).toFixed(1));
 }
 
 nadpis('5) Cena podle VT/NT');

@@ -625,7 +625,7 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   // Předpověď, doladění a kontrola běží na pozadí — v řádku jen cíl a čas zapnutí
   const puvodne = new Date(); puvodne.setHours(18, 10, 0, 0);
   huumTimersData = [{ id: 8, time: '19:00', teplota: 85, zapneV: zapneV.getTime(), puvodneV: puvodne.getTime(), zapnuto: false,
-    nabeh: { minut: 62, venkuC: 9, zPredpovedi: true, doladeni: 1.11, doladeniMereni: 8 },
+    nabeh: { minut: 62, venkuC: 9, zPredpovedi: true },
     kontrola: { kdy: 1, vSaune: 9.6, venkuC: 4, minut: 62, posunMin: -12 } }];
   renderHuumTimers();
   check('  jen teplota a čas zapnutí', document.querySelector('#huumTimerList .timer-row-text').textContent,
@@ -789,14 +789,15 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
     ],
     prumer: { pocet: 2, cena: 51.1, kwh: 13, nabehKwh: 10.5, udrzKwh: 2.5, nabehMin: 97.5, saunovaniMin: 64, celkemMin: 161.5, hodinaNavicKc: 8 },
     cenik: { nt: 3.42394, vt: 4.32625, hdoNt: [[0, 8], [9, 12], [13, 15], [16, 19], [20, 24]] },
-    fit: { pouzit: false, zaznamu: 14, chybaPrahuMin: { fit: 1.6, vychozi: 1.7 } }
+    fit: { lepsi: false, zaznamu: 14, chybaPrahuMin: { fit: 1.6, vychozi: 1.7 } }
   };
   renderSaunaNahrev();
   const stSouhrn = souhrn.textContent;
   check('průměrná cena a kWh', /51 Kč · 13,0 kWh/.test(stSouhrn), 'true');
   check('  náběh v hodinách a minutách', /1 h 38 min/.test(stSouhrn), 'true');
   check('  hodina saunování navíc', /asi 8 Kč/.test(stSouhrn), 'true');
-  check('  model: výchozí s chybou na prazích', /výchozí \\(14 náběhů\\) · ±1,7 min/.test(stSouhrn), 'true');
+  check('  model: pevný vzorec s chybou na prazích', /pevný vzorec \\(ověřeno na 14 nábězích\\) · ±1,7 min/.test(stSouhrn), 'true');
+  check('  bez výzvy k přefitování, když sedí', /přefitování/.test(stSouhrn), 'false');
   check('  VT časy z HDO', /8–9, 12–13, 15–16, 19–20 h/.test(stSouhrn), 'true');
   check('  hodina ve VT o ~7,5 Kč dráž', /o 7,5 Kč víc/.test(stSouhrn), 'true');
   check('tabulka viditelná', tabObal.hidden, false);
@@ -814,11 +815,13 @@ const MIN = 60000, H = 3600000, DEN = 24 * H;
   document.getElementById('nahrevKopirBtn').click();
   await wait(60);
   check('kopie dat nese i analýzu', JSON.parse(zkopirovano).analyza.prumer.pocet, 2);
-  // Doladění z měření se v odhadu před zapnutím projeví i v appce
-  const sDol = odhadNabehuJs({ ...model, doladeni: { faktor: 1.1, pouzito: true } }, 10, 20, 80).minut;
-  check('odhad v appce násobí doladěním', (sDol / odhadNabehuJs(model, 10, 20, 80).minut).toFixed(2), '1.10');
-  check('  nepoužité doladění nic nemění',
-    odhadNabehuJs({ ...model, doladeni: { faktor: 1.1, pouzito: false } }, 10, 20, 80).minut, odhadNabehuJs(model, 10, 20, 80).minut);
+  // Fit by byl lepší → jen výzva poslat data, vzorec v appce se nemění
+  saunaAnalyzaData.fit = { lepsi: true, zaznamu: 14, chybaPrahuMin: { fit: 1.6, vychozi: 4.2 } };
+  renderSaunaNahrev();
+  check('lepší fit → výzva k přefitování', /±4,2 min · pošli data k přefitování/.test(souhrn.textContent), 'true');
+  // Vzorec je pevný: případné staré „doladění“ ze serveru se ignoruje
+  check('odhad v appce bez doladění',
+    odhadNabehuJs({ ...model, doladeni: { faktor: 1.1, pouzito: true } }, 10, 20, 80).minut, odhadNabehuJs(model, 10, 20, 80).minut);
   saunaAnalyzaData = null;
 
   OUT.push('\\n9) Měřák 3EM zůstal nedotčený');

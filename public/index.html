@@ -10122,11 +10122,8 @@ function odhadNabehuJs(m, venkuC, tStartC, cilC, now = Date.now()) {
   if (cilC <= tStartC) return { minut: 0, hotovoV: now, dosazitelne: true };
   const tMax = m.a + m.b * venkuC;
   if (cilC >= m.termostat || cilC >= tMax) return { minut: null, hotovoV: null, dosazitelne: false };
-  let minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC))
+  const minut = (typeof m.rozjezd === 'number' ? m.rozjezd : 0) + m.tau * Math.log((tMax - tStartC) / (tMax - cilC))
     + (typeof m.dojezd === 'number' ? m.dojezd : 0);
-  // Doladění podle vlastních nahřátí násobí celý odhad (jako na serveru)
-  const dol = m.doladeni;
-  if (dol && dol.pouzito && typeof dol.faktor === 'number') minut *= dol.faktor;
   return { minut, hotovoV: Math.round((now + minut * 60000) / 60000) * 60000, dosazitelne: true };
 }
 
@@ -10412,7 +10409,7 @@ function renderHuumTimers() {
     const txt = document.createElement('span');
     txt.className = 'timer-row-text';
     txt.textContent = `${t.teplota} °C · ` + (t.zapnuto ? 'topí'
-      // Jen cíl a čas zapnutí. Předpověď, doladění a kontrola 20 min předem běží
+      // Jen cíl a čas zapnutí. Předpověď a kontrola 20 min předem běží
       // na pozadí a píšou se do logu.
       : (typeof t.zapneV === 'number' ? `zapne se v ${fmtSolTime(t.zapneV)}` : 'zapne se podle odhadu'));
     const x = document.createElement('button');
@@ -10750,9 +10747,11 @@ function renderSaunaSouhrn() {
   }
   const f = a.fit;
   if (f) {
-    const chyba = f.chybaPrahuMin && typeof f.chybaPrahuMin[f.pouzit ? 'fit' : 'vychozi'] === 'number'
-      ? ` · ±${nahrevCislo(f.chybaPrahuMin[f.pouzit ? 'fit' : 'vychozi'])} min` : '';
-    radek('Model náběhu', (f.pouzit ? `z měření (${f.zaznamu} náběhů)` : `výchozí (${f.zaznamu} náběhů)`) + chyba);
+    // Vzorec je pevný; fit z měření jen hlásí, kdy by se vyplatilo přefitovat
+    const chyba = f.chybaPrahuMin && typeof f.chybaPrahuMin.vychozi === 'number'
+      ? ` · ±${nahrevCislo(f.chybaPrahuMin.vychozi)} min` : '';
+    radek('Model náběhu', `pevný vzorec (ověřeno na ${f.zaznamu} nábězích)` + chyba
+      + (f.lepsi ? ' · pošli data k přefitování' : ''));
   }
   const pozn = document.createElement('div');
   pozn.className = 'wbsrc-note';
