@@ -70,7 +70,6 @@ setTimeout(async () => {
   pouzijRezim('full');
   check('záložek je třináct', zalozky().length, 13);
   check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
-  check('tlačítko prázdnin (Žaluzie, nad rozvrhem) je vidět', vidim(document.getElementById('prazdninyBtn')), true);
   check('teplotní automatika je na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
   // Rozvrh je ve full sbalený pod tlačítkem — jde k němu, jen se na něj musí ťuknout
@@ -163,9 +162,7 @@ setTimeout(async () => {
   check('teplotní automatika se přestěhuje na Žaluzie', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Žaluzie"]'), true);
   check('  hned pod dětská tlačítka', document.getElementById('detiTlacitka').closest('.card').nextElementSibling.id, 'tempAutoCard');
   check('  a je vidět', vidim(document.getElementById('tempAutoCard')), true);
-  // Prázdniny mění rozvrh celého domu — do dětské ruky nepatří
-  check('tlačítko prázdnin zmizí', vidim(document.getElementById('prazdninyBtn')), false);
-  check('  i jezdec automatiky', vidim(document.getElementById('autoModeSlider')), false);
+  check('jezdec automatiky zmizí', vidim(document.getElementById('autoModeSlider')), false);
   check('bazén už nejde spínat', vidim(document.getElementById('poolOnBtn')), false);
   check('  ale světlo ano', vidim(document.getElementById('lightBazenOnBtn2')), true);
   // Ovládání se dětem vrátilo, ale jen se světly zahrady — ne s čerpadlem,
@@ -316,7 +313,6 @@ setTimeout(async () => {
   await pockej();
   check('správný kód přepne na full', rezimApky, 'full');
   check('  a vrátí všechny záložky', zalozky().length, 13);
-  check('  i prázdniny', vidim(document.getElementById('prazdninyBtn')), true);
   check('  a teplotní automatika zpátky na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
 
   // Kód se chce i OPAČNÝM směrem — jinak by stačilo přepnout tam a zpátky

@@ -1,5 +1,5 @@
-// Přepínač automatiky (nahoře na Ovládání, do 11/2026 na FVE) a výjimky z rozvrhu žaluzií — prázdniny
-// a ložnice (na Žaluziích nad rozvrhem). Box se scénami („Zapni saunu"…) je
+// Přepínač automatiky (nahoře na Ovládání, do 11/2026 na FVE). Box s prázdninami
+// a ložnicí je pryč — prázdniny se řídí kalendářem. Box se scénami („Zapni saunu"…) je
 // z FVE pryč (11/2026), stránka Asistent i pole na instrukce taky.
 const fs = require('fs');
 const path = require('path');
@@ -35,7 +35,6 @@ setTimeout(async () => {
   const pockej = () => new Promise(r => setTimeout(r, 30));
   const slide = document.querySelector('.slide[data-title="FVE"]');
 
-  const zaluzie = document.querySelector('.slide[data-title="Žaluzie"]');
   R.push('1) Box se scénami je pryč');
   check('žádná tlačítka scén', document.querySelectorAll('#asstScenes, .asst-scene, .asszistant-card').length, 0);
   check('ani odpověď asistenta', !!document.getElementById('asstReply'), false);
@@ -45,34 +44,10 @@ setTimeout(async () => {
   // Snímek ze serveru dál posílá seznam scén — appka ho jen přejde
   check('renderSceny už neexistuje', typeof window.renderSceny, 'undefined');
 
-  R.push('\\n1b) Prázdniny a ložnice na Žaluziích nad rozvrhem');
-  const vyj = document.getElementById('rozvrhVyjimky');
-  check('karta je na Žaluziích', zaluzie.contains(vyj), true);
-  check('  ne na FVE', slide.contains(document.getElementById('prazdninyBtn')), false);
-  const zKarty = [...zaluzie.querySelectorAll(':scope > .page > .card')];
-  check('  hned nad rozvrhem (mezi nimi jen náhled pro děti)',
-    zKarty.slice(zKarty.indexOf(vyj) + 1, zKarty.indexOf(document.getElementById('rozvrhCard'))).every(c => c.classList.contains('jen-deti')), true);
-  const dv = [...vyj.querySelectorAll('button')];
-  check('  prázdniny a ložnice', dv.map(b => b.id).join(','), 'prazdninyBtn,lozniceZavrenoBtn');
-  const r0 = dv[0].getBoundingClientRect(), r1 = dv[1].getBoundingClientRect();
-  check('stojí vedle sebe', Math.round(r0.top) === Math.round(r1.top) && r1.left > r0.left, true);
-  check('  a jsou stejně široká', Math.round(r0.width), Math.round(r1.width));
-
-  R.push('\\n1e) Zavřené žaluzie v ložnici');
-  const loz = document.getElementById('lozniceZavrenoBtn');
-  renderLozniceZavreno({ datum: null, aktivni: false });
-  check('tlačítko je šedé s výzvou', loz.textContent + ' ' + loz.classList.contains('on'), 'Zavřené žaluzie v ložnici false');
-  poslano.length = 0;
-  loz.click();
-  await pockej();
-  check('stisk zapne', poslano[0] && poslano[0].url + ' ' + poslano[0].body.zapnout, '/api/loznice-zavreno true');
-  renderLozniceZavreno({ datum: '2026-09-29', aktivni: true });
-  check('  zapnuté je oranžové a řekne do kdy', loz.textContent + ' ' + loz.classList.contains('on'), 'Ložnice zavřená do rána ✓ true');
-  poslano.length = 0;
-  loz.click();
-  await pockej();
-  check('druhý stisk zruší', poslano[0] && poslano[0].body.zapnout, false);
-  renderLozniceZavreno({ datum: null, aktivni: false });
+  R.push('\\n1b) Box s prázdninami a ložnicí je pryč (prázdniny se řídí kalendářem)');
+  check('žádný box ani tlačítka', ['rozvrhVyjimky', 'prazdninyBtn', 'lozniceZavrenoBtn'].filter(id => document.getElementById(id)).length, 0);
+  check('  ani jejich kód', typeof window.renderPrazdniny + ' ' + typeof window.renderLozniceZavreno, 'undefined undefined');
+  check('  a nápověda rozvrhu tlačítko nezmiňuje', [...document.querySelectorAll('.logic-list')].some(u => /tlačítko na FVE/.test(u.textContent)), false);
 
   R.push('\\n2) Pořadí karet');
   const karty = [...slide.querySelectorAll(':scope > .page > .card')]
@@ -95,38 +70,6 @@ setTimeout(async () => {
   const logKarty = [...logSlide.querySelectorAll(':scope > .page > .card')];
   const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
   check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);
-
-  R.push('\\n2b) Zítra jsou prázdniny');
-  // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
-  // zítřek se má počítat jako víkend, i když je středa.
-  const praz = document.getElementById('prazdninyBtn');
-  check('tlačítko je na Žaluziích', zaluzie.contains(praz), true);
-  renderPrazdniny({ zitra: false, dnes: false });
-  check('  a je vypnuté', praz.classList.contains('on'), false);
-  check('  s výzvou', praz.textContent, 'Zítra jsou prázdniny');
-  poslano.length = 0;
-  praz.click();
-  await pockej();
-  check('stisk je zapne', poslano[0].url, '/api/prazdniny');
-  check('  s hodnotou', poslano[0].body.zapnout, true);
-  renderPrazdniny({ zitra: true, dnes: false });
-  check('  a tlačítko se rozsvítí', praz.classList.contains('on'), true);
-  poslano.length = 0;
-  praz.click();
-  await pockej();
-  // Bez toho by se prázdniny nedaly zrušit, jen počkat, až přejdou
-  check('druhý stisk je zruší', poslano[0].body.zapnout, false);
-  renderPrazdniny({ zitra: false, dnes: true });
-  check('v den prázdnin to tlačítko řekne', praz.textContent, 'Dnes jsou prázdniny');
-  // Prázdniny, které přišly samy
-  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: 'leto' });
-  check('v létě tlačítko řekne proč', praz.textContent, 'Zítra prázdniny (léto)');
-  check('  světlejší než ruční', praz.classList.contains('auto') && !praz.classList.contains('on'), true);
-  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: 'skola' });
-  check('bez školy v kalendáři taky', praz.textContent, 'Zítra prázdniny (bez školy)');
-  renderPrazdniny({ zitra: true, dnes: false, zitraDuvod: 'rucne' });
-  check('ruční má přednost', praz.textContent + ' ' + praz.classList.contains('auto'), 'Zítra jsou prázdniny ✓ false');
-  renderPrazdniny({ zitra: false, dnes: false, zitraDuvod: null, dnesDuvod: null });
 
   R.push('\\n3) Jezdec automatiky má čtyři polohy');
   const jezdec = document.getElementById('autoModeSlider');

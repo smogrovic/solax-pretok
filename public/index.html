@@ -1555,28 +1555,6 @@
   .aqp-smazat:disabled{visibility:hidden;}
   .aqp-pridat{margin:2px 0 4px;}
   .aqp-ulozit{width:100%;margin-top:8px;}
-  /* Výjimky z rozvrhu (Žaluzie): prázdniny a ložnice vedle sebe */
-  .asst-scenes{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:8px;
-  }
-  /* O rozměr se stará mřížka. Šedou/oranžovou si tlačítko nechává — je to
-     přepínač, ne akce, a na tom rozdílu záleží. */
-  .prazdniny-btn{
-    border:none;
-    border-radius:16px;
-    padding:12px 10px;
-    background:rgba(44,62,80,0.06);
-    color:var(--grey-text);
-    font-size:13px;
-    font-weight:600;
-    font-family:inherit;
-  }
-  .prazdniny-btn.on{background:var(--orange);color:#fff;}
-  /* Prázdniny, které přišly samy (léto, bez školy) — světlejší než ruční */
-  .prazdniny-btn.auto{background:rgba(245,147,61,0.18);color:var(--orange-dark);}
-  .prazdniny-btn:disabled{opacity:0.5;}
   /* Potvrzovací okno u poloh, které dům utlumí. Překrývá celou obrazovku schválně:
      dokud se nerozhodne, nemá jít mezitím přehodit něco jiného. */
   .prihlaseni-kod{margin-top:10px;text-align:center;font-size:13px;color:var(--grey-text);}
@@ -3159,16 +3137,6 @@
         <div class="timer-list bt-list"></div>
       </div>
 
-      <!-- Výjimky z rozvrhu: zítřek jako víkend a ložnice zavřená do rána. Dřív na FVE
-           v boxu se scénami (zrušen 11/2026), sem patří, protože mění, co rozvrh udělá. -->
-      <div class="card lockable jen-full" id="rozvrhVyjimky">
-        <div class="asst-scenes" id="asstDvojice">
-          <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
-          <!-- Zatáhne ložnici a to ráno ji žádná automatika neotevře (ani o prázdninách v 10:00) -->
-          <button class="prazdniny-btn" id="lozniceZavrenoBtn" type="button">Zavřené žaluzie v ložnici</button>
-        </div>
-      </div>
-
       <!-- Rozvrh: opakovaná pravidla místo scénářů v TaHomě. Je jen na první
            stránce žaluzií — pravidla míří na jména, ne na stránky, takže druhá
            karta by ukazovala totéž dvakrát. -->
@@ -4139,7 +4107,7 @@
           <div class="logic-h">Rozvrh žaluzií</div>
           <ul class="logic-list">
             <li>„Západ slunce" = <b>západ + zpoždění</b> níže.</li>
-            <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: tlačítko na FVE, <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
+            <li>O <b>prázdninách</b> (Po–Pá) jede víkendová sada: <b>červenec–srpen</b>, nebo když Miki ani Elenka nemají v kalendáři <b>Školu</b>.</li>
             <li>Po–Pá: <b>Děti ráno</b> v 6:40 na 50 % — každé dítě jen v den, kdy má v kalendáři <b>Školu</b>.</li>
             <li>Po–Pá: <b>Dopoledne</b> kuchyň a obývák (7:00, nejdřív při východu), <b>Pokoje dopoledne</b> v 10:00 ložnice, hosté a děti 25 %.</li>
             <li><b>Víkend a prázdniny</b>: 10:00 děti i ložnice 25 %. Pokoje se dopoledne <b>jen otevírají</b> — ručně víc otevřené rozvrh nepřivře.</li>
@@ -11678,84 +11646,6 @@ function renderAuto(d) {
   document.getElementById('wbAutoMeta').textContent = meta.join(' · ');
 }
 
-// ---------- Zítra jsou prázdniny ----------
-// Rozvrh žaluzií počítá takový den jako neděli, takže pojede víkendová sada.
-const prazdninyBtnEl = document.getElementById('prazdninyBtn');
-let prazdninyData = { zitra: false, dnes: false };
-
-// Prázdniny přijdou samy v červenci a srpnu a když děti nemají v kalendáři Školu.
-// Tlačítko pak ukazuje proč; ručně jde zapnout dál.
-const PRAZDNINY_PROC = { leto: 'léto', skola: 'bez školy' };
-function renderPrazdniny(d) {
-  if (d) prazdninyData = { ...prazdninyData, ...d };
-  if (!prazdninyBtnEl) return;
-  const auto = PRAZDNINY_PROC[prazdninyData.zitraDuvod];
-  prazdninyBtnEl.classList.toggle('on', !!prazdninyData.zitra);
-  prazdninyBtnEl.classList.toggle('auto', !prazdninyData.zitra && !!auto);
-  prazdninyBtnEl.textContent = prazdninyData.zitra
-    ? 'Zítra jsou prázdniny ✓'
-    : auto ? `Zítra prázdniny (${auto})`
-    : (prazdninyData.dnes ? 'Dnes jsou prázdniny' : 'Zítra jsou prázdniny');
-}
-
-if (prazdninyBtnEl) {
-  prazdninyBtnEl.addEventListener('click', async () => {
-    const zapnout = !prazdninyData.zitra;
-    prazdninyBtnEl.disabled = true;
-    try {
-      const res = await fetch('/api/prazdniny', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ zapnout })
-      });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
-      renderPrazdniny(data);
-      errorEl.classList.remove('show');
-    } catch (err) {
-      errorEl.textContent = 'Prázdniny: ' + err.message;
-      errorEl.classList.add('show');
-    }
-    prazdninyBtnEl.disabled = false;
-  });
-}
-
-// ---------- Zavřené žaluzie v ložnici ----------
-// Zatáhne ložnici hned a to ráno (stisk večer = zítra, po půlnoci = dnes) ji
-// automatika neotevře. Druhý stisk jen zruší, žaluzie nechá být.
-const lozniceZavrenoBtnEl = document.getElementById('lozniceZavrenoBtn');
-let lozniceZavrenoData = { datum: null, aktivni: false };
-
-function renderLozniceZavreno(d) {
-  if (d) lozniceZavrenoData = { ...lozniceZavrenoData, ...d };
-  if (!lozniceZavrenoBtnEl) return;
-  lozniceZavrenoBtnEl.classList.toggle('on', !!lozniceZavrenoData.aktivni);
-  lozniceZavrenoBtnEl.textContent = lozniceZavrenoData.aktivni
-    ? 'Ložnice zavřená do rána ✓' : 'Zavřené žaluzie v ložnici';
-}
-
-if (lozniceZavrenoBtnEl) {
-  lozniceZavrenoBtnEl.addEventListener('click', async () => {
-    const zapnout = !lozniceZavrenoData.aktivni;
-    lozniceZavrenoBtnEl.disabled = true;
-    try {
-      const res = await fetch('/api/loznice-zavreno', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ zapnout })
-      });
-      const data = await res.json();
-      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
-      renderLozniceZavreno(data);
-      errorEl.classList.remove('show');
-    } catch (err) {
-      errorEl.textContent = 'Ložnice: ' + err.message;
-      errorEl.classList.add('show');
-    }
-    lozniceZavrenoBtnEl.disabled = false;
-  });
-}
-
 // ---------- Nejsme doma ----------
 // Poslední poloha jezdce automatiky. Spustí patnáctiminutový odpočet, ať se stihne
 // odejít. Hláška pod jezdcem říká, co se stane a kdy — bez ní by přehození vypadalo,
@@ -13252,8 +13142,6 @@ function applySnapshot(snap) {
   bezpecne(() => renderSekacka(snap.sekacka));
   bezpecne(() => renderVysavac(snap.vysavac || null));
   bezpecne(() => renderAuto(snap.auto || null));
-  bezpecne(() => renderPrazdniny(snap.prazdniny));
-  bezpecne(() => renderLozniceZavreno(snap.lozniceZavreno));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   bezpecne(() => renderSaunaPo(snap.saunaPoMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
@@ -13644,8 +13532,6 @@ function connectStream() {
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
   es.addEventListener('auto', e => { bezpecne(() => renderAuto(JSON.parse(e.data).auto)); });
-  es.addEventListener('prazdniny', e => { renderPrazdniny(JSON.parse(e.data)); });
-  es.addEventListener('lozniceZavreno', e => { renderLozniceZavreno(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('saunaPo', e => { renderSaunaPo(JSON.parse(e.data).minut); });
   es.addEventListener('siteDny', e => {
