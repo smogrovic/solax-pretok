@@ -1062,6 +1062,18 @@
     color:var(--grey-text);
   }
   .rozvrh-dny button.on{background:var(--orange);color:#fff;}
+  /* Rozvrh televize dětí (Log/Nastavení): pravidlo = dny, čas, zapnout/vypnout */
+  .tvr-dite{width:100%;margin-top:10px;}
+  .tvr-dite-h{font-weight:700;color:var(--navy);font-size:14px;margin-bottom:6px;}
+  .tvr-pozn{font-size:12px;color:var(--grey-text);margin:-2px 0 6px;}
+  .tvr-pravidlo{background:rgba(44,62,80,0.04);border-radius:12px;padding:8px;margin-bottom:6px;}
+  .tvr-pravidlo.vyp{opacity:0.5;}
+  .tvr-radek{display:flex;gap:6px;align-items:center;}
+  .tvr-radek input[type=time]{flex:1;min-width:0;}
+  .tvr-akce{border:none;border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;font-weight:700;color:#fff;background:var(--red);min-width:74px;}
+  .tvr-akce.on{background:var(--green);}
+  .tvr-mini{border:none;border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;background:rgba(44,62,80,0.08);color:var(--navy);}
+  .tvr-pridat{width:100%;}
   .rozvrh-rychle{display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;width:100%;margin-bottom:8px;}
   .rozvrh-rychle button{
     border:none;
@@ -3428,9 +3440,10 @@
         </div>
       </div>
 
-      <!-- Mikyho televize: obyčejné ON/OFF, žádná automatika ani auto-off v relé -->
+      <!-- Televize dětí: ON/OFF bez auto-off v relé, rozvrh je v Log/Nastavení.
+           Elenka zatím Shelly nemá — tlačítka jsou neaktivní, dokud ho server nehlásí. -->
       <div class="card lockable jen-full" data-emoji="📺" id="tvMikyCard">
-        <div class="device-block last">
+        <div class="device-block">
           <div class="shelly-row">
             <div class="traffic-light" id="tvMikyLight"></div>
             <div class="shelly-label">Televize Miky</div>
@@ -3440,6 +3453,17 @@
             <button class="power-btn off-btn" id="tvMikyOffBtn">OFF</button>
           </div>
           <div class="manual-hold" id="tvMikyHold"></div>
+        </div>
+        <div class="device-block last" id="tvElenkaBlok">
+          <div class="shelly-row">
+            <div class="traffic-light" id="tvElenkaLight"></div>
+            <div class="shelly-label">Televize Elenka</div>
+          </div>
+          <div class="power-buttons">
+            <button class="power-btn on-btn" id="tvElenkaOnBtn" disabled>ON</button>
+            <button class="power-btn off-btn" id="tvElenkaOffBtn" disabled>OFF</button>
+          </div>
+          <div class="manual-hold" id="tvElenkaHold">Shelly zatím není připojené</div>
           <canvas id="tvMikyTimeline"></canvas>
         </div>
       </div>
@@ -3963,6 +3987,15 @@
                   placeholder="Text, který se ukáže přes celou appku…"></textarea>
         <button class="sek-btn oznameni-poslat" id="oznameniPoslat" type="button">Zobrazit všem</button>
         <div class="rezim-hint" id="oznameniHint"></div>
+      </div>
+
+      <!-- Rozvrh televize dětí: dřív v aplikaci Shelly, teď ho spouští appka (server).
+           Elenka Shelly zatím nemá — pravidla jdou uložit, spouštět se začnou s relé. -->
+      <div class="card jen-full" id="tvRozvrhKarta">
+        <div class="asst-log-title">Rozvrh televize dětí</div>
+        <div id="tvRozvrhObsah"></div>
+        <button class="sek-btn" id="tvRozvrhUlozit" type="button" disabled>Uložit rozvrh</button>
+        <div class="rezim-hint" id="tvRozvrhHint"></div>
       </div>
 
       <div class="card logic-card">
@@ -4746,6 +4779,17 @@ const devices = {
     holdEl: document.getElementById('tvMikyHold'),
     label: 'Televize Miky'
   },
+  // Elenka zatím bez Shelly: tlačítka neaktivní, dokud server relé nehlásí (tvRozvrh.deti)
+  tvElenka: {
+    statusUrl: '/api/tv/elenka',
+    setUrl: '/api/tv/elenka/set',
+    light: els('tvElenkaLight'),
+    state: els('tvElenkaState'),
+    onBtn: els('tvElenkaOnBtn'),
+    offBtn: els('tvElenkaOffBtn'),
+    holdEl: document.getElementById('tvElenkaHold'),
+    label: 'Televize Elenka'
+  },
   lightNocni: {
     statusUrl: '/api/light/nocni',
     setUrl: '/api/light/nocni/set',
@@ -4778,7 +4822,9 @@ function renderManualHold() {
     } else if ((key === 'pool' || key === 'solinator') && saunaBlokujeUi()) {
       // Sauna přebíjí i ruční zapnutí — jistič je přednější
       device.holdEl.textContent = `Vypnuto saunou — vrátí se po ${fmtSolTime(saunaData.blockUntil)}`;
-    } else if (key === 'tvMiky') {
+    } else if (key === 'tvElenka' && !tvElenkaPripojeno) {
+      device.holdEl.textContent = 'Shelly zatím není připojené';
+    } else if (key === 'tvMiky' || key === 'tvElenka') {
       // Žádná automatika ji neřídí. Relé ale může být zapnuté a televize vypnutá —
       // rozhoduje odběr (nad 5 W jede), stejně jako pro časovou osu
       const w = d && typeof d.powerW === 'number' ? Math.round(d.powerW) : null;
@@ -6173,7 +6219,7 @@ function pruneTimelineLocal(tl) {
   const now = Date.now();
   const out = {};
   for (const k of Object.keys(tl || {})) {
-    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|ac_)/.test(k)) continue;
+    if (!/^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|tvElenka|ac_)/.test(k)) continue;
     // Dráha „připojeno" se kreslí v posouvacím grafu wallboxu, tak se drží 4 dny
     const cutoff = now - (k === 'wbPlugged' ? HIST_MAX_AGE_MS : 48 * 60 * 60 * 1000);
     out[k] = (Array.isArray(tl[k]) ? tl[k] : [])
@@ -6456,10 +6502,143 @@ function renderObehPlan(rozvrh) {
 // Mikyho televize: stejný malý graf ve své kartě
 const tvMikyCanvas = document.getElementById('tvMikyTimeline');
 const TV_MIKY_LANE = { key: 'tvMiky', label: 'Televize Miky', color: '#7d5fd6' };
+// Čára pro Elenku je v grafu hned — prázdná, dokud nemá Shelly
+const TV_ELENKA_LANE = { key: 'tvElenka', label: 'Televize Elenka', color: '#e0679a' };
 
 function renderObehTimeline() {
   drawTimeline(obehCanvas, null, [OBEH_LANE], 0, 24);
-  if (tvMikyCanvas) drawTimeline(tvMikyCanvas, null, [TV_MIKY_LANE], 0, 24);
+  if (tvMikyCanvas) drawTimeline(tvMikyCanvas, null, [TV_MIKY_LANE, TV_ELENKA_LANE], 0, 24);
+}
+
+// ---------- Rozvrh televize dětí (Log/Nastavení) ----------
+// Pravidla jako v aplikaci Shelly: ve vybrané dny v HH:MM zapni / vypni. Spouští je
+// server. Úpravy se drží v rozpracovaném návrhu, dokud se neuloží — příchozí stav ze
+// serveru je mezitím nepřepíše.
+const TVR_DNY = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+const tvRozvrhObsahEl = document.getElementById('tvRozvrhObsah');
+const tvRozvrhUlozitEl = document.getElementById('tvRozvrhUlozit');
+const tvRozvrhHintEl = document.getElementById('tvRozvrhHint');
+const TVR_HINT = 'Spouští ho appka (při vypnuté automatice ne, při „Jsme pryč" jen vypíná). '
+  + 'V aplikaci Shelly plán vypni, ať se to neplete.';
+let tvRozvrhServer = null;   // { rozvrh, deti } ze serveru
+let tvRozvrhNavrh = null;    // rozpracované úpravy; null = nic neupraveno
+let tvElenkaPripojeno = false;
+
+function tvRozvrhUprav(fn) {
+  if (!tvRozvrhNavrh) tvRozvrhNavrh = JSON.parse(JSON.stringify(tvRozvrhServer.rozvrh));
+  fn(tvRozvrhNavrh);
+  delete tvRozvrhHintEl.dataset.zprava;   // stará hláška („Uloženo.") po úpravě neplatí
+  renderTvRozvrh();
+}
+
+function tvRozvrhPravidloEl(klic, p, i) {
+  const box = document.createElement('div');
+  box.className = 'tvr-pravidlo' + (p.zap ? '' : ' vyp');
+  const dny = document.createElement('div');
+  dny.className = 'rozvrh-dny';
+  TVR_DNY.forEach((nazev, j) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = nazev;
+    b.classList.toggle('on', p.dny.includes(j + 1));
+    b.addEventListener('click', () => tvRozvrhUprav(r => {
+      const q = r[klic][i];
+      q.dny = q.dny.includes(j + 1) ? q.dny.filter(d => d !== j + 1) : [...q.dny, j + 1].sort();
+    }));
+    dny.appendChild(b);
+  });
+  box.appendChild(dny);
+  const radek = document.createElement('div');
+  radek.className = 'tvr-radek';
+  const cas = document.createElement('input');
+  cas.type = 'time';
+  cas.className = 'timer-time';
+  cas.value = p.cas;
+  cas.addEventListener('change', () => { if (cas.value) tvRozvrhUprav(r => { r[klic][i].cas = cas.value; }); });
+  const akce = document.createElement('button');
+  akce.type = 'button';
+  akce.className = 'tvr-akce' + (p.akce === 'on' ? ' on' : '');
+  akce.textContent = p.akce === 'on' ? 'Zapnout' : 'Vypnout';
+  akce.addEventListener('click', () => tvRozvrhUprav(r => { r[klic][i].akce = r[klic][i].akce === 'on' ? 'off' : 'on'; }));
+  const zap = document.createElement('button');
+  zap.type = 'button';
+  zap.className = 'tvr-mini';
+  zap.textContent = p.zap ? 'Aktivní' : 'Vypnuté';
+  zap.addEventListener('click', () => tvRozvrhUprav(r => { r[klic][i].zap = !r[klic][i].zap; }));
+  const smaz = document.createElement('button');
+  smaz.type = 'button';
+  smaz.className = 'tvr-mini';
+  smaz.textContent = '✕';
+  smaz.setAttribute('aria-label', 'Smazat pravidlo');
+  smaz.addEventListener('click', () => tvRozvrhUprav(r => { r[klic].splice(i, 1); }));
+  radek.append(cas, akce, zap, smaz);
+  box.appendChild(radek);
+  return box;
+}
+
+function renderTvRozvrh(p) {
+  if (p && p.rozvrh) tvRozvrhServer = p;
+  const deti = (tvRozvrhServer && tvRozvrhServer.deti) || [];
+  const elenka = deti.find(d => d.klic === 'elenka');
+  tvElenkaPripojeno = !!(elenka && elenka.pripojeno);
+  // Tlačítka Elenky jsou neaktivní, dokud server nehlásí její Shelly
+  for (const b of [...devices.tvElenka.onBtn, ...devices.tvElenka.offBtn]) b.disabled = !tvElenkaPripojeno;
+  renderManualHold();
+  if (!tvRozvrhObsahEl || !tvRozvrhServer) return;
+  const r = tvRozvrhNavrh || tvRozvrhServer.rozvrh;
+  tvRozvrhObsahEl.textContent = '';
+  for (const d of deti) {
+    const sek = document.createElement('div');
+    sek.className = 'tvr-dite';
+    sek.dataset.dite = d.klic;
+    const h = document.createElement('div');
+    h.className = 'tvr-dite-h';
+    h.textContent = d.jmeno;
+    sek.appendChild(h);
+    if (!d.pripojeno) {
+      const pozn = document.createElement('div');
+      pozn.className = 'tvr-pozn';
+      pozn.textContent = 'Shelly zatím není — pravidla se začnou spouštět, až bude připojené.';
+      sek.appendChild(pozn);
+    }
+    (r[d.klic] || []).forEach((pr, i) => sek.appendChild(tvRozvrhPravidloEl(d.klic, pr, i)));
+    const pridat = document.createElement('button');
+    pridat.type = 'button';
+    pridat.className = 'tvr-mini tvr-pridat';
+    pridat.textContent = '+ Přidat pravidlo';
+    pridat.addEventListener('click', () => tvRozvrhUprav(x => {
+      (x[d.klic] = x[d.klic] || []).push({ dny: [1, 2, 3, 4, 5], cas: '07:00', akce: 'on', zap: true });
+    }));
+    sek.appendChild(pridat);
+    tvRozvrhObsahEl.appendChild(sek);
+  }
+  tvRozvrhUlozitEl.disabled = !tvRozvrhNavrh;
+  if (!tvRozvrhHintEl.dataset.zprava) tvRozvrhHintEl.textContent = tvRozvrhNavrh ? 'Neuloženo.' : TVR_HINT;
+}
+
+if (tvRozvrhUlozitEl) {
+  tvRozvrhUlozitEl.addEventListener('click', async () => {
+    if (!tvRozvrhNavrh) return;
+    tvRozvrhUlozitEl.disabled = true;
+    const ukaz = t => { tvRozvrhHintEl.dataset.zprava = '1'; tvRozvrhHintEl.textContent = t; };
+    try {
+      const res = await fetch('/api/tv-rozvrh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ rozvrh: tvRozvrhNavrh })
+      });
+      const data = await res.json();
+      if (res.status === 401) { setLocked(true); throw new Error(data.error || 'Ovládání je zamčené.'); }
+      if (!res.ok) throw new Error(data.error || 'Nepovedlo se uložit.');
+      tvRozvrhNavrh = null;
+      delete tvRozvrhHintEl.dataset.zprava;
+      renderTvRozvrh(data);
+      ukaz('Uloženo.');
+    } catch (err) {
+      ukaz(err.message);
+      tvRozvrhUlozitEl.disabled = false;
+    }
+  });
 }
 
 function renderTimeline() {
@@ -13192,6 +13371,7 @@ function applySnapshot(snap) {
   bezpecne(renderTimeline);
   bezpecne(renderObehTimeline);
   bezpecne(() => renderObehPlan(snap.obehRozvrh));
+  bezpecne(() => renderTvRozvrh(snap.tvRozvrh));
   bezpecne(renderWallboxChart);   // dráha „připojeno" se kreslí z časové osy
   saveTimelineLocal();
   maybeRestoreTimelineToServer(serverTl, localTl);
@@ -13532,6 +13712,7 @@ function connectStream() {
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
   es.addEventListener('auto', e => { bezpecne(() => renderAuto(JSON.parse(e.data).auto)); });
+  es.addEventListener('tvRozvrh', e => { renderTvRozvrh(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('saunaPo', e => { renderSaunaPo(JSON.parse(e.data).minut); });
   es.addEventListener('siteDny', e => {

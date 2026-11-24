@@ -15,7 +15,7 @@ const { check, nadpis, konec } = suite('rozvrh čerpadla');
 
 const MIN = 60000;
 const CODE = between('// ---------- Oběhové čerpadlo: rozvrh ----------',
-                     '// ---------- Automatika přebytků');
+                     '// ---------- Televize dětí: rozvrh ----------');
 
 // `den` je zkratka jako z Intl (Mon…Sun), `cas` je 'HH:MM' pražského času.
 function build({ den = 'Mon', cas = '06:15', rezim = 'on', rucni = false, pryc = false, relace = null, huum = {} } = {}) {

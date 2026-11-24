@@ -115,7 +115,7 @@ setTimeout(() => {
     tvMikyCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: rc.left + (u.x1 + u.x2) / 2, clientY: rc.top + u.y }));
     const tip = document.querySelector('.tl-tip');
     const cas = t => new Date(t).toLocaleTimeString('cs-CZ', { hour: 'numeric', minute: '2-digit' });
-    check('klepnutí na úsek ukáže od–do a délku', !tip.hidden && tip.textContent, cas(od.getTime()) + ' – ' + cas(od.getTime() + 47 * MIN) + ' · 47 min');
+    check('klepnutí na úsek ukáže od–do a délku (dvě čáry → i čí)', !tip.hidden && tip.textContent, 'Televize Miky: ' + cas(od.getTime()) + ' – ' + cas(od.getTime() + 47 * MIN) + ' · 47 min');
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     check('  klepnutí jinam ho schová', tip.hidden, true);
     tvMikyCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: rc.left + 2, clientY: rc.top + 2 }));

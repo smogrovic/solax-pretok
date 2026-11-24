@@ -43,6 +43,10 @@ const OBEH_SERVER_URI = process.env.OBEH_SERVER_URI || SHELLY_SERVER_URI;
 // žádná automatika ani auto-off v relé — proto ani odhad „samo se vypne".
 const TV_MIKY_DEVICE_ID  = process.env.TV_MIKY_DEVICE_ID  || '34b7dac919a4';
 const TV_MIKY_SERVER_URI = process.env.TV_MIKY_SERVER_URI || SHELLY_SERVER_URI;
+// Televize u Elenky: Shelly zatím NENÍ. Až bude, stačí v Render → Environment vyplnit
+// TV_ELENKA_DEVICE_ID — relé, tlačítka v appce i rozvrh se zapnou samy.
+const TV_ELENKA_DEVICE_ID  = process.env.TV_ELENKA_DEVICE_ID  || '';
+const TV_ELENKA_SERVER_URI = process.env.TV_ELENKA_SERVER_URI || SHELLY_SERVER_URI;
 const TV_BEZI_W = 5;   // nad tímhle odběrem televize opravdu jede (relé samo neříká nic)
 
 // Tři samostatné měřáky spotřeby bazénu (ne relé). Proměnná je seznam oddělený čárkami.
@@ -124,7 +128,11 @@ const DEVICES = {
   lightNocni:  { apiPath: '/api/light/nocni',         serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_NOCNI_ID },
   lightKoupelna: { apiPath: '/api/light/koupelna',    serverUri: SHELLY_SERVER_URI,    deviceId: LIGHT_KOUPELNA_ID },
   obeh:        { apiPath: '/api/obeh',                serverUri: OBEH_SERVER_URI,      deviceId: OBEH_DEVICE_ID },
-  tvMiky:      { apiPath: '/api/tv/miky',             serverUri: TV_MIKY_SERVER_URI,   deviceId: TV_MIKY_DEVICE_ID }
+  tvMiky:      { apiPath: '/api/tv/miky',             serverUri: TV_MIKY_SERVER_URI,   deviceId: TV_MIKY_DEVICE_ID },
+  // Jen když má Elenka Shelly — jinak by ho poller každé dvě minuty hledal naprázdno
+  ...(TV_ELENKA_DEVICE_ID ? {
+    tvElenka:  { apiPath: '/api/tv/elenka',           serverUri: TV_ELENKA_SERVER_URI, deviceId: TV_ELENKA_DEVICE_ID }
+  } : {})
 };
 
 const shellyCache = new Map();
@@ -201,7 +209,8 @@ const DEVICE_LABELS = {
   lightNocni: 'Noční světla',
   lightKoupelna: 'Noční světlo koupelna',
   obeh: 'Oběhové čerpadlo',
-  tvMiky: 'Televize Miky'
+  tvMiky: 'Televize Miky',
+  tvElenka: 'Televize Elenka'
 };
 
 // Světla se cvakají pořád dokola a v logu by přebila věci, na kterých záleží.
@@ -266,7 +275,7 @@ const state = {
     lastTs: Date.now()
   },
   // segmenty { from, to } za 48 h; wbPlugged = kdy bylo auto připojené (graf režimů)
-  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [], obeh: [], tvMiky: [] },
+  timeline: { shelly: [], pool: [], solinator: [], wallbox: [], wbPlugged: [], sauna: [], obeh: [], tvMiky: [], tvElenka: [] },
   aircon: { devices: [], error: null }, // Panasonic klimatizace
   wallbox: { power: null, energy: null, mode: null, status: null, error: null }, // Solax EV charger
   wallboxHistory: [], // { t, w } — výkon nabíječky za poslední 4 dny
@@ -856,6 +865,7 @@ function snapshot() {
     // Rozvrh čerpadla jde do appky odsud, ať se popisek v kartě nemůže rozejít
     // se skutečnými časy
     obehRozvrh: OBEH_ROZVRH,
+    tvRozvrh: tvRozvrhPayload(),
     blindsEnabled: tahomaEnabled,
     blindTimers,
     blindRules,
@@ -4002,10 +4012,10 @@ function updateRuntimes() {
   }
   // Oběhové čerpadlo a Mikyho televize: jen pruh „kdy běželo" do karty na Ovládání.
   // Do doby běhu (runtime.ms) schválně nepatří — ta je o spotřebičích, které řídí automatika.
-  for (const k of ['obeh', 'tvMiky']) {
-    if (!releBezi(k)) continue;
+  for (const k of ['obeh', 'tvMiky', 'tvElenka']) {
+    if (!DEVICES[k] || !releBezi(k)) continue;
     // Televize: relé může být zapnuté a televize vypnutá — „běží" až nad TV_BEZI_W
-    if (k === 'tvMiky' && !(releZname(k) && state.devices.tvMiky.powerW > TV_BEZI_W)) continue;
+    if (k.startsWith('tv') && !(releZname(k) && state.devices[k].powerW > TV_BEZI_W)) continue;
     if (!state.timeline[k]) state.timeline[k] = [];
     const segs = state.timeline[k];
     const last = segs[segs.length - 1];
@@ -4650,7 +4660,7 @@ app.post('/api/timeline/restore', (req, res) => {
   const now = Date.now();
   let changed = false;
   // Klíče: pevná zařízení + dynamické klimatizace (ac_<guid>)
-  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|ac_[\w+/=.:-]{1,64})$/.test(k);
+  const validKey = k => /^(shelly|pool|solinator|wallbox|wbPlugged|sauna|obeh|tvMiky|tvElenka|ac_[\w+/=.:-]{1,64})$/.test(k);
   const keys = new Set([...Object.keys(state.timeline), ...Object.keys(tl).filter(validKey)]);
   for (const k of Array.from(keys).slice(0, 16)) {
     if (!state.timeline[k]) state.timeline[k] = [];
@@ -5274,7 +5284,7 @@ function releZname(key) {
 }
 // Dokdy nejpozději může relé běžet bez dalšího ON. 0 = nevíme o žádném ON.
 // Relé bez časovače vypnutí: u nich se z posledního ON nedá odhadnout, kdy zhasne
-const RELE_BEZ_AUTO_OFF = ['tvMiky'];
+const RELE_BEZ_AUTO_OFF = ['tvMiky', 'tvElenka'];
 function releDobehDo(key) {
   if (RELE_BEZ_AUTO_OFF.includes(key)) return 0;
   const cmd = lastCmd[key];
@@ -5448,6 +5458,128 @@ async function runObehSchedule(now = Date.now()) {
 }
 
 scheduleEvery(() => { runObehSchedule().catch(() => {}); }, OBEH_TICK_MS, 45000);
+
+// ---------- Televize dětí: rozvrh ----------
+// Dřív ho měla každá televize ve svém Shelly (aplikace Shelly → Schedule). Teď ho
+// řídí appka: pravidla „ve dny X v HH:MM zapni/vypni", stejně jako v Shelly, a
+// nastavují se v Log/Nastavení. V Shelly se pak plán vypne (aktualizace firmwaru
+// tam zůstává). Elenka Shelly zatím nemá — její pravidla jdou uložit, ale spouštět
+// se začnou, až bude relé (TV_ELENKA_DEVICE_ID).
+// Dny: 1 = pondělí … 7 = neděle.
+const TV_DETI = [
+  { klic: 'miky', jmeno: 'Miky', rele: 'tvMiky' },
+  { klic: 'elenka', jmeno: 'Elenka', rele: 'tvElenka' }
+];
+// Výchozí = to, co bylo v Mikyho Shelly (11/2026)
+const TV_ROZVRH_VYCHOZI = {
+  miky: [
+    { dny: [1, 2, 3, 4, 5], cas: '07:30', akce: 'on', zap: true },
+    { dny: [1, 2, 3, 4, 5], cas: '20:00', akce: 'off', zap: true },
+    { dny: [6, 7], cas: '06:30', akce: 'on', zap: true },
+    { dny: [6, 7], cas: '22:00', akce: 'off', zap: true }
+  ],
+  elenka: []
+};
+const TV_ROZVRH_MAX = 20;          // pravidel na jednu televizi
+const TV_TIK_MS = 60 * 1000;
+const TV_DOHANI_MIN = 10;          // výpadek tiku do 10 min se dožene, delší ne
+
+// null = nic neuloženo → výchozí. Vrací vždy kopii.
+function tvRozvrhData() {
+  return JSON.parse(JSON.stringify(state.tvRozvrh || TV_ROZVRH_VYCHOZI));
+}
+
+// Kontrola toho, co přijde z appky nebo ze zálohy → { rozvrh } nebo { chyba }
+function tvRozvrhOver(vstup) {
+  if (!vstup || typeof vstup !== 'object' || Array.isArray(vstup)) return { chyba: 'Chybí rozvrh.' };
+  const out = {};
+  for (const { klic, jmeno } of TV_DETI) {
+    const pravidla = vstup[klic] === undefined ? [] : vstup[klic];
+    if (!Array.isArray(pravidla)) return { chyba: `${jmeno}: rozvrh musí být seznam.` };
+    if (pravidla.length > TV_ROZVRH_MAX) return { chyba: `${jmeno}: nejvýš ${TV_ROZVRH_MAX} pravidel.` };
+    out[klic] = [];
+    for (const p of pravidla) {
+      if (!p || typeof p !== 'object') return { chyba: `${jmeno}: špatné pravidlo.` };
+      if (!validTimerTime(p.cas)) return { chyba: `${jmeno}: špatný čas „${p.cas}".` };
+      if (p.akce !== 'on' && p.akce !== 'off') return { chyba: `${jmeno}: akce musí být zapnout nebo vypnout.` };
+      const dny = Array.isArray(p.dny) ? [...new Set(p.dny.map(Number))].filter(d => Number.isInteger(d) && d >= 1 && d <= 7).sort() : [];
+      if (!dny.length) return { chyba: `${jmeno} ${p.cas}: vyber aspoň jeden den.` };
+      out[klic].push({ dny, cas: p.cas, akce: p.akce, zap: p.zap !== false });
+    }
+    out[klic].sort((a, b) => a.cas.localeCompare(b.cas) || a.dny[0] - b.dny[0]);
+  }
+  return { rozvrh: out };
+}
+
+function tvRozvrhPayload() {
+  return {
+    rozvrh: tvRozvrhData(),
+    deti: TV_DETI.map(t => ({ klic: t.klic, jmeno: t.jmeno, rele: t.rele, pripojeno: !!DEVICES[t.rele] }))
+  };
+}
+
+// Den v týdnu (1 = Po … 7 = Ne) a HH:MM v Praze
+const TV_DNY_EN = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+function tvPrahaMinuta(at) {
+  const den = TV_DNY_EN[new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', weekday: 'short' }).format(at)];
+  const p = pragueTime(at);
+  return { den, cas: String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0') };
+}
+
+// Pravidla, jejichž čas padl do (od, do] — po minutách, nejvýš TV_DOHANI_MIN zpátky.
+// Vrací [{ dite, pravidlo }] v časovém pořadí; nepřipojené televize vynechá.
+function tvRozvrhSplatne(od, do_, rozvrh = tvRozvrhData()) {
+  const out = [];
+  const MIN = 60000;
+  let t = Math.max(Math.floor(od / MIN) * MIN + MIN, Math.floor(do_ / MIN) * MIN - (TV_DOHANI_MIN - 1) * MIN);
+  for (; t <= do_; t += MIN) {
+    const { den, cas } = tvPrahaMinuta(t);
+    for (const dite of TV_DETI) {
+      if (!DEVICES[dite.rele]) continue;
+      for (const p of rozvrh[dite.klic] || []) {
+        if (p.zap && p.cas === cas && p.dny.includes(den)) out.push({ dite, pravidlo: p });
+      }
+    }
+  }
+  return out;
+}
+
+let tvTikPosledni = 0;   // 0 = první tik po startu: nic zpětně nedohánět
+async function runTvRozvrh(now = Date.now()) {
+  const od = tvTikPosledni || now;
+  tvTikPosledni = now;
+  // Hlavní vypínač automatiky platí i tady; „nejsme doma" nic nezapíná
+  if (!autoRunning()) return;
+  for (const { dite, pravidlo } of tvRozvrhSplatne(od, now)) {
+    if (pravidlo.akce === 'on' && awayActive(now)) continue;
+    // `force`: rozvrh je nastavení od člověka, ruční odklad mu nemá sebrat vypnutí
+    await autoSet(dite.rele, pravidlo.akce, `rozvrh televize ${pravidlo.cas}`, { force: true });
+  }
+}
+
+scheduleEvery(() => { runTvRozvrh().catch(() => {}); }, TV_TIK_MS, 50000);
+
+app.post('/api/tv-rozvrh', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const o = tvRozvrhOver(req.body && req.body.rozvrh);
+  if (o.chyba) return res.status(400).json({ error: o.chyba });
+  state.tvRozvrh = o.rozvrh;
+  addLog('Rozvrh televize dětí uložen');
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  const p = tvRozvrhPayload();
+  broadcast('tvRozvrh', p);
+  res.json(p);
+});
+
+// Záloha: bere se jen platný rozvrh; neplatný nechá to, co je
+app.post('/api/tv-rozvrh/restore', (req, res) => {
+  const o = tvRozvrhOver(req.body && req.body.rozvrh);
+  if (!o.chyba) {
+    state.tvRozvrh = o.rozvrh;
+    broadcast('tvRozvrh', tvRozvrhPayload());
+  }
+  res.json({ ok: !o.chyba });
+});
 
 // ---------- Automatika přebytků (nahrazuje skripty v Shelly aplikaci) ----------
 
@@ -14509,6 +14641,7 @@ const STORE_POSTS = [
   '/api/solinator/restore',
   '/api/timers/restore',
   '/api/blinds/schedule/restore',
+  '/api/tv-rozvrh/restore',
   '/api/prazdniny/restore',
   '/api/loznice-zavreno/restore',
   '/api/zapad-delay/restore',
@@ -14572,6 +14705,8 @@ function storeSnapshot() {
     },
     // Rozvrh je nastavení od člověka — bez tohohle by ho každé nasazení smazalo
     '/api/blinds/schedule/restore': { savedAt: blindRulesAt, rules: blindRules },
+    // Jen co člověk uložil — výchozí rozvrh je v kódu
+    ...(state.tvRozvrh ? { '/api/tv-rozvrh/restore': { rozvrh: state.tvRozvrh } } : {}),
     '/api/prazdniny/restore': { datum: state.prazdniny },
     '/api/loznice-zavreno/restore': { datum: state.lozniceZavrenoRano || null },
     '/api/zapad-delay/restore': { minut: state.zapadDelayMin },
