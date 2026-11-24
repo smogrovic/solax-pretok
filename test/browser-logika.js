@@ -40,7 +40,9 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   // Přepínač automatiky a Nejsme doma nahoře, nákupní seznam až úplně dole
   check('nahoře Obecné, Nejsme doma, čerpadlo, Zima', sekce.slice(0, 4).join(' | '), 'Obecné | Nejsme doma | Tepelné čerpadlo (program) | Zima');
   const karty = [...page.querySelectorAll(':scope > .page > .card')];
-  check('nákup je poslední karta', karty[karty.length - 1].contains(document.getElementById('oblibeneSeznam')), 'true');
+  // Úplně dole zapnutí notifikací, nad ním nákup a nad ním zkratky
+  check('notifikace jsou poslední karta', karty[karty.length - 1].contains(document.getElementById('notifBtn')), 'true');
+  check('  nákup hned nad nimi', karty[karty.length - 2].contains(document.getElementById('oblibeneSeznam')), 'true');
   check('Nejsme doma zmiňuje čerpadlo a −5', ((t) => t.includes('Tepelné čerpadlo') && t.includes('−5 °C'))(page.querySelectorAll('.logic-sec')[1].textContent), 'true');
   const lh = parseFloat(getComputedStyle(li[0]).lineHeight) || 18;
   const dlouhe = li.filter(e => e.getBoundingClientRect().height > lh * 3.4);
@@ -116,7 +118,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   OUT.push('\\n3) Pokyny ze zkratek iPhonu');
   const zkK = document.getElementById('zkratkyKarta');
   const zkKarty = [...page.querySelectorAll(':scope > .page > .card')];
-  check('karta zkratek dole, hned nad nákupem', zkKarty.indexOf(zkK) === zkKarty.length - 2 && zkKarty[zkKarty.length - 1].contains(document.getElementById('oblibeneSeznam')), 'true');
+  check('karta zkratek dole, hned nad nákupem', zkKarty.indexOf(zkK) === zkKarty.length - 3 && zkKarty[zkKarty.length - 2].contains(document.getElementById('oblibeneSeznam')), 'true');
   applySnapshot({ zkratky: { probuzeni: { nocniSvetla: true, obehMin: 15 }, spanek: { nocniSvetla: true }, klic: true, obehDo: 0,
     posledni: { probuzeni: { kdy: Date.now(), kdo: 'Lukáš', vysledek: 'noční světla rozsvícena' }, spanek: null } } });
   const zkTxt = zkK.textContent;

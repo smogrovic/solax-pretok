@@ -87,7 +87,7 @@ setTimeout(() => {
     klice.join(', '),
     // a k tomu každý časovač (casovac-…), ten ukazuje nastavené i sbalený
     'odhad, fve, sptabulka, aqprogram, klima, topeni, casovac-timerList, casovac-zaluzie1, rozvrh, casovac-zaluzie2, casovac-relayTimerList, '
-    + 'wallbox, bazen, solinator, nahrev, sauna, zavlaha, terminy, termvloz, log');
+    + 'wallbox, bazen, solinator, nahrev, sauna, zavlaha, terminy, termvloz, log, zaloha, prihlaseni, velikost, tvrozvrh, zkratky, oblibene');
   // Přehled spotřeby na FVE: odkud šla spotřeba, dnešek i týden (z bývalé stránky Přehled)
   check('Přehled spotřeby na FVE je jedna karta (24 h, 7 dní, odkud)',
     document.querySelectorAll('.card[data-sbal-obsah="fve"]').length, 1);

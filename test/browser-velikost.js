@@ -32,10 +32,13 @@ setTimeout(async () => {
  try {
   const karta = document.getElementById('velikostKarta');
   check('po načtení se server zeptal', window.__dotazy.some(u => u.startsWith('/api/velikost')), true);
-  check('jiný účet (403): karta skrytá', karta.hidden, true);
+  const btnV = document.getElementById('velikostBtn');
+  const skryta = () => karta.classList.contains('nedostupna') && btnV.classList.contains('nedostupna');
+  check('jiný účet (403): karta i tlačítko skryté', skryta(), true);
   window.__spravce = true;
   await velikostNacti();
-  check('správce: karta vidět', karta.hidden, false);
+  check('správce: karta i tlačítko vidět', skryta() || btnV.classList.contains('nedostupna'), false);
+  check('  rozbalovací (výchozí sbalená)', btnV.dataset.sbal + ' ' + karta.hidden, 'velikost true');
   check('  je v Log/Nastavení', !!karta.closest('.slide[data-title="Log/Nastavení"]'), true);
   const radky = [...karta.querySelectorAll('.velikost-radek')].map(r => r.querySelector('.velikost-hlava').textContent);
   check('řádky s procenty', radky.join(' | '),
@@ -47,7 +50,7 @@ setTimeout(async () => {
   check('  podrobnosti', [...karta.querySelectorAll('.velikost-pod')][3].textContent, '470 MB z 512 MB RAM');
   window.__spravce = false;
   await velikostNacti();
-  check('odebrané právo: zase skrytá', karta.hidden, true);
+  check('odebrané právo: zase skrytá', skryta(), true);
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message); }
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

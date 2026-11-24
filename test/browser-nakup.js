@@ -255,6 +255,8 @@ setTimeout(async () => {
   // Úprava v Logice automatiky
   const ns = document.getElementById('oblibeneSeznam');
   check('nastavení je v Logice automatiky', !!ns.closest('.slide[data-title="Log/Nastavení"]'), true);
+  check('  rozbalovací karta', document.querySelector('.sbal-btn[data-sbal="oblibene"]') && ns.closest('[data-sbal-obsah]').dataset.sbalObsah, 'oblibene');
+  sbalNastav('oblibene', false);
   renderOblibeneNastaveni();
   check('  ukazuje seznam', [...ns.querySelectorAll('.nazev')].map(n => n.textContent).join(' | '), '🥚 Vajíčka | 🥛 Mléko | 🧻 Toaletní papír');
   {

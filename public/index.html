@@ -1524,6 +1524,9 @@
   body.sp-cela .sp-graf text{font-size:11px;}
   .sp-bezi-stitek{font-size:9px;font-weight:700;font-style:normal;color:var(--orange-dark);margin-left:4px;}
   .sbal-btn[hidden]{display:none;}
+  /* Karta, která na tomhle zařízení nedává smysl (přihlášení vypnuté, velikost jen
+     pro správce) — i se svým rozbalovacím tlačítkem. hidden patří sbalení. */
+  .nedostupna{display:none!important;}
   .zk-sek{border-top:1px solid rgba(44,62,80,0.08);padding:8px 0 4px;}
   .zk-sek:first-child{border-top:none;padding-top:2px;}
   .zk-hlava{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;font-size:14px;margin-bottom:4px;}
@@ -3933,14 +3936,6 @@
 
       <div class="store-note jen-full" data-sbal-obsah="log" id="storeNote"></div>
 
-      <!-- Notifikace: ve všech režimech. Dětem chodí jen garáž a upozornění pro všechny,
-           iPadu upozornění ne (svítí mu přes obrazovku) — filtruje server podle režimu -->
-      <div class="card">
-        <div class="asst-log-title">Notifikace</div>
-        <button class="notif-btn" id="notifBtn" type="button">🔔 Zapnout notifikace</button>
-        <div class="rezim-hint" id="notifHint"></div>
-      </div>
-
       <!-- Přepínač je vidět ve všech režimech — jinak by z dětského nebyla cesta zpět -->
       <div class="card">
         <div class="rezim-karta">
@@ -3951,8 +3946,8 @@
       </div>
 
       <!-- Záloha do souboru: data i aplikace (bez hesel a přihlášení) -->
-      <div class="card jen-full" id="zalohaKarta">
-        <div class="asst-log-title">Záloha</div>
+      <button class="sbal-btn jen-full" data-sbal="zaloha" type="button" aria-expanded="false">Záloha<i>▾</i></button>
+      <div class="card jen-full" id="zalohaKarta" data-sbal-obsah="zaloha">
         <div class="zaloha-btns">
           <button class="sek-btn" id="zalohaStahnout" type="button">⬇️ Stáhnout zálohu (data + aplikace)</button>
           <button class="sek-btn" id="zalohaObnovit" type="button">⬆️ Obnovit data ze zálohy</button>
@@ -3962,8 +3957,8 @@
       </div>
 
       <!-- Přihlášení: kdo je přihlášený, odhlášení a kód pro další zařízení -->
-      <div class="card" id="prihlaseniKarta" hidden>
-        <div class="asst-log-title">Přihlášení</div>
+      <button class="sbal-btn nedostupna" data-sbal="prihlaseni" id="prihlaseniBtn" type="button" aria-expanded="false">Přihlášení<i>▾</i></button>
+      <div class="card nedostupna" id="prihlaseniKarta" data-sbal-obsah="prihlaseni">
         <div class="rezim-hint" id="prihlaseniKdo"></div>
         <div class="zaloha-btns">
           <button class="sek-btn" id="prihlaseniKodBtn" type="button">🔑 Kód pro další zařízení</button>
@@ -3973,8 +3968,8 @@
       </div>
 
       <!-- Velikost aplikace a limity služeb — jen pro správce (server ostatním vrací 403) -->
-      <div class="card" id="velikostKarta" hidden>
-        <div class="asst-log-title">Velikost aplikace</div>
+      <button class="sbal-btn nedostupna" data-sbal="velikost" id="velikostBtn" type="button" aria-expanded="false">Velikost aplikace<i>▾</i></button>
+      <div class="card nedostupna" id="velikostKarta" data-sbal-obsah="velikost">
         <div id="velikostObsah"></div>
         <div class="rezim-hint" id="velikostPozn"></div>
       </div>
@@ -3991,8 +3986,8 @@
 
       <!-- Rozvrh televize dětí: dřív v aplikaci Shelly, teď ho spouští appka (server).
            Elenka Shelly zatím nemá — pravidla jdou uložit, spouštět se začnou s relé. -->
-      <div class="card jen-full" id="tvRozvrhKarta">
-        <div class="asst-log-title">Rozvrh televize dětí</div>
+      <button class="sbal-btn jen-full" data-sbal="tvrozvrh" type="button" aria-expanded="false">Rozvrh televize dětí<i>▾</i></button>
+      <div class="card jen-full" id="tvRozvrhKarta" data-sbal-obsah="tvrozvrh">
         <div id="tvRozvrhObsah"></div>
         <button class="sek-btn" id="tvRozvrhUlozit" type="button" disabled>Uložit rozvrh</button>
         <div class="rezim-hint" id="tvRozvrhHint"></div>
@@ -4168,15 +4163,15 @@
       </div>
 
       <!-- Pokyny ze zkratek iPhonu: zkratka jen oznámí událost, co se stane, je tady -->
-      <div class="card" data-rezim="full" id="zkratkyKarta">
-        <div class="asst-log-title">Pokyny ze zkratek iPhonu</div>
+      <button class="sbal-btn" data-rezim="full" data-sbal="zkratky" type="button" aria-expanded="false">Pokyny ze zkratek iPhonu<i>▾</i></button>
+      <div class="card" data-rezim="full" id="zkratkyKarta" data-sbal-obsah="zkratky">
         <div id="zkratkyObsah"></div>
         <div class="rezim-hint" id="zkratkyHint"></div>
       </div>
 
       <!-- Pravidelně kupované: nabízí se po klepnutí do pole na stránce Nákup -->
-      <div class="card" data-rezim="full">
-        <div class="asst-log-title">Nákup — pravidelné položky</div>
+      <button class="sbal-btn" data-rezim="full" data-sbal="oblibene" type="button" aria-expanded="false">Nákup — pravidelné položky<i>▾</i></button>
+      <div class="card" data-rezim="full" id="oblibeneKarta" data-sbal-obsah="oblibene">
         <div class="oblibene-seznam" id="oblibeneSeznam"></div>
         <div class="oblibene-pridat">
           <select class="timer-select" id="oblibeneIkona"></select>
@@ -4184,6 +4179,14 @@
           <button class="sek-btn" id="oblibenePridat" type="button">Přidat</button>
         </div>
         <div class="rezim-hint" id="oblibeneHint"></div>
+      </div>
+
+      <!-- Notifikace: ve všech režimech. Dětem chodí jen garáž a upozornění pro všechny,
+           iPadu upozornění ne (svítí mu přes obrazovku) — filtruje server podle režimu -->
+      <div class="card">
+        <div class="asst-log-title">Notifikace</div>
+        <button class="notif-btn" id="notifBtn" type="button">🔔 Zapnout notifikace</button>
+        <div class="rezim-hint" id="notifHint"></div>
       </div>
     </div>
   </div>
@@ -17394,7 +17397,7 @@ async function prihlaseniNacti() {
   if (!prihlaseniKartaEl) return;
   try {
     const s = await (await fetch('/api/auth/stav', { cache: 'no-store' })).json();
-    prihlaseniKartaEl.hidden = !s.zapnuto;
+    for (const el of [prihlaseniKartaEl, document.getElementById('prihlaseniBtn')]) el.classList.toggle('nedostupna', !s.zapnuto);
     document.getElementById('prihlaseniKdo').textContent = s.email ? 'Přihlášen: ' + s.email : '';
     if (s.email) bezpecne(velikostNacti);
   } catch { /* zkusí se při dalším otevření */ }
@@ -17402,6 +17405,7 @@ async function prihlaseniNacti() {
 
 // ---------- Velikost aplikace (jen správce) ----------
 const velikostKartaEl = document.getElementById('velikostKarta');
+const velikostUkaz = ano => { for (const el of [velikostKartaEl, document.getElementById('velikostBtn')]) el.classList.toggle('nedostupna', !ano); };
 const velikostMB = b => (b / 1048576).toLocaleString('cs-CZ', { maximumFractionDigits: b < 10485760 ? 2 : 1 }) + ' MB';
 const velikostPct = (b, z) => { const p = 100 * b / z; return (p < 1 ? p.toLocaleString('cs-CZ', { maximumFractionDigits: 2 }) : Math.round(p)) + ' %'; };
 function velikostRadek(rodic, nazev, hodnota, pod, b, z) {
@@ -17443,10 +17447,10 @@ async function velikostNacti() {
   if (!velikostKartaEl) return;
   try {
     const r = await fetch('/api/velikost', { cache: 'no-store' });
-    if (!r.ok) { velikostKartaEl.hidden = true; return; }
+    if (!r.ok) { velikostUkaz(false); return; }
     renderVelikost(await r.json());
-    velikostKartaEl.hidden = false;
-  } catch { velikostKartaEl.hidden = true; }
+    velikostUkaz(true);
+  } catch { velikostUkaz(false); }
 }
 if (prihlaseniKartaEl) {
   document.getElementById('prihlaseniOdhlasit').addEventListener('click', async () => {
