@@ -7060,9 +7060,6 @@ function blindsVseNaStrance(items) {
   });
 }
 
-// Box za Kuchyní (strana 1) a za Hosty (strana 2)
-const BLINDS_VSE_ZA = { 1: 'kuchyn', 2: 'hoste' };
-
 function renderBlindsVseBox(items) {
   const block = document.createElement('div');
   block.className = 'blind-room blind-room-vse';
@@ -7209,17 +7206,16 @@ function renderBlinds() {
       block.appendChild(renderBlindRow(b));
     }
     listEl.appendChild(block);
-    if (!kresli.has(listEl)) kresli.set(listEl, { strana: listEl === blindsList2El ? 2 : 1, items: [] });
+    if (!kresli.has(listEl)) kresli.set(listEl, { items: [] });
     kresli.get(listEl).items.push(...group.items);
   }
-  // Box „Všechny žaluzie" pro každou stránku — dítě má jen svůj pokoj, tam ne
+  // Box „Všechny žaluzie" pro každou stránku úplně nahoře — dítě má jen svůj pokoj, tam ne
   if (!jenPokoj) {
-    for (const [listEl, { strana, items }] of kresli) {
+    for (const [listEl, { items }] of kresli) {
       const vse = blindsVseNaStrance(items);
       if (vse.length < 2) continue;
       const box = renderBlindsVseBox(vse);
-      const za = [...listEl.children].find(el => (el.dataset.mistnost || '').includes(BLINDS_VSE_ZA[strana]));
-      if (za) za.after(box); else listEl.appendChild(box);
+      listEl.prepend(box);
     }
   }
 

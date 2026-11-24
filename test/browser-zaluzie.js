@@ -39,7 +39,7 @@ setTimeout(async () => {
     .map(b => b.querySelector('.blind-room-title').textContent);
   check('na první stránce jsou dva boxy', boxy('blindsList1').join(' | '), 'Obývák | Kuchyň');
   check('  a kuchyň je hned pod obývákem', boxy('blindsList1')[1], 'Kuchyň');
-  const prvni = [...document.getElementById('blindsList1').querySelectorAll('.blind-room')];
+  const prvni = [...document.getElementById('blindsList1').querySelectorAll('.blind-room:not(.blind-room-vse)')];
   check('v obýváku zůstaly jeho dvě', prvni[0].querySelectorAll('.blind-item').length, 2);
   check('  a v kuchyni je jen ta kuchyňská', prvni[1].querySelectorAll('.blind-item').length, 1);
   check('  se svým štítkem', prvni[1].querySelector('.blind-label').textContent, 'Kuchyň');
@@ -50,7 +50,7 @@ setTimeout(async () => {
   R.push('\\n2) Zbytek zůstal, jak byl');
   check('ložnice a Miky jsou na druhé stránce', boxy('blindsList2').join(' | '), 'Ložnice | Miky');
   check('  a Miky má obě své', [...document.getElementById('blindsList2')
-    .querySelectorAll('.blind-room')][1].querySelectorAll('.blind-item').length, 2);
+    .querySelectorAll('.blind-room:not(.blind-room-vse)')][1].querySelectorAll('.blind-item').length, 2);
 
   R.push('\\n3) Časovač zná kuchyň zvlášť');
   // Časovač řadí místnosti stejně jako ovládání — jinak by „Kuchyň" v seznamu chyběla
@@ -238,14 +238,14 @@ setTimeout(async () => {
     ];
     renderBlinds();
     const poradi = n => [...document.getElementById(n).querySelectorAll('.blind-room')].map(b => b.querySelector('.blind-room-title').textContent);
-    check('strana 1: hned pod Kuchyní', poradi('blindsList1').join(' | '), 'Obývák | Kuchyň | Všechny žaluzie | Terasa | Garáž');
-    check('strana 2: hned pod Hosty', poradi('blindsList2').join(' | '), 'Ložnice | Miky | Elenka | Hosté | Všechny žaluzie');
+    check('strana 1: Všechny žaluzie úplně nahoře', poradi('blindsList1').join(' | '), 'Všechny žaluzie | Obývák | Kuchyň | Terasa | Garáž');
+    check('strana 2: taky úplně nahoře', poradi('blindsList2').join(' | '), 'Všechny žaluzie | Ložnice | Miky | Elenka | Hosté');
     const box = n => document.querySelector('#' + n + ' .blind-room-vse');
     check('bez popisku „Celá stránka"', !!box('blindsList1').querySelector('.blind-label') + ' ' + /Celá stránka/.test(box('blindsList1').textContent), 'false false');
     const jezdec = box('blindsList1').querySelector('input[type=range]');
     check('jezdec: průměr naklopení', jezdec.value, 40);
     const prvni = r => r.querySelector('.blind-btn').getBoundingClientRect().left;
-    check('  tlačítka lícují s řádky nad ním', Math.abs(prvni(box('blindsList1')) - prvni(document.querySelector('#blindsList1 .blind-room'))) < 1, true);
+    check('  tlačítka lícují s řádky nad ním', Math.abs(prvni(box('blindsList1')) - prvni(document.querySelector('#blindsList1 .blind-room:not(.blind-room-vse)'))) < 1, true);
     let poslano = [];
     window.fetch = async (url, init) => { if (/command/.test(url)) poslano.push(JSON.parse(init.body));
       return { ok: true, status: 200, json: async () => ({ ok: true, success: true, blinds: [] }) }; };
@@ -278,7 +278,7 @@ setTimeout(async () => {
     renderBlinds();
     const m = box('blindsList1').querySelector('.blind-meter-col');
     check('ukazatel zatažení: průměr stránky', m.querySelector('.blind-meter-pct').textContent + ' ' + m.classList.contains('holdable') + ' ' + getComputedStyle(m).visibility, '30 % true visible');
-    const radek = document.querySelector('#blindsList1 .blind-room .blind-meter-col').getBoundingClientRect();
+    const radek = document.querySelector('#blindsList1 .blind-room:not(.blind-room-vse) .blind-meter-col').getBoundingClientRect();
     check('  lícuje s ukazateli nad ním', Math.abs(m.getBoundingClientRect().left - radek.left) < 1, true);
     box('blindsList1').querySelector('input[type=range]').value = 70;
     poslano = [];
@@ -295,7 +295,7 @@ setTimeout(async () => {
     for (const t of blindsReloadTimers) clearTimeout(t);
     // Jedna žaluzie se táhne dál sama
     poslano = [];
-    const m1 = document.querySelector('#blindsList1 .blind-room .blind-meter-col'), r1 = m1.getBoundingClientRect();
+    const m1 = document.querySelector('#blindsList1 .blind-room:not(.blind-room-vse) .blind-meter-col'), r1 = m1.getBoundingClientRect();
     const ptr1 = (typ, y) => m1.dispatchEvent(new PointerEvent(typ, { pointerId: 8, clientX: r1.left + 5, clientY: y, bubbles: true }));
     ptr1('pointerdown', r1.top + 5);
     await new Promise(z => setTimeout(z, 500));
