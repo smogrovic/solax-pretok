@@ -2798,34 +2798,7 @@
   <div class="slide slide-stats" data-title="FVE" data-rezim="full">
     <div class="page">
       <div class="error-banner" id="errorBanner"></div>
-      <div class="card lock-panel">
-        <div class="lock-icon">🔒</div>
-        <div class="lock-text">Ovládání je zamčené</div>
-        <button class="faceid-btn">Odemknout Face ID</button>
-        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
-        <button class="unlock-btn">Odemknout</button>
-        <div class="lock-error"></div>
-      </div>
-      <!-- Přepínač automatiky a scény: dřív na stránce Asistent -->
-      <div class="card lockable jen-full" id="autoCard">
-        <div class="device-block last">
-          <div class="shelly-row">
-            <div class="traffic-light" id="autoLight"></div>
-            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
-          </div>
-          <input type="range" min="0" max="3" step="1" value="1" id="autoModeSlider"
-                 aria-label="Režim automatiky" list="autoModeTicks">
-          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
-          <div class="mode-scale">
-            <span data-mode="0">Vypnuto</span>
-            <span data-mode="1">Jsme pryč</span>
-            <span data-mode="2">Zapnuto</span>
-            <span data-mode="3">Zima</span>
-          </div>
-          <div class="mode-hint" id="autoModeHint"></div>
-          <div class="away-hint" id="awayHint"></div>
-        </div>
-      </div>
+      <!-- Bez zámkového panelu: na FVE se nic neovládá (automatika je od 11/2026 na Ovládání) -->
       <div class="card" data-emoji="🔆">
         <div class="nodes">
           <div class="node">
@@ -3126,7 +3099,7 @@
       </div>
 
       <div class="card lockable timer-card">
-        <div class="graph-title">Časovač</div>
+        <div class="graph-title">Časovač klimatizací</div>
         <select id="timerDevice" class="timer-select"></select>
         <div class="timer-form-row">
           <select id="timerAction" class="timer-select">
@@ -3329,6 +3302,26 @@
         <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Zadej kód">
         <button class="unlock-btn">Odemknout</button>
         <div class="lock-error"></div>
+      </div>
+      <!-- Přepínač automatiky: řídí celý dům, proto nahoře na Ovládání (dřív na FVE) -->
+      <div class="card lockable jen-full" id="autoCard">
+        <div class="device-block last">
+          <div class="shelly-row">
+            <div class="traffic-light" id="autoLight"></div>
+            <div class="shelly-label">Automatika: <span class="state" id="autoState">–</span></div>
+          </div>
+          <input type="range" min="0" max="3" step="1" value="1" id="autoModeSlider"
+                 aria-label="Režim automatiky" list="autoModeTicks">
+          <datalist id="autoModeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option></datalist>
+          <div class="mode-scale">
+            <span data-mode="0">Vypnuto</span>
+            <span data-mode="1">Jsme pryč</span>
+            <span data-mode="2">Zapnuto</span>
+            <span data-mode="3">Zima</span>
+          </div>
+          <div class="mode-hint" id="autoModeHint"></div>
+          <div class="away-hint" id="awayHint"></div>
+        </div>
       </div>
       <div class="card pool-card lockable" data-emoji="💡">
         <div class="lights-grid">

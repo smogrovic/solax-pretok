@@ -1,4 +1,4 @@
-// Přepínač automatiky (nahoře na FVE) a výjimky z rozvrhu žaluzií — prázdniny
+// Přepínač automatiky (nahoře na Ovládání, do 11/2026 na FVE) a výjimky z rozvrhu žaluzií — prázdniny
 // a ložnice (na Žaluziích nad rozvrhem). Box se scénami („Zapni saunu"…) je
 // z FVE pryč (11/2026), stránka Asistent i pole na instrukce taky.
 const fs = require('fs');
@@ -77,8 +77,12 @@ setTimeout(async () => {
   R.push('\\n2) Pořadí karet');
   const karty = [...slide.querySelectorAll(':scope > .page > .card')]
     .filter(c => !c.classList.contains('lock-panel') && getComputedStyle(c).display !== 'none');
-  check('nahoře na FVE přepínač automatiky', karty[0].id, 'autoCard');
-  check('  hned pod ním elektrárna', !!karty[1].querySelector('.nodes'), true);
+  check('FVE začíná elektrárnou', !!karty[0].querySelector('.nodes'), true);
+  check('  bez zámkového panelu (nic se tu neovládá)', slide.querySelectorAll('.lock-panel, .lockable').length, 0);
+  // Automatika řídí celý dům — patří nahoru na Ovládání
+  const ovl = document.querySelector('.slide[data-title="Ovládání"]');
+  const ovlKarty = [...ovl.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
+  check('přepínač automatiky je první na Ovládání', ovlKarty[0].id, 'autoCard');
   // Teplotní automatika je nahoře na Klimatu
   const klima = document.querySelector('.slide[data-title="Klima"]');
   const klimaKarty = [...klima.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
