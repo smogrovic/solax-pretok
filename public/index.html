@@ -1504,7 +1504,11 @@
     font-size:14px;padding:8px 14px;border-radius:12px;box-shadow:0 2px 8px rgba(44,62,80,0.1);cursor:pointer;margin-bottom:8px;}
   body.sp-cela #spotrebaSlide .page{max-width:1500px;display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:12px;align-items:start;}
   body.sp-cela #spotrebaSlide .page > .card{margin-top:0;}
-  body.sp-cela #spotrebaSlide .page > .card:nth-of-type(3){grid-column:1 / -1;}
+  /* Přes celou šířku: tlačítka sbalení, přehled 24 h / 7 dní nahoře a tabulka dole;
+     souhrn a graf po měsících stojí vedle sebe */
+  body.sp-cela #spotrebaSlide .page > .sbal-btn,
+  body.sp-cela #spotrebaSlide .page > .prehled-karta,
+  body.sp-cela #spotrebaSlide .page > [data-sbal-obsah="sptabulka"]{grid-column:1 / -1;}
   body.sp-cela .sp-graf text{font-size:11px;}
   .sp-bezi-stitek{font-size:9px;font-weight:700;font-style:normal;color:var(--orange-dark);margin-left:4px;}
   .sbal-btn[hidden]{display:none;}
@@ -1551,74 +1555,12 @@
   .aqp-smazat:disabled{visibility:hidden;}
   .aqp-pridat{margin:2px 0 4px;}
   .aqp-ulozit{width:100%;margin-top:8px;}
-  .asszistant-card{align-items:stretch;}
-  .asst-reply{
-    font-size:14px;
-    color:var(--navy);
-    font-weight:600;
-    text-align:center;
-    min-height:20px;
-    margin-bottom:10px;
-    white-space:pre-wrap;
-  }
-  .asst-reply.err{color:var(--red);}
-  .asst-row{
-    display:flex;
-    gap:8px;
-  }
-  .asst-input{
-    flex:1;
-    padding:12px 14px;
-    border:1px solid rgba(44,62,80,0.15);
-    border-radius:14px;
-    font-size:15px;
-    background:var(--bg);
-    color:var(--navy);
-    outline:none;
-    min-width:0;
-  }
-  .asst-send{
-    flex:0 0 auto;
-    width:46px;
-    border:none;
-    border-radius:14px;
-    background:var(--orange);
-    color:#fff;
-    font-size:16px;
-    font-weight:700;
-  }
-  .asst-send:active{background:var(--orange-dark);}
-  .asst-send:disabled{opacity:0.6;}
-  .asst-send.loading{color:transparent;position:relative;}
-  .asst-send.loading::after{
-    content:"";position:absolute;top:50%;left:50%;width:16px;height:16px;
-    margin:-8px 0 0 -8px;border:2px solid rgba(255,255,255,0.4);
-    border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;
-  }
-  /* Pevná tlačítka scén (nahoře na FVE) — rovnou něco udělají. */
+  /* Výjimky z rozvrhu (Žaluzie): prázdniny a ložnice vedle sebe */
   .asst-scenes{
     display:grid;
     grid-template-columns:1fr 1fr;
     gap:8px;
-    margin-top:10px;
   }
-  /* Spodní mřížka navazuje na horní se stejnou mezerou jako mezi tlačítky */
-  #asstDvojice{margin-top:8px;}
-  #asstAlarm{margin-top:8px;}
-  #asstAlarm[hidden]{display:none;}
-  .asst-scene.alarm-btn{background:var(--navy);}
-  /* iPad na zdi nemá SIM — zkratky se SMS se pouštějí z telefonu */
-  @media (min-width: 1000px) { #asstAlarm{display:none;} }
-  .asst-scene{
-    border:none;
-    border-radius:16px;
-    padding:12px 10px;
-    background:var(--orange);
-    color:#fff;
-    font-size:13px;
-    font-weight:600;
-  }
-  .asst-scene:disabled{opacity:0.5;}
   /* O rozměr se stará mřížka. Šedou/oranžovou si tlačítko nechává — je to
      přepínač, ne akce, a na tom rozdílu záleží. */
   .prazdniny-btn{
@@ -2884,27 +2826,6 @@
           <div class="away-hint" id="awayHint"></div>
         </div>
       </div>
-      <div class="card lockable asszistant-card jen-full">
-        <div class="asst-reply" id="asstReply"></div>
-        <div class="asst-scenes" id="asstScenes"></div>
-        <!-- Druhá řada téže mřížky: „Otevři dveře" a prázdniny vedle sebe. Dveře
-             sem patří kvůli rozměru řady, prázdniny proto, že rozvrh žaluzií jede
-             jinak ve všední den a jinak o víkendu — tohle řekne, že zítřek má
-             počítat jako víkend, i když je středa. -->
-        <div class="asst-scenes" id="asstDvojice">
-          <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
-          <!-- Zatáhne ložnici a to ráno ji žádná automatika neotevře (ani o prázdninách v 10:00) -->
-          <button class="prazdniny-btn" id="lozniceZavrenoBtn" type="button">Zavřené žaluzie v ložnici</button>
-        </div>
-        <!-- Alarm se ovládá SMS. Tlačítko spustí zkratku v iPhonu, která SMS pošle;
-             číslo alarmu i kód jsou JEN ve zkratce, appka zná jen její jméno. -->
-        <!-- Zatím schované: přeskakování do Zkratek se nelíbí, rozpracováno
-             v ROZPRACOVANE.md (SMS ze serveru). -->
-        <div class="asst-scenes" id="asstAlarm" hidden>
-          <button class="asst-scene alarm-btn" id="alarmZapBtn" type="button">Zakóduj alarm</button>
-          <button class="asst-scene alarm-btn" id="alarmVypBtn" type="button">Odkóduj alarm</button>
-        </div>
-      </div>
       <div class="card" data-emoji="🔆">
         <div class="nodes">
           <div class="node">
@@ -3064,6 +2985,33 @@
       </div>
 
 
+      <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="odhad">
+        <div class="pv-avg" id="pvAvg"></div>
+        <canvas id="pvChart"></canvas>
+        <div class="timeline-legend" id="pvLegend"></div>
+      </div>
+
+
+      <button class="refresh-btn" id="refreshBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+        <span id="refreshLabel">Aktualizovat</span>
+      </button>
+
+      <div class="meta">
+        <div class="updated" id="updatedAt">Načítám…</div>
+        <div class="updated" id="weatherInfo"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Stránka: Spotřeba — měsíční tabulka jako ručně vedená, dál se plní sama -->
+  <div class="slide" data-title="Spotřeba" id="spotrebaSlide" data-rezim="full">
+    <!-- Na iPadu/počítači: druhé klepnutí na záložku otevře stránku přes celou obrazovku -->
+    <button class="sp-zavrit" id="spZavrit" type="button">✕ Zavřít</button>
+    <div class="page">
       <button class="sbal-btn" data-sbal="fve" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
       <!-- Jedna karta: nahoře 24 h a 7 dní vedle sebe, pod tím „odkud šla spotřeba“
            na dvou listech (24 h / 7 dní) -->
@@ -3089,45 +3037,6 @@
         <div class="wbsrc-note">Celý dům včetně auta, bazénu, obou bojlerů a sauny. Rozpad na auto a bazén je i na jejich stránkách.</div>
       </div>
 
-      <button class="sbal-btn" data-sbal="odhad" type="button" aria-expanded="false">Odhad vs. skutečnost (10 dní)<i>▾</i></button>
-      <div class="card stats-card" data-sbal-obsah="odhad">
-        <div class="pv-avg" id="pvAvg"></div>
-        <canvas id="pvChart"></canvas>
-        <div class="timeline-legend" id="pvLegend"></div>
-      </div>
-
-
-      <!-- Podklad pro analýzu topení: server každou hodinu zapíše průměr venku,
-           v pokojích a odhad topení ze spotřeby domu. Tady se jen ukazuje. -->
-      <button class="sbal-btn" data-sbal="topeni" type="button" aria-expanded="false">Topení a teplota v domě<i>▾</i></button>
-      <div class="card stats-card" data-sbal-obsah="topeni">
-        <div class="graph-title">Topení po dnech</div>
-        <div class="topeni-analyza" id="topeniAnalyza" hidden></div>
-        <div class="wbsrc-list" id="topeniList"></div>
-        <div class="wbsrc-note" id="topeniPozn"></div>
-        <button class="sbal-btn" id="topeniKopirBtn" type="button">Zkopírovat data<i id="topeniStav">▾</i></button>
-        <textarea class="diag-zaloha" id="topeniZaloha" readonly hidden></textarea>
-      </div>
-
-      <button class="refresh-btn" id="refreshBtn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
-          <path d="M21 3v6h-6"/>
-        </svg>
-        <span id="refreshLabel">Aktualizovat</span>
-      </button>
-
-      <div class="meta">
-        <div class="updated" id="updatedAt">Načítám…</div>
-        <div class="updated" id="weatherInfo"></div>
-      </div>
-    </div>
-  </div>
-  <!-- Stránka: Spotřeba — měsíční tabulka jako ručně vedená, dál se plní sama -->
-  <div class="slide" data-title="Spotřeba" id="spotrebaSlide" data-rezim="full">
-    <!-- Na iPadu/počítači: druhé klepnutí na záložku otevře stránku přes celou obrazovku -->
-    <button class="sp-zavrit" id="spZavrit" type="button">✕ Zavřít</button>
-    <div class="page">
       <div class="card stats-card sp-karta" data-emoji="📊">
         <div class="graph-title" id="spSouhrnTitul">Posledních 12 měsíců</div>
         <div id="spSouhrn"></div>
@@ -3204,6 +3113,18 @@
         <div class="timeline-legend" id="airconChartLegend"></div>
       </div>
 
+      <!-- Podklad pro analýzu topení: server každou hodinu zapíše průměr venku,
+           v pokojích a odhad topení ze spotřeby domu. Tady se jen ukazuje. -->
+      <button class="sbal-btn" data-sbal="topeni" type="button" aria-expanded="false">Topení a teplota v domě<i>▾</i></button>
+      <div class="card stats-card" data-sbal-obsah="topeni">
+        <div class="graph-title">Topení po dnech</div>
+        <div class="topeni-analyza" id="topeniAnalyza" hidden></div>
+        <div class="wbsrc-list" id="topeniList"></div>
+        <div class="wbsrc-note" id="topeniPozn"></div>
+        <button class="sbal-btn" id="topeniKopirBtn" type="button">Zkopírovat data<i id="topeniStav">▾</i></button>
+        <textarea class="diag-zaloha" id="topeniZaloha" readonly hidden></textarea>
+      </div>
+
       <div class="card lockable timer-card">
         <div class="graph-title">Časovač</div>
         <select id="timerDevice" class="timer-select"></select>
@@ -3263,6 +3184,16 @@
         </div>
         <button class="timer-add-btn bt-add">Přidat časovač</button>
         <div class="timer-list bt-list"></div>
+      </div>
+
+      <!-- Výjimky z rozvrhu: zítřek jako víkend a ložnice zavřená do rána. Dřív na FVE
+           v boxu se scénami (zrušen 11/2026), sem patří, protože mění, co rozvrh udělá. -->
+      <div class="card lockable jen-full" id="rozvrhVyjimky">
+        <div class="asst-scenes" id="asstDvojice">
+          <button class="prazdniny-btn" id="prazdninyBtn" type="button">Zítra jsou prázdniny</button>
+          <!-- Zatáhne ložnici a to ráno ji žádná automatika neotevře (ani o prázdninách v 10:00) -->
+          <button class="prazdniny-btn" id="lozniceZavrenoBtn" type="button">Zavřené žaluzie v ložnici</button>
+        </div>
       </div>
 
       <!-- Rozvrh: opakovaná pravidla místo scénářů v TaHomě. Je jen na první
@@ -11588,11 +11519,8 @@ async function maybeRestoreMonths(server) {
   } catch {}
 }
 
-// ---------- AI asistent ----------
+// ---------- Výpis asistenta (Log) ----------
 
-const asstInput = document.getElementById('asstInput');
-const asstSend = document.getElementById('asstSend');
-const asstReply = document.getElementById('asstReply');
 const asstLog = document.getElementById('asstLog');
 const asstLogCard = document.getElementById('asstLogCard');
 
@@ -11617,32 +11545,6 @@ function renderAssistantLog(entries) {
     row.appendChild(time);
     row.appendChild(txt);
     asstLog.appendChild(row);
-  }
-}
-
-// Pevná tlačítka. Seznam chodí ze serveru, takže v appce nemůže být tlačítko na něco,
-// co server neumí — a popisky se nemůžou rozejít s tím, co se doopravdy stane.
-const asstScenesEl = document.getElementById('asstScenes');
-const asstDvojiceEl = document.getElementById('asstDvojice');
-
-// Tyhle scény nepatří do hlavní mřížky, ale do spodní s prázdninami a ložnicí —
-// dohromady 2×4 tlačítka bez díry
-const ASST_PAROVE = ['otevri', 'zaluzie'];
-
-function renderSceny(sceny) {
-  if (!asstScenesEl) return;
-  asstScenesEl.textContent = '';
-  for (const b of [...asstDvojiceEl.querySelectorAll('.asst-scene')]) b.remove();
-  for (const s of (sceny || [])) {
-    if (!s || !s.key || !s.label) continue;
-    const btn = document.createElement('button');
-    btn.className = 'asst-scene';
-    btn.dataset.scene = s.key;
-    btn.textContent = s.label;
-    btn.addEventListener('click', () => scenaKlik(s.key, btn));
-    // Prázdniny zůstávají v dvojici poslední, párová scéna se vejde před ně
-    if (ASST_PAROVE.includes(s.key)) asstDvojiceEl.insertBefore(btn, prazdninyBtnEl);
-    else asstScenesEl.appendChild(btn);
   }
 }
 
@@ -11863,107 +11765,6 @@ if (lozniceZavrenoBtnEl) {
     }
     lozniceZavrenoBtnEl.disabled = false;
   });
-}
-
-// Tlačítka, která se ptají, a na kolik vteřin. Otevřené dveře jsou horší omyl než
-// cokoli jiného, co se odsud dá spustit.
-const POTVRZ_SCENY = {
-  otevri: { nadpis: 'Otevřít dveře?', text: 'Zámek stáhne západku a dveře půjdou otevřít.', sekundy: 15 },
-  // Těch 80 °C musí sedět se `SCENA_SAUNA_C` na serveru — hlídá to test/staticka.js.
-  // Okno vypisuje i to, co přijde samo: z názvu „Zapni saunu" by nikdo nečekal,
-  // že se pak otevřou žaluzie v ložnici.
-  sauna: {
-    nadpis: 'Zapnout saunu?',
-    text: 'Kamna se rozjedou na 80 °C. Na 70 °C se vytáhnou žaluzie v ložnici, na 75 °C se rozsvítí '
-        + 'v sauně a po západu slunce i zahrada dole. Zkontroluj, že na kamnech nic neleží.',
-    sekundy: 15
-  }
-};
-
-// ---------- Alarm přes Zkratky v iPhonu ----------
-const ALARM_ZKRATKY = { zapnout: 'Alarm zapnout', vypnout: 'Alarm vypnout' };
-// Samostatně, ať jde v testu podvrhnout (skutečná navigace by stránku opustila)
-function alarmOtevri(url) { location.href = url; }
-function alarmZkratka(co) {
-  const jmeno = ALARM_ZKRATKY[co];
-  if (!jmeno) return;
-  alarmOtevri('shortcuts://run-shortcut?name=' + encodeURIComponent(jmeno));
-}
-function alarmKlik(co) {
-  const zap = co === 'zapnout';
-  potvrzZeptej(zap ? 'Zakódovat alarm?' : 'Odkódovat alarm?',
-    'Z tohoto telefonu odejde SMS přes zkratku „' + ALARM_ZKRATKY[co] + '".',
-    () => alarmZkratka(co), 15, () => {});
-}
-const alarmZapBtnEl = document.getElementById('alarmZapBtn');
-const alarmVypBtnEl = document.getElementById('alarmVypBtn');
-if (alarmZapBtnEl) alarmZapBtnEl.addEventListener('click', () => alarmKlik('zapnout'));
-if (alarmVypBtnEl) alarmVypBtnEl.addEventListener('click', () => alarmKlik('vypnout'));
-
-function scenaKlik(key, btn) {
-  const p = POTVRZ_SCENY[key];
-  if (!p) return spustScenu(key, btn);
-  potvrzZeptej(p.nadpis, p.text, () => spustScenu(key, btn), p.sekundy);
-}
-
-async function spustScenu(key, btn) {
-  const vsechna = [...document.querySelectorAll('#asstScenes .asst-scene, #asstDvojice .asst-scene')];
-  vsechna.forEach(b => { b.disabled = true; });
-  asstReply.classList.remove('err');
-  asstReply.textContent = '';
-  try {
-    const res = await fetch('/api/scene', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ scene: key })
-    });
-    const data = await res.json();
-    if (res.status === 401) {
-      setLocked(true);
-      throw new Error(data.error || 'Ovládání je zamčené.');
-    }
-    if (!res.ok) throw new Error(data.error || 'Nepovedlo se.');
-    asstReply.textContent = data.reply || 'Hotovo.';
-  } catch (err) {
-    asstReply.classList.add('err');
-    asstReply.textContent = err.message;
-  }
-  vsechna.forEach(b => { b.disabled = false; });
-}
-
-
-async function sendAssistant() {
-  const text = asstInput.value.trim();
-  if (!text) return;
-  asstSend.disabled = true;
-  asstSend.classList.add('loading');
-  asstReply.classList.remove('err');
-  asstReply.textContent = '';
-  try {
-    const res = await fetch('/api/assistant', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-      body: JSON.stringify({ text })
-    });
-    const data = await res.json();
-    if (res.status === 401) {
-      setLocked(true);
-      throw new Error(data.error || 'Ovládání je zamčené.');
-    }
-    if (!res.ok) throw new Error(data.error || 'Asistent selhal.');
-    asstReply.textContent = data.reply || 'Hotovo.';
-    asstInput.value = '';
-  } catch (err) {
-    asstReply.classList.add('err');
-    asstReply.textContent = err.message;
-  }
-  asstSend.disabled = false;
-  asstSend.classList.remove('loading');
-}
-
-if (asstSend) {
-  asstSend.addEventListener('click', sendAssistant);
-  asstInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAssistant(); });
 }
 
 // ---------- Nejsme doma ----------
@@ -13332,7 +13133,6 @@ function applySnapshot(snap) {
   bezpecne(renderHuumTimers);
   if (snap.assistantEnabled === false) hideAssistantSlide();
   bezpecne(() => renderAssistantLog(snap.assistantLog || []));
-  bezpecne(() => renderSceny(snap.sceny));
   bezpecne(() => renderKalendar(snap.calendar));
   bezpecne(() => renderAway(snap));
   if (snap.tempAuto) tempAutoData = snap.tempAuto;

@@ -1,4 +1,4 @@
-// Karta „Topení a teplota v domě" na FVE: denní souhrn a kopírování celé řady.
+// Karta „Topení a teplota v domě" na Klimatu (do 11/2026 na FVE): denní souhrn a kopírování celé řady.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -19,9 +19,11 @@ window.fetch = async (url, init) => {
 let schranka = null;
 setTimeout(async () => {
  try {
-  const fve = document.querySelector('.slide[data-title="FVE"]');
-  const btn = fve.querySelector('.sbal-btn[data-sbal="topeni"]');
-  check('tlačítko je na FVE', !!btn, true);
+  const klima = document.querySelector('.slide[data-title="Klima"]');
+  const btn = klima.querySelector('.sbal-btn[data-sbal="topeni"]');
+  check('tlačítko je na Klimatu', !!btn, true);
+  check('  hned pod teplotou v pokojích', klima.querySelector('[data-sbal-obsah="klima"]').nextElementSibling === btn, true);
+  check('  na FVE už není', !!document.querySelector('.slide[data-title="FVE"] [data-sbal="topeni"]'), false);
   check('  výchozí sbalené', document.querySelector('[data-sbal-obsah="topeni"]').hidden, true);
 
   topeniData = null;

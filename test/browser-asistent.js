@@ -1,9 +1,6 @@
-// Tlačítka scén, prázdnin a ložnice a přepínač automatiky — dřív stránka Asistent,
-// teď nahoře na FVE (stránka Asistent i pole na instrukce jsou pryč).
-//
-// Tlačítka se staví ze seznamu ze serveru — v appce tak nemůže svítit tlačítko na
-// něco, co server neumí. Proto se tady nekontroluje jen jejich existence, ale i to,
-// že se opravdu berou z těch dat.
+// Přepínač automatiky (nahoře na FVE) a výjimky z rozvrhu žaluzií — prázdniny
+// a ložnice (na Žaluziích nad rozvrhem). Box se scénami („Zapni saunu"…) je
+// z FVE pryč (11/2026), stránka Asistent i pole na instrukce taky.
 const fs = require('fs');
 const path = require('path');
 const SP = process.env.TEST_OUT || require('os').tmpdir();
@@ -38,71 +35,28 @@ setTimeout(async () => {
   const pockej = () => new Promise(r => setTimeout(r, 30));
   const slide = document.querySelector('.slide[data-title="FVE"]');
 
-  R.push('1) Tlačítka pod instrukcemi');
-  renderSceny([
-    { key: 'sauna', label: 'Zapni saunu' },
-    { key: 'zahrada', label: 'Zahrada OFF' },
-    { key: 'zamkni', label: 'Zamkni dům' },
-    { key: 'sprcha', label: 'Jdu do sprchy' }
-  ]);
-  const tlacitka = [...document.querySelectorAll('#asstScenes .asst-scene')];
-  check('jsou čtyři', tlacitka.length, 4);
-  check('  s popisky ze serveru', tlacitka.map(b => b.textContent).join(' | '),
-    'Zapni saunu | Zahrada OFF | Zamkni dům | Jdu do sprchy');
-  // Stránka Asistent je zrušená: scény jsou nahoře na FVE hned pod přepínačem automatiky
+  const zaluzie = document.querySelector('.slide[data-title="Žaluzie"]');
+  R.push('1) Box se scénami je pryč');
+  check('žádná tlačítka scén', document.querySelectorAll('#asstScenes, .asst-scene, .asszistant-card').length, 0);
+  check('ani odpověď asistenta', !!document.getElementById('asstReply'), false);
   check('stránka Asistent je pryč', !!document.querySelector('.slide[data-title="Asistent"]'), false);
   check('  i pole na instrukce', !!document.getElementById('asstInput'), false);
-  check('scény jsou na FVE', slide.contains(document.getElementById('asstScenes')), true);
-  check('  hned pod automatikou', document.getElementById('asstScenes').closest('.card').previousElementSibling.id, 'autoCard');
+  check('alarm (rozpracovaný) taky', !!document.getElementById('asstAlarm'), false);
+  // Snímek ze serveru dál posílá seznam scén — appka ho jen přejde
+  check('renderSceny už neexistuje', typeof window.renderSceny, 'undefined');
 
-  poslano.length = 0;
-  tlacitka[3].click();
-  await new Promise(r => setTimeout(r, 30));
-  check('stisk pošle klíč tlačítka', poslano[0].url, '/api/scene');
-  check('  a je to ten správný', poslano[0].body.scene, 'sprcha');
-  check('odpověď serveru se ukáže', document.getElementById('asstReply').textContent, 'Hotovo.');
-
-  // Server umí jen to, co pošle — appka si tlačítka nevymýšlí
-  renderSceny([{ key: 'zamkni', label: 'Zamkni dům' }]);
-  check('kratší seznam ubere tlačítka', document.querySelectorAll('#asstScenes .asst-scene').length, 1);
-  renderSceny(null);
-  check('  a bez seznamu nezbyde žádné', document.querySelectorAll('#asstScenes .asst-scene').length, 0);
-
-  R.push('\\n1c) Dvojice: dveře a prázdniny vedle sebe');
-  // Pátá scéna by v hlavní mřížce zbyla sama na řádku. Patří vedle prázdnin.
-  renderSceny([
-    { key: 'sauna', label: 'Zapni saunu' },
-    { key: 'zahrada', label: 'Zahrada OFF' },
-    { key: 'zamkni', label: 'Zamkni dům' },
-    { key: 'sprcha', label: 'Jdu do sprchy' },
-    { key: 'otevri', label: 'Otevři dveře' },
-    { key: 'zaluzie', label: 'Zavři všechny žaluzie' }
-  ]);
-  check('v hlavní mřížce zůstanou čtyři', document.querySelectorAll('#asstScenes .asst-scene').length, 4);
-  check('  a dveře jsou v dvojici', !!document.querySelector('#asstDvojice [data-scene="otevri"]'), true);
-  const dvojice = [...document.querySelectorAll('#asstDvojice button')];
-  check('spodní mřížka: dveře, žaluzie, prázdniny, ložnice',
-    dvojice.map(b => b.dataset.scene || b.id).join(','), 'otevri,zaluzie,prazdninyBtn,lozniceZavrenoBtn');
-  // Dohromady 2×4 bez díry a se stejnou mezerou mezi mřížkami jako mezi tlačítky
-  const vse = [...document.querySelectorAll('#asstScenes button, #asstDvojice button')].map(b => b.getBoundingClientRect());
-  const radky = [...new Set(vse.map(r => Math.round(r.top)))];
-  check('tlačítka 2×4', radky.length + '×' + (vse.length / radky.length), '4×2');
-  const mezera = (a, b) => Math.round(b.top - a.bottom);
-  check('  mezi mřížkami stejná mezera jako uvnitř', mezera(vse[3], vse[4]), mezera(vse[1], vse[2]));
-  check('  poslední řádek plný', vse[6].top === vse[7].top && vse[7].left > vse[6].left, true);
-  const r0 = dvojice[0].getBoundingClientRect(), r1 = dvojice[1].getBoundingClientRect();
+  R.push('\\n1b) Prázdniny a ložnice na Žaluziích nad rozvrhem');
+  const vyj = document.getElementById('rozvrhVyjimky');
+  check('karta je na Žaluziích', zaluzie.contains(vyj), true);
+  check('  ne na FVE', slide.contains(document.getElementById('prazdninyBtn')), false);
+  const zKarty = [...zaluzie.querySelectorAll(':scope > .page > .card')];
+  check('  hned nad rozvrhem (mezi nimi jen náhled pro děti)',
+    zKarty.slice(zKarty.indexOf(vyj) + 1, zKarty.indexOf(document.getElementById('rozvrhCard'))).every(c => c.classList.contains('jen-deti')), true);
+  const dv = [...vyj.querySelectorAll('button')];
+  check('  prázdniny a ložnice', dv.map(b => b.id).join(','), 'prazdninyBtn,lozniceZavrenoBtn');
+  const r0 = dv[0].getBoundingClientRect(), r1 = dv[1].getBoundingClientRect();
   check('stojí vedle sebe', Math.round(r0.top) === Math.round(r1.top) && r1.left > r0.left, true);
   check('  a jsou stejně široká', Math.round(r0.width), Math.round(r1.width));
-  // Stejná mřížka jako tlačítka nad tím, ať to drží linku
-  const nahore = document.querySelector('#asstScenes .asst-scene').getBoundingClientRect();
-  check('  a široká jako ta nad nimi', Math.round(r0.width), Math.round(nahore.width));
-  // Když server dveře nenabídne, dvojici tvoří samotné prázdniny
-  renderSceny([{ key: 'zamkni', label: 'Zamkni dům' }]);
-  check('bez dveří ze serveru zbydou v dvojici prázdniny a ložnice',
-    document.querySelectorAll('#asstDvojice button').length, 2);
-
-  R.push('\\n1d) Šedé návrhy pod polem jsou pryč');
-  check('žádné šedé návrhy', document.querySelectorAll('#asstExamples, .asst-chip').length, 0);
 
   R.push('\\n1e) Zavřené žaluzie v ložnici');
   const loz = document.getElementById('lozniceZavrenoBtn');
@@ -121,15 +75,10 @@ setTimeout(async () => {
   renderLozniceZavreno({ datum: null, aktivni: false });
 
   R.push('\\n2) Pořadí karet');
-  // Jen karty, které je doopravdy vidět — schované (zámek, dětský režim) do
-  // pořadí na obrazovce nepatří
   const karty = [...slide.querySelectorAll(':scope > .page > .card')]
     .filter(c => !c.classList.contains('lock-panel') && getComputedStyle(c).display !== 'none');
-  const popis = c => (c.querySelector('.shelly-label') || {}).textContent
-    || (c.classList.contains('asszistant-card') ? 'scény' : c.id || '?');
-  // Nahoře na FVE: přepínač automatiky, pod ním scény, pak teprve elektrárna
-  check('pořadí karet nahoře na FVE', karty.slice(0, 2).map(popis).join(' | '), 'Automatika: – | scény');
-  check('  pak elektrárna', !!karty[2].querySelector('.nodes'), true);
+  check('nahoře na FVE přepínač automatiky', karty[0].id, 'autoCard');
+  check('  hned pod ním elektrárna', !!karty[1].querySelector('.nodes'), true);
   // Teplotní automatika je nahoře na Klimatu
   const klima = document.querySelector('.slide[data-title="Klima"]');
   const klimaKarty = [...klima.querySelectorAll(':scope > .page > .card')].filter(c => !c.classList.contains('lock-panel'));
@@ -143,58 +92,11 @@ setTimeout(async () => {
   const vypadky = logKarty.find(c => /Výpadky/.test(c.textContent));
   check('  hned nad výpadky', logKarty.indexOf(vypadky) - logKarty.indexOf(logKarta), 1);
 
-  R.push('\\n1b) Otevři dveře se ptá');
-  // Otevřené dveře jsou horší omyl než cokoli jiného, co se odsud dá spustit
-  renderSceny([{ key: 'zahrada', label: 'Zahrada OFF' }, { key: 'otevri', label: 'Otevři dveře' }]);
-  const okno0 = document.getElementById('potvrzOkno');
-  const tlac = k => document.querySelector('[data-scene=\"' + k + '\"]');
-  poslano.length = 0;
-  tlac('zahrada').click();
-  await pockej();
-  check('ostatní tlačítka se neptají', okno0.hidden, true);
-  // Zhasínání je bezpečná strana — na rozdíl od sauny a dveří se na nic neptá
-  check('  a rovnou pošlou scénu', poslano[0].body.scene, 'zahrada');
-  check('  a tlačítko se jmenuje Zahrada OFF', tlac('zahrada').textContent, 'Zahrada OFF');
-  poslano.length = 0;
-  tlac('otevri').click();
-  check('otevři dveře se ptá', okno0.hidden, false);
-  check('  a zatím nic neposílá', poslano.length, 0);
-  // Patnáct vteřin, ne třicet jako u jezdce automatiky
-  check('  odpočet je patnáctivteřinový',
-    /^Potvrdit \\(15 s\\)$/.test(document.getElementById('potvrzAno').textContent), true);
-  document.getElementById('potvrzZpet').click();
-  check('„zpět" dveře neotevře', poslano.length, 0);
-  tlac('otevri').click();
-  document.getElementById('potvrzAno').click();
-  await pockej();
-  check('potvrzení je otevře', poslano[0].url, '/api/scene');
-  check('  se správnou scénou', poslano[0].body.scene, 'otevri');
-
-  // Sauna: scéna sáhne na čtyři věci naráz a z názvu „Zapni saunu" by nikdo
-  // nečekal, že se otevřou žaluzie v ložnici. Okno je proto má vyjmenovat.
-  renderSceny([{ key: 'sauna', label: 'Zapni saunu' }]);
-  poslano.length = 0;
-  tlac('sauna').click();
-  check('zapni saunu se ptá taky', okno0.hidden, false);
-  check('  a zatím nic neposílá', poslano.length, 0);
-  const textOkna = document.getElementById('potvrzText').textContent;
-  check('  řekne, na kolik kamna pojedou', /80 °C/.test(textOkna), true);
-  check('  že se rozsvítí v sauně až na 75 °C', /na 75 °C se rozsvítí/.test(textOkna), true);
-  check('  že se vytáhnou žaluzie v ložnici na 70 °C', /Na 70 °C se vytáhnou žaluzie v ložnici/.test(textOkna), true);
-  check('  že zahrada až po západu', /po západu slunce/.test(textOkna), true);
-  check('  a připomene, co leží na kamnech', /nic neleží/.test(textOkna), true);
-  document.getElementById('potvrzZpet').click();
-  check('„zpět" saunu nezapne', poslano.length, 0);
-  tlac('sauna').click();
-  document.getElementById('potvrzAno').click();
-  await pockej();
-  check('potvrzení ji zapne', poslano[0].body.scene, 'sauna');
-
   R.push('\\n2b) Zítra jsou prázdniny');
   // Rozvrh žaluzií jede jinak ve všední den a jinak o víkendu. Tohle řekne, že
   // zítřek se má počítat jako víkend, i když je středa.
   const praz = document.getElementById('prazdninyBtn');
-  check('tlačítko je na FVE', slide.contains(praz), true);
+  check('tlačítko je na Žaluziích', zaluzie.contains(praz), true);
   renderPrazdniny({ zitra: false, dnes: false });
   check('  a je vypnuté', praz.classList.contains('on'), false);
   check('  s výzvou', praz.textContent, 'Zítra jsou prázdniny');
@@ -303,25 +205,6 @@ setTimeout(async () => {
   check('potvrzené „jsme pryč" se pošle', poslano[0].url, '/api/away');
   check('  s hodnotou', poslano[0].body.away, true);
 
-  R.push('\\nAlarm přes Zkratky');
-  const otevreno = [];
-  alarmOtevri = url => otevreno.push(url);
-  const zap = document.getElementById('alarmZapBtn'), vyp = document.getElementById('alarmVypBtn');
-  check('tlačítka Zakóduj / Odkóduj alarm jsou v appce', zap.textContent + ' | ' + vyp.textContent, 'Zakóduj alarm | Odkóduj alarm');
-  // Zatím schované (rozpracováno, viz ROZPRACOVANE.md) — kód ale funguje
-  check('  zatím schovaná', document.getElementById('asstAlarm').hidden && getComputedStyle(document.getElementById('asstAlarm')).display, 'none');
-  zap.click();
-  check('zakódování se ptá', document.getElementById('potvrzNadpis').textContent, 'Zakódovat alarm?');
-  check('  s 15s odpočtem', document.getElementById('potvrzAno').textContent, 'Potvrdit (15 s)');
-  document.getElementById('potvrzZpet').click();
-  check('„Zpět" nic nespustí', otevreno.length, 0);
-  zap.click();
-  document.getElementById('potvrzAno').click();
-  check('potvrzení spustí zkratku Alarm zapnout', otevreno[0], 'shortcuts://run-shortcut?name=Alarm%20zapnout');
-  vyp.click();
-  check('odkódování se ptá', document.getElementById('potvrzNadpis').textContent, 'Odkódovat alarm?');
-  document.getElementById('potvrzAno').click();
-  check('  a spustí zkratku Alarm vypnout', otevreno[1], 'shortcuts://run-shortcut?name=Alarm%20vypnout');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message + ' @ ' + (e.stack || '').split('\\n')[1]); }
 
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;

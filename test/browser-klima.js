@@ -138,7 +138,7 @@ setTimeout(async () => {
   check('  v létě obě nápovědy zůstanou', /Vypne pod/.test(document.getElementById('tempAutoOffHintObyvak').textContent), true);
   // Teplotní automatika je nahoře (dřív na stránce Asistent)
   check('pořadí karet sedí', karty.map(nazev).join(' | '),
-    'Teplotní automatika | seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Časovač');
+    'Teplotní automatika | seznam klimatizací | Tepelné čerpadlo | Program tepelného čerpadla | Teplota v pokojích (12 h) | Topení po dnech | Časovač');
 
   R.push('\\nTepelné čerpadlo');
   const box = document.getElementById('aquareaBox');

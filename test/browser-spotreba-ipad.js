@@ -19,6 +19,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
  try {
   sbalNastav('sptabulka', false);
+  sbalNastav('fve', false);
   await wait(150);
   check('široký displej', sirokyDisplej(), true);
   spotrebaData = { mesice: ${JSON.stringify(HISTORIE)}, rucneDo: '2026-10',
@@ -37,11 +38,16 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const slide = document.getElementById('spotrebaSlide');
   const r = slide.getBoundingClientRect();
   check('druhé klepnutí: přes celou obrazovku', [document.body.classList.contains('sp-cela'), Math.round(r.width) === innerWidth, Math.round(r.height) === innerHeight, r.top].join(' '), 'true true true 0');
-  const karty = [...slide.querySelectorAll('.page > .card')].map(k => k.getBoundingClientRect());
+  // Nahoře přehled 24 h / 7 dní (do 11/2026 na FVE) přes celou šířku, pod ním
+  // souhrn a graf vedle sebe, dole tabulka přes celou šířku
+  const prehled = slide.querySelector('.prehled-karta');
+  const kk = [...slide.querySelectorAll('.page > .sp-karta')];
+  const karty = kk.map(k => k.getBoundingClientRect());
+  const rp = prehled.getBoundingClientRect();
+  check('  přehled spotřeby nahoře přes celou šířku', !prehled.hidden && (rp.bottom <= karty[0].top + 1 && rp.width > karty[1].width), true);
   check('  souhrn a graf vedle sebe, tabulka přes celou šířku pod nimi',
     Math.abs(karty[0].top - karty[1].top) < 2 && karty[1].left > karty[0].right && karty[2].top > karty[0].top && karty[2].width > karty[1].width, true);
-  const kk = [...slide.querySelectorAll('.page > .card')];
-  check('  graf stejně vysoký jako souhrn vedle', Math.abs(kk[0].getBoundingClientRect().height - kk[1].getBoundingClientRect().height) <= 2, true);
+  check('  graf stejně vysoký jako souhrn vedle', Math.abs(karty[0].height - karty[1].height) <= 2, true);
   check('  a graf je vyšší než normálně', Number(slide.querySelector('.sp-pas').getAttribute('height')) > 180, true);
   const posun = document.getElementById('spGrafPosun');
   const sloupce = slide.querySelectorAll('.sp-sloupec');

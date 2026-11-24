@@ -220,18 +220,10 @@ const seznam = "const A = process.env.A || 'aabbccddeeff,112233445566';";
 check('seznam se rozpadne na kusy', idLiteraly(seznam).idcka.length, 2);
 check('oddělovač se za ID nepovažuje', idLiteraly("','").idcka.length, 0);
 
-nadpis('8) Čísla, která musí sedět na obou stranách');
-// Scéna „Zapni saunu" zapíná kamna na SCENA_SAUNA_C, ale v potvrzovacím okně
-// v appce je ta teplota napsaná ručně — okno má říct, co se opravdu stane.
-// Tyhle dvě hodnoty se rozejdou při první změně a nikdo si toho nevšimne,
-// protože obě části dál fungují.
-const scenaC = (LINES.join('\n').match(/const SCENA_SAUNA_C = (\d+);/) || [])[1];
-check('server má teplotu scény', scenaC, '80');
-const oknoText = (js.match(/sauna:\s*\{[\s\S]*?text:\s*([\s\S]*?),\n\s*sekundy/) || [])[1] || '';
-check('  a okno v appce mluví o té samé',
-  new RegExp(scenaC + '\\s*°C').test(oknoText), true);
-// Kdyby se text přepsal tak, že teplotu vůbec neuvádí, vršek by prošel naprázdno
-check('  a opravdu se v něm nějaká teplota píše', /\d+\s*°C/.test(oknoText), true);
+nadpis('8) Tlačítka scén jsou z appky pryč');
+// Box se scénami („Zapni saunu"…) byl na FVE do 11/2026. Potvrzovací okno sauny
+// psalo teplotu ručně a hlídalo se proti SCENA_SAUNA_C; s tlačítky zmizelo i ono.
+check('appka nemá tlačítka scén ani jejich okna', /POTVRZ_SCENY|renderSceny|asstScenes/.test(js), false);
 
 nadpis('9) Prohlížečové sady: zpětné apostrofy v DRIVERu');
 // Sady pro prohlížeč si celý skript nesou jako šablonový řetězec. Zpětný
@@ -265,14 +257,14 @@ nadpis('Potvrzovací okna');
 // Všechna potvrzení jdou přes okno appky (oranžové „Potvrdit" s odpočtem), ne přes
 // systémový dialog prohlížeče
 check('v appce není systémové confirm()', /[^A-Za-z_.]confirm\(/.test(HTML), false);
-check('garáž a otevření dveří mají 15 s',
-  /zavřít garáž\?'[\s\S]{0,200}?, 15\)\)\) return;/i.test(HTML) && /otevri: \{[^}]*sekundy: 15/.test(HTML), true);
+check('garáž má 15 s',
+  /zavřít garáž\?'[\s\S]{0,200}?, 15\)\)\) return;/i.test(HTML), true);
 // Vysvětlení logiky sauny je jen na stránce Logika automatiky
 check('u časovače sauny není dlouhé vysvětlení', HTML.includes('Kamna se zapnou o odhad náběhu dřív'), false);
 
 nadpis('Alarm');
 // Číslo alarmu a kód patří jen do zkratky v telefonu — v appce smí být jen jména zkratek
-check('appka spouští zkratky Alarm zapnout / vypnout', HTML.includes("zapnout: 'Alarm zapnout'") && HTML.includes("vypnout: 'Alarm vypnout'"), true);
+// Tlačítka alarmu (rozpracovaná, schovaná) zmizela s boxem scén na FVE (11/2026)
 check('v appce není telefonní číslo', /(?<![\d.])(\+420\s?)?[67]\d{2}\s?\d{3}\s?\d{3}(?!\d)/.test(HTML), false);
 check('  ani SMS příkaz alarmu', /\.(ARM|OFF)\.A\d/.test(HTML), false);
 
