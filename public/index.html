@@ -8817,7 +8817,7 @@ function renderAqProgram() {
   el('div', 'aqp-pozn', ed, `Čerpadlo bere vodu od ${vodaMin} °C — nižší hodnotu pošle jako ${vodaMin} °C. `
     + 'Aby nádrž s ohřevem počkala (třeba po ranní sprše do poledne), dej na ten úsek „Vyp.". '
     + 'Před prvním úsekem dne platí poslední úsek z předchozího večera. '
-    + '„Až když svítí": úsek začne, až FVE vyrábí aspoň 1,5 kW, nejpozději v zadaný čas; do té doby platí předchozí úsek.');
+    + '„Až když svítí": úsek začne, až FVE vyrábí aspoň 1,5 kW, nejpozději v zadaný čas; do té doby platí předchozí úsek. S „vynechat" se ten den bez slunce neohřeje vůbec.');
   const ulozit = el('button', 'timer-add-btn aqp-ulozit', ed, 'Uložit program');
   ulozit.type = 'button';
   ulozit.addEventListener('click', () => {
