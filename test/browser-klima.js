@@ -302,12 +302,23 @@ setTimeout(async () => {
     + ' ' + sl('04:30').querySelector('input[type=checkbox]').checked + ' ' + sl('04:30').querySelector('input[type=time]').hidden, 'true 14:00 false true');
   sl('04:30').querySelector('input[type=checkbox]').click();
   check('  zaškrtnutí nabídne o 3 h později', sl('04:30').querySelector('input[type=time]').value, '07:30');
+  const js = od => pbox.querySelector('.aqp-jenslunce[data-od="' + od + '"]');
+  check('  volba „když nesvítí, vynechat" jen u úseků podle slunce', !!js('04:30') + ' ' + !!js('07:00') + ' ' + js('04:30').querySelector('input').checked, 'true false false');
+  js('04:30').querySelector('input').click();
   sl('11:00').querySelector('input[type=checkbox]').click();
+  check('  zrušené slunce schová i „vynechat"', !!js('11:00'), false);
   pbox.querySelector('.aqp-predpoved input').click();
   poslano = [];
   pbox.querySelector('.aqp-ulozit').click();
   await pockej(80);
   check('  uloží slunce i předpověď', JSON.stringify([poslano[0].predpoved, poslano[0].voda.map(r => r.slunce || '-')]), '[true,["07:30","-","-","-"]]');
+  check('  uloží „vynechat"', poslano[0].voda.map(r => !!r.jenSlunce).join(','), 'true,false,false,false');
+  aqProgramStav = { vodaCeka: { od: '11:00', nejpozdeji: '14:00', teplota: 50, jenSlunce: true } };
+  aqProgramEditor = false; renderAqProgram();
+  check('stav: jen ze slunce čeká', pbox.querySelector('.aqp-navic').textContent, '☀️ ohřev vody na 50 °C čeká na slunce, jinak se v 14:00 vynechá');
+  aqProgramStav = { vodaVynechano: { od: '11:00', teplota: 50 } }; renderAqProgram();
+  check('  a vynechaný', pbox.querySelector('.aqp-navic').textContent, '☁️ ohřev vody z 11:00 dnes vynechán, nesvítilo');
+  aqProgramStav = null; aqProgramEditor = true; renderAqProgram();
   // Program se na serveru změní, zatímco je editor otevřený (obnova ze zálohy po nasazení)
   const VYCH = { zapnuto: true, topeni: [{ od: '00:00', posun: 0 }, { od: '11:00', posun: 1 }], voda: [{ od: '00:00', teplota: 43 }] };
   const MUJ = { zapnuto: true, topeni: [{ od: '00:00', posun: 0 }], voda: [{ od: '04:30', teplota: 48 }, { od: '16:00', teplota: 40 }] };

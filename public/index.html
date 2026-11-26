@@ -8693,7 +8693,8 @@ function renderAqProgram() {
   const s = p.zapnuto ? aqProgramStav : null;
   const navic = [];
   if (s && s.korekce) navic.push(s.duvod === 'jasno' ? '☀️ jasný den: topení o 1 níž' : '🥶 přijde ochlazení: topení o 1 výš předem');
-  if (s && s.vodaCeka) navic.push(`☀️ ohřev vody na ${s.vodaCeka.teplota} °C čeká na slunce, nejpozději ${s.vodaCeka.nejpozdeji}`);
+  if (s && s.vodaCeka) navic.push(`☀️ ohřev vody na ${s.vodaCeka.teplota} °C čeká na slunce, ${s.vodaCeka.jenSlunce ? 'jinak se v ' + s.vodaCeka.nejpozdeji + ' vynechá' : 'nejpozději ' + s.vodaCeka.nejpozdeji}`);
+  if (s && s.vodaVynechano) navic.push(`☁️ ohřev vody z ${s.vodaVynechano.od} dnes vynechán, nesvítilo`);
   if (navic.length) el('div', 'aqp-navic', aqProgramObsahEl, navic.join(' · '));
   // Pruh přes celý den, jako plán v Panasonicu
   const pruh = (nazev, rady, text, trida) => {
@@ -8705,7 +8706,7 @@ function renderAqProgram() {
       const hodnota = r.posun !== undefined ? r.posun : r.teplota;
       const u = el('div', 'aqp-usek ' + (hodnota === null ? 'vyp' : trida), pr, (doo - od) >= 120 ? text(hodnota) : '');
       u.style.flex = String(doo - od);
-      u.title = `${hm(od)}–${doo === 1440 ? '24:00' : hm(doo)}: ${text(hodnota)}` + (r.slunce ? ` (podle slunce, nejpozději ${r.slunce})` : '');
+      u.title = `${hm(od)}–${doo === 1440 ? '24:00' : hm(doo)}: ${text(hodnota)}` + (r.slunce ? (r.jenSlunce ? ` (jen ze slunce do ${r.slunce}, jinak se vynechá)` : ` (podle slunce, nejpozději ${r.slunce})`) : '');
       if (r.slunce) { u.classList.add('slunce'); if (u.textContent) u.textContent = '☀ ' + u.textContent; }
     }
   };
@@ -8781,10 +8782,20 @@ function renderAqProgram() {
           if (sc.checked) {
             const m = Math.min(23 * 60 + 45, aqMin(r.od) + 180);
             r.slunce = r.slunce || String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-          } else delete r.slunce;
+          } else { delete r.slunce; delete r.jenSlunce; }
           renderAqProgram();
         });
         nej.addEventListener('change', () => { if (nej.value) r.slunce = nej.value; });
+        // Když do té doby nezasvítí: ohřát ze sítě (výchozí), nebo ten den vynechat
+        if (r.slunce) {
+          const jl = el('label', 'aqp-volba aqp-slunce aqp-jenslunce', ed);
+          jl.dataset.od = r.od;
+          const jc = el('input', '', jl);
+          jc.type = 'checkbox';
+          jc.checked = !!r.jenSlunce;
+          el('span', '', jl, 'když nesvítí, vynechat (žádný ohřev ze sítě)');
+          jc.addEventListener('change', () => { if (jc.checked) r.jenSlunce = true; else delete r.jenSlunce; });
+        }
       }
     });
     const plus = el('button', 'mode-btn aqp-pridat', ed, '+ úsek');

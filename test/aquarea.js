@@ -173,6 +173,18 @@ function build(o = {}) {
     check('  nejpozději ve 14:00 začne i bez slunce', u(P(14, 0, 17), 0), '50 | 00:00 11:00');
     check('  bez FVE dat čeká na čas', u(P(11, 30, 18), null), 'null čeká | 00:00 11:00 cekam');
     check('  jiné úseky beze změny', u(P(5, 0, 18), 0) + ' / ' + u(P(17, 0, 18), 0), '48 | 00:00 04:30 / 40 | 00:00 16:00');
+    // Jen ze slunce: když do 14:00 nezasvítí, ten den se ohřev vynechá
+    const js = over({ ...V, voda: V.voda.map(r => (r.od === '11:00' ? { ...r, jenSlunce: true } : r)) }).program;
+    check('jen ze slunce se uloží', JSON.stringify(js.voda[2]), '{"od":"11:00","teplota":50,"slunce":"14:00","jenSlunce":true}');
+    check('  bez „podle slunce" se zahodí', JSON.stringify(over({ ...V, voda: [{ od: '11:00', teplota: 50, jenSlunce: true }] }).program.voda[0]), '{"od":"11:00","teplota":50}');
+    const uj = (t, fveW) => { const x = h.api.aquareaProgramUsek(js, t, { fveW, korekce: { korekce: 0 } });
+      return x.voda.teplota + (x.stav.vodaCeka ? ' čeká' + (x.stav.vodaCeka.jenSlunce ? '!' : '') : '') + (x.stav.vodaVynechano ? ' vynechán' : '') + ' | ' + x.klic.split(' ').slice(1).join(' '); };
+    check('  11:30 bez slunce čeká', uj(P(11, 30, 20), 300), 'null čeká! | 00:00 11:00 cekam');
+    check('  ve 14:00 bez slunce vynechá (dál vypnuto)', uj(P(14, 0, 20), 300), 'null vynechán | 00:00 11:00 cekam');
+    check('  ani v 15:00 nezačne, když zasvítí pozdě', uj(P(15, 0, 20), 300), 'null vynechán | 00:00 11:00 cekam');
+    check('  zasvítí až ve 14:30 → pořád vynechán', uj(P(14, 30, 21), 2000), 'null vynechán | 00:00 11:00 cekam');
+    check('  svítí ve 12:00 → ohřev a platí do 16:00', uj(P(12, 0, 22), 2000) + ' / ' + uj(P(15, 0, 22), 0), '50 | 00:00 11:00 / 50 | 00:00 11:00');
+    check('  16:00 dál normálně', uj(P(16, 0, 20), 0), '40 | 00:00 16:00');
     // Předpověď: posun topení
     const pp = { ...pr, predpoved: true, topeni: [{ od: '00:00', posun: 0 }, { od: '22:00', posun: -5 }] };
     const t = (cas, korekce) => { const x = h.api.aquareaProgramUsek(pp, cas, { fveW: 0, korekce }); return x.topeni.posun + ' ' + x.stav.korekce + ' ' + x.stav.duvod + ' ' + /k-?\d/.test(x.klic); };

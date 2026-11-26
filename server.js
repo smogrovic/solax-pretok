@@ -1715,7 +1715,8 @@ const TOPENI_ZMENY = [
   { d: '2026-11-13', co: 'Program vody v SMGhome: 4:30 → 48 °C (teplá voda na 6:30), 7:00 → 30 °C (čerpadlo dostane své minimum; po ranní sprše se nedohřívá), 11:00 → 50 °C (ohřev ze slunce), 16:00 → 40 °C (večerní pojistka, platí i přes noc do 4:30). Dřív: celý den 43 °C s dohřevem kdykoli, hlavně večer.' },
   { d: '2026-11-14', co: 'Program vody v SMGhome večer upraven: 4:30 → 48 °C, 7:00 → vypnuto (po ranní sprše se nedohřívá), 11:00 → 50 °C až když FVE vyrábí aspoň 1,5 kW (nejpozději 14:00), 16:00 → 40 °C přes noc. Pozor: polední posun topení +1 (11–17 h, z výchozího programu) podle dat (`tcPosun`) zůstal v programu a platil každý den 14.–17. 11.; období po změně je tím v poledne o kus teplejší, než mělo být. Jestli je zapnuté „topení podle předpovědi“, říká `program.predpoved` v exportu.' },
   { d: '2026-11-17', co: 'Večer: polední posun +1 smazán, topení v programu SMGhome celý den 0. Zapnuto „topení podle předpovědi“ (jasný den 9–15 h −1, ochlazení o 5 °C+ do 12 h +1 předem). Ranní voda 4:30 → 50 °C místo 48 (při 44–47 °C v nádrži se čerpadlo kvůli hysterezi nerozjelo a ohřívalo až při sprše). Zbytek vody beze změny: 7:00 vyp., 11:00 → 50 °C ze slunce (nejpozději 14:00), 16:00 → 40 °C.' },
-  { d: '2026-11-20', co: 'Program vody v SMGhome: přidáno 21:00 → vypnuto (16:00–21:00 zůstává 40 °C na večerní sprchy). Cíl: žádné noční dohřevy (nádrž ztrácí ~1 °C/h a při 40 °C přes noc se ohřívala ve 23–3 h a pak znovu ve 4:30 na 50 °C; voda 6–6,6 kWh/den). Ekvitermní křivka beze změny. Pozn.: 19.–20. 11. v noci se nejspíš větralo v dětských pokojích (Elenka 18,8, Miky 19,2 °C ráno).' }
+  { d: '2026-11-20', co: 'Program vody v SMGhome: přidáno 21:00 → vypnuto (16:00–21:00 zůstává 40 °C na večerní sprchy). Cíl: žádné noční dohřevy (nádrž ztrácí ~1 °C/h a při 40 °C přes noc se ohřívala ve 23–3 h a pak znovu ve 4:30 na 50 °C; voda 6–6,6 kWh/den). Ekvitermní křivka beze změny. Pozn.: 19.–20. 11. v noci se nejspíš větralo v dětských pokojích (Elenka 18,8, Miky 19,2 °C ráno).' },
+  { d: '2026-11-26', co: 'Program vody v SMGhome: smazán polední ohřev 11:00 → 50 °C ze slunce (v listopadu FVE skoro nikdy nedala 1,5 kW, takže ve 14:00 ohříval ze sítě a nádrž pak celé odpoledne ztrácela teplo při 50 °C; voda ~6 kWh/den). Večerní úsek 16:00 → 45 °C místo 40 (při rozdílu 1–3 °C se čerpadlo kvůli hysterezi nerozjede). Nově: 4:30 → 50 °C, 7:00 vyp., 16:00 → 45 °C, 21:00 vyp. Cíl: voda ~4,5–5 kWh/den, v 6:30 aspoň 45 °C, v 18:00 ~44 °C. Topení beze změny.' }
 ];
 
 // Porovnání týdne před změnou nastavení a týdne po ní (den změny se nepočítá, dnešek
@@ -8785,23 +8786,28 @@ function aquareaProgramOver(p) {
   const v = seznam(p.voda, r => (r.teplota === null ? null : Number.isInteger(r.teplota) && r.teplota >= AQ_VODA_MIN && r.teplota <= AQ_VODA_MAX ? r.teplota : undefined), 'Voda');
   if (v.chyba) return v;
   // Úsek vody „podle slunce": čeká na výrobu FVE, nejpozději do zadaného času
-  const slunce = {};
+  // `jenSlunce`: když do toho času nezasvítí, úsek se ten den vynechá (žádný ohřev ze sítě)
+  const slunce = {}, jenSlunce = {};
   for (const r of p.voda) {
     if (!r || r.slunce === undefined || r.slunce === null) continue;
     if (!/^([01]\d|2[0-3]):(00|15|30|45)$/.test(String(r.slunce)) || r.teplota === null || String(r.slunce) <= String(r.od)) {
       return { chyba: `Voda: „podle slunce" v ${r.od} potřebuje teplotu a čas „nejpozději" po začátku úseku.` };
     }
     slunce[r.od] = r.slunce;
+    if (r.jenSlunce === true) jenSlunce[r.od] = true;
   }
   return { program: { zapnuto: p.zapnuto === true, predpoved: p.predpoved === true,
     topeni: t.out.map(r => ({ od: r.od, posun: r.v })),
-    voda: v.out.map(r => ({ od: r.od, teplota: r.v, ...(slunce[r.od] ? { slunce: slunce[r.od] } : {}) })) } };
+    voda: v.out.map(r => ({ od: r.od, teplota: r.v,
+      ...(slunce[r.od] ? { slunce: slunce[r.od] } : {}), ...(jenSlunce[r.od] ? { jenSlunce: true } : {}) })) } };
 }
 
 // ---- Ohřev vody podle slunce a posun topení podle předpovědi ----
 // Úsek vody se `slunce: 'HH:MM'` nezačne hned: do té doby platí předchozí úsek a čeká
 // se, až FVE vyrábí aspoň AQ_SLUNCE_W (nádrž se ohřeje z vlastní elektřiny a za
-// tepla). Nejpozději v zadaný čas začne tak jako tak. Jednou začatý platí do konce.
+// tepla). Nejpozději v zadaný čas začne tak jako tak — s `jenSlunce` se místo toho ten
+// den vynechá a dál platí předchozí úsek (v zimě bez slunce žádný ohřev ze sítě, takže
+// úsek může zůstat celý rok). Jednou začatý platí do konce.
 const AQ_SLUNCE_W = 1500;
 // Předpověď: jasný den (9–15 h, oblačnost ≤ 30 %) → posun −1, slunce okny dům ohřeje;
 // večer a v noci, když má během 12 h přijít ochlazení aspoň o 5 °C → posun +1 předem
@@ -8841,14 +8847,21 @@ function aquareaProgramUsek(program, now = Date.now(), kontext = null) {
   const topeniUsek = program.topeni[ti];
   let voda = program.voda[vi];
   const stav = { korekce: 0, duvod: null, vodaCeka: null };
+  let vynechano = false;
   // Voda podle slunce: dokud nezačne, platí předchozí úsek
   if (voda.slunce && vi >= 0) {
     const zacal = state.aquareaSlunce && state.aquareaSlunce.den === den && state.aquareaSlunce.od === voda.od;
     const fve = kontext && 'fveW' in kontext ? kontext.fveW : aquareaFveW();
-    if (zacal || (typeof fve === 'number' && fve >= AQ_SLUNCE_W) || ted >= voda.slunce || ted < voda.od) {
+    const sviti = typeof fve === 'number' && fve >= AQ_SLUNCE_W;
+    if (!zacal && voda.jenSlunce && ted >= voda.slunce && ted >= voda.od) {
+      // Nezasvítilo včas → dnes bez ohřevu, platí předchozí úsek
+      vynechano = true;
+      stav.vodaVynechano = { od: voda.od, teplota: voda.teplota };
+      voda = program.voda[(vi - 1 + program.voda.length) % program.voda.length];
+    } else if (zacal || sviti || ted >= voda.slunce || ted < voda.od) {
       if (!zacal && ted >= voda.od) state.aquareaSlunce = { den, od: voda.od };
     } else {
-      stav.vodaCeka = { od: voda.od, nejpozdeji: voda.slunce, teplota: voda.teplota };
+      stav.vodaCeka = { od: voda.od, nejpozdeji: voda.slunce, teplota: voda.teplota, ...(voda.jenSlunce ? { jenSlunce: true } : {}) };
       voda = program.voda[(vi - 1 + program.voda.length) % program.voda.length];
     }
   }
@@ -8862,7 +8875,7 @@ function aquareaProgramUsek(program, now = Date.now(), kontext = null) {
     }
   }
   return { topeni, voda, stav,
-    klic: `${den} ${topeniUsek.od} ${program.voda[vi].od}${stav.vodaCeka ? ' cekam' : ''}${stav.korekce ? ' k' + stav.korekce : ''}` };
+    klic: `${den} ${topeniUsek.od} ${program.voda[vi].od}${stav.vodaCeka || vynechano ? ' cekam' : ''}${stav.korekce ? ' k' + stav.korekce : ''}` };
 }
 
 // Co udělat, aby čerpadlo odpovídalo úseku → seznam akcí pro aquareaProvest
@@ -8912,7 +8925,8 @@ async function runAquareaProgram(now = Date.now()) {
   }
   const pozn = [];
   if (usek.stav.korekce) pozn.push(usek.stav.duvod === 'jasno' ? 'jasno, posun −1' : 'přijde ochlazení, posun +1');
-  if (usek.stav.vodaCeka) pozn.push(`voda čeká na slunce, nejpozději ${usek.stav.vodaCeka.nejpozdeji}`);
+  if (usek.stav.vodaCeka) pozn.push(`voda čeká na slunce, ${usek.stav.vodaCeka.jenSlunce ? 'jinak se vynechá v' : 'nejpozději'} ${usek.stav.vodaCeka.nejpozdeji}`);
+  if (usek.stav.vodaVynechano) pozn.push(`ohřev vody z ${usek.stav.vodaVynechano.od} vynechán, nesvítilo`);
   addLog(`Tepelné čerpadlo (program): ${hotovo.join(', ')}${pozn.length ? ` (${pozn.join('; ')})` : ''}`);
 }
 
