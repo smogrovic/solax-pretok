@@ -328,6 +328,15 @@ setTimeout(async () => {
   check('  v Termínech jen Eso', [...document.querySelectorAll('#termKarty > .card')].map(k => k.dataset.karta).join(), 'eso');
   check('  motorka nepadne do karty BMW auta', /Servis po 10/.test(bt.textContent), false);
 
+  // Vozidlo bez karty: hláška a založení
+  terminyData = { predemDni: 14, karty: [{ id: 'eso', nazev: 'Eso', ikona: '🐕', udaje: '', terminy: [] }] };
+  renderTerminy();
+  check('bez karty: vozidlo to řekne', /zatím nejsou žádné termíny/.test(bt.textContent) + ' ' + /BMW 4 Gran Coupé/.test(bt.textContent), 'true true');
+  bt.querySelector('.term-hotovo').click();
+  check('  Založit otevře formulář v kartě vozidla', !!bt.querySelector('.term-form') + ' ' + bt.querySelector('.term-f-nazev').value, 'true BMW 4 Gran Coupé');
+  bt.querySelector('.zrusit').click();
+  check('  Zrušit ho zavře', !!bt.querySelector('.term-form'), false);
+
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };
   renderTerminy();

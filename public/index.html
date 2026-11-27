@@ -14862,6 +14862,26 @@ function renderTerminy() {
     }
     cil.appendChild(c);
   }
+  // Vozidlo bez karty termínů: řekne to a nabídne ji založit (jinak by sekce tiše chyběla)
+  for (const el of document.querySelectorAll('[data-karta-auta]')) {
+    if (el.childElementCount) continue;
+    const id = el.dataset.kartaAuta;
+    if (termUprava && termUprava.id === id) { el.appendChild(termFormular(termUprava)); continue; }
+    const nazev = (el.closest('.card').querySelector('.bmw-titulek') || {}).textContent || id;
+    const c = termEl('div', 'card');
+    const h = termEl('div', 'term-hlava');
+    h.appendChild(termEl('div', 'graph-title', 'Termíny a údaje'));
+    c.appendChild(h);
+    c.appendChild(termEl('div', 'term-prazdno', `Pro ${nazev} tu zatím nejsou žádné termíny ani údaje (${karty.length} karet v Termínech, žádná se k němu nehodí).`));
+    const zalozit = termEl('button', 'term-hotovo', '+ Založit termíny a údaje');
+    zalozit.type = 'button';
+    zalozit.addEventListener('click', () => {
+      termUprava = { id, k: { id, nazev, ikona: id === 'gs' ? '🏍️' : id === 'vw' ? '🚐' : '🚗', udaje: '', terminy: [] } };
+      renderTerminy();
+    });
+    c.appendChild(zalozit);
+    el.appendChild(c);
+  }
   if (termUprava && termUprava.id === 'nova') termKartyEl.appendChild(termFormular(termUprava));
   if (termNovaBtnEl) termNovaBtnEl.hidden = !!termUprava;
 }
