@@ -13037,6 +13037,14 @@ function autoOcisti(t) {
   return {
     soc: cislo(t.soc, 0, 100),
     dojezdKm: cislo(t.dojezdKm, 0, 2000),
+    palivoPct: cislo(t.palivoPct, 0, 100),
+    km: cislo(t.km, 0, 2000000),
+    zamek: ['zamčeno', 'odemčeno'].includes(t.zamek) ? t.zamek : null,
+    rucniBrzda: typeof t.rucniBrzda === 'boolean' ? t.rucniBrzda : null,
+    servisDatum: cas(t.servisDatum),
+    servisKm: cislo(t.servisKm, -100000, 100000),
+    olejDatum: cas(t.olejDatum),
+    olejKm: cislo(t.olejKm, -100000, 100000),
     nabijeni: text(t.nabijeni, 40),
     nabiji: typeof t.nabiji === 'boolean' ? t.nabiji : null,
     cilSoc: cislo(t.cilSoc, 0, 100),
@@ -13073,7 +13081,7 @@ app.post('/api/auto/stav', (req, res) => {
   for (const z of autoZmena(autoStav, stav)) addLog(z);
   if (bylTicho && autoKdy) addLog('Auto: most na NASu se zase ozývá');
   // Chyba bez čísel nepřepíše poslední známá procenta — jen se k nim přidá
-  autoStav = stav.chyba && stav.soc === null && autoStav ? { ...autoStav, chyba: stav.chyba } : stav;
+  autoStav = stav.chyba && stav.soc === null && stav.km === null && autoStav ? { ...autoStav, chyba: stav.chyba } : stav;
   autoKdy = Date.now();
   broadcast('auto', { auto: autoPayload() });
   res.json({ ok: true });

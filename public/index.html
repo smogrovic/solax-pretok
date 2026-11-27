@@ -3620,6 +3620,7 @@
         <div class="graph-title bmw-titulek">VW Multivan</div>
         <div class="wb-auto" id="wbAuto" hidden>
           <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
+          <div id="wbAutoRadky"></div>
           <div class="wb-auto-meta" id="wbAutoMeta"></div>
         </div>
         <div class="bmw-meta" id="vwBezDat"></div>
@@ -11911,8 +11912,29 @@ const AUTO_NABIJENI_CZ = {
 function autoShrnuti(a) {
   if (!(a && a.kdy && a.stav)) return null;
   const s = a.stav;
+  const c = n => Math.round(n).toLocaleString('cs-CZ');
+  const je = n => typeof n === 'number';
+  // Velké číslo: baterie, jinak nádrž, jinak dojezd, jinak kilometry
+  const hlavni = je(s.soc) ? `🚗 ${Math.round(s.soc)} %` : je(s.palivoPct) ? `⛽ ${Math.round(s.palivoPct)} %`
+    : je(s.dojezdKm) ? `⛽ ${c(s.dojezdKm)} km` : je(s.km) ? `${c(s.km)} km` : '🚗 –';
   const kusy = [];
-  if (typeof s.dojezdKm === 'number') kusy.push(`dojezd ${Math.round(s.dojezdKm)} km`);
+  if (je(s.dojezdKm) && (je(s.soc) || je(s.palivoPct))) kusy.push(`dojezd ${Math.round(s.dojezdKm)} km`);
+  if (je(s.km) && (je(s.soc) || je(s.palivoPct) || je(s.dojezdKm))) kusy.push(`najeto ${c(s.km)} km`);
+  else if (je(s.km)) kusy.push('najeto');
+  // Řádky pod tím jako u BMW: zámek, ruční brzda, servis a olej
+  const radky = [];
+  if (s.zamek || typeof s.rucniBrzda === 'boolean') {
+    radky.push({ pozor: s.zamek === 'odemčeno', text: [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 odemčeno') : null,
+      s.rucniBrzda === true ? 'ruční brzda zatažená' : s.rucniBrzda === false ? 'ruční brzda povolená' : null].filter(Boolean).join(' · ') });
+  }
+  const termin = (km, datum) => [je(km) ? `za ${c(km)} km` : null,
+    datum ? `do ${new Date(datum).toLocaleDateString('cs-CZ')}` : null].filter(Boolean).join(' nebo ');
+  const servis = termin(s.servisKm, s.servisDatum), olej = termin(s.olejKm, s.olejDatum);
+  if (servis && servis === olej) radky.push({ text: `🔧 servis a olej ${servis}` });
+  else {
+    if (servis) radky.push({ text: `🔧 servis ${servis}` });
+    if (olej) radky.push({ text: `🛢️ olej ${olej}` });
+  }
   if (s.nabijeni) {
     let n = AUTO_NABIJENI_CZ[s.nabijeni] || s.nabijeni;
     if (s.nabiji && typeof s.cilSoc === 'number') n += ` do ${Math.round(s.cilSoc)} %`;
@@ -11924,10 +11946,9 @@ function autoShrnuti(a) {
   if (s.chyba) meta.push(s.chyba);
   if (s.nabiji && s.hotovoV) meta.push(`nabito v ${fmtSolTime(Date.parse(s.hotovoV))}`);
   if (s.zmerenoV) meta.push(`změřeno ${fmtSolTime(Date.parse(s.zmerenoV))}`);
-  return { soc: typeof s.soc === 'number' ? `🚗 ${Math.round(s.soc)} %` : '🚗 –',
-    text: kusy.join(' · '), meta: meta.join(' · '), zive: !!a.zive };
+  return { soc: hlavni, text: kusy.join(' · '), radky, meta: meta.join(' · '), zive: !!a.zive };
 }
-const VW_BEZ_DAT = 'Živá data z VW teď nejdou — VW v květnu 2026 zavřel rozhraní pro jiné aplikace. Termíny a údaje fungují.';
+const VW_BEZ_DAT = 'Živá data z VW zatím nepřišla — posílá je most na NASu z portálu VW (asi po 15 min).';
 
 function renderAuto(d) {
   if (d !== undefined) autoData = d;
@@ -11941,6 +11962,7 @@ function renderAuto(d) {
   wbAutoEl.classList.toggle('stare', !sh.zive);
   document.getElementById('wbAutoSoc').textContent = sh.soc;
   document.getElementById('wbAutoText').textContent = sh.text;
+  document.getElementById('wbAutoRadky').replaceChildren(...sh.radky.map(r => termEl('div', 'bmw-radek' + (r.pozor ? ' pozor' : ''), r.text)));
   document.getElementById('wbAutoMeta').textContent = sh.meta;
 }
 
@@ -14804,7 +14826,10 @@ function renderKalAuta() {
   const a = autoData && autoData.kdy && autoData.stav;
   const vw = [];
   if (a && typeof a.soc === 'number') vw.push(`${a.nabiji ? '⚡' : '🔋'} ${Math.round(a.soc)} %`);
-  if (a && typeof a.dojezdKm === 'number') vw.push(`${Math.round(a.dojezdKm)} km`);
+  else if (a && typeof a.palivoPct === 'number') vw.push(`⛽ ${Math.round(a.palivoPct)} %`);
+  if (a && typeof a.dojezdKm === 'number') vw.push(`${vw.length ? '' : '⛽ '}${Math.round(a.dojezdKm).toLocaleString('cs-CZ')} km`);
+  // Bez dojezdu aspoň najeté kilometry (portál VW dojezd u dieselu zatím neposílá)
+  if (!vw.length && a && typeof a.km === 'number') vw.push(`${Math.round(a.km).toLocaleString('cs-CZ')} km`);
   obal.replaceChildren(karta('/bmw.jpg', '', 'BMW 420d', bmwText, false),
     karta('/vw.jpg', 'vw-foto', 'VW Multivan', vw.join(' · '), a && !autoData.zive));
 }

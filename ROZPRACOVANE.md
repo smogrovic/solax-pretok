@@ -28,25 +28,14 @@ Zkratky a zpátky do appky se to samo nevrátí.
 **Bezpečnost:** kód alarmu prošel chatem na snímku, takže je potřeba ho změnit.
 Číslo a kód nikdy nepatří do repozitáře ani do chatu.
 
-## VW Multivan — živá data přes portál EU Data Act (čeká se na VW)
+## VW Multivan — živá data přes portál EU Data Act
 
-**Stav (27. 11. 2026):** most `public/nas/auto-most.py` je na NASu (verze 11 923 B),
-přihlášení do portálu funguje, auto se našlo jako `VOLKSWAGEN_PASSENGER_CARS`.
-Žádost o data („Načíst data definovaná uživatelem", průběžně) je podaná; portál
-vrací 404 na `/list`, dokud nepřijde první dodávka (VW má až 24 h).
+**Stav (27. 11. 2026):** první dodávka přišla. Portál posílá km, zámek, ruční brzdu,
+světla, servis a olej (km i datum) a čas měření. Nádrž ani dojezd zatím ne — až je
+pošle, most je pošle taky (`drives`), nic dalšího se dělat nemusí.
 
-**Co má udělat uživatel (připomenout, až se zeptá):**
-1. Na portálu (Přehled vozidel → auto) zkontrolovat, že přišla první data.
-2. Na NASu: `ssh` na NAS, `sudo -i`,
-   `PY=/var/packages/Python3.9/target/usr/bin/python3.9`,
-   `cd /volume1/family/scripts/auto`, `$PY auto-most.py --vypis`.
-   Výstup poslat **bez VIN a e-mailu**.
-
-**Co pak udělá Claude:**
-- napevno nastavit značku v konfiguraci (osobní VW),
-- doladit kartu VW (Auta/Wallbox i kalendář na iPadu) podle toho, co portál posílá,
-- dát krok do Plánovače úloh: Spuštění systému, root, příkaz
-  `/var/packages/Python3.9/target/usr/bin/python3.9 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1`.
+**Zbývá uživateli:** stáhnout novou verzi mostu (`curl -o auto-most.py …/nas/auto-most.py`)
+a nastavit Plánovač úloh (AUTA.md, krok 8 — s celou cestou k Pythonu 3.9).
 
 ## Kalendář na iPadu — počasí + auta (doladit detaily)
 

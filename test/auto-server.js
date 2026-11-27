@@ -40,6 +40,12 @@ nadpis('1) Hlášení mostu');
   const d = h.api.autoOcisti({ soc: 150, dojezdKm: 'x', nabiji: 'ano', hotovoV: 'včera', heslo: 'tajne' });
   check('mimo rozsah a nesmysly se zahodí', [d.soc, d.dojezdKm, d.nabiji, d.hotovoV].join(','), ',,,');
   check('  a cizí pole se nepřevezmou', 'heslo' in d, false);
+  const v = h.api.autoOcisti({ km: 64063, palivoPct: 55, zamek: 'zamčeno', rucniBrzda: true, servisKm: 17800,
+    servisDatum: '2028-05-19T16:14:33+00:00', olejKm: 17800, olejDatum: '2028-05-19T16:14:33+00:00' });
+  check('diesel z portálu: km, nádrž, zámek, brzda, servis, olej',
+    [v.km, v.palivoPct, v.zamek, v.rucniBrzda, v.servisKm, v.servisDatum, v.olejKm].join(','), '64063,55,zamčeno,true,17800,2028-05-19T16:14:33.000Z,17800');
+  const z = h.api.autoOcisti({ zamek: '<b>x</b>', rucniBrzda: 'ano', km: -5 });
+  check('  zámek jen zamčeno/odemčeno, nesmysly pryč', [z.zamek, z.rucniBrzda, z.km].join(','), ',,');
   h.api.kdy = Date.now() - h.api.AUTO_TICHO_MS - 1;
   check('35 min ticha = most mlčí', h.api.autoZive(), false);
   h.volej(STAV);

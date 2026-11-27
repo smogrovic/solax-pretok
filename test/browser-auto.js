@@ -30,6 +30,16 @@ setTimeout(() => {
   check('  nenabíjí', document.getElementById('wbAutoText').textContent, 'nenabíjí');
   renderAuto({ zive: true, kdy: T, stav: { soc: null, chyba: 'VW odmítl přihlášení — zkontroluj heslo v auto.config.json.' } });
   check('chyba bez procent se ukáže', /VW odmítl/.test(document.getElementById('wbAutoMeta').textContent) + ' ' + document.getElementById('wbAutoSoc').textContent, 'true 🚗 –');
+  // Diesel z portálu EU Data Act: km, zámek, ruční brzda, servis (dojezd zatím ne)
+  renderAuto({ zive: true, kdy: T, stav: { km: 64063, zamek: 'zamčeno', rucniBrzda: true,
+    servisKm: 17800, servisDatum: '2028-05-19T16:14:33.000Z', olejKm: 17800, olejDatum: '2028-05-19T16:14:33.000Z', zmerenoV: new Date(T).toISOString() } });
+  const radky = () => [...document.querySelectorAll('#wbAutoRadky .bmw-radek')].map(r => r.textContent.replace(/\\u00a0/g, ' '));
+  check('diesel bez dojezdu: velké číslo jsou km', document.getElementById('wbAutoSoc').textContent.replace(/\\u00a0/g, ' ') + ' ' + document.getElementById('wbAutoText').textContent, '64 063 km najeto');
+  check('  zámek a ruční brzda', radky()[0], '🔒 zamčeno · ruční brzda zatažená');
+  check('  servis a olej naráz, když sedí', radky()[1], '🔧 servis a olej za 17 800 km nebo do 19. 5. 2028');
+  renderAuto({ zive: true, kdy: T, stav: { palivoPct: 55, dojezdKm: 610, km: 64100, zamek: 'odemčeno', servisKm: 17800, olejKm: 9000 } });
+  check('s nádrží: procenta, dojezd, km', document.getElementById('wbAutoSoc').textContent + ' | ' + document.getElementById('wbAutoText').textContent.replace(/\\u00a0/g, ' '), '⛽ 55 % | dojezd 610 km · najeto 64 100 km');
+  check('  odemčeno červeně, servis a olej zvlášť', document.querySelector('#wbAutoRadky .bmw-radek').classList.contains('pozor') + ' ' + radky().slice(1).join(' | ').replace(/\\u00a0/g, ' '), 'true 🔧 servis za 17 800 km | 🛢️ olej za 9 000 km');
  } catch (e) { R.push('CHYBA  výjimka: ' + e.message); }
   const chyb = R.filter(r => r.startsWith('CHYBA')).length;
   const pre = document.createElement('pre');

@@ -616,6 +616,10 @@ setTimeout(async () => {
     check('  tučně a uprostřed', cisla.every(c => getComputedStyle(c).fontWeight >= 700 && getComputedStyle(c).textAlign === 'center'), true);
     renderAuto({ kdy: Date.now(), zive: true, stav: { soc: 64, dojezdKm: 300, nabiji: true } });
     check('  VW při nabíjení blesk', auta.querySelectorAll('.kal-auto-cislo')[1].textContent, '⚡ 64 % · 300 km');
+    renderAuto({ kdy: Date.now(), zive: true, stav: { km: 64063, zamek: 'zamčeno' } });
+    check('  VW diesel bez dojezdu: aspoň km', auta.querySelectorAll('.kal-auto-cislo')[1].textContent.replace(/\\u00a0/g, ' '), '64 063 km');
+    renderAuto({ kdy: Date.now(), zive: true, stav: { palivoPct: 55, dojezdKm: 610 } });
+    check('  VW s nádrží: procenta a dojezd', auta.querySelectorAll('.kal-auto-cislo')[1].textContent, '⛽ 55 % · 610 km');
     check('  karty se vejdou do boxu', ka2.every(k => k.getBoundingClientRect().bottom <= ra.bottom + 1), true);
     bmwData = bmwPuv; renderAuto(autoPuv); renderBmw();
     const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());

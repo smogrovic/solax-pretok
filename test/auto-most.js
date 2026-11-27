@@ -51,6 +51,31 @@ print(json.dumps(m.stav_auta(auto)))`);
   check('bez pohonu a nabíjení jen prázdno', out.chyba || [out.soc, out.nabiji, out.nabijeni].join(','), ',,');
 }
 
+{
+  // Multivan diesel z portálu EU Data Act — přesně co most vypsal 27. 11. 2026
+  const out = py(`
+class E:
+    def __init__(s, v): s.value = v
+t = datetime(2028, 5, 19, 16, 14, 33, tzinfo=timezone.utc)
+auto = N(vin=A('X'), odometer=A(64063.0), parking_brake=A(True), doors=N(lock_state=A(E('locked'))),
+  maintenance=N(inspection_due_at=A(t), inspection_due_after=A(17800.0), oil_service_due_at=A(t), oil_service_due_after=A(17800.0)),
+  captured_at=A(datetime(2026, 11, 27, 16, 14, 33, tzinfo=timezone.utc)))
+print(json.dumps(m.stav_auta(auto)))`);
+  check('portál: km, zámek, brzda', [out.km, out.zamek, out.rucniBrzda].join(','), '64063,zamčeno,true');
+  check('  servis a olej (km i datum)', [out.servisKm, out.servisDatum, out.olejKm].join(','), '17800,2028-05-19T16:14:33+00:00,17800');
+  check('  kdy auto hlásilo = captured_at', out.zmerenoV, '2026-11-27T16:14:33+00:00');
+  check('  bez pohonu nádrž i dojezd prázdné', [out.palivoPct, out.dojezdKm, out.soc].join(','), ',,');
+}
+{
+  // Kdyby portál poslal i pohon: nádrž z dieselu, dojezd z total_range
+  const out = py(`
+class T:
+    def __init__(s, v): s.value = v
+auto = N(vin=A('X'), drives=N(total_range=A(612), drives={'primary': N(type=A(T('diesel')), level=A(55.0), range=A(600))}))
+print(json.dumps(m.stav_auta(auto)))`);
+  check('pohon diesel: nádrž a dojezd', [out.palivoPct, out.dojezdKm, out.soc].join(','), '55,612,');
+}
+
 nadpis('2) Výběr auta');
 {
   const out = py(`

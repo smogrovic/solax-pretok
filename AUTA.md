@@ -6,7 +6,7 @@ Stránka **Auta/Wallbox** má kartu pro každé vozidlo: fotku, živá data (kde
 | Vozidlo | Živá data | Ovládání (zamknout, topení…) |
 |---|---|---|
 | BMW 420d Gran Coupé | ✅ BMW CarData (oficiální, zdarma) | ❌ CarData je jen pro čtení |
-| VW Multivan | ⚠️ most na NASu, VW ho v 5/2026 zablokoval | ❌ jen přes appku VW |
+| VW Multivan | ✅ most na NASu z portálu EU Data Act (km, zámek, servis, olej; po ~15 min) | ❌ jen přes appku VW |
 | BMW R 1300 GS | ❌ BMW Motorrad rozhraní nemá | ❌ |
 
 ## Ovládání aut z appky (zamknout, odemknout, větrání…)
@@ -120,11 +120,11 @@ skript**:
 - Obecné: název „VW most“, **Uživatel: root**, Událost: **Spuštění systému**.
 - Nastavení úlohy → Spustit příkaz:
   ```
-  python3 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1
+  /var/packages/Python3.9/target/usr/bin/python3.9 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1
   ```
 - **OK**, pak úlohu označ a dej **Spustit** (ať nečeká na restart NASu).
 
-Do 10 minut se karta VW na Auta/Wallbox naplní (procenta, dojezd, nabíjení). Když ne:
+Do 15 minut se karta VW na Auta/Wallbox naplní (najeto, zámek, ruční brzda, servis a olej; nádrž a dojezd, až je portál začne posílat). Když ne:
 `tail -n 30 /volume1/family/scripts/auto/auto-most.log` a výstup (bez VIN a e-mailu) Claudovi.
 
 ### 9. Odhlásit se z NASu

@@ -125,22 +125,53 @@ def vyber_auto(garaz, vin=None):
     return auta[0] if auta else None
 
 
+ZAMEK_CZ = {'locked': 'zamčeno', 'unlocked': 'odemčeno'}
+
+
+def _pohony(auto):
+    """Všechny pohony auta (portál EU Data Act je dává do drives.drives, i spalovací)."""
+    d = getattr(getattr(auto, 'drives', None), 'drives', None)
+    return list(d.values()) if isinstance(d, dict) else []
+
+
+def _je_elektricky(pohon):
+    return (_enum_text(_hodnota(pohon, 'type')) or '').lower() == 'electric'
+
+
 def stav_auta(auto):
     """Z vozidla CarConnectivity → to, co appka zobrazí."""
+    pohony = _pohony(auto)
     pohon = auto.get_electric_drive() if hasattr(auto, 'get_electric_drive') else None
+    if pohon is None:
+        pohon = next((p for p in pohony if _je_elektricky(p)), None)
+    # Nádrž: první pohon, který není elektrický (diesel, benzín…)
+    nadrz = next((p for p in pohony if not _je_elektricky(p)), None)
     nabijeni = getattr(auto, 'charging', None)
     stav = _enum_text(_hodnota(nabijeni, 'state'))
     level = getattr(pohon, 'level', None) if pohon is not None else None
+    dojezd = next((d for d in (_cislo(_hodnota(auto, 'drives', 'total_range')), _cislo(_hodnota(pohon, 'range')),
+                               _cislo(_hodnota(nadrz, 'range'))) if d is not None), None)
+    zamek = _enum_text(_hodnota(auto, 'doors', 'lock_state'))
+    brzda = _hodnota(auto, 'parking_brake')
+    udrzba = getattr(auto, 'maintenance', None)
     return {
         'soc': _cislo(_hodnota(pohon, 'level')),
-        'dojezdKm': _cislo(_hodnota(pohon, 'range')),
+        'dojezdKm': dojezd,
+        'palivoPct': _cislo(_hodnota(nadrz, 'level')),
+        'km': _cislo(_hodnota(auto, 'odometer')),
+        'zamek': ZAMEK_CZ.get((zamek or '').lower()) if zamek else None,
+        'rucniBrzda': brzda if isinstance(brzda, bool) else None,
+        'servisDatum': _cas(_hodnota(udrzba, 'inspection_due_at')),
+        'servisKm': _cislo(_hodnota(udrzba, 'inspection_due_after')),
+        'olejDatum': _cas(_hodnota(udrzba, 'oil_service_due_at')),
+        'olejKm': _cislo(_hodnota(udrzba, 'oil_service_due_after')),
         'nabijeni': stav,
         'nabiji': stav == 'charging' if stav else None,
         'cilSoc': _cislo(_hodnota(nabijeni, 'settings', 'target_level')),
         'vykonKw': _cislo(_hodnota(nabijeni, 'power')),
         'hotovoV': _cas(_hodnota(nabijeni, 'estimated_date_reached')),
         # Kdy auto údaj naposledy změřilo — VW hlásí i staré hodnoty, když auto spí
-        'zmerenoV': _cas(getattr(level, 'last_updated', None)),
+        'zmerenoV': _cas(getattr(level, 'last_updated', None)) or _cas(_hodnota(auto, 'captured_at')),
         'model': _hodnota(auto, 'model'),
     }
 
