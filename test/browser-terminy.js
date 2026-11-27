@@ -35,7 +35,7 @@ setTimeout(async () => {
   sbalNastav('terminy', false);
 
   terminyData = { predemDni: 14, karty: [
-    { id: 'auto2', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: X\\nPojišťovna: Direct', terminy: [
+    { id: 'auto2', nazev: 'Chata', ikona: '🚗', udaje: 'VIN: X\\nPojišťovna: Direct', terminy: [
       { id: 'stk', nazev: 'STK', datum: den(400), opakovani: 0, pozn: '' },
       { id: 'poj', nazev: 'Pojištění', datum: den(10), opakovani: 0, pozn: 'Direct' }] },
     { id: 'eso', nazev: 'Eso', ikona: '🐕', udaje: '', terminy: [
@@ -48,7 +48,7 @@ setTimeout(async () => {
   R.push('1) Nejbližší nahoře');
   const blizke = [...document.querySelectorAll('#termBlizke .term-radek')];
   check('do dvou měsíců a prošlé, nejbližší první', blizke.map(r => r.querySelector('.term-nazev').textContent).join(' | '),
-    '🐕 Eso: Odčervení | 🚗 BMW 4: Pojištění | 🐕 Eso: Nobivac ↻');
+    '🐕 Eso: Odčervení | 🚗 Chata: Pojištění | 🐕 Eso: Nobivac ↻');
   check('prošlé červeně', blizke[0].querySelector('.term-zbyva').className + ' ' + blizke[0].querySelector('.term-zbyva').textContent,
     'term-zbyva hori prošlo před 3 d');
   check('do 14 dní červeně', blizke[1].querySelector('.term-zbyva').className, 'term-zbyva hori');
@@ -58,7 +58,7 @@ setTimeout(async () => {
 
   R.push('\\n2) Karty');
   const karty = [...document.querySelectorAll('#termKarty > .card')];
-  check('dvě karty', karty.map(k => k.querySelector('.graph-title').textContent).join(' | '), '🚗 BMW 4 | 🐕 Eso');
+  check('dvě karty', karty.map(k => k.querySelector('.graph-title').textContent).join(' | '), '🚗 Chata | 🐕 Eso');
   check('údaje po řádcích', [...karty[0].querySelector('.term-udaje').children].map(e => e.firstChild.textContent).join(' | '), 'VIN: X | Pojišťovna: Direct');
   check('termíny podle data, bez data na konci', [...karty[1].querySelectorAll('.term-nazev')].map(e => e.textContent).join(','),
     'Odčervení,Nobivac ↻,Vzteklina');
@@ -81,7 +81,7 @@ setTimeout(async () => {
   check('otevře formulář', !!form, true);
   check('  tlačítko Nová karta se schová', document.getElementById('termNovaBtn').hidden, true);
   const nazev = form.querySelector('.term-f-nazev');
-  nazev.value = 'BMW 4 Gran Coupé';
+  nazev.value = 'Chata Gran Coupé';
   nazev.dispatchEvent(new Event('input'));
   const udaje = form.querySelector('.term-f-udaje');
   udaje.value = 'VIN: X\\nSPZ: Y';
@@ -89,7 +89,7 @@ setTimeout(async () => {
   form.querySelector('.term-f-pridat').click();
   const f2 = document.querySelector('#termKarty [data-karta="auto2"] .term-form');
   check('přidaný termín má řádek a název zůstal', f2.querySelectorAll('.term-f-termin').length + ' ' + f2.querySelector('.term-f-nazev').value,
-    '3 BMW 4 Gran Coupé');
+    '3 Chata Gran Coupé');
   const posl = [...f2.querySelectorAll('.term-f-termin')].pop();
   const tn = posl.querySelector('.term-f-tnazev'); tn.value = 'Dálniční známka'; tn.dispatchEvent(new Event('input'));
   const td = posl.querySelector('.term-f-datum'); td.value = '2027-05-05'; td.dispatchEvent(new Event('change'));
@@ -101,7 +101,7 @@ setTimeout(async () => {
   await pockej();
   check('uložení pošle všechny karty', poslano[0].url + ' ' + poslano[0].body.karty.length, '/api/terminy 2');
   const k0 = poslano[0].body.karty[0];
-  check('  s novým názvem a údaji', k0.nazev + ' | ' + k0.udaje, 'BMW 4 Gran Coupé | VIN: X\\nSPZ: Y');
+  check('  s novým názvem a údaji', k0.nazev + ' | ' + k0.udaje, 'Chata Gran Coupé | VIN: X\\nSPZ: Y');
   check('  i s novým termínem', JSON.stringify(k0.terminy[2]), '{"nazev":"Dálniční známka","datum":"2027-05-05","opakovani":12,"pozn":""}');
   check('formulář se zavře', !!document.querySelector('#termKarty .term-form'), false);
 
@@ -194,7 +194,7 @@ setTimeout(async () => {
   check('uloží pododdíly i přiřazení', ul.skupiny.join(',') + ' | ' + ul.terminy[1].skupina, 'Lukáš,Zuzka,Miky,Elenka | Elenka');
 
   R.push('\\n6d) VIN ke zkopírování');
-  terminyData = { predemDni: 14, karty: [{ id: 'auto2', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: WBA123\\nSPZ: 1AB', terminy: [] }] };
+  terminyData = { predemDni: 14, karty: [{ id: 'auto2', nazev: 'Chata', ikona: '🚗', udaje: 'VIN: WBA123\\nSPZ: 1AB', terminy: [] }] };
   renderTerminy();
   const kop = [...document.querySelectorAll('#termKarty .term-kopir')];
   check('u VIN je tlačítko Kopírovat (u SPZ ne)', kop.length, 1);
@@ -208,7 +208,7 @@ setTimeout(async () => {
   R.push('\\n6e) Olej: Hotovo se zeptá na kilometry');
   const olej = { id: 'gs-olej', nazev: 'Olej', datum: den(5), opakovani: 12, pozn: '', posledni: 'Poslední olej', km: true };
   const stk = { id: 'gs-stk', nazev: 'STK', datum: den(3), opakovani: 0, pozn: '' };
-  terminyData = { predemDni: 14, karty: [{ id: 'moto2', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [olej, stk, { ...olej, id: 'x-olej', datum: den(300) }] }] };
+  terminyData = { predemDni: 14, karty: [{ id: 'moto2', nazev: 'Skútr', ikona: '🏍️', udaje: '', terminy: [olej, stk, { ...olej, id: 'x-olej', datum: den(300) }] }] };
   renderTerminy();
   const hot = [...document.querySelectorAll('#termKarty .term-hotovo')];
   check('olej má Hotovo i daleko, STK Nové datum', hot.map(b => b.textContent).join(','), 'Nové datum,Hotovo,Hotovo');
@@ -257,7 +257,7 @@ setTimeout(async () => {
 
   R.push('\\n6f) Termín do 14 dní svítí mezi připomínkami');
   const defs = pripDefinice().filter(d => d.termin);
-  check('olej a STK do 14 dní jsou připomínky (daleký olej ne)', defs.map(d => d.nazev).join(' | '), 'Objednat olej – BMW R 1300 GS | BMW R 1300 GS: STK');
+  check('olej a STK do 14 dní jsou připomínky (daleký olej ne)', defs.map(d => d.nazev).join(' | '), 'Objednat olej – Skútr | Skútr: STK');
   check('  svítí s textem', pripominkaStav(defs[0], null).sviti + ' ' + pripominkaStav(defs[0], null).text, 'true Za 5 dní (' + termDatumCz(den(5)) + ')');
   renderPripominky();
   check('  jsou v seznamu Připomínek', [...document.querySelectorAll('#pripSeznam .prip-radek')].filter(r => /^term_/.test(r.dataset.id)).length, 2);
@@ -316,6 +316,17 @@ setTimeout(async () => {
   bt.querySelector('.zrusit').click();
   check('  Zrušit ji zavře', !!bt.querySelector('.term-form'), false);
   check('připomínky aut dál chodí', termPripominky().map(p => p.nazev).join(), 'BMW 4 Gran Coupé: Pojištění');
+
+  // Uložené karty můžou mít jiná id (založené znovu nebo vložením) — pozná se podle názvu
+  terminyData = { predemDni: 14, karty: [
+    { id: 'kab12cd', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'SPZ: 5SP', terminy: [{ id: 'x1', nazev: 'STK', datum: den(500), opakovani: 24, pozn: '' }] },
+    { id: 'kef34gh', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [] },
+    { id: 'kij56kl', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: 'Servis po 10 000 km', terminy: [] },
+    { id: 'eso', nazev: 'Eso', ikona: '🐕', udaje: '', terminy: [] }] };
+  renderTerminy();
+  check('jiná id: auta podle názvu do svých karet', [bt, vt, document.getElementById('gsTerminy')].map(el => (el.querySelector('[data-karta]') || {}).dataset?.karta).join(','), 'kab12cd,kef34gh,kij56kl');
+  check('  v Termínech jen Eso', [...document.querySelectorAll('#termKarty > .card')].map(k => k.dataset.karta).join(), 'eso');
+  check('  motorka nepadne do karty BMW auta', /Servis po 10/.test(bt.textContent), false);
 
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };

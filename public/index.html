@@ -14426,7 +14426,8 @@ async function termPost(adresa, telo) {
   } catch (err) {
     termHintEl.textContent = err.message || 'Nepodařilo se uložit.';
     // Karta auta je na Wallboxu — chyba se musí ukázat i tam
-    const f = termUprava && document.querySelector(`[data-karta-auta="${termUprava.id}"] .term-form`);
+    const cil = termUprava && termAutaMapa((terminyData && terminyData.karty) || []).get(termUprava.id);
+    const f = cil && cil.querySelector('.term-form');
     if (f) { let h = f.querySelector('.term-f-chyba'); if (!h) { h = termEl('div', 'rezim-hint term-f-chyba'); f.appendChild(h); } h.textContent = termHintEl.textContent; }
     return false;
   }
@@ -14789,15 +14790,35 @@ document.getElementById('bmwPoleKopirovat').addEventListener('click', async () =
   catch { hint.textContent = 'Schránka nejde — označ seznam ručně.'; }
 });
 
+const TERM_AUTA_NAZEV = { bmw4: /bmw\s*4|gran\s*coup/i, vw: /\bvw\b|multivan|volkswagen/i, gs: /\bgs\b|r\s*1300/i };
+// id karty → kontejner v kartě vozidla
+function termAutaMapa(karty) {
+  const mapa = new Map();
+  const cile = [...document.querySelectorAll('[data-karta-auta]')];
+  for (const el of cile) {
+    const k = karty.find(x => x.id === el.dataset.kartaAuta);
+    if (k) mapa.set(k.id, el);
+  }
+  for (const el of cile) {
+    if ([...mapa.values()].includes(el)) continue;
+    const re = TERM_AUTA_NAZEV[el.dataset.kartaAuta];
+    const k = re && karty.find(x => !mapa.has(x.id) && re.test(x.nazev || ''));
+    if (k) mapa.set(k.id, el);
+  }
+  return mapa;
+}
+
 function renderTerminy() {
   if (!termKartyEl || !termBlizkeEl) return;
   const karty = (terminyData && terminyData.karty) || [];
   const dnes = termDnes();
   // Nahoře: co je do dvou měsíců nebo už prošlo, nejbližší první
   termBlizkeEl.textContent = '';
-  // Auta mají termíny ve svých kartách na Wallboxu — tady se neukazují
-  const auta = new Map([...document.querySelectorAll('[data-karta-auta]')].map(el => [el.dataset.kartaAuta, el]));
-  for (const el of auta.values()) el.textContent = '';
+  // Auta mají termíny ve svých kartách na Auta/Wallbox — tady se neukazují.
+  // Karta se pozná podle id (bmw4, vw, gs), a když ho uložená data mají jiné
+  // (karta založená znovu nebo vložením), podle názvu.
+  const auta = termAutaMapa(karty);
+  for (const el of document.querySelectorAll('[data-karta-auta]')) el.textContent = '';
   const blizke = [];
   for (const k of karty) for (const x of k.terminy) {
     if (!auta.has(k.id) && x.datum && termDni(x.datum, dnes) <= TERM_BLIZKO_DNI) blizke.push([k, x]);
