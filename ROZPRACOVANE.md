@@ -30,15 +30,14 @@ Zkratky a zpátky do appky se to samo nevrátí.
 
 ## VW Multivan — živá data přes portál EU Data Act
 
-**Stav (27. 11. 2026):** první dodávka přišla. Portál posílá km, zámek, ruční brzdu,
-světla, servis a olej (km i datum) a čas měření. Nádrž ani dojezd zatím ne — až je
-pošle, most je pošle taky (`drives`), nic dalšího se dělat nemusí.
+**Stav (27. 11. 2026, 22:35):** most běží na NASu (verze 14 548 B), spouští ho hlídač
+v Plánovači úloh (druhý řádek pod smyčkou vysavač/závlaha). Uživatel podal na portálu
+novou průběžnou žádost s víc skupinami dat (All Data, nebo Dashboard Measurements +
+Breakdown) kvůli baterii, nádrži a dojezdu; čeká se na první dodávku (až 24 h).
 
-**Zbývá uživateli (připomenout):** nová verze mostu je stažená? (13 479 B) a hlavně
-**Plánovač úloh** — DSM → Plánovač úloh → Vytvořit → Spuštěná úloha → Uživatelem
-definovaný skript; „VW most", root, Spuštění systému, příkaz
-`/var/packages/Python3.9/target/usr/bin/python3.9 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1`,
-pak úlohu označit a **Spustit**. Karta VW se naplní do 15 minut.
+**Připomenout:** po dodávce spustit `$PY auto-most.py --vypis` a výpis (bez VIN) poslat.
+Zkontrolovat, že přišly `soc`, `palivoPct`, `dojezdKm`, nabíjení a `zapojeno`, a podle
+toho doladit kartu VW. Ověřit, že hlídač má oba řádky uložené (přežije restart NASu).
 
 ## Motorka BMW R 1300 GS — zjistit, jestli je v BMW CarData
 
