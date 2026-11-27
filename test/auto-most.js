@@ -75,6 +75,16 @@ auto = N(vin=A('X'), drives=N(total_range=A(612), drives={'primary': N(type=A(T(
 print(json.dumps(m.stav_auta(auto)))`);
   check('pohon diesel: nádrž a dojezd', [out.palivoPct, out.dojezdKm, out.soc].join(','), '55,612,');
 }
+{
+  // Plug-in hybrid: kabel z charging.connector (bez něj null)
+  const out = py(`
+class E:
+    def __init__(s, v): s.value = v
+a = N(vin=A('X'), charging=N(state=A(E('off')), connector=N(connection_state=A(E('connected')))))
+b = N(vin=A('X'), charging=N(state=A(E('off')), connector=N(connection_state=A(E('disconnected')))))
+print(json.dumps([m.stav_auta(a)['zapojeno'], m.stav_auta(b)['zapojeno'], m.stav_auta(N(vin=A('X')))['zapojeno']]))`);
+  check('kabel: zapojený / ne / neznámo', out.join(','), 'true,false,');
+}
 
 nadpis('2) Výběr auta');
 {

@@ -13041,6 +13041,7 @@ function autoOcisti(t) {
     km: cislo(t.km, 0, 2000000),
     zamek: ['zamčeno', 'odemčeno'].includes(t.zamek) ? t.zamek : null,
     rucniBrzda: typeof t.rucniBrzda === 'boolean' ? t.rucniBrzda : null,
+    zapojeno: typeof t.zapojeno === 'boolean' ? t.zapojeno : null,
     servisDatum: cas(t.servisDatum),
     servisKm: cislo(t.servisKm, -100000, 100000),
     olejDatum: cas(t.olejDatum),

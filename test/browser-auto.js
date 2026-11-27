@@ -37,6 +37,10 @@ setTimeout(() => {
   check('diesel bez dojezdu: velké číslo jsou km', document.getElementById('wbAutoSoc').textContent.replace(/\\u00a0/g, ' ') + ' ' + document.getElementById('wbAutoText').textContent, '64 063 km najeto');
   check('  zámek a ruční brzda', radky()[0], '🔒 zamčeno · ruční brzda zatažená');
   check('  servis a olej naráz, když sedí', radky()[1], '🔧 servis a olej za 17 800 km nebo do 19. 5. 2028');
+  renderAuto({ zive: true, kdy: T, stav: { soc: 90, zapojeno: true, nabijeni: 'off', nabiji: false } });
+  check('kabel zapojený, nenabíjí', radky().join('|'), '🔌 kabel zapojený, nenabíjí');
+  renderAuto({ zive: true, kdy: T, stav: { soc: 50, zapojeno: true, nabijeni: 'charging', nabiji: true } });
+  check('  při nabíjení se řádek neopakuje', radky().length, 0);
   renderAuto({ zive: true, kdy: T, stav: { palivoPct: 55, dojezdKm: 610, km: 64100, zamek: 'odemčeno', servisKm: 17800, olejKm: 9000 } });
   check('s nádrží: procenta, dojezd, km', document.getElementById('wbAutoSoc').textContent + ' | ' + document.getElementById('wbAutoText').textContent.replace(/\\u00a0/g, ' '), '⛽ 55 % | dojezd 610 km · najeto 64 100 km');
   check('  odemčeno červeně, servis a olej zvlášť', document.querySelector('#wbAutoRadky .bmw-radek').classList.contains('pozor') + ' ' + radky().slice(1).join(' | ').replace(/\\u00a0/g, ' '), 'true 🔧 servis za 17 800 km | 🛢️ olej za 9 000 km');

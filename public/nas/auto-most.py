@@ -167,6 +167,9 @@ def stav_auta(auto):
         'olejKm': _cislo(_hodnota(udrzba, 'oil_service_due_after')),
         'nabijeni': stav,
         'nabiji': stav == 'charging' if stav else None,
+        # Kabel v autě (plug_state); portál ho dá jen autu, které pozná jako hybrid/elektro
+        'zapojeno': (lambda z: z == 'connected' if z else None)(
+            (_enum_text(_hodnota(nabijeni, 'connector', 'connection_state')) or '').lower() or None),
         'cilSoc': _cislo(_hodnota(nabijeni, 'settings', 'target_level')),
         'vykonKw': _cislo(_hodnota(nabijeni, 'power')),
         'hotovoV': _cas(_hodnota(nabijeni, 'estimated_date_reached')),

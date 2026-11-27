@@ -11927,6 +11927,7 @@ function autoShrnuti(a) {
     radky.push({ pozor: s.zamek === 'odemčeno', text: [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 odemčeno') : null,
       s.rucniBrzda === true ? 'ruční brzda zatažená' : s.rucniBrzda === false ? 'ruční brzda povolená' : null].filter(Boolean).join(' · ') });
   }
+  if (s.zapojeno === true && !s.nabiji) radky.push({ text: '🔌 kabel zapojený, nenabíjí' });
   const termin = (km, datum) => [je(km) ? `za ${c(km)} km` : null,
     datum ? `do ${new Date(datum).toLocaleDateString('cs-CZ')}` : null].filter(Boolean).join(' nebo ');
   const servis = termin(s.servisKm, s.servisDatum), olej = termin(s.olejKm, s.olejDatum);
