@@ -596,13 +596,14 @@ setTimeout(async () => {
     // Rozjetá animace listování z dřívějška by mřížku posunula
     kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
     const rm = document.getElementById('kalMrizka').getBoundingClientRect(), rp = poc.getBoundingClientRect();
-    check('  počasí vpravo vedle mřížky, nahoře, na půl výšky', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && Math.abs(rp.height - rm.height / 2) < 12, true);
+    check('  počasí vpravo vedle mřížky, nahoře, nad auty víc než půl', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && rp.height > rm.height / 2, true);
     // Pod počasím auta vedle sebe (BMW 420d, VW Multivan) — jen ke čtení
     const auta = document.getElementById('kalAuta');
     const ra = auta.getBoundingClientRect();
     check('  pod počasím box s auty', !auta.hidden && ra.top > rp.bottom - 1 && Math.abs(ra.bottom - rm.bottom) < 2 && Math.abs(ra.left - rp.left) < 2, true);
     const ka = [...auta.querySelectorAll('.kal-auto')];
-    check('  dvě karty: BMW 420d a VW Multivan', ka.map(k => k.querySelector('.kal-auto-nazev').textContent).join(','), 'BMW 420d,VW Multivan');
+    check('  dvě karty: BMW 420d a VW Multivan', ka.map(k => k.querySelector('img').alt).join(','), 'BMW 420d,VW Multivan');
+    check('  bez dat pomlčka', ka.map(k => k.querySelector('.kal-auto-cislo').textContent).join(','), '–,–');
     const r0 = ka[0].getBoundingClientRect(), r1 = ka[1].getBoundingClientRect();
     check('  vedle sebe, stejně velké', Math.abs(r0.top - r1.top) < 2 && r1.left > r0.right && Math.abs(r0.width - r1.width) < 2, true);
     check('  s fotkami', ka.map(k => k.querySelector('img').getAttribute('src')).join(','), '/bmw.jpg,/vw.jpg');
@@ -610,9 +611,11 @@ setTimeout(async () => {
     renderBmw({ pripojeno: true, stream: true, model: 'BMW 420d', stav: { dojezdKm: 612, palivoPct: 55, km: 48211, zamek: 'zamčeno', otevreno: [] } });
     renderAuto({ kdy: Date.now(), zive: true, stav: { soc: 81, dojezdKm: 395 } });
     const ka2 = [...auta.querySelectorAll('.kal-auto')];
-    check('  BMW: živá data jako na Auta/Wallbox', /612 km/.test(ka2[0].textContent) && /zamčeno/.test(ka2[0].textContent), true);
-    check('  BMW: bez tlačítek a formulářů', ka2[0].querySelectorAll('button, input, a').length + ' ' + document.querySelectorAll('#bmwBlok').length, '0 1');
-    check('  VW: procenta a dojezd', /81 %/.test(ka2[1].textContent) && /dojezd 395 km/.test(ka2[1].textContent), true);
+    const cisla = ka2.map(k => k.querySelector('.kal-auto-cislo'));
+    check('  pod fotkou jen dojezd / nabití', cisla.map(c => c.textContent).join(' | ') + ' ' + ka2.map(k => k.children.length).join(''), '⛽ 612 km | 🔋 81 % · 395 km 22');
+    check('  tučně a uprostřed', cisla.every(c => getComputedStyle(c).fontWeight >= 700 && getComputedStyle(c).textAlign === 'center'), true);
+    renderAuto({ kdy: Date.now(), zive: true, stav: { soc: 64, dojezdKm: 300, nabiji: true } });
+    check('  VW při nabíjení blesk', auta.querySelectorAll('.kal-auto-cislo')[1].textContent, '⚡ 64 % · 300 km');
     check('  karty se vejdou do boxu', ka2.every(k => k.getBoundingClientRect().bottom <= ra.bottom + 1), true);
     bmwData = bmwPuv; renderAuto(autoPuv); renderBmw();
     const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());
@@ -672,8 +675,8 @@ setTimeout(async () => {
     check('  srážky zítra', /od zítra 3:00/.test(poc.textContent), true);
     // Celé se to vejde na výšku iPadu bez posouvání
     kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
-    // Na půl výšky (pod ním auta) se celé nevejde — zbytek jde posunout prstem
-    check('na půl výšky kalendáře', Math.abs(poc.getBoundingClientRect().height - document.getElementById('kalMrizka').getBoundingClientRect().height / 2) < 12, true);
+    // Pod ním jsou auta, takže se celé nemusí vejít — zbytek jde posunout prstem
+    check('nad auty většinu výšky', poc.getBoundingClientRect().height > document.getElementById('kalMrizka').getBoundingClientRect().height * 0.6, true);
     check('  co se nevejde, posouvá se', getComputedStyle(poc).overflowY, 'auto');
     renderKalDen();
     check('lišta ukazuje zdroj', [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop().textContent, 'Počasí dnes · Open-Meteo');
