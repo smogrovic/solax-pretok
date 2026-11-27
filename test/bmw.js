@@ -30,7 +30,7 @@ function build() {
   h.api = new Function('state', 'app', 'requireAuth', 'addLog', 'broadcast', 'storeUlozBrzy', 'fetch', 'require', 'setTimeout', 'clearTimeout',
     CODE + '\n; return { bmwPrijmi, bmwShrnuti, bmwPayload, bmwPrihlasitStart, bmwPrihlasitCekej, bmwObnovToken, bmwDotaz, bmwTik, bmwStreamPripoj,'
       + ' bmwHodnota, BMW_DOTAZ_MS, nastavPosledni: t => { bmwPosledniDotaz = t; } };'
-  )(h.state, { post: (c, f) => { h.routy[c] = f; } }, () => true, t => h.log.push(t),
+  )(h.state, { post: (c, f) => { h.routy[c] = f; }, get: (c, f) => { h.routy[c] = f; } }, () => true, t => h.log.push(t),
     (typ, d) => h.zpravy.push([typ, d]), () => { h.ulozeni++; }, h.fetch, req,
     (f, ms) => { h.casovace.push([f, ms]); return h.casovace.length; }, () => {});
   h.volej = async (cesta, body) => {
@@ -188,6 +188,23 @@ nadpis('5) Tik: limit dotazů a stream');
   const h = build();
   await h.api.bmwTik();
   check('nepřipojené → nic', h.dotazy.length + ' ' + h.mqtt.length, '0 0');
+}
+
+nadpis('5b) Co auto posílá (jen názvy)');
+{
+  const h = build();
+  h.state.bmwHodnoty = {};
+  const T = '2026-11-27T10:00:00Z';
+  h.api.bmwPrijmi({ 'vehicle.cabin.infotainment.navigation.currentLocation.latitude': { value: '50.123', unit: 'deg', timestamp: T },
+    'vehicle.drivetrain.fuelSystem.level': { value: '60', unit: '%', timestamp: T },
+    'vehicle.status.checkControlMessages': { value: '[{"type":"ADBLUE"}]', timestamp: T } }, 1000);
+  h.api.bmwPrijmi({ 'vehicle.drivetrain.fuelSystem.level': { value: '59', unit: '%', timestamp: T }, 'divny klic!': { value: 1 } }, 2000);
+  const r = await h.volej('/api/bmw/popisovace');
+  check('zaznamená i neukládaná pole, neplatný název ne', r.popisovace.map(x => x.nazev.split('.').pop()).join(','), 'latitude,level,checkControlMessages');
+  check('  typ, jednotka, počet, kdy', JSON.stringify(r.popisovace[1]), '{"nazev":"vehicle.drivetrain.fuelSystem.level","n":2,"od":1000,"t":2000,"typ":"číslo","u":"%"}');
+  check('  žádné hodnoty (ani poloha)', /50\.123|ADBLUE|"59"|"60"/.test(JSON.stringify(r)), false);
+  check('  poloha se mezi hodnoty neuloží', Object.keys(h.state.bmwHodnoty).some(k => /Location/.test(k)), false);
+  check('  uloží se do zálohy stavu', h.ulozeni > 0, true);
 }
 
 nadpis('6) Odpojení');

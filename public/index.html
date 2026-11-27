@@ -1139,6 +1139,9 @@
   .bmw-form input{flex:1;min-width:0;font-size:14px;padding:8px 10px;border-radius:10px;border:1px solid rgba(44,62,80,.2);}
   .bmw-tl{border:1px solid rgba(44,62,80,.2);background:#fff;color:var(--navy);border-radius:10px;font-size:13px;padding:7px 10px;white-space:nowrap;}
   .bmw-tl.hlavni{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600;}
+  .bmw-pole-seznam{width:100%;font-size:12px;color:var(--navy);margin-top:6px;}
+  .bmw-pole-seznam div{padding:3px 0;border-top:1px solid rgba(44,62,80,.08);overflow-wrap:anywhere;}
+  .bmw-pole-seznam span{color:var(--grey-text);}
   .bmw-odkaz{display:inline-block;margin-top:4px;color:var(--orange-dark);font-weight:600;font-size:14px;}
   .term-form{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
   .term-form input,.term-form textarea,.term-form select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid rgba(44,62,80,.15);border-radius:12px;font-size:15px;background:var(--bg);color:var(--navy);font-family:inherit;min-width:0;}
@@ -4015,6 +4018,18 @@
         <div id="tvRozvrhObsah"></div>
         <button class="sek-btn" id="tvRozvrhUlozit" type="button" disabled>Uložit rozvrh</button>
         <div class="rezim-hint" id="tvRozvrhHint"></div>
+      </div>
+
+      <!-- BMW: která pole auto posílá (jen názvy, bez hodnot) — podklad pro výběr do karty -->
+      <button class="sbal-btn jen-full" data-sbal="bmwpole" type="button" aria-expanded="false">BMW — co auto posílá<i>▾</i></button>
+      <div class="card jen-full" id="bmwPoleKarta" data-sbal-obsah="bmwpole">
+        <div class="rezim-hint">Jen názvy polí, typ a kolikrát přišly — žádné hodnoty ani poloha. Za pár dní ježdění to zkopíruj a pošli Claudovi.</div>
+        <div class="bmw-form">
+          <button class="bmw-tl" id="bmwPoleNacist" type="button">Načíst</button>
+          <button class="bmw-tl" id="bmwPoleKopirovat" type="button" disabled>Zkopírovat</button>
+        </div>
+        <div class="rezim-hint" id="bmwPoleHint"></div>
+        <div class="bmw-pole-seznam" id="bmwPoleSeznam"></div>
       </div>
 
       <div class="card logic-card">
@@ -14717,6 +14732,36 @@ function bmwPripojit(clientId) {
   bmwVolej('/api/bmw/pripojit', { clientId });
 }
 renderBmw();
+
+// Log/Nastavení: seznam polí, která auto posílá (bez hodnot)
+let bmwPoleText = '';
+async function bmwPoleNacti() {
+  const hint = document.getElementById('bmwPoleHint');
+  const seznam = document.getElementById('bmwPoleSeznam');
+  const kop = document.getElementById('bmwPoleKopirovat');
+  hint.textContent = 'Načítám…';
+  try {
+    const res = await fetch('/api/bmw/popisovace', { headers: { 'X-Auth-Token': authToken } });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { hint.textContent = j.error || `Nepovedlo se (HTTP ${res.status}).`; return; }
+    const p = j.popisovace || [];
+    seznam.textContent = '';
+    for (const x of p) {
+      const r = termEl('div', '', x.nazev + ' ');
+      r.appendChild(termEl('span', '', `${x.typ || ''}${x.u ? ' ' + x.u : ''} · ${x.n}× · ${fmtSolTime(x.t)}`));
+      seznam.appendChild(r);
+    }
+    bmwPoleText = p.map(x => `${x.nazev}\t${x.typ || ''}\t${x.u || ''}\t${x.n}`).join('\n');
+    kop.disabled = !p.length;
+    hint.textContent = p.length ? `${p.length} polí.` : 'Zatím nic — auto ještě nic neposlalo.';
+  } catch { hint.textContent = 'Server neodpovídá.'; }
+}
+document.getElementById('bmwPoleNacist').addEventListener('click', bmwPoleNacti);
+document.getElementById('bmwPoleKopirovat').addEventListener('click', async () => {
+  const hint = document.getElementById('bmwPoleHint');
+  try { await navigator.clipboard.writeText('BMW pole:\n' + bmwPoleText); hint.textContent = 'Zkopírováno — vlož to do chatu.'; }
+  catch { hint.textContent = 'Schránka nejde — označ seznam ručně.'; }
+});
 
 function renderTerminy() {
   if (!termKartyEl || !termBlizkeEl) return;

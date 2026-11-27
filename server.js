@@ -13128,8 +13128,29 @@ function bmwHodnota(v) {
 }
 
 // Data ze streamu i z dotazu: { popisovač: { value, unit, timestamp } } → state.bmwHodnoty
+// Co auto posílá: jen názvy polí, typ a jednotka, počet a kdy naposledy — žádné
+// hodnoty (poloha ani nic jiného). Podle toho se vybere, co ještě přidat do karty.
+const BMW_POPISOVACU_MAX = 600;
+function bmwZaznamenej(data, now) {
+  if (!state.bmwPopisovace) state.bmwPopisovace = {};
+  const p = state.bmwPopisovace;
+  for (const [k, x] of Object.entries(data)) {
+    if (!/^[\w.-]{1,160}$/.test(k)) continue;
+    if (!p[k] && Object.keys(p).length >= BMW_POPISOVACU_MAX) continue;
+    const v = x && typeof x === 'object' ? bmwHodnota(x.value) : undefined;
+    const typ = Array.isArray(v) ? 'seznam' : v === null || v === undefined ? 'prázdné' : typeof v === 'number' ? 'číslo'
+      : typeof v === 'boolean' ? 'ano/ne' : typeof v === 'object' ? 'objekt' : 'text';
+    const o = p[k] || (p[k] = { n: 0, od: now });
+    o.n++;
+    o.t = now;
+    o.typ = typ;
+    if (x && typeof x.unit === 'string' && x.unit) o.u = x.unit.slice(0, 12);
+  }
+}
+
 function bmwPrijmi(data, now = Date.now()) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+  bmwZaznamenej(data, now);
   let n = 0;
   for (const [k, x] of Object.entries(data)) {
     if (!BMW_BRAT.test(k) || !x || typeof x !== 'object') continue;
@@ -13140,10 +13161,8 @@ function bmwPrijmi(data, now = Date.now()) {
     state.bmwHodnoty[k] = { v: bmwHodnota(x.value), u: typeof x.unit === 'string' ? x.unit.slice(0, 12) : null, t: kdy };
     n++;
   }
-  if (n) {
-    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
-    broadcast('bmw', { bmw: bmwPayload() });
-  }
+  if (typeof storeUlozBrzy === 'function' && Object.keys(data).length) storeUlozBrzy();
+  if (n) broadcast('bmw', { bmw: bmwPayload() });
   return n;
 }
 
@@ -13423,6 +13442,13 @@ app.post('/api/bmw/pripojit', async (req, res) => {
     await bmwPrihlasitStart(clientId);
     res.json({ ok: true, bmw: bmwPayload() });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Seznam polí, která auto poslalo (bez hodnot) — pro výběr dalších údajů do karty
+app.get('/api/bmw/popisovace', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const p = state.bmwPopisovace || {};
+  res.json({ popisovace: Object.keys(p).sort().map(k => ({ nazev: k, ...p[k] })) });
 });
 
 app.post('/api/bmw/odpojit', (req, res) => {
@@ -15135,6 +15161,7 @@ function storeSnapshot() {
     bmwOauth: state.bmwOauth || null,
     bmwHodnoty: state.bmwHodnoty || {},
     bmwPosledniDotaz: state.bmwPosledniDotaz || 0,
+    bmwPopisovace: state.bmwPopisovace || {},
     // Cookies webu Rohlíku (schválené zařízení) — jen sem, nikdy do appky ani do logu
     rohlikWebCookies: state.rohlikWebCookies || null,
     // Kdy odešel týdenní report — nasazení v neděli večer ho nesmí poslat podruhé
@@ -15198,6 +15225,7 @@ function storeApplyPrimo(p) {
   if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
   if (p.bmwOauth && typeof p.bmwOauth === 'object' && !state.bmwOauth) state.bmwOauth = p.bmwOauth;
   if (p.bmwHodnoty && typeof p.bmwHodnoty === 'object' && !Object.keys(state.bmwHodnoty || {}).length) state.bmwHodnoty = p.bmwHodnoty;
+  if (p.bmwPopisovace && typeof p.bmwPopisovace === 'object' && !Object.keys(state.bmwPopisovace || {}).length) state.bmwPopisovace = p.bmwPopisovace;
   if (Number.isFinite(p.bmwPosledniDotaz)) state.bmwPosledniDotaz = Math.max(state.bmwPosledniDotaz || 0, p.bmwPosledniDotaz);
   if (p.rohlikWebCookies && typeof rohlikWebCookiesObnov === 'function') rohlikWebCookiesObnov(p.rohlikWebCookies);
   const sr = p.saunaRelace;

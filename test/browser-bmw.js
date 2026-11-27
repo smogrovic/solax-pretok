@@ -55,6 +55,20 @@ setTimeout(async () => {
   check('bez dat a s chybou', /čekám na první data/.test(blok().textContent) + ' ' + /stream odpojený/.test(blok().textContent) + ' ' + /vypršelo/.test(blok().textContent), 'true true true');
   check('nic nepřetéká', blok().scrollWidth <= blok().clientWidth + 1, true);
 
+  R.push('\\n2b) Co auto posílá');
+  const pk = document.getElementById('bmwPoleKarta');
+  check('karta v Log/Nastavení', !!pk.closest('.slide[data-title="Log/Nastavení"]'), true);
+  odpoved = { status: 200, data: { popisovace: [{ nazev: 'vehicle.drivetrain.fuelSystem.level', typ: 'číslo', u: '%', n: 3, t: Date.now() }] } };
+  poslano = [];
+  document.getElementById('bmwPoleNacist').click();
+  await pockej();
+  check('  načte a ukáže', poslano[0].url + ' | ' + /^vehicle\\.drivetrain\\.fuelSystem\\.level číslo % · 3× · \\d/.test(document.getElementById('bmwPoleSeznam').textContent), '/api/bmw/popisovace | true');
+  check('  jde zkopírovat', document.getElementById('bmwPoleKopirovat').disabled + ' ' + document.getElementById('bmwPoleHint').textContent, 'false 1 polí.');
+  odpoved = { status: 200, data: { popisovace: [] } };
+  document.getElementById('bmwPoleNacist').click();
+  await pockej();
+  check('  prázdné → vysvětlí', document.getElementById('bmwPoleHint').textContent + ' ' + document.getElementById('bmwPoleKopirovat').disabled, 'Zatím nic — auto ještě nic neposlalo. true');
+
   R.push('\\n3) Rozepsané Client ID');
   renderBmw({ pripojeno: false });
   const inp = document.getElementById('bmwClientId');
