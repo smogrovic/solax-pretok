@@ -1127,6 +1127,11 @@
   .bmw-karta{align-items:stretch;}
   .bmw-foto{display:block;width:100%;height:auto;aspect-ratio:900/580;object-fit:cover;border-radius:14px;}
   .bmw-titulek{margin:10px 0 0;text-align:left;}
+  .vw-foto{aspect-ratio:900/507;}
+  .auto-terminy{margin-top:10px;}
+  .auto-terminy:empty{display:none;}
+  .auto-terminy .term-hlava .graph-title{font-size:14px;color:var(--grey-text);}
+  .auto-terminy .card{box-shadow:none;padding:0;margin:0;background:none;align-items:stretch;width:100%;}
   .bmw-blok{margin:6px 0 4px;padding:10px 12px;border-radius:12px;background:var(--bg);}
   .bmw-cisla{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;}
   .bmw-velke{font-size:22px;font-weight:700;color:var(--navy);}
@@ -3536,11 +3541,6 @@
             <div class="wb-stat-val" id="wbStatusVal">–</div>
           </div>
         </div>
-        <!-- Baterie auta z cloudu VW (most na NASu). Bez mostu se neukazuje. -->
-        <div class="wb-auto" id="wbAuto" hidden>
-          <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
-          <div class="wb-auto-meta" id="wbAutoMeta"></div>
-        </div>
         <div class="wb-mode-toggle">
           <span class="wb-mode-opt" id="wbModeFast">FAST</span>
           <button class="toggle-switch" id="wbAutoSwitch" aria-label="Přepnout FAST/AUTO"></button>
@@ -3577,6 +3577,20 @@
         <img class="bmw-foto" src="/bmw.jpg" alt="BMW 4 Gran Coupé" loading="lazy">
         <div class="graph-title bmw-titulek">BMW 4 Gran Coupé</div>
         <div id="bmwObsah"></div>
+        <!-- Termíny a údaje auta (STK, známka, pojištění, olej) — data jsou z Termínů -->
+        <div class="auto-terminy" id="bmwTerminy" data-karta-auta="bmw4"></div>
+      </div>
+
+      <!-- VW Multivan: baterie z cloudu VW (most na NASu) + termíny a údaje -->
+      <div class="card bmw-karta" id="vwKarta">
+        <img class="bmw-foto vw-foto" src="/vw.jpg" alt="VW Multivan" loading="lazy">
+        <div class="graph-title bmw-titulek">VW Multivan</div>
+        <div class="wb-auto" id="wbAuto" hidden>
+          <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
+          <div class="wb-auto-meta" id="wbAutoMeta"></div>
+        </div>
+        <div class="bmw-meta" id="vwBezDat">Živá data z VW teď nejdou — VW v květnu 2026 zavřel rozhraní pro jiné aplikace. Termíny a údaje fungují.</div>
+        <div class="auto-terminy" id="vwTerminy" data-karta-auta="vw"></div>
       </div>
 
       <button class="sbal-btn" data-sbal="wallbox" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
@@ -11857,6 +11871,8 @@ function renderAuto(d) {
   if (!wbAutoEl) return;
   const a = autoData;
   wbAutoEl.hidden = !(a && a.kdy && a.stav);
+  const bezDat = document.getElementById('vwBezDat');
+  if (bezDat) bezDat.hidden = !wbAutoEl.hidden;
   if (wbAutoEl.hidden) return;
   const s = a.stav;
   wbAutoEl.classList.toggle('stare', !a.zive);
@@ -14402,6 +14418,9 @@ async function termPost(adresa, telo) {
     return true;
   } catch (err) {
     termHintEl.textContent = err.message || 'Nepodařilo se uložit.';
+    // Karta auta je na Wallboxu — chyba se musí ukázat i tam
+    const f = termUprava && document.querySelector(`[data-karta-auta="${termUprava.id}"] .term-form`);
+    if (f) { let h = f.querySelector('.term-f-chyba'); if (!h) { h = termEl('div', 'rezim-hint term-f-chyba'); f.appendChild(h); } h.textContent = termHintEl.textContent; }
     return false;
   }
 }
@@ -14769,9 +14788,12 @@ function renderTerminy() {
   const dnes = termDnes();
   // Nahoře: co je do dvou měsíců nebo už prošlo, nejbližší první
   termBlizkeEl.textContent = '';
+  // Auta mají termíny ve svých kartách na Wallboxu — tady se neukazují
+  const auta = new Map([...document.querySelectorAll('[data-karta-auta]')].map(el => [el.dataset.kartaAuta, el]));
+  for (const el of auta.values()) el.textContent = '';
   const blizke = [];
   for (const k of karty) for (const x of k.terminy) {
-    if (x.datum && termDni(x.datum, dnes) <= TERM_BLIZKO_DNI) blizke.push([k, x]);
+    if (!auta.has(k.id) && x.datum && termDni(x.datum, dnes) <= TERM_BLIZKO_DNI) blizke.push([k, x]);
   }
   blizke.sort((a, b) => a[1].datum.localeCompare(b[1].datum));
   for (const [k, x] of blizke) termBlizkeEl.appendChild(termRadek(k, x, true));
@@ -14779,11 +14801,12 @@ function renderTerminy() {
 
   termKartyEl.textContent = '';
   for (const k of karty) {
-    if (termUprava && termUprava.id === k.id) { termKartyEl.appendChild(termFormular(termUprava)); continue; }
+    const cil = auta.get(k.id) || termKartyEl;
+    if (termUprava && termUprava.id === k.id) { cil.appendChild(termFormular(termUprava)); continue; }
     const c = termEl('div', 'card');
     c.dataset.karta = k.id;
     const h = termEl('div', 'term-hlava');
-    h.appendChild(termEl('div', 'graph-title', `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}`));
+    h.appendChild(termEl('div', 'graph-title', auta.has(k.id) ? 'Termíny a údaje' : `${k.ikona ? k.ikona + ' ' : ''}${k.nazev}`));
     const upr = termEl('button', 'term-upravit', '✎ Upravit');
     upr.type = 'button';
     upr.addEventListener('click', () => {
@@ -14809,7 +14832,7 @@ function renderTerminy() {
       for (const x of serazene) c.appendChild(termRadek(k, x, false));
       if (!k.terminy.length) c.appendChild(termEl('div', 'term-prazdno', 'Zatím bez termínů.'));
     }
-    termKartyEl.appendChild(c);
+    cil.appendChild(c);
   }
   if (termUprava && termUprava.id === 'nova') termKartyEl.appendChild(termFormular(termUprava));
   if (termNovaBtnEl) termNovaBtnEl.hidden = !!termUprava;

@@ -35,7 +35,7 @@ setTimeout(async () => {
   sbalNastav('terminy', false);
 
   terminyData = { predemDni: 14, karty: [
-    { id: 'bmw4', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: X\\nPojišťovna: Direct', terminy: [
+    { id: 'auto2', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: X\\nPojišťovna: Direct', terminy: [
       { id: 'stk', nazev: 'STK', datum: den(400), opakovani: 0, pozn: '' },
       { id: 'poj', nazev: 'Pojištění', datum: den(10), opakovani: 0, pozn: 'Direct' }] },
     { id: 'eso', nazev: 'Eso', ikona: '🐕', udaje: '', terminy: [
@@ -77,7 +77,7 @@ setTimeout(async () => {
 
   R.push('\\n4) Úprava karty');
   document.querySelector('#termKarty .term-upravit').click();
-  const form = document.querySelector('#termKarty [data-karta="bmw4"] .term-form');
+  const form = document.querySelector('#termKarty [data-karta="auto2"] .term-form');
   check('otevře formulář', !!form, true);
   check('  tlačítko Nová karta se schová', document.getElementById('termNovaBtn').hidden, true);
   const nazev = form.querySelector('.term-f-nazev');
@@ -87,7 +87,7 @@ setTimeout(async () => {
   udaje.value = 'VIN: X\\nSPZ: Y';
   udaje.dispatchEvent(new Event('input'));
   form.querySelector('.term-f-pridat').click();
-  const f2 = document.querySelector('#termKarty [data-karta="bmw4"] .term-form');
+  const f2 = document.querySelector('#termKarty [data-karta="auto2"] .term-form');
   check('přidaný termín má řádek a název zůstal', f2.querySelectorAll('.term-f-termin').length + ' ' + f2.querySelector('.term-f-nazev').value,
     '3 BMW 4 Gran Coupé');
   const posl = [...f2.querySelectorAll('.term-f-termin')].pop();
@@ -137,11 +137,11 @@ setTimeout(async () => {
   odpoved = { telo: { ok: true, terminy: terminyData } };
   document.querySelector('#termKarty [data-karta="eso"] .smazat').click();
   await pockej();
-  check('smazání pošle karty bez ní', poslano[0].body.karty.map(k => k.id).join(','), 'bmw4');
+  check('smazání pošle karty bez ní', poslano[0].body.karty.map(k => k.id).join(','), 'auto2');
 
   R.push('\\n6b) Vložit údaje');
   const zaklad = [
-    { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'Pojišťovna: Direct\\nVIN: staré', terminy: [] },
+    { id: 'auto2', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'Pojišťovna: Direct\\nVIN: staré', terminy: [] },
     { id: 'vw', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [{ id: 't1', nazev: 'STK', datum: '2028-01-29', opakovani: 0, pozn: '' }] }];
   const r1 = termSlucUdaje(zaklad, '[bmw 4]\\nVIN: WBA1\\nSPZ: 1AB 2345\\n\\n[VW Multivan]\\nOMV karta: 1234\\n[Chata]\\nRevize kotle: 2027');
   check('karta podle začátku názvu, bez ohledu na velikost', r1.karty[0].udaje, 'Pojišťovna: Direct\\nVIN: WBA1\\nSPZ: 1AB 2345');
@@ -194,7 +194,7 @@ setTimeout(async () => {
   check('uloží pododdíly i přiřazení', ul.skupiny.join(',') + ' | ' + ul.terminy[1].skupina, 'Lukáš,Zuzka,Miky,Elenka | Elenka');
 
   R.push('\\n6d) VIN ke zkopírování');
-  terminyData = { predemDni: 14, karty: [{ id: 'bmw4', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: WBA123\\nSPZ: 1AB', terminy: [] }] };
+  terminyData = { predemDni: 14, karty: [{ id: 'auto2', nazev: 'BMW 4', ikona: '🚗', udaje: 'VIN: WBA123\\nSPZ: 1AB', terminy: [] }] };
   renderTerminy();
   const kop = [...document.querySelectorAll('#termKarty .term-kopir')];
   check('u VIN je tlačítko Kopírovat (u SPZ ne)', kop.length, 1);
@@ -297,6 +297,24 @@ setTimeout(async () => {
   check('pořadí SPZ, VIN, zbytek', ud.map(e => e.textContent.replace('Kopírovat', '')).join(' | '), 'SPZ: 5SP 1 | VIN: WBA1 | Pojišťovna: Direct');
   check('  SPZ a VIN tučně, zbytek ne', ud.map(e => !!(e.tagName === 'B' || e.querySelector('b'))).join(','), 'true,true,false');
   check('naposledy u oleje', /naposledy 3\. 8\. 2026, 97 000 km/.test(document.querySelector('#termKarty .term-pod').textContent), true);
+
+  R.push('\\n6i) Auta: termíny a údaje v kartách na Wallboxu');
+  terminyData = { predemDni: 14, karty: [
+    { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'SPZ: 5SP', terminy: [{ id: 'b1', nazev: 'Pojištění', datum: den(5), opakovani: 0, pozn: '' }] },
+    { id: 'vw', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [{ id: 'v1', nazev: 'STK', datum: den(400), opakovani: 24, pozn: '' }] },
+    { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [] }] };
+  renderTerminy();
+  check('v Termínech zůstane jen motorka', [...document.querySelectorAll('#termKarty > .card')].map(k => k.dataset.karta).join(), 'gs');
+  check('  ani v blízkých auta nejsou', /Pojištění/.test(document.getElementById('termBlizke').textContent), false);
+  const bt = document.getElementById('bmwTerminy'), vt = document.getElementById('vwTerminy');
+  check('BMW a VW mají termíny ve své kartě na Wallboxu', !!bt.closest('.slide[data-title="Wallbox"]') + ' ' + bt.querySelectorAll('.term-radek').length + ' ' + vt.querySelectorAll('.term-radek').length, 'true 1 1');
+  check('  nadpis „Termíny a údaje“, údaje vidět', bt.querySelector('.graph-title').textContent + ' | ' + /5SP/.test(bt.textContent), 'Termíny a údaje | true');
+  check('  VW má fotku', document.querySelector('#vwKarta img').getAttribute('src'), '/vw.jpg');
+  bt.querySelector('.term-upravit').click();
+  check('úprava se otevře přímo v kartě auta', !!bt.querySelector('.term-form') + ' ' + !!document.querySelector('#termKarty .term-form'), 'true false');
+  bt.querySelector('.zrusit').click();
+  check('  Zrušit ji zavře', !!bt.querySelector('.term-form'), false);
+  check('připomínky aut dál chodí', termPripominky().map(p => p.nazev).join(), 'BMW 4 Gran Coupé: Pojištění');
 
   R.push('\\n7) Rozložení');
   terminyData = { predemDni: 14, karty: [] };
