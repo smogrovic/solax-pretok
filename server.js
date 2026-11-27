@@ -13082,7 +13082,9 @@ app.post('/api/auto/stav', (req, res) => {
   for (const z of autoZmena(autoStav, stav)) addLog(z);
   if (bylTicho && autoKdy) addLog('Auto: most na NASu se zase ozývá');
   // Chyba bez čísel nepřepíše poslední známá procenta — jen se k nim přidá
-  autoStav = stav.chyba && stav.soc === null && stav.km === null && autoStav ? { ...autoStav, chyba: stav.chyba } : stav;
+  // Chyba nebo samé prázdno nepřepíše poslední známé údaje — chyba se jen přidá
+  const bezDat = Object.entries(stav).every(([k, v]) => k === 'chyba' || k === 'model' || v === null);
+  autoStav = bezDat && autoStav ? { ...autoStav, chyba: stav.chyba } : stav;
   autoKdy = Date.now();
   broadcast('auto', { auto: autoPayload() });
   res.json({ ok: true });

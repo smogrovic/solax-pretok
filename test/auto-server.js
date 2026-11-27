@@ -44,6 +44,13 @@ nadpis('1) Hlášení mostu');
     servisDatum: '2028-05-19T16:14:33+00:00', olejKm: 17800, olejDatum: '2028-05-19T16:14:33+00:00' });
   check('diesel z portálu: km, nádrž, zámek, brzda, servis, olej',
     [v.km, v.palivoPct, v.zamek, v.rucniBrzda, v.servisKm, v.servisDatum, v.olejKm].join(','), '64063,55,zamčeno,true,17800,2028-05-19T16:14:33.000Z,17800');
+  h.volej({ km: 64063, zamek: 'zamčeno' });
+  h.volej({ soc: null, km: null, zamek: null });
+  check('samé prázdno nesmaže poslední údaje', [h.api.autoPayload().stav.km, h.api.autoPayload().stav.zamek].join(','), '64063,zamčeno');
+  h.volej({ chyba: 'Portál čeká' });
+  check('  chyba se k nim jen přidá', [h.api.autoPayload().stav.km, h.api.autoPayload().stav.chyba].join(','), '64063,Portál čeká');
+  h.volej({ km: 64100 });
+  check('  nová data přepíšou i chybu', [h.api.autoPayload().stav.km, h.api.autoPayload().stav.chyba].join(','), '64100,');
   const z = h.api.autoOcisti({ zamek: '<b>x</b>', rucniBrzda: 'ano', km: -5 });
   check('  zámek jen zamčeno/odemčeno, nesmysly pryč', [z.zamek, z.rucniBrzda, z.km].join(','), ',,');
   h.api.kdy = Date.now() - h.api.AUTO_TICHO_MS - 1;

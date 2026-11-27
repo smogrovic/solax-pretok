@@ -200,6 +200,11 @@ def zabezpec_tokeny(cesta=TOKENY):
 CEKA_NA_DATA = 'Portál VW zatím nedodal žádná data — požadavek čeká na první dodávku (až 24 h).'
 
 
+def prazdny_stav(stav):
+    """Auto je na účtu, ale portál o něm zatím nic neposlal (všechno None)."""
+    return all(v is None for k, v in stav.items() if k != 'model')
+
+
 def ceka_na_data(e):
     """Portál EU Data Act vrací 404 na seznam dodávek, dokud nepřišla první."""
     t = str(e)
@@ -253,6 +258,12 @@ def kolo(nastaveni, cc):
             telo = {'chyba': 'Na účtu VW není žádné auto' + (f' s VIN {nastaveni["vin"]}' if nastaveni['vin'] else '') + '.'}
         else:
             telo = stav_auta(auto)
+            # Nová žádost na portálu bez první dodávky: samé prázdno appce neposílat,
+            # jinak by smazalo poslední známé údaje
+            if prazdny_stav(telo):
+                ohlas_bezpecne(nastaveni, {'chyba': CEKA_NA_DATA})
+                zapis('portál zatím nemá data, zkusím později')
+                return False
         ok = 'chyba' not in telo
     except errors.AuthenticationError as e:
         telo = {'chyba': 'VW odmítl přihlášení — zkontroluj heslo v auto.config.json.', 'prihlaseni': False}
@@ -299,7 +310,11 @@ def vypis(nastaveni):
             print(f'{a.get_absolute_path()} = {a.value}')
     auto = vyber_auto(cc.get_garage(), nastaveni['vin'])
     print('\nCo půjde do appky:')
-    print(json.dumps(stav_auta(auto) if auto else None, ensure_ascii=False, indent=1))
+    stav = stav_auta(auto) if auto else None
+    print(json.dumps(stav, ensure_ascii=False, indent=1))
+    if stav and prazdny_stav(stav):
+        print('\nZatím samé prázdno — portál ještě nedodal data (nová žádost čeká na první dodávku, až 24 h).'
+              '\nAppce se prázdný stav neposílá, poslední známé údaje v ní zůstanou.')
     cc.shutdown()
 
 

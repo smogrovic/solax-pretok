@@ -85,6 +85,12 @@ b = N(vin=A('X'), charging=N(state=A(E('off')), connector=N(connection_state=A(E
 print(json.dumps([m.stav_auta(a)['zapojeno'], m.stav_auta(b)['zapojeno'], m.stav_auta(N(vin=A('X')))['zapojeno']]))`);
   check('kabel: zapojený / ne / neznámo', out.join(','), 'true,false,');
 }
+{
+  // Nová žádost na portálu bez dodávky: auto je, data ne → appce se nic prázdného nepošle
+  const out = py(`
+print(json.dumps([m.prazdny_stav(m.stav_auta(N(vin=A('X'), model=A('Multivan')))), m.prazdny_stav(m.stav_auta(N(vin=A('X'), odometer=A(1.0))))]))`);
+  check('prázdný stav pozná (model se nepočítá)', out.join(','), 'true,false');
+}
 
 nadpis('2) Výběr auta');
 {
