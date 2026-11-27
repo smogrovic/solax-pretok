@@ -620,7 +620,7 @@ setTimeout(async () => {
     bmwData = bmwPuv; renderAuto(autoPuv); renderBmw();
     const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());
     check('  nadpis „Počasí dnes" nad panelem', Math.abs((hlavy[1].left + hlavy[1].right) / 2 - (rp.left + rp.right) / 2) < 12, true);
-    check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 60), '6° true');
+    check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 48), '6° true');
     check('  popis s velkým písmenem', poc.querySelector('.poc-popis').textContent, 'Oblačno');
     check('  max a min', poc.querySelector('.poc-minmax').textContent.replace(/\\s+/g, ' '), 'Max 14° Min 2°');
     const hod = [...poc.querySelectorAll('.poc-hod')];
@@ -640,11 +640,12 @@ setTimeout(async () => {
     const tcEl = poc.querySelector('.poc-tc');
     check('čidlo TČ menším písmem pod Max/Min', tcEl && tcEl.textContent + ' ' + (parseFloat(getComputedStyle(tcEl).fontSize) < parseFloat(getComputedStyle(poc.querySelector('.poc-popis')).fontSize))
       + ' ' + tcEl.parentElement.className, 'čidlo TČ 8° true poc-minmax');
-    check('  i s ním je hlavička celá vidět', poc.querySelector('.poc-hlava').getBoundingClientRect().bottom <= poc.getBoundingClientRect().bottom, true);
+    check('  vejde se bez posouvání i s ním', poc.scrollHeight <= poc.clientHeight + 1, true);
     airconData = airconPuv;
     renderKalPocasi(POC, v7);
-    check('nahoře Benešov a dvě teploty', poc.querySelector('.poc-misto').textContent + ' | '
-      + [...poc.querySelectorAll('.poc-t')].map(t => t.textContent).join(' | '), 'Benešov | 6°Skutečná | 3°Pocitová');
+    // Na iPadu (pod počasím auta) se název místa nepíše — šetří se výška
+    check('nahoře dvě teploty, název místa schovaný', getComputedStyle(poc.querySelector('.poc-misto')).display + ' | '
+      + [...poc.querySelectorAll('.poc-t')].map(t => t.textContent).join(' | '), 'none | 6°Skutečná | 3°Pocitová');
     const ts = [...poc.querySelectorAll('.poc-t')].map(t => t.getBoundingClientRect());
     check('  vedle sebe, stejně velké', Math.abs(ts[0].top - ts[1].top) < 2 && ts[1].left > ts[0].right
       && getComputedStyle(poc.querySelectorAll('.poc-teplota')[1]).fontSize === getComputedStyle(poc.querySelectorAll('.poc-teplota')[0]).fontSize, true);
@@ -677,7 +678,7 @@ setTimeout(async () => {
     kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
     // Pod ním jsou auta, takže se celé nemusí vejít — zbytek jde posunout prstem
     check('nad auty většinu výšky', poc.getBoundingClientRect().height > document.getElementById('kalMrizka').getBoundingClientRect().height * 0.6, true);
-    check('  co se nevejde, posouvá se', getComputedStyle(poc).overflowY, 'auto');
+    check('  vejde se bez posouvání (24 h řada)', poc.scrollHeight <= poc.clientHeight + 1, true);
     renderKalDen();
     check('lišta ukazuje zdroj', [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop().textContent, 'Počasí dnes · Open-Meteo');
     // Mrak nemá rovný vršek: celá cesta je uvnitř viewBoxu
