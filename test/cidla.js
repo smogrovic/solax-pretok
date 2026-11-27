@@ -8,7 +8,7 @@ const CFG = between('// Teplotní čidla (Shelly H&T)', '// Jak dlouhé ticho č
 const ZDROJ = between('// Podle čeho se v pokoji rozhoduje', '// Teploty v pokojích pro graf');
 const GRAF = between('// Teploty v pokojích pro graf', '// Zásah do klimatizace od člověka');
 const TEMPC = fn('function sensorTempC(room)');
-const BATERIE = between('const sensorBatteryWarned = {};', 'let shellyPollRunning');
+const BATERIE = between('// Slabá baterie čidla: push nejvýš jednou za 3 dny', 'let shellyPollRunning');
 
 const H = 3600000;
 
@@ -126,6 +126,24 @@ nadpis('4) Baterie');
   h.api.checkSensorBattery('elenka', null);
   check('bez údaje o baterii se nic nehlásí',
     h.logy.filter(l => /Slabá baterie/.test(l)).length, 2);
+}
+{
+  // Nejvýš jednou za 3 dny — a přežije nasazení (kdy naposledy je ve state)
+  const D = 24 * H, t0 = Date.UTC(2026, 10, 27, 10);
+  const h = build({});
+  const pocet = () => h.logy.filter(l => /Slabá baterie/.test(l)).length;
+  h.api.checkSensorBattery('loznice', 9, t0);
+  h.api.checkSensorBattery('loznice', 9, t0 + D);
+  h.api.checkSensorBattery('loznice', 8, t0 + 3 * D - 60000);
+  check('slabá baterie: jednou, pak 3 dny nic', pocet(), 1);
+  h.api.checkSensorBattery('loznice', 8, t0 + 3 * D);
+  check('  po 3 dnech znovu', pocet(), 2);
+  // Nasazení: nový běh se stejným uloženým časem nepípne
+  const h2 = build({});
+  h2.state.sensorBaterieVarovano = { ...h.state.sensorBaterieVarovano };
+  h2.api.checkSensorBattery('loznice', 8, t0 + 3 * D + 3600000);
+  check('  po nasazení se nepošle znovu', h2.logy.filter(l => /Slabá baterie/.test(l)).length, 0);
+  check('  každé čidlo zvlášť', h2.api.checkSensorBattery('obyvak', 10, t0 + 3 * D + 3600000), true);
 }
 
 konec();

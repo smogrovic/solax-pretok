@@ -1206,16 +1206,26 @@ function sensorTempC(room) {
   return s && typeof s.tempC === 'number' ? s.tempC : null;
 }
 
-const sensorBatteryWarned = {};
-function checkSensorBattery(room, battery) {
-  if (typeof battery !== 'number') return;
-  if (battery <= SENSOR_LOW_BATTERY && !sensorBatteryWarned[room]) {
-    sensorBatteryWarned[room] = true;
+// Slabá baterie čidla: push nejvýš jednou za 3 dny na čidlo. Kdy naposledy se drží
+// ve state (přežije nasazení) — dřív to byla proměnná v paměti a po každém
+// nasazení přišel push znovu.
+const SENSOR_BATERIE_PUSH_MS = 3 * 24 * 3600 * 1000;
+function checkSensorBattery(room, battery, now = Date.now()) {
+  if (typeof battery !== 'number') return false;
+  if (!state.sensorBaterieVarovano) state.sensorBaterieVarovano = {};
+  const posledni = state.sensorBaterieVarovano[room] || 0;
+  if (battery <= SENSOR_LOW_BATTERY && now - posledni >= SENSOR_BATERIE_PUSH_MS) {
+    state.sensorBaterieVarovano[room] = now;
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
     const label = (TEMP_AUTO_RULES.find(r => r.key === room) || {}).room || room;
     sendPushToAll('🪫 Slabá baterie čidla', `Teplotní čidlo ${label} hlásí ${Math.round(battery)} %.`);
-  } else if (battery > SENSOR_LOW_BATTERY + 10) {
-    sensorBatteryWarned[room] = false;   // po výměně/nabití se upozornění zase natáhne
+    return true;
   }
+  if (battery > SENSOR_LOW_BATTERY + 10 && posledni) {
+    delete state.sensorBaterieVarovano[room];   // po výměně baterie se upozornění zase natáhne
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  return false;
 }
 
 let shellyPollRunning = false;
@@ -15162,6 +15172,8 @@ function storeSnapshot() {
     bmwHodnoty: state.bmwHodnoty || {},
     bmwPosledniDotaz: state.bmwPosledniDotaz || 0,
     bmwPopisovace: state.bmwPopisovace || {},
+    // Kdy naposledy přišel push o slabé baterii čidla — nasazení ho nesmí poslat znovu
+    sensorBaterieVarovano: state.sensorBaterieVarovano || {},
     // Cookies webu Rohlíku (schválené zařízení) — jen sem, nikdy do appky ani do logu
     rohlikWebCookies: state.rohlikWebCookies || null,
     // Kdy odešel týdenní report — nasazení v neděli večer ho nesmí poslat podruhé
@@ -15225,6 +15237,9 @@ function storeApplyPrimo(p) {
   if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
   if (p.bmwOauth && typeof p.bmwOauth === 'object' && !state.bmwOauth) state.bmwOauth = p.bmwOauth;
   if (p.bmwHodnoty && typeof p.bmwHodnoty === 'object' && !Object.keys(state.bmwHodnoty || {}).length) state.bmwHodnoty = p.bmwHodnoty;
+  if (p.sensorBaterieVarovano && typeof p.sensorBaterieVarovano === 'object') {
+    state.sensorBaterieVarovano = { ...p.sensorBaterieVarovano, ...(state.sensorBaterieVarovano || {}) };
+  }
   if (p.bmwPopisovace && typeof p.bmwPopisovace === 'object' && !Object.keys(state.bmwPopisovace || {}).length) state.bmwPopisovace = p.bmwPopisovace;
   if (Number.isFinite(p.bmwPosledniDotaz)) state.bmwPosledniDotaz = Math.max(state.bmwPosledniDotaz || 0, p.bmwPosledniDotaz);
   if (p.rohlikWebCookies && typeof rohlikWebCookiesObnov === 'function') rohlikWebCookiesObnov(p.rohlikWebCookies);
