@@ -27,7 +27,7 @@ setTimeout(async () => {
   renderTerminy();
   renderBmw(bmwData);
   const blok = () => document.getElementById('bmwBlok');
-  check('karta na Wallboxu s fotkou, v Termínech nic', !!blok().closest('.slide[data-title="Wallbox"]') + ' ' + document.querySelectorAll('.bmw-blok').length
+  check('karta na Wallboxu s fotkou, v Termínech nic', !!blok().closest('.slide[data-title="Auta/Wallbox"]') + ' ' + document.querySelectorAll('.bmw-blok').length
     + ' ' + document.querySelector('#bmwKarta img.bmw-foto').getAttribute('src'), 'true 1 /bmw.jpg');
   check('nepřipojeno: pole na Client ID', !!document.getElementById('bmwClientId'), true);
   blok().querySelector('.bmw-tl.hlavni').click();

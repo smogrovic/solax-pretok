@@ -69,7 +69,7 @@ setTimeout(() => {
     return Array.from(sl.querySelectorAll('.page > .card')).filter(viditelna)[0];
   };
   check('Ovládání se kvůli zámku neposune', mezera(prvniViditelna('Ovládání')), 0);
-  check('  a Wallbox taky ne', mezera(prvniViditelna('Wallbox')), 0);
+  check('  a Wallbox taky ne', mezera(prvniViditelna('Auta/Wallbox')), 0);
   // Dřív si Bazén 12 px nechával a první box seděl níž než jinde — už ne
   check('Bazén se se zbytkem srovná', mezera(prvniViditelna('Bazén')), 0);
 

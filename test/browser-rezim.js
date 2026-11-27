@@ -69,7 +69,7 @@ setTimeout(async () => {
   R.push('1) Ve full režimu je všechno jako dřív');
   pouzijRezim('full');
   check('záložek je třináct', zalozky().length, 13);
-  check('  a je mezi nimi Wallbox', zalozky().includes('Wallbox'), true);
+  check('  a je mezi nimi Wallbox', zalozky().includes('Auta/Wallbox'), true);
   check('teplotní automatika je na Klimatu', !!document.getElementById('tempAutoCard').closest('.slide[data-title="Klima"]'), true);
   check('dětská tlačítka ne', vidim(document.getElementById('detiTlacitka')), false);
   // Rozvrh je ve full sbalený pod tlačítkem — jde k němu, jen se na něj musí ťuknout

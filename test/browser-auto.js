@@ -15,7 +15,7 @@ window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: tr
 setTimeout(() => {
  try {
   const el = document.getElementById('wbAuto');
-  check('karta je na stránce Wallbox', el.closest('.slide').dataset.title, 'Wallbox');
+  check('karta je na stránce Wallbox', el.closest('.slide').dataset.title, 'Auta/Wallbox');
   renderAuto(null);
   check('bez mostu se neukazuje', el.hidden, true);
   const T = Date.now();

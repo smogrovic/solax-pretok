@@ -37,7 +37,7 @@ setTimeout(() => {
     ['kamna HUUM', karta('huumLight'), '🔥'],
     ['sauna', karta('saunaLight'), '🔥'],
     ['závlaha', karta('zavlahaLight'), '💧'],
-    ['wallbox', slide('Wallbox').querySelector('.card.lockable'), '⚡'],
+    ['wallbox', slide('Auta/Wallbox').querySelector('.card.lockable'), '⚡'],
     ['klima', slide('Klima').querySelector('.blinds-card'), '🌬️'],
     ['žaluzie', document.getElementById('blindsList1').closest('.card'), '🪟']
   ];
