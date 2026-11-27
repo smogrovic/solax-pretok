@@ -106,5 +106,11 @@ print(json.dumps({'zdroj': vych['zdroj'], 'znacky': vych['znacky'], 'br': br['zn
   check('We Connect: starý connector bez značky', out.k2.join(' '), 'volkswagen false');
   check('neznámý zdroj → chyba', /povolené/.test(out.spatne), true);
 }
+{
+  const out = py(`
+print(json.dumps([m.ceka_na_data(Exception('GET /proxy_api/euda-apim/datadelivery/vehicles/X/abc/list -> HTTP 404')),
+  m.ceka_na_data(Exception('GET /vehicles -> HTTP 401')), m.ceka_na_data(Exception('nic'))]))`);
+  check('404 na seznamu dodávek = portál čeká na první data', out.join(','), 'true,false,false');
+}
 
 konec();

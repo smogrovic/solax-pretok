@@ -163,6 +163,15 @@ def zabezpec_tokeny(cesta=TOKENY):
         pass
 
 
+CEKA_NA_DATA = 'Portál VW zatím nedodal žádná data — požadavek čeká na první dodávku (až 24 h).'
+
+
+def ceka_na_data(e):
+    """Portál EU Data Act vrací 404 na seznam dodávek, dokud nepřišla první."""
+    t = str(e)
+    return '404' in t and '/list' in t
+
+
 def cc_konfigurace(nastaveni, znacka=None):
     if nastaveni.get('zdroj') == 'weconnect':
         connector = {'type': 'volkswagen', 'config': dict(nastaveni['vw'])}
@@ -185,10 +194,14 @@ def cc_otevri(nastaveni):
             break
         try:
             cc.fetch_all()
-            if vyber_auto(cc.get_garage(), nastaveni['vin']) is not None:
+        except Exception as e:  # noqa: BLE001
+            # Přihlášení prošlo a auto se našlo, jen portál ještě nemá data (404 na
+            # seznamu dodávek) → značka je správná, další se nezkouší
+            if ceka_na_data(e) or vyber_auto(cc.get_garage(), nastaveni['vin']) is not None:
                 return cc
-        except Exception as e:  # noqa: BLE001 — u jiné značky se zkusí znovu
             zapis(f'značka {znacka}: {e.__class__.__name__}: {str(e)[:150]}')
+        if vyber_auto(cc.get_garage(), nastaveni['vin']) is not None:
+            return cc
         zapis(f'pod značkou {znacka} žádné auto, zkouším další')
         cc.shutdown()
     return posledni
@@ -212,6 +225,10 @@ def kolo(nastaveni, cc):
         zapis(f'přihlášení odmítnuto ({e.__class__.__name__})')
         ok = False
     except Exception as e:  # noqa: BLE001 — cloud VW umí selhat všelijak, most jede dál
+        if ceka_na_data(e):
+            ohlas_bezpecne(nastaveni, {'chyba': CEKA_NA_DATA})
+            zapis('portál zatím nemá data, zkusím později')
+            return False
         telo = {'chyba': f'Čtení z cloudu VW selhalo ({e.__class__.__name__}).'}
         zapis(f'kolo spadlo: {e.__class__.__name__}: {str(e)[:200]}')
         ok = False
@@ -223,9 +240,24 @@ def kolo(nastaveni, cc):
     return ok
 
 
+def ohlas_bezpecne(nastaveni, telo):
+    try:
+        ohlas(nastaveni, telo)
+    except Exception as e:  # noqa: BLE001
+        zapis(f'appka neodpověděla: {e.__class__.__name__}')
+
+
 def vypis(nastaveni):
     cc = cc_otevri(nastaveni)
-    cc.fetch_all()
+    try:
+        cc.fetch_all()
+    except Exception as e:  # noqa: BLE001
+        if not ceka_na_data(e):
+            raise
+        print('\nPřihlášení k portálu VW funguje a auto je na účtu. ' + CEKA_NA_DATA
+              + '\nAž bude u auta na portálu první dodávka, spusť --vypis znovu.')
+        cc.shutdown()
+        return
     cc.persist()
     zabezpec_tokeny()
     for a in cc.get_attributes(recursive=True):
