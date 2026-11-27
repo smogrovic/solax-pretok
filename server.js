@@ -329,6 +329,7 @@ const state = {
   nakupOblibene: null, // pravidelně kupované (výchozí doplní nakupOblibeneVychozi)
   oznameni: null,    // upozornění přes celou appku: { id, text, od }
   rohlikVyber: {},   // zapamatované výrobky z Rohlíku: „mléko" → { productId, nazev, … }
+  bmwOauth: null,   // přihlášení k BMW CarData: Client ID, tokeny, VIN — nikdy nejde do appky
   rohlikOauth: null, // přihlášení k Rohlíku (OAuth): klient, tokeny — nikdy nejde do appky  // kdy se co naposledy odťuklo + přepínače popelnic
   // { d, feed, imp, b1, b2 } — přetok, odběr ze sítě a oba bojlery po dnech.
   // Zbytek appky má denní řady pro wallbox, bazén, saunu a dům; tyhle čtyři
@@ -901,6 +902,7 @@ function snapshot() {
     zavlaha: zavlahaPayload(),
     vysavac: vysavacPayload(),
     auto: autoPayload(),
+    bmw: bmwPayload(),
     sekacka: sekackaPayload(),
     pushEnabled,
     lockEnabled,
@@ -13067,6 +13069,375 @@ app.post('/api/auto/stav', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Auto BMW (BMW CarData) ----------
+// Oficiální rozhraní BMW pro majitele v EU, zdarma. Klienta (Client ID) si majitel
+// vytvoří na webu BMW u auta: BMW CarData → Technický přístup, se zapnutým API
+// i Streamingem. Přihlášení je „device flow": appka ukáže kód, člověk ho jednou
+// potvrdí na webu BMW, server pak drží tokeny sám (obnova po 45 min).
+// Data chodí dvěma cestami:
+//   - stream (MQTT): auto posílá změny hned, bez limitu — hlavní zdroj;
+//   - dotaz (REST): nejvýš 50 za den, tady jen po startu a pak po 3 h, ať je co
+//     ukázat i když auto stojí a stream mlčí.
+// Tokeny, VIN a Client ID jsou jen v state.bmwOauth (záloha je vynechá, appka je
+// nedostane). Poloha se neukládá vůbec.
+const BMW_AUTH = 'https://customer.bmwgroup.com/gcdm/oauth';
+const BMW_API = 'https://api-cardata.bmwgroup.com';
+const BMW_MQTT_URL = 'mqtts://customer.streaming-cardata.bmwgroup.com:9000';
+const BMW_SCOPE = 'authenticate_user openid cardata:api:read cardata:streaming:read';
+const BMW_OBNOVA_PRED_MS = 15 * 60 * 1000;    // token se obnoví 15 min před vypršením
+const BMW_TIK_MS = 5 * 60 * 1000;
+const BMW_DOTAZ_MS = 3 * 3600 * 1000;         // REST telematika nejvýš 8× za den
+const BMW_STREAM_PAUZA_MS = [30000, 60000, 120000, 300000];
+// Co se z auta bere (stream i dotaz). Poloha schválně ne.
+const BMW_BRAT = /^vehicle\.(drivetrain\.(fuelSystem\.|lastRemainingRange|totalRemainingRange|remainingRange)|vehicle\.travelledDistance|cabin\.(door\.|window\.|sunroof\.)|body\.(trunk\.|hood\.)|status\.(serviceDistance|serviceTime|conditionBasedServices)|chassis\.axle\.row\d\.wheel\.(left|right)\.tire\.pressure|electricalSystem\.battery\.)/;
+// Co se ptá dotazem (kontejner). Nejdřív plný seznam; kdyby BMW některý název
+// neznalo, druhý pokus jen s ověřenými názvy z komunitních integrací.
+const BMW_KONTEJNER_OVERENE = [
+  'vehicle.drivetrain.fuelSystem.remainingFuel', 'vehicle.drivetrain.fuelSystem.level',
+  'vehicle.vehicle.travelledDistance', 'vehicle.cabin.door.lock.status',
+  'vehicle.cabin.window.row1.driver.status', 'vehicle.cabin.window.row1.passenger.status',
+  'vehicle.cabin.window.row2.driver.status', 'vehicle.cabin.window.row2.passenger.status',
+  'vehicle.status.serviceDistance.next', 'vehicle.status.conditionBasedServices',
+  'vehicle.chassis.axle.row1.wheel.left.tire.pressure', 'vehicle.chassis.axle.row1.wheel.right.tire.pressure',
+  'vehicle.chassis.axle.row2.wheel.left.tire.pressure', 'vehicle.chassis.axle.row2.wheel.right.tire.pressure',
+  'vehicle.electricalSystem.battery.stateOfCharge'
+];
+const BMW_KONTEJNER_PLNY = [...BMW_KONTEJNER_OVERENE,
+  'vehicle.drivetrain.lastRemainingRange', 'vehicle.drivetrain.totalRemainingRange'];
+
+if (!state.bmwHodnoty) state.bmwHodnoty = {};   // { popisovač: { v, u, t } }
+let bmwCekani = null;          // rozběhnuté přihlášení: { userCode, url, doKdy, ... }
+let bmwChyba = null;
+let bmwStream = null;          // klient MQTT
+let bmwStreamSpojeno = false;
+let bmwStreamPokus = 0;
+let bmwStreamCasovac = null;
+let bmwPosledniDotaz = 0;
+let bmwBezi = false;
+
+const bmwPrihlasen = () => !!(state.bmwOauth && state.bmwOauth.refresh);
+
+// Hodnota z BMW přijde často jako text — čísla a ano/ne převést, JSON rozbalit
+function bmwHodnota(v) {
+  if (typeof v !== 'string') return v;
+  const s = v.trim();
+  if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+  if (s === 'true' || s === 'false') return s === 'true';
+  if (/^[[{]/.test(s)) { try { return JSON.parse(s); } catch { /* text */ } }
+  return s;
+}
+
+// Data ze streamu i z dotazu: { popisovač: { value, unit, timestamp } } → state.bmwHodnoty
+function bmwPrijmi(data, now = Date.now()) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+  let n = 0;
+  for (const [k, x] of Object.entries(data)) {
+    if (!BMW_BRAT.test(k) || !x || typeof x !== 'object') continue;
+    const t = Date.parse(x.timestamp);
+    const stare = state.bmwHodnoty[k];
+    const kdy = Number.isFinite(t) ? t : now;
+    if (stare && stare.t > kdy) continue;   // starší údaj nepřepíše novější
+    state.bmwHodnoty[k] = { v: bmwHodnota(x.value), u: typeof x.unit === 'string' ? x.unit.slice(0, 12) : null, t: kdy };
+    n++;
+  }
+  if (n) {
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+    broadcast('bmw', { bmw: bmwPayload() });
+  }
+  return n;
+}
+
+// Shrnutí pro appku — jen to, co karta ukazuje
+function bmwShrnuti(h = state.bmwHodnoty) {
+  const v = k => (h[k] ? h[k].v : undefined);
+  const cislo = k => (typeof v(k) === 'number' && Number.isFinite(v(k)) ? v(k) : null);
+  const prvni = (...k) => { for (const x of k) if (cislo(x) !== null) return cislo(x); return null; };
+  const klice = Object.keys(h);
+  const s = {
+    dojezdKm: prvni('vehicle.drivetrain.lastRemainingRange', 'vehicle.drivetrain.totalRemainingRange', 'vehicle.drivetrain.remainingRange'),
+    palivoPct: cislo('vehicle.drivetrain.fuelSystem.level'),
+    palivoL: cislo('vehicle.drivetrain.fuelSystem.remainingFuel'),
+    km: cislo('vehicle.vehicle.travelledDistance'),
+    zamek: null, otevreno: [], servisKm: cislo('vehicle.status.serviceDistance.next'), servis: [], pneu: null, akuPct: cislo('vehicle.electricalSystem.battery.stateOfCharge'),
+    kdy: klice.length ? Math.max(...klice.map(k => h[k].t || 0)) : null
+  };
+  const zamek = v('vehicle.cabin.door.lock.status');
+  if (typeof zamek === 'string') {
+    const z = zamek.toUpperCase();
+    s.zamek = /^(SECURED|LOCKED|DOUBLE_?LOCKED)$/.test(z) ? 'zamčeno' : /UNLOCK|OPEN/.test(z) ? 'odemčeno'
+      : /SELECTIVE|PARTIAL/.test(z) ? 'částečně zamčeno' : zamek.toLowerCase().slice(0, 30);
+  }
+  // Co je otevřené: dveře, kufr, kapota (…isOpen), okna a střecha (…status ≠ CLOSED)
+  const MISTA = { 'row1.driver': 'řidič', 'row1.passenger': 'spolujezdec', 'row2.driver': 'vzadu vlevo', 'row2.passenger': 'vzadu vpravo' };
+  for (const k of klice.sort()) {
+    const x = v(k);
+    let m;
+    if ((m = /^vehicle\.cabin\.door\.(row\d\.\w+)\.isOpen$/.exec(k)) && x === true) s.otevreno.push(`dveře ${MISTA[m[1]] || m[1]}`);
+    else if ((m = /^vehicle\.cabin\.window\.(row\d\.\w+)\.status$/.exec(k)) && typeof x === 'string' && !/CLOSED/i.test(x)) s.otevreno.push(`okno ${MISTA[m[1]] || m[1]}`);
+    else if (k === 'vehicle.cabin.sunroof.status' && typeof x === 'string' && !/CLOSED/i.test(x)) s.otevreno.push('střecha');
+    else if (/^vehicle\.body\.trunk\.(isOpen|door\.isOpen)$/.test(k) && x === true) s.otevreno.push('kufr');
+    else if (k === 'vehicle.body.hood.isOpen' && x === true) s.otevreno.push('kapota');
+  }
+  // Tlak v pneu → bar (BMW posílá kPa)
+  const bar = k => { const p = cislo(`vehicle.chassis.axle.${k}.tire.pressure`); return p === null ? null : Math.round((p > 20 ? p / 100 : p) * 10) / 10; };
+  const pneu = { lp: bar('row1.wheel.left'), pp: bar('row1.wheel.right'), lz: bar('row2.wheel.left'), pz: bar('row2.wheel.right') };
+  if (Object.values(pneu).some(x => x !== null)) s.pneu = pneu;
+  // Servis podle auta (CBS): typ, stav, do kdy / za kolik km
+  const cbs = v('vehicle.status.conditionBasedServices');
+  if (Array.isArray(cbs)) {
+    for (const c of cbs.slice(0, 10)) {
+      if (!c || typeof c !== 'object') continue;
+      const datum = typeof (c.dateTime || c.date) === 'string' ? String(c.dateTime || c.date).slice(0, 10) : null;
+      const km = [c.distance, c.remainingDistance, c.mileage].find(x => typeof x === 'number');
+      s.servis.push({ typ: String(c.type || c.typ || '').slice(0, 40), stav: String(c.status || c.state || '').slice(0, 20),
+        datum: datum && /^\d{4}-\d{2}-\d{2}$/.test(datum) ? datum : null, km: typeof km === 'number' ? km : null });
+    }
+  }
+  return s;
+}
+
+function bmwPayload() {
+  return {
+    pripojeno: bmwPrihlasen(),
+    model: (state.bmwOauth && state.bmwOauth.model) || null,
+    stream: bmwStreamSpojeno,
+    chyba: bmwChyba,
+    cekani: bmwCekani ? { userCode: bmwCekani.userCode, url: bmwCekani.url, doKdy: bmwCekani.doKdy } : null,
+    stav: Object.keys(state.bmwHodnoty || {}).length ? bmwShrnuti() : null
+  };
+}
+
+function bmwNastavChybu(text) {
+  if (text !== bmwChyba && text) addLog(`BMW: ${text}`);
+  bmwChyba = text || null;
+  broadcast('bmw', { bmw: bmwPayload() });
+}
+
+async function bmwPost(url, parametry) {
+  const r = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams(parametry).toString(), signal: AbortSignal.timeout(20000)
+  });
+  let j = null;
+  try { j = await r.json(); } catch { /* bez těla */ }
+  return { status: r.status, j };
+}
+
+// Z tokenu se vezme gcid (uživatel pro stream): pole v odpovědi, jinak `sub` z id_token
+function bmwGcid(j) {
+  if (j && typeof j.gcid === 'string' && j.gcid) return j.gcid;
+  try {
+    const p = JSON.parse(Buffer.from(String(j.id_token).split('.')[1], 'base64url').toString('utf8'));
+    return typeof p.gcid === 'string' ? p.gcid : typeof p.sub === 'string' ? p.sub : null;
+  } catch { return null; }
+}
+
+function bmwUlozTokeny(j, zaklad, now = Date.now()) {
+  state.bmwOauth = { ...zaklad, access: j.access_token, refresh: j.refresh_token || zaklad.refresh,
+    id: j.id_token || zaklad.id || null, gcid: bmwGcid(j) || zaklad.gcid || null,
+    exp: now + (Number.isFinite(j.expires_in) ? j.expires_in : 3600) * 1000 };
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+}
+
+// Krok 1: kód pro člověka
+async function bmwPrihlasitStart(clientId, now = Date.now()) {
+  const crypto = require('crypto');
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const r = await bmwPost(`${BMW_AUTH}/device/code`, {
+    client_id: clientId, response_type: 'device_code', scope: BMW_SCOPE, code_challenge: challenge, code_challenge_method: 'S256'
+  });
+  if (r.status >= 300 || !r.j || !r.j.device_code) {
+    const d = r.j && (r.j.error_description || r.j.error);
+    throw new Error(`BMW kód nevydalo${d ? ` (${String(d).slice(0, 120)})` : ` (HTTP ${r.status})`}. Zkontroluj Client ID a že má zapnuté API i Streaming.`);
+  }
+  bmwCekani = {
+    clientId, verifier, deviceCode: r.j.device_code, userCode: r.j.user_code,
+    url: r.j.verification_uri_complete || r.j.verification_uri || 'https://customer.bmwgroup.com/oneid/link',
+    interval: Math.max(5, Number(r.j.interval) || 5) * 1000,
+    doKdy: now + (Number(r.j.expires_in) || 600) * 1000
+  };
+  bmwChyba = null;
+  broadcast('bmw', { bmw: bmwPayload() });
+  setTimeout(() => bmwPrihlasitCekej().catch(() => {}), bmwCekani.interval);
+  return bmwCekani;
+}
+
+// Krok 2: čeká se, až člověk kód na webu BMW potvrdí
+async function bmwPrihlasitCekej(now = Date.now()) {
+  const c = bmwCekani;
+  if (!c) return 'nic';
+  if (now > c.doKdy) {
+    bmwCekani = null;
+    bmwNastavChybu('kód vypršel, než se potvrdil — zkus připojit znovu.');
+    return 'vyprselo';
+  }
+  const r = await bmwPost(`${BMW_AUTH}/token`, {
+    client_id: c.clientId, grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: c.deviceCode, code_verifier: c.verifier
+  });
+  if (bmwCekani !== c) return 'zruseno';
+  const err = r.j && r.j.error;
+  if (r.status < 300 && r.j && r.j.access_token) {
+    bmwCekani = null;
+    bmwUlozTokeny(r.j, { clientId: c.clientId });
+    bmwChyba = null;
+    addLog('BMW: auto připojené');
+    broadcast('bmw', { bmw: bmwPayload() });
+    bmwSpust().catch(() => {});
+    return 'hotovo';
+  }
+  if (err === 'authorization_pending' || err === 'slow_down') {
+    if (err === 'slow_down') c.interval += 5000;
+    setTimeout(() => bmwPrihlasitCekej().catch(() => {}), c.interval);
+    return 'ceka';
+  }
+  bmwCekani = null;
+  bmwNastavChybu(`přihlášení se nepovedlo (${String((r.j && (r.j.error_description || err)) || 'HTTP ' + r.status).slice(0, 120)}).`);
+  return 'chyba';
+}
+
+async function bmwObnovToken(now = Date.now()) {
+  const o = state.bmwOauth;
+  if (!o || !o.refresh) return false;
+  if (o.exp && o.exp - now > BMW_OBNOVA_PRED_MS && o.access) return true;
+  const r = await bmwPost(`${BMW_AUTH}/token`, { client_id: o.clientId, grant_type: 'refresh_token', refresh_token: o.refresh, scope: BMW_SCOPE });
+  if (r.status < 300 && r.j && r.j.access_token) {
+    bmwUlozTokeny(r.j, o, now);
+    if (bmwChyba) { bmwChyba = null; broadcast('bmw', { bmw: bmwPayload() }); }
+    return true;
+  }
+  const err = r.j && r.j.error;
+  if (err === 'invalid_grant' || err === 'invalid_client' || r.status === 400 || r.status === 401) {
+    // Přihlášení propadlo — tokeny pryč, auto se musí připojit znovu
+    state.bmwOauth = { clientId: o.clientId, vin: o.vin || null, model: o.model || null, kontejner: o.kontejner || null };
+    bmwStreamZastav();
+    bmwNastavChybu('přihlášení k BMW vypršelo — připoj auto znovu.');
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  return false;
+}
+
+async function bmwApi(cesta, init = {}) {
+  const r = await fetch(BMW_API + cesta, {
+    ...init,
+    headers: { Authorization: `Bearer ${state.bmwOauth.access}`, 'x-version': 'v1', Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
+    signal: AbortSignal.timeout(20000)
+  });
+  let j = null;
+  try { j = await r.json(); } catch { /* bez těla */ }
+  return { status: r.status, j };
+}
+
+// VIN a model (jednou), kontejner (jednou), pak telematika
+async function bmwDotaz(now = Date.now()) {
+  const o = state.bmwOauth;
+  if (!o.vin) {
+    const r = await bmwApi('/customers/vehicles/mappings');
+    const seznam = Array.isArray(r.j) ? r.j : (r.j && (r.j.mappings || r.j.vehicles)) || [];
+    const auto = seznam.find(m => m && m.mappingType === 'PRIMARY') || seznam[0];
+    if (!auto || !auto.vin) throw new Error(`BMW nevrátilo žádné auto (HTTP ${r.status}).`);
+    o.vin = String(auto.vin);
+    const b = await bmwApi(`/customers/vehicles/${encodeURIComponent(o.vin)}/basicData`);
+    if (b.j) o.model = String(b.j.modelName || b.j.series || b.j.brand || '').slice(0, 60) || null;
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  if (!o.kontejner) {
+    for (const seznam of [BMW_KONTEJNER_PLNY, BMW_KONTEJNER_OVERENE]) {
+      const r = await bmwApi('/customers/containers', { method: 'POST',
+        body: JSON.stringify({ name: 'SMGhome', purpose: 'SMGhome', technicalDescriptors: seznam }) });
+      if (r.status < 300 && r.j && r.j.containerId) { o.kontejner = String(r.j.containerId); break; }
+    }
+    if (!o.kontejner) throw new Error('BMW nezaložilo kontejner pro dotazy — data půjdou jen ze streamu.');
+    if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  }
+  const r = await bmwApi(`/customers/vehicles/${encodeURIComponent(o.vin)}/telematicData?containerId=${encodeURIComponent(o.kontejner)}`);
+  bmwPosledniDotaz = now;
+  state.bmwPosledniDotaz = now;
+  if (r.status === 403 || r.status === 404) { o.kontejner = null; }   // kontejner zmizel → příště nový
+  if (r.status >= 300) throw new Error(`dotaz na data auta se nepovedl (HTTP ${r.status}).`);
+  bmwPrijmi((r.j && (r.j.telematicData || r.j.data)) || {}, now);
+}
+
+function bmwStreamZastav() {
+  clearTimeout(bmwStreamCasovac);
+  bmwStreamCasovac = null;
+  if (bmwStream) { try { bmwStream.end(true); } catch { /* nic */ } }
+  bmwStream = null;
+  if (bmwStreamSpojeno) { bmwStreamSpojeno = false; broadcast('bmw', { bmw: bmwPayload() }); }
+}
+
+// Stream: po výpadku se připojí znovu s čerstvým tokenem (heslo = id_token, hodinu platí)
+function bmwStreamPripoj() {
+  const o = state.bmwOauth;
+  if (!o || !o.id || !o.gcid || bmwStream) return;
+  let mqtt;
+  try { mqtt = require('mqtt'); } catch { return; }
+  const klient = mqtt.connect(BMW_MQTT_URL, { clientId: o.gcid, username: o.gcid, password: o.id,
+    protocolVersion: 4, clean: true, keepalive: 30, reconnectPeriod: 0, connectTimeout: 20000 });
+  bmwStream = klient;
+  klient.on('connect', () => {
+    bmwStreamPokus = 0;
+    bmwStreamSpojeno = true;
+    klient.subscribe(`${o.gcid}/+`);
+    broadcast('bmw', { bmw: bmwPayload() });
+  });
+  klient.on('message', (_t, zprava) => {
+    try { const j = JSON.parse(zprava.toString('utf8')); bmwPrijmi(j && j.data); } catch { /* nečitelné */ }
+  });
+  klient.on('error', () => { /* řeší close */ });
+  klient.on('close', () => {
+    if (bmwStream !== klient) return;
+    bmwStream = null;
+    const byl = bmwStreamSpojeno;
+    bmwStreamSpojeno = false;
+    if (byl) broadcast('bmw', { bmw: bmwPayload() });
+    const pauza = BMW_STREAM_PAUZA_MS[Math.min(bmwStreamPokus++, BMW_STREAM_PAUZA_MS.length - 1)];
+    clearTimeout(bmwStreamCasovac);
+    bmwStreamCasovac = setTimeout(() => { bmwTik().catch(() => {}); }, pauza);
+  });
+}
+
+// Pravidelně: token, stream, občas dotaz
+async function bmwTik(now = Date.now()) {
+  if (!bmwPrihlasen() || bmwBezi) return;
+  bmwBezi = true;
+  try {
+    if (!(await bmwObnovToken(now))) return;
+    if (!bmwStream) bmwStreamPripoj();
+    if (now - (bmwPosledniDotaz || state.bmwPosledniDotaz || 0) >= BMW_DOTAZ_MS) {
+      try { await bmwDotaz(now); if (bmwChyba) { bmwChyba = null; broadcast('bmw', { bmw: bmwPayload() }); } }
+      catch (e) { bmwPosledniDotaz = now; bmwNastavChybu(String(e.message).slice(0, 160)); }
+    }
+  } catch (e) {
+    bmwNastavChybu(`spojení s BMW selhalo (${String(e.message).slice(0, 100)}).`);
+  } finally { bmwBezi = false; }
+}
+async function bmwSpust() { await bmwTik(); }
+
+app.post('/api/bmw/pripojit', async (req, res) => {
+  if (!requireAuth(req, res)) return;
+  const clientId = String((req.body && req.body.clientId) || (state.bmwOauth && state.bmwOauth.clientId) || '').trim();
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(clientId)) return res.status(400).json({ error: 'Vlož Client ID z webu BMW (BMW CarData → Technický přístup).' });
+  try {
+    await bmwPrihlasitStart(clientId);
+    res.json({ ok: true, bmw: bmwPayload() });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.post('/api/bmw/odpojit', (req, res) => {
+  if (!requireAuth(req, res)) return;
+  bmwCekani = null;
+  bmwStreamZastav();
+  state.bmwOauth = null;
+  state.bmwHodnoty = {};
+  bmwChyba = null;
+  addLog('BMW: auto odpojené');
+  if (typeof storeUlozBrzy === 'function') storeUlozBrzy();
+  broadcast('bmw', { bmw: bmwPayload() });
+  res.json({ ok: true, bmw: bmwPayload() });
+});
+
 // ---------- Sekačka Anthbot (cloud) ----------
 // Anthbot nemá oficiální API; tvar je odkoukaný z komunitní integrace do Home
 // Assistantu (vincentjanv/anthbot_genie_ha). Na rozdíl od závlahy vede všechno
@@ -14760,6 +15131,10 @@ function storeSnapshot() {
     oznameni: state.oznameni,
     // Přihlášení k Rohlíku — bez něj by se po každém nasazení muselo přihlašovat znovu
     rohlikOauth: state.rohlikOauth,
+    // BMW: přihlášení (tokeny, VIN) a poslední údaje z auta — tokeny nikdy do appky ani do zálohy
+    bmwOauth: state.bmwOauth || null,
+    bmwHodnoty: state.bmwHodnoty || {},
+    bmwPosledniDotaz: state.bmwPosledniDotaz || 0,
     // Cookies webu Rohlíku (schválené zařízení) — jen sem, nikdy do appky ani do logu
     rohlikWebCookies: state.rohlikWebCookies || null,
     // Kdy odešel týdenní report — nasazení v neděli večer ho nesmí poslat podruhé
@@ -14821,6 +15196,9 @@ function storeApplyPrimo(p) {
   if (Number.isInteger(p.saunaPoMin) && p.saunaPoMin >= 5 && p.saunaPoMin <= 15) state.saunaPoMin = p.saunaPoMin;
   if (p.oznameni && typeof oznameniObnov === 'function') oznameniObnov(p.oznameni, now);
   if (p.rohlikOauth && typeof rohlikOauthObnov === 'function') rohlikOauthObnov(p.rohlikOauth);
+  if (p.bmwOauth && typeof p.bmwOauth === 'object' && !state.bmwOauth) state.bmwOauth = p.bmwOauth;
+  if (p.bmwHodnoty && typeof p.bmwHodnoty === 'object' && !Object.keys(state.bmwHodnoty || {}).length) state.bmwHodnoty = p.bmwHodnoty;
+  if (Number.isFinite(p.bmwPosledniDotaz)) state.bmwPosledniDotaz = Math.max(state.bmwPosledniDotaz || 0, p.bmwPosledniDotaz);
   if (p.rohlikWebCookies && typeof rohlikWebCookiesObnov === 'function') rohlikWebCookiesObnov(p.rohlikWebCookies);
   const sr = p.saunaRelace;
   if (sr && typeof sr === 'object' && Number.isFinite(sr.od) && sr.od <= now
@@ -15230,6 +15608,8 @@ const server = app.listen(PORT, async () => {
   // spuštění bez úložiště by nebylo poznat, že se rozvrh vzal z předvyplnění
   rozvrhVychoziPoStartu();
   spotrebaPoStartu();
+  // BMW: token, stream a občasný dotaz (po obnově zálohy, ať jsou tokeny)
+  scheduleEvery(() => bmwTik().catch(() => {}), BMW_TIK_MS, 15000);
   // Týdenní report v neděli večer
   scheduleEvery(() => tydenReportTik().catch(() => {}), TYDEN_REPORT_TIK_MS, TYDEN_REPORT_TIK_MS);
   // Venkovní teplota pro stránku Spotřeba (archiv Open-Meteo), každých 6 h
@@ -15559,7 +15939,7 @@ const ZALOHA_SLOZKY = ['public', 'data', 'jidelnicek', 'shelly'];
 // Konfigurace NASu s hesly a tokeny (gitignorované) do zálohy nikdy
 const ZALOHA_NE = /(^|\/)(\.env|[^/]*\.config\.json|[^/]*tokeny[^/]*|[^/]*relace[^/]*|__pycache__|node_modules)(\/|$)/;
 const ZALOHA_BINARNI = /\.(png|jpe?g|gif|ico|webp|pdf|zip)$/i;
-const ZALOHA_PRIMO_TAJNE = ['rohlikOauth', 'rohlikWebCookies', 'push'];
+const ZALOHA_PRIMO_TAJNE = ['rohlikOauth', 'rohlikWebCookies', 'push', 'bmwOauth'];
 
 function zalohaSoubory(koren = __dirname) {
   const fs = require('fs'), path = require('path');

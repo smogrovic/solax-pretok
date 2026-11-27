@@ -1123,6 +1123,20 @@
   .term-prazdno{font-size:13px;color:var(--grey-text);padding:6px 0;}
   .term-skupina{font-size:13px;font-weight:700;color:var(--orange-dark);margin-top:10px;padding-bottom:2px;border-bottom:1px solid rgba(44,62,80,.12);}
   .term-skupina + .term-radek{border-top:none;}
+  /* Živá data auta (BMW CarData) v kartě termínů */
+  .bmw-blok{margin:6px 0 4px;padding:10px 12px;border-radius:12px;background:var(--bg);}
+  .bmw-cisla{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;}
+  .bmw-velke{font-size:22px;font-weight:700;color:var(--navy);}
+  .bmw-male{font-size:13px;color:var(--navy);}
+  .bmw-radek{font-size:13px;color:var(--navy);margin-top:6px;overflow-wrap:anywhere;}
+  .bmw-radek.pozor{color:var(--red);font-weight:600;}
+  .bmw-meta{font-size:12px;color:var(--grey-text);margin-top:6px;}
+  .bmw-kod{font-size:24px;font-weight:700;letter-spacing:2px;color:var(--navy);margin:6px 0;}
+  .bmw-form{display:flex;gap:8px;margin-top:8px;}
+  .bmw-form input{flex:1;min-width:0;font-size:14px;padding:8px 10px;border-radius:10px;border:1px solid rgba(44,62,80,.2);}
+  .bmw-tl{border:1px solid rgba(44,62,80,.2);background:#fff;color:var(--navy);border-radius:10px;font-size:13px;padding:7px 10px;white-space:nowrap;}
+  .bmw-tl.hlavni{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600;}
+  .bmw-odkaz{display:inline-block;margin-top:4px;color:var(--orange-dark);font-weight:600;font-size:14px;}
   .term-form{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
   .term-form input,.term-form textarea,.term-form select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid rgba(44,62,80,.15);border-radius:12px;font-size:15px;background:var(--bg);color:var(--navy);font-family:inherit;min-width:0;}
   .term-form textarea{min-height:90px;resize:vertical;}
@@ -13335,6 +13349,7 @@ function applySnapshot(snap) {
   bezpecne(() => renderSekacka(snap.sekacka));
   bezpecne(() => renderVysavac(snap.vysavac || null));
   bezpecne(() => renderAuto(snap.auto || null));
+  bezpecne(() => renderBmw(snap.bmw || null));
   bezpecne(() => renderZapadDelay(snap.zapadDelayMin));
   bezpecne(() => renderSaunaPo(snap.saunaPoMin));
   rozvrhSavedAt = snap.blindRulesAt || 0;
@@ -13726,6 +13741,7 @@ function connectStream() {
   es.addEventListener('sekacka', e => { renderSekacka(JSON.parse(e.data).sekacka); });
   es.addEventListener('vysavac', e => { bezpecne(() => renderVysavac(JSON.parse(e.data).vysavac)); });
   es.addEventListener('auto', e => { bezpecne(() => renderAuto(JSON.parse(e.data).auto)); });
+  es.addEventListener('bmw', e => { bezpecne(() => renderBmw(JSON.parse(e.data).bmw)); });
   es.addEventListener('tvRozvrh', e => { renderTvRozvrh(JSON.parse(e.data)); });
   es.addEventListener('zapadDelay', e => { renderZapadDelay(JSON.parse(e.data).minut); });
   es.addEventListener('saunaPo', e => { renderSaunaPo(JSON.parse(e.data).minut); });
@@ -14575,6 +14591,124 @@ async function termUloz(u, smazat) {
   renderTerminy();
 }
 
+// ---------- BMW: živá data v kartě termínů (BMW CarData) ----------
+// Server drží přihlášení a stream; sem chodí jen shrnutí. Připojení: Client ID
+// z webu BMW → server vydá kód → člověk ho potvrdí na webu BMW.
+const BMW_KARTA = 'bmw4';
+let bmwData = null;
+let bmwHlaska = '';
+const bmwCislo = (n, des = 0) => n.toLocaleString('cs-CZ', { maximumFractionDigits: des, minimumFractionDigits: des });
+
+function bmwBlokEl() {
+  const b = termEl('div', 'bmw-blok');
+  b.id = 'bmwBlok';
+  const d = bmwData;
+  const tl = (text, hlavni, akce) => {
+    const x = termEl('button', 'bmw-tl' + (hlavni ? ' hlavni' : ''), text);
+    x.type = 'button';
+    x.addEventListener('click', akce);
+    return x;
+  };
+  if (d && d.cekani) {
+    b.appendChild(termEl('div', 'bmw-male', 'Otevři web BMW, přihlas se a zadej tenhle kód:'));
+    b.appendChild(termEl('div', 'bmw-kod', d.cekani.userCode || ''));
+    const a = termEl('a', 'bmw-odkaz', 'Otevřít web BMW ↗');
+    a.href = d.cekani.url; a.target = '_blank'; a.rel = 'noopener';
+    b.appendChild(a);
+    b.appendChild(termEl('div', 'bmw-meta', 'Appka čeká, až to potvrdíš — pak se sama připojí.'));
+    return b;
+  }
+  if (!d || !d.pripojeno) {
+    b.appendChild(termEl('div', 'bmw-male', 'Živá data z auta (dojezd, palivo, km, zamčení): vlož Client ID z webu BMW (BMW CarData → Technický přístup).'));
+    const f = termEl('div', 'bmw-form');
+    const inp = termEl('input');
+    inp.id = 'bmwClientId';
+    inp.placeholder = 'Client ID';
+    inp.autocomplete = 'off';
+    inp.spellcheck = false;
+    f.appendChild(inp);
+    f.appendChild(tl('Připojit', true, () => bmwPripojit(inp.value.trim())));
+    b.appendChild(f);
+  } else {
+    const s = d.stav;
+    if (!s) b.appendChild(termEl('div', 'bmw-male', 'Připojeno — čekám na první data z auta.'));
+    else {
+      const cisla = termEl('div', 'bmw-cisla');
+      if (typeof s.dojezdKm === 'number') cisla.appendChild(termEl('span', 'bmw-velke', `⛽ ${bmwCislo(s.dojezdKm)} km`));
+      const pal = [];
+      if (typeof s.palivoPct === 'number') pal.push(`${Math.round(s.palivoPct)} %`);
+      if (typeof s.palivoL === 'number') pal.push(`${bmwCislo(s.palivoL)} l`);
+      if (pal.length) cisla.appendChild(termEl('span', 'bmw-male', 'nádrž ' + pal.join(' · ')));
+      if (typeof s.km === 'number') cisla.appendChild(termEl('span', 'bmw-male', `najeto ${bmwCislo(s.km)} km`));
+      b.appendChild(cisla);
+      if (s.zamek || (s.otevreno && s.otevreno.length)) {
+        const pozor = s.zamek === 'odemčeno' || (s.otevreno && s.otevreno.length);
+        const t = [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 ' + s.zamek) : null,
+          s.otevreno && s.otevreno.length ? 'otevřené: ' + s.otevreno.join(', ') : 'vše zavřené'].filter(Boolean).join(' · ');
+        b.appendChild(termEl('div', 'bmw-radek' + (pozor ? ' pozor' : ''), t));
+      }
+      const servis = [];
+      if (typeof s.servisKm === 'number') servis.push(`servis za ${bmwCislo(s.servisKm)} km`);
+      for (const x of (s.servis || []).slice(0, 4)) {
+        const kdy = x.datum ? 'do ' + termDatumCz(x.datum) : (typeof x.km === 'number' ? `za ${bmwCislo(x.km)} km` : '');
+        if (x.typ) servis.push(`${x.typ.toLowerCase().replace(/_/g, ' ')}${kdy ? ' ' + kdy : ''}`);
+      }
+      if (servis.length) b.appendChild(termEl('div', 'bmw-radek', '🔧 ' + servis.join(' · ')));
+      if (s.pneu) {
+        const p = v => (typeof v === 'number' ? bmwCislo(v, 1) : '–');
+        b.appendChild(termEl('div', 'bmw-radek', `🛞 vpředu ${p(s.pneu.lp)} / ${p(s.pneu.pp)} · vzadu ${p(s.pneu.lz)} / ${p(s.pneu.pz)} bar`));
+      }
+    }
+    const meta = [];
+    if (d.model) meta.push(d.model);
+    if (d.stav && d.stav.kdy) meta.push('auto hlásilo ' + fmtSolTime(d.stav.kdy));
+    meta.push(d.stream ? 'živě' : 'stream odpojený');
+    b.appendChild(termEl('div', 'bmw-meta', meta.join(' · ')));
+  }
+  if (d && d.chyba) b.appendChild(termEl('div', 'bmw-radek pozor', d.chyba));
+  if (bmwHlaska) b.appendChild(termEl('div', 'bmw-meta', bmwHlaska));
+  if (d && d.pripojeno) {
+    const odp = tl('Odpojit', false, async () => {
+      if (!(await zeptejSe('Odpojit BMW?', 'Appka zapomene přihlášení i poslední data. Připojit jde zase kdykoli.'))) return;
+      bmwVolej('/api/bmw/odpojit', {});
+    });
+    odp.style.marginTop = '8px';
+    b.appendChild(odp);
+  }
+  return b;
+}
+
+// Překreslí jen blok — rozepsané Client ID nesmaže
+function renderBmw(d) {
+  if (d !== undefined) bmwData = d;
+  const el = document.getElementById('bmwBlok');
+  if (!el) return;
+  const stare = document.getElementById('bmwClientId');
+  const mel = stare && document.activeElement === stare;
+  const nove = bmwBlokEl();
+  el.replaceWith(nove);
+  const inp = document.getElementById('bmwClientId');
+  if (stare && inp) { inp.value = stare.value; if (mel) inp.focus(); }
+}
+
+async function bmwVolej(cesta, telo) {
+  bmwHlaska = 'Chvilku…';
+  renderBmw();
+  try {
+    const res = await fetch(cesta, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(telo) });
+    const j = await res.json().catch(() => ({}));
+    bmwHlaska = res.ok ? '' : (j.error || `Nepovedlo se (HTTP ${res.status}).`);
+    if (j.bmw) bmwData = j.bmw;
+  } catch {
+    bmwHlaska = 'Server neodpovídá.';
+  }
+  renderBmw();
+}
+function bmwPripojit(clientId) {
+  if (!clientId) { bmwHlaska = 'Vlož Client ID.'; renderBmw(); return; }
+  bmwVolej('/api/bmw/pripojit', { clientId });
+}
+
 function renderTerminy() {
   if (!termKartyEl || !termBlizkeEl) return;
   const karty = (terminyData && terminyData.karty) || [];
@@ -14604,6 +14738,7 @@ function renderTerminy() {
     });
     h.appendChild(upr);
     c.appendChild(h);
+    if (k.id === BMW_KARTA) c.appendChild(bmwBlokEl());
     if (k.udaje) c.appendChild(termUdaje(k.udaje));
     const serazene = [...k.terminy].sort((a, b) => (a.datum || '9999').localeCompare(b.datum || '9999'));
     const skupiny = Array.isArray(k.skupiny) ? k.skupiny : [];

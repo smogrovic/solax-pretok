@@ -49,6 +49,7 @@ const PRIPONY = ['El', 'Els', 'Data', 'Canvas', 'Flag'];
 const chybi = [...pouzita]
   .filter(n => PRIPONY.some(p => n.endsWith(p)) && n.length > 4)
   .filter(n => !dekl.has(n) && !vlastnosti.has(n) && !klice.has(n))
+  .filter(n => n !== 'CarData')   // název služby BMW v textu, ne proměnná
   .sort();
 
 check('žádný prvek/proměnná bez deklarace', chybi.join(', ') || 'žádná', 'žádná');

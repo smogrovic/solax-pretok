@@ -7,7 +7,7 @@ const { between, suite } = require('./zdroj');
 const { check, nadpis, konec } = suite('auto (appka)');
 
 const CODE = between('// ---------- Auto VW (most na NASu) ----------',
-                     '// ---------- Sekačka Anthbot (cloud) ----------');
+                     '// ---------- Auto BMW (BMW CarData) ----------');
 
 function build() {
   const logy = [], zpravy = [], routy = {};
