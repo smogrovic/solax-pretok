@@ -1124,6 +1124,9 @@
   .term-skupina{font-size:13px;font-weight:700;color:var(--orange-dark);margin-top:10px;padding-bottom:2px;border-bottom:1px solid rgba(44,62,80,.12);}
   .term-skupina + .term-radek{border-top:none;}
   /* Živá data auta (BMW CarData) v kartě termínů */
+  .bmw-karta{align-items:stretch;}
+  .bmw-foto{display:block;width:100%;height:auto;aspect-ratio:900/551;object-fit:cover;border-radius:14px;}
+  .bmw-titulek{margin:10px 0 0;text-align:left;}
   .bmw-blok{margin:6px 0 4px;padding:10px 12px;border-radius:12px;background:var(--bg);}
   .bmw-cisla{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;}
   .bmw-velke{font-size:22px;font-weight:700;color:var(--navy);}
@@ -3564,6 +3567,13 @@
         <canvas id="wbChart" class="pan-chart"></canvas>
         <div class="graph-total" id="wbEnergyTotal"></div>
         <div class="timeline-legend" id="wbModeLegend"></div>
+      </div>
+
+      <!-- BMW: stav auta z BMW CarData (server drží přihlášení a stream) -->
+      <div class="card bmw-karta" id="bmwKarta">
+        <img class="bmw-foto" src="/bmw.jpg" alt="BMW 4 Gran Coupé" loading="lazy">
+        <div class="graph-title bmw-titulek">BMW 4 Gran Coupé</div>
+        <div id="bmwObsah"></div>
       </div>
 
       <button class="sbal-btn" data-sbal="wallbox" type="button" aria-expanded="false">Přehled spotřeby<i>▾</i></button>
@@ -14591,10 +14601,9 @@ async function termUloz(u, smazat) {
   renderTerminy();
 }
 
-// ---------- BMW: živá data v kartě termínů (BMW CarData) ----------
+// ---------- BMW: stav auta na stránce Wallbox (BMW CarData) ----------
 // Server drží přihlášení a stream; sem chodí jen shrnutí. Připojení: Client ID
 // z webu BMW → server vydá kód → člověk ho potvrdí na webu BMW.
-const BMW_KARTA = 'bmw4';
 let bmwData = null;
 let bmwHlaska = '';
 const bmwCislo = (n, des = 0) => n.toLocaleString('cs-CZ', { maximumFractionDigits: des, minimumFractionDigits: des });
@@ -14681,12 +14690,11 @@ function bmwBlokEl() {
 // Překreslí jen blok — rozepsané Client ID nesmaže
 function renderBmw(d) {
   if (d !== undefined) bmwData = d;
-  const el = document.getElementById('bmwBlok');
-  if (!el) return;
+  const obal = document.getElementById('bmwObsah');
+  if (!obal) return;
   const stare = document.getElementById('bmwClientId');
   const mel = stare && document.activeElement === stare;
-  const nove = bmwBlokEl();
-  el.replaceWith(nove);
+  obal.replaceChildren(bmwBlokEl());
   const inp = document.getElementById('bmwClientId');
   if (stare && inp) { inp.value = stare.value; if (mel) inp.focus(); }
 }
@@ -14708,6 +14716,7 @@ function bmwPripojit(clientId) {
   if (!clientId) { bmwHlaska = 'Vlož Client ID.'; renderBmw(); return; }
   bmwVolej('/api/bmw/pripojit', { clientId });
 }
+renderBmw();
 
 function renderTerminy() {
   if (!termKartyEl || !termBlizkeEl) return;
@@ -14738,7 +14747,6 @@ function renderTerminy() {
     });
     h.appendChild(upr);
     c.appendChild(h);
-    if (k.id === BMW_KARTA) c.appendChild(bmwBlokEl());
     if (k.udaje) c.appendChild(termUdaje(k.udaje));
     const serazene = [...k.terminy].sort((a, b) => (a.datum || '9999').localeCompare(b.datum || '9999'));
     const skupiny = Array.isArray(k.skupiny) ? k.skupiny : [];

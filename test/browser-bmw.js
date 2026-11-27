@@ -25,8 +25,10 @@ setTimeout(async () => {
     { id: 'vw', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [] }] };
   bmwData = { pripojeno: false, stav: null, cekani: null, chyba: null, stream: false, model: null };
   renderTerminy();
+  renderBmw(bmwData);
   const blok = () => document.getElementById('bmwBlok');
-  check('blok jen v kartě BMW', blok().closest('[data-karta]').dataset.karta + ' ' + document.querySelectorAll('.bmw-blok').length, 'bmw4 1');
+  check('karta na Wallboxu s fotkou, v Termínech nic', !!blok().closest('.slide[data-title="Wallbox"]') + ' ' + document.querySelectorAll('.bmw-blok').length
+    + ' ' + document.querySelector('#bmwKarta img.bmw-foto').getAttribute('src'), 'true 1 /bmw.jpg');
   check('nepřipojeno: pole na Client ID', !!document.getElementById('bmwClientId'), true);
   blok().querySelector('.bmw-tl.hlavni').click();
   await pockej();
