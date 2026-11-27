@@ -83,4 +83,28 @@ print(json.dumps({'appka': ok['appka'], 'interval': ok['interval'], 'vin': ok['v
   check('chybějící soubor poradí', /Chybí .*vytvoř/.test(out.chybi), true);
 }
 
+nadpis('4) Zdroj: portál EU Data Act (výchozí) nebo We Connect');
+{
+  const out = py(`
+d = tempfile.mkdtemp()
+def zkus(vw):
+    c = os.path.join(d, 'c.json')
+    with open(c, 'w') as f: f.write(json.dumps({'vw': {'username': 'a@b.cz', 'password': 'X', **vw}}))
+    return m.nacti_nastaveni(c)
+vych, _ = zkus({})
+wc, _ = zkus({'zdroj': 'weconnect'})
+br, _ = zkus({'brand': 'VWN'})
+_, spatne = zkus({'zdroj': 'nesmysl'})
+k1 = m.cc_konfigurace(vych, 'VOLKSWAGEN_COMMERCIAL_VEHICLES')['carConnectivity']['connectors'][0]
+k2 = m.cc_konfigurace(wc)['carConnectivity']['connectors'][0]
+print(json.dumps({'zdroj': vych['zdroj'], 'znacky': vych['znacky'], 'br': br['znacky'], 'spatne': spatne,
+  'k1': [k1['type'], k1['config']['brand'], k1['config']['interval']], 'k2': [k2['type'], 'brand' in k2['config']]}))`);
+  check('výchozí zdroj = portál EU Data Act', out.zdroj, 'eu-data-act');
+  check('  zkusí osobní a pak užitkové VW', out.znacky.join(','), 'VOLKSWAGEN_PASSENGER_CARS,VOLKSWAGEN_COMMERCIAL_VEHICLES');
+  check('  značka z konfigurace jen ta', out.br.join(','), 'VWN');
+  check('  connector, značka a interval po 15 min', out.k1.join(' '), 'vw_eu_data_act VOLKSWAGEN_COMMERCIAL_VEHICLES 900');
+  check('We Connect: starý connector bez značky', out.k2.join(' '), 'volkswagen false');
+  check('neznámý zdroj → chyba', /povolené/.test(out.spatne), true);
+}
+
 konec();

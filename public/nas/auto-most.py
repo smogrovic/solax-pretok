@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 # Most mezi appkou a autem VW — běží trvale na NASu.
 #
-# Stav auta (procenta baterie, dojezd, nabíjení) umí jen cloud Volkswagenu, tedy
-# to, co ukazuje aplikace Volkswagen / We Connect ID. Oficiální API na to VW nemá;
-# přihlášení a čtení obstará knihovna CarConnectivity (github.com/tillsteinbach/
-# CarConnectivity), která se o změny na straně VW stará. Přihlašuje se tady doma,
-# heslo k VW ID zůstává na NASu a appka dostane jen stav. Spojení navazuje VŽDYCKY
-# most sám směrem ven, do domácí sítě se nic neotevírá.
+# Stav auta (procenta baterie, dojezd, nabíjení) umí jen cloud Volkswagenu. Čtení
+# obstará knihovna CarConnectivity (github.com/tillsteinbach/CarConnectivity).
+# Dvě cesty („zdroj" v konfiguraci):
+#   - "eu-data-act" (výchozí): portál VW podle EU Data Act (eu-data-act.vwgroup-
+#     datahub.com), connector carconnectivity-connector-vw-eu-data-act. Jen čtení,
+#     data po ~15 min. Na portálu je potřeba jednou zapnout průběžný požadavek
+#     na data (Get customised data → continuous, 15 minut) — viz AUTA.md.
+#   - "weconnect": původní přístup appky We Connect; VW ho 5/2026 zablokoval.
+# Přihlašuje se tady doma, heslo k VW ID zůstává na NASu a appka dostane jen stav.
+# Spojení navazuje VŽDYCKY most sám směrem ven, do domácí sítě se nic neotevírá.
 #
-# Instalace (jednou, přes SSH jako root):
-#   python3 -m pip install --upgrade pip
-#   python3 -m pip install carconnectivity carconnectivity-connector-volkswagen
+# Instalace (jednou, přes SSH jako root; na DSM je potřeba Python 3.9 z Centra balíčků):
+#   PY=/var/packages/Python3.9/target/usr/bin/python3.9
+#   $PY -m pip install --upgrade carconnectivity carconnectivity-connector-vw-eu-data-act
 #   curl -o /volume1/family/scripts/auto/auto-most.py https://solax-pretok.onrender.com/nas/auto-most.py
 # Vedle skriptu vytvoř auto.config.json (heslo sem, do chatu ani repozitáře ne):
 #   {"appka": "https://solax-pretok.onrender.com",
 #    "vw": {"username": "tvuj@email.cz", "password": "heslo-k-VW-ID"}}
-# Volitelně "vin" (když je na účtu víc aut) a "interval" v sekundách (výchozí 600).
+# Volitelně "vin" (když je na účtu víc aut), "interval" v sekundách (výchozí 900),
+# ve "vw" pak "zdroj" ("eu-data-act" / "weconnect") a "brand" (značka na portálu;
+# bez ní se zkusí osobní VW a pak užitkové VW — Multivan bývá pod užitkovými).
 #
 # Nejdřív vyzkoušet (vypíše, co VW o autě hlásí):
 #   python3 /volume1/family/scripts/auto/auto-most.py --vypis
@@ -36,7 +42,8 @@ SLOZKA = os.path.dirname(os.path.abspath(__file__))
 KONFIG = os.path.join(SLOZKA, 'auto.config.json')
 TOKENY = os.path.join(SLOZKA, 'auto.tokeny.json')
 APPKA_VYCHOZI = 'https://solax-pretok.onrender.com'
-INTERVAL_S = 600          # VW nemá rád časté dotazy; auto se stejně mění pomalu
+INTERVAL_S = 900          # portál EU Data Act dává nová data po ~15 min, častěji to nemá smysl
+ZNACKY_VW = ['VOLKSWAGEN_PASSENGER_CARS', 'VOLKSWAGEN_COMMERCIAL_VEHICLES']
 INTERVAL_MIN_S = 300
 INTERVAL_MAX_S = 3600
 PAUZA_PO_CHYBE_S = 900
@@ -62,9 +69,14 @@ def nacti_nastaveni(cesta=KONFIG):
         interval = int(k.get('interval') or INTERVAL_S)
     except (TypeError, ValueError):
         interval = INTERVAL_S
+    zdroj = str(vw.get('zdroj') or 'eu-data-act').lower()
+    if zdroj not in ('eu-data-act', 'weconnect'):
+        return None, f'V {cesta} je "zdroj" "{zdroj}" — povolené jsou "eu-data-act" a "weconnect".'
     return {
         'appka': str(k.get('appka') or APPKA_VYCHOZI).rstrip('/'),
         'vw': {'username': vw['username'], 'password': vw['password']},
+        'zdroj': zdroj,
+        'znacky': [str(vw['brand'])] if vw.get('brand') else list(ZNACKY_VW),
         'vin': (k.get('vin') or '').strip().upper() or None,
         'interval': max(INTERVAL_MIN_S, min(INTERVAL_MAX_S, interval)),
     }, None
@@ -151,11 +163,35 @@ def zabezpec_tokeny(cesta=TOKENY):
         pass
 
 
+def cc_konfigurace(nastaveni, znacka=None):
+    if nastaveni.get('zdroj') == 'weconnect':
+        connector = {'type': 'volkswagen', 'config': dict(nastaveni['vw'])}
+    else:
+        connector = {'type': 'vw_eu_data_act', 'config': {**nastaveni['vw'], 'interval': nastaveni['interval'],
+                                                         'brand': znacka or nastaveni['znacky'][0]}}
+    return {'carConnectivity': {'log_level': 'error', 'connectors': [connector]}}
+
+
 def cc_otevri(nastaveni):
+    """Otevře CarConnectivity. U portálu EU Data Act zkusí značky po řadě (osobní VW,
+    užitkové VW) a nechá tu, pod kterou je na účtu auto."""
     from carconnectivity import carconnectivity  # až tady: --help jde i bez knihovny
-    config = {'carConnectivity': {'log_level': 'error',
-                                  'connectors': [{'type': 'volkswagen', 'config': dict(nastaveni['vw'])}]}}
-    return carconnectivity.CarConnectivity(config=config, tokenstore_file=TOKENY)
+    znacky = [None] if nastaveni.get('zdroj') == 'weconnect' else nastaveni['znacky']
+    posledni = None
+    for i, znacka in enumerate(znacky):
+        cc = carconnectivity.CarConnectivity(config=cc_konfigurace(nastaveni, znacka), tokenstore_file=TOKENY)
+        posledni = cc
+        if i == len(znacky) - 1:
+            break
+        try:
+            cc.fetch_all()
+            if vyber_auto(cc.get_garage(), nastaveni['vin']) is not None:
+                return cc
+        except Exception as e:  # noqa: BLE001 — u jiné značky se zkusí znovu
+            zapis(f'značka {znacka}: {e.__class__.__name__}: {str(e)[:150]}')
+        zapis(f'pod značkou {znacka} žádné auto, zkouším další')
+        cc.shutdown()
+    return posledni
 
 
 def kolo(nastaveni, cc):
@@ -209,12 +245,12 @@ def hlavni(argv):
     try:
         import carconnectivity  # noqa: F401
     except ImportError:
-        zapis('Chybí knihovna: python3 -m pip install carconnectivity carconnectivity-connector-volkswagen')
+        zapis('Chybí knihovna: python3 -m pip install carconnectivity carconnectivity-connector-vw-eu-data-act')
         return 1
     if '--vypis' in argv:
         vypis(nastaveni)
         return 0
-    zapis(f'most spuštěn — appka {nastaveni["appka"]}, kolo po {nastaveni["interval"]} s')
+    zapis(f'most spuštěn — zdroj {nastaveni["zdroj"]}, appka {nastaveni["appka"]}, kolo po {nastaveni["interval"]} s')
     cc = cc_otevri(nastaveni)
     bezelo = False
     while True:

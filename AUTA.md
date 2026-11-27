@@ -36,6 +36,23 @@ Kdyby na NASu jelo spolehlivě, dá se přesun zvážit.
 
 Heslo k VW ID nikam nepiš — jen do souboru na NASu (krok 6). Do chatu ani do repozitáře ne.
 
+**Stav 11/2026:** přístup přes We Connect (connector `volkswagen`) VW zablokoval — i nejnovější
+verze hlásí *Authorization URL could not be fetched due to WeConnect failure*. Most proto
+výchozí čte z **portálu VW podle EU Data Act** (connector `vw_eu_data_act`): jen čtení, data
+po ~15 minutách, umí i hybridy. Navíc je potřeba:
+
+### 0. Portál EU Data Act (jednou, v prohlížeči)
+1. Otevři https://eu-data-act.vwgroup-datahub.com/ a přihlas se **VW ID** (stejný účet jako appka).
+2. **Data clusters → Vehicle overview**; když tam auto není, **připoj ho** (souhlasy pro VIN).
+3. U auta **Get customised data** → nastav **průběžný (continuous) požadavek** s frekvencí
+   **15 minut**.
+4. Počkej, až se v seznamu dodávek objeví první ZIP soubory (může to chvíli trvat).
+
+V kroku 4 se pak instaluje `carconnectivity-connector-vw-eu-data-act`
+(`$PY -m pip install --upgrade carconnectivity-connector-vw-eu-data-act`). Most zkusí značku
+osobní VW a pak užitkové VW (Multivan). Ke starému We Connect jde vrátit `"zdroj": "weconnect"`
+v části `"vw"` konfigurace.
+
 ### 1. Zapnout SSH na NASu (jednou)
 DSM v prohlížeči → **Ovládací panely → Terminál a SNMP** → zaškrtni **Povolit službu SSH**
 (port 22) → **Použít**.
