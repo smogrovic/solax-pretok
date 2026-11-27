@@ -596,7 +596,25 @@ setTimeout(async () => {
     // Rozjetá animace listování z dřívějška by mřížku posunula
     kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
     const rm = document.getElementById('kalMrizka').getBoundingClientRect(), rp = poc.getBoundingClientRect();
-    check('  počasí vpravo vedle mřížky, stejně vysoké', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && Math.abs(rp.height - rm.height) < 2, true);
+    check('  počasí vpravo vedle mřížky, nahoře, na půl výšky', rp.left > rm.right - 1 && Math.abs(rp.top - rm.top) < 2 && Math.abs(rp.height - rm.height / 2) < 12, true);
+    // Pod počasím auta vedle sebe (BMW 420d, VW Multivan) — jen ke čtení
+    const auta = document.getElementById('kalAuta');
+    const ra = auta.getBoundingClientRect();
+    check('  pod počasím box s auty', !auta.hidden && ra.top > rp.bottom - 1 && Math.abs(ra.bottom - rm.bottom) < 2 && Math.abs(ra.left - rp.left) < 2, true);
+    const ka = [...auta.querySelectorAll('.kal-auto')];
+    check('  dvě karty: BMW 420d a VW Multivan', ka.map(k => k.querySelector('.kal-auto-nazev').textContent).join(','), 'BMW 420d,VW Multivan');
+    const r0 = ka[0].getBoundingClientRect(), r1 = ka[1].getBoundingClientRect();
+    check('  vedle sebe, stejně velké', Math.abs(r0.top - r1.top) < 2 && r1.left > r0.right && Math.abs(r0.width - r1.width) < 2, true);
+    check('  s fotkami', ka.map(k => k.querySelector('img').getAttribute('src')).join(','), '/bmw.jpg,/vw.jpg');
+    const bmwPuv = bmwData, autoPuv = autoData;
+    renderBmw({ pripojeno: true, stream: true, model: 'BMW 420d', stav: { dojezdKm: 612, palivoPct: 55, km: 48211, zamek: 'zamčeno', otevreno: [] } });
+    renderAuto({ kdy: Date.now(), zive: true, stav: { soc: 81, dojezdKm: 395 } });
+    const ka2 = [...auta.querySelectorAll('.kal-auto')];
+    check('  BMW: živá data jako na Auta/Wallbox', /612 km/.test(ka2[0].textContent) && /zamčeno/.test(ka2[0].textContent), true);
+    check('  BMW: bez tlačítek a formulářů', ka2[0].querySelectorAll('button, input, a').length + ' ' + document.querySelectorAll('#bmwBlok').length, '0 1');
+    check('  VW: procenta a dojezd', /81 %/.test(ka2[1].textContent) && /dojezd 395 km/.test(ka2[1].textContent), true);
+    check('  karty se vejdou do boxu', ka2.every(k => k.getBoundingClientRect().bottom <= ra.bottom + 1), true);
+    bmwData = bmwPuv; renderAuto(autoPuv); renderBmw();
     const hlavy = [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].map(h => h.getBoundingClientRect());
     check('  nadpis „Počasí dnes" nad panelem', Math.abs((hlavy[1].left + hlavy[1].right) / 2 - (rp.left + rp.right) / 2) < 12, true);
     check('teplota velká a zaokrouhlená', poc.querySelector('.poc-teplota').textContent + ' ' + (parseFloat(getComputedStyle(poc.querySelector('.poc-teplota')).fontSize) >= 60), '6° true');
@@ -619,7 +637,7 @@ setTimeout(async () => {
     const tcEl = poc.querySelector('.poc-tc');
     check('čidlo TČ menším písmem pod Max/Min', tcEl && tcEl.textContent + ' ' + (parseFloat(getComputedStyle(tcEl).fontSize) < parseFloat(getComputedStyle(poc.querySelector('.poc-popis')).fontSize))
       + ' ' + tcEl.parentElement.className, 'čidlo TČ 8° true poc-minmax');
-    check('  vejde se bez posouvání i s ním', poc.scrollHeight <= poc.clientHeight + 1, true);
+    check('  i s ním je hlavička celá vidět', poc.querySelector('.poc-hlava').getBoundingClientRect().bottom <= poc.getBoundingClientRect().bottom, true);
     airconData = airconPuv;
     renderKalPocasi(POC, v7);
     check('nahoře Benešov a dvě teploty', poc.querySelector('.poc-misto').textContent + ' | '
@@ -654,8 +672,9 @@ setTimeout(async () => {
     check('  srážky zítra', /od zítra 3:00/.test(poc.textContent), true);
     // Celé se to vejde na výšku iPadu bez posouvání
     kalMrizkaEl.classList.remove('kal-den-dopredu', 'kal-den-zpet');
-    check('vejde se bez posouvání', poc.scrollHeight <= poc.clientHeight + 1, true);
-    check('  stejně vysoké jako kalendář', Math.abs(poc.getBoundingClientRect().height - document.getElementById('kalMrizka').getBoundingClientRect().height) < 2, true);
+    // Na půl výšky (pod ním auta) se celé nevejde — zbytek jde posunout prstem
+    check('na půl výšky kalendáře', Math.abs(poc.getBoundingClientRect().height - document.getElementById('kalMrizka').getBoundingClientRect().height / 2) < 12, true);
+    check('  co se nevejde, posouvá se', getComputedStyle(poc).overflowY, 'auto');
     renderKalDen();
     check('lišta ukazuje zdroj', [...document.querySelectorAll('#kalDenNazev .kal-den-hlava')].pop().textContent, 'Počasí dnes · Open-Meteo');
     // Mrak nemá rovný vršek: celá cesta je uvnitř viewBoxu

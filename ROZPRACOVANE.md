@@ -27,3 +27,29 @@ Zkratky a zpátky do appky se to samo nevrátí.
 
 **Bezpečnost:** kód alarmu prošel chatem na snímku, takže je potřeba ho změnit.
 Číslo a kód nikdy nepatří do repozitáře ani do chatu.
+
+## VW Multivan — živá data přes portál EU Data Act (čeká se na VW)
+
+**Stav (27. 11. 2026):** most `public/nas/auto-most.py` je na NASu (verze 11 923 B),
+přihlášení do portálu funguje, auto se našlo jako `VOLKSWAGEN_PASSENGER_CARS`.
+Žádost o data („Načíst data definovaná uživatelem", průběžně) je podaná; portál
+vrací 404 na `/list`, dokud nepřijde první dodávka (VW má až 24 h).
+
+**Co má udělat uživatel (připomenout, až se zeptá):**
+1. Na portálu (Přehled vozidel → auto) zkontrolovat, že přišla první data.
+2. Na NASu: `ssh` na NAS, `sudo -i`,
+   `PY=/var/packages/Python3.9/target/usr/bin/python3.9`,
+   `cd /volume1/family/scripts/auto`, `$PY auto-most.py --vypis`.
+   Výstup poslat **bez VIN a e-mailu**.
+
+**Co pak udělá Claude:**
+- napevno nastavit značku v konfiguraci (osobní VW),
+- doladit kartu VW (Auta/Wallbox i kalendář na iPadu) podle toho, co portál posílá,
+- dát krok do Plánovače úloh: Spuštění systému, root, příkaz
+  `/var/packages/Python3.9/target/usr/bin/python3.9 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1`.
+
+## Kalendář na iPadu — počasí + auta (doladit detaily)
+
+Vpravo nahoře počasí na půl výšky (co se nevejde, posouvá se), dole karty
+BMW 420d a VW Multivan vedle sebe (`#kalAuta`, `renderKalAuta`). Uživatel chce
+detaily doladit, až to uvidí.

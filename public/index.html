@@ -292,6 +292,19 @@
     background:linear-gradient(180deg,var(--poc-a,#3f8fe0),var(--poc-b,#8cc4f5));box-sizing:border-box;}
   .kal-pocasi::-webkit-scrollbar{display:none;}
   .kal-pocasi[hidden]{display:none;}
+  /* iPad: vpravo nahoře počasí na půl výšky, pod ním auta vedle sebe */
+  .kal-den-telo.s-pocasim{grid-template-rows:minmax(0,1fr) minmax(0,1fr);}
+  .kal-den-telo.s-pocasim > .kal-mrizka{grid-row:1 / 3;}
+  .kal-den-telo.s-pocasim > .kal-pocasi{grid-row:1;}
+  .kal-auta{grid-column:3;grid-row:2;margin:10px 0 0 10px;min-height:0;min-width:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .kal-auta[hidden]{display:none;}
+  .kal-auto{min-height:0;min-width:0;overflow:hidden;border-radius:18px;padding:10px;background:var(--card);box-sizing:border-box;
+    display:flex;flex-direction:column;box-shadow:0 1px 4px rgba(0,0,0,0.08);}
+  .kal-auto-foto{display:block;width:100%;flex:0 1 auto;min-height:0;aspect-ratio:900/580;object-fit:cover;border-radius:12px;}
+  .kal-auto-foto.vw-foto{aspect-ratio:900/507;}
+  .kal-auto-nazev{margin:8px 0 0;font-size:16px;font-weight:700;color:var(--navy);}
+  .kal-auto .bmw-blok{overflow:hidden;min-height:0;}
+  .kal-auto .bmw-blok.stare{opacity:0.6;}
   .poc-cekam{text-align:center;font-size:18px;padding:40px 0;}
   .page-tab-kal.wx{color:#2f80d1;}
   /* Telefon: počasí místo celého kalendáře (denní pohled je tu jinak schovaný) */
@@ -301,6 +314,7 @@
     .kal-panel.kal-wx .kal-den-lista, .kal-panel.kal-wx .kal-mrizka{display:none;}
     .kal-panel.kal-wx .kal-den-telo{display:block;}
     .kal-panel.kal-wx .kal-pocasi{margin-left:0;overflow:hidden;padding:14px 12px;}
+    .kal-auta{display:none !important;}
     .kal-wx .poc-teplota{font-size:58px;}
     .kal-wx .poc-male{gap:8px;}
     .kal-wx .poc-karta{padding:9px 10px 10px;}
@@ -3589,7 +3603,7 @@
           <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
           <div class="wb-auto-meta" id="wbAutoMeta"></div>
         </div>
-        <div class="bmw-meta" id="vwBezDat">Živá data z VW teď nejdou — VW v květnu 2026 zavřel rozhraní pro jiné aplikace. Termíny a údaje fungují.</div>
+        <div class="bmw-meta" id="vwBezDat"></div>
         <div class="auto-terminy" id="vwTerminy" data-karta-auta="vw"></div>
       </div>
 
@@ -4273,6 +4287,7 @@
     <div class="kal-den-telo" id="kalDenTelo">
       <div class="kal-mrizka" id="kalMrizka"></div>
       <div class="kal-pocasi" id="kalPocasi" hidden></div>
+      <div class="kal-auta" id="kalAuta" hidden></div>
     </div>
   </div>
   <div class="kal-dny" id="kalDny"></div>
@@ -11873,17 +11888,10 @@ const AUTO_NABIJENI_CZ = {
   conservation: 'udržuje baterii', error: 'chyba nabíjení', discharging: 'vybíjí se'
 };
 
-function renderAuto(d) {
-  if (d !== undefined) autoData = d;
-  if (!wbAutoEl) return;
-  const a = autoData;
-  wbAutoEl.hidden = !(a && a.kdy && a.stav);
-  const bezDat = document.getElementById('vwBezDat');
-  if (bezDat) bezDat.hidden = !wbAutoEl.hidden;
-  if (wbAutoEl.hidden) return;
+// Shrnutí VW pro kartu na Auta/Wallbox i pro kalendář na iPadu (null = data nejsou)
+function autoShrnuti(a) {
+  if (!(a && a.kdy && a.stav)) return null;
   const s = a.stav;
-  wbAutoEl.classList.toggle('stare', !a.zive);
-  document.getElementById('wbAutoSoc').textContent = typeof s.soc === 'number' ? `🚗 ${Math.round(s.soc)} %` : '🚗 –';
   const kusy = [];
   if (typeof s.dojezdKm === 'number') kusy.push(`dojezd ${Math.round(s.dojezdKm)} km`);
   if (s.nabijeni) {
@@ -11892,13 +11900,29 @@ function renderAuto(d) {
     if (s.nabiji && typeof s.vykonKw === 'number') n += ` (${s.vykonKw.toFixed(1).replace('.', ',')} kW)`;
     kusy.push(n);
   }
-  document.getElementById('wbAutoText').textContent = kusy.join(' · ');
   const meta = [];
   if (!a.zive) meta.push('most na NASu mlčí');
   if (s.chyba) meta.push(s.chyba);
   if (s.nabiji && s.hotovoV) meta.push(`nabito v ${fmtSolTime(Date.parse(s.hotovoV))}`);
   if (s.zmerenoV) meta.push(`změřeno ${fmtSolTime(Date.parse(s.zmerenoV))}`);
-  document.getElementById('wbAutoMeta').textContent = meta.join(' · ');
+  return { soc: typeof s.soc === 'number' ? `🚗 ${Math.round(s.soc)} %` : '🚗 –',
+    text: kusy.join(' · '), meta: meta.join(' · '), zive: !!a.zive };
+}
+const VW_BEZ_DAT = 'Živá data z VW teď nejdou — VW v květnu 2026 zavřel rozhraní pro jiné aplikace. Termíny a údaje fungují.';
+
+function renderAuto(d) {
+  if (d !== undefined) autoData = d;
+  renderKalAuta();
+  if (!wbAutoEl) return;
+  const sh = autoShrnuti(autoData);
+  wbAutoEl.hidden = !sh;
+  const bezDat = document.getElementById('vwBezDat');
+  if (bezDat) { bezDat.hidden = !!sh; bezDat.textContent = VW_BEZ_DAT; }
+  if (!sh) return;
+  wbAutoEl.classList.toggle('stare', !sh.zive);
+  document.getElementById('wbAutoSoc').textContent = sh.soc;
+  document.getElementById('wbAutoText').textContent = sh.text;
+  document.getElementById('wbAutoMeta').textContent = sh.meta;
 }
 
 // ---------- Nejsme doma ----------
@@ -14739,6 +14763,41 @@ function renderBmw(d) {
   obal.replaceChildren(bmwBlokEl());
   const inp = document.getElementById('bmwClientId');
   if (stare && inp) { inp.value = stare.value; if (mel) inp.focus(); }
+  renderKalAuta();
+}
+
+// Kalendář na iPadu: pod počasím karty BMW a VW vedle sebe — fotka, název a živá
+// data jako na Auta/Wallbox. Jen ke čtení: připojování a termíny zůstávají tam.
+function renderKalAuta() {
+  const obal = document.getElementById('kalAuta');
+  if (!obal) return;
+  const karta = (foto, tridaFoto, nazev) => {
+    const k = termEl('div', 'kal-auto');
+    const img = termEl('img', 'kal-auto-foto' + (tridaFoto ? ' ' + tridaFoto : ''));
+    img.src = foto; img.alt = nazev;
+    k.appendChild(img);
+    k.appendChild(termEl('div', 'kal-auto-nazev', nazev));
+    return k;
+  };
+  const bmw = karta('/bmw.jpg', '', 'BMW 420d');
+  if (bmwData && bmwData.pripojeno) {
+    const b = bmwBlokEl();
+    b.removeAttribute('id');
+    b.querySelectorAll('button, input, a, .bmw-form').forEach(x => x.remove());
+    bmw.appendChild(b);
+  } else bmw.appendChild(termEl('div', 'bmw-meta', 'BMW není připojené — připojíš ho na Auta/Wallbox.'));
+  const vw = karta('/vw.jpg', 'vw-foto', 'VW Multivan');
+  const sh = autoShrnuti(autoData);
+  if (sh) {
+    const b = termEl('div', 'bmw-blok' + (sh.zive ? '' : ' stare'));
+    const c = termEl('div', 'bmw-cisla');
+    c.appendChild(termEl('span', 'bmw-velke', sh.soc));
+    if (sh.text) c.appendChild(termEl('span', 'bmw-male', sh.text));
+    b.appendChild(c);
+    if (sh.meta) b.appendChild(termEl('div', 'bmw-meta', sh.meta));
+    vw.appendChild(b);
+  } else vw.appendChild(termEl('div', 'bmw-meta', VW_BEZ_DAT));
+  obal.replaceChildren(bmw, vw);
 }
 
 async function bmwVolej(cesta, telo) {
@@ -17024,6 +17083,8 @@ function renderKalDen() {
     if (pocasi && kalMamPocasi()) renderKalPocasi(pocasiAktualni());
     else if (pocasi) { kalPocasiEl.textContent = ''; const t = document.createElement('div'); t.className = 'poc-obsah poc-cekam'; t.textContent = 'Počasí se načítá…'; kalPocasiEl.appendChild(t); }
   }
+  const kalAutaEl = document.getElementById('kalAuta');
+  if (kalAutaEl) { kalAutaEl.hidden = !pocasi; if (pocasi) renderKalAuta(); }
   if (kalPrevBtn) kalPrevBtn.disabled = kalDenIndex <= 0;
   if (kalNextBtn) kalNextBtn.disabled = kalDenIndex >= dny.length - 2;
   kalMrizkaEl.textContent = '';
