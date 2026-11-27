@@ -208,7 +208,7 @@ setTimeout(async () => {
   R.push('\\n6e) Olej: Hotovo se zeptá na kilometry');
   const olej = { id: 'gs-olej', nazev: 'Olej', datum: den(5), opakovani: 12, pozn: '', posledni: 'Poslední olej', km: true };
   const stk = { id: 'gs-stk', nazev: 'STK', datum: den(3), opakovani: 0, pozn: '' };
-  terminyData = { predemDni: 14, karty: [{ id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [olej, stk, { ...olej, id: 'x-olej', datum: den(300) }] }] };
+  terminyData = { predemDni: 14, karty: [{ id: 'moto2', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [olej, stk, { ...olej, id: 'x-olej', datum: den(300) }] }] };
   renderTerminy();
   const hot = [...document.querySelectorAll('#termKarty .term-hotovo')];
   check('olej má Hotovo i daleko, STK Nové datum', hot.map(b => b.textContent).join(','), 'Nové datum,Hotovo,Hotovo');
@@ -302,14 +302,15 @@ setTimeout(async () => {
   terminyData = { predemDni: 14, karty: [
     { id: 'bmw4', nazev: 'BMW 4 Gran Coupé', ikona: '🚗', udaje: 'SPZ: 5SP', terminy: [{ id: 'b1', nazev: 'Pojištění', datum: den(5), opakovani: 0, pozn: '' }] },
     { id: 'vw', nazev: 'VW Multivan', ikona: '🚐', udaje: '', terminy: [{ id: 'v1', nazev: 'STK', datum: den(400), opakovani: 24, pozn: '' }] },
-    { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [] }] };
+    { id: 'gs', nazev: 'BMW R 1300 GS', ikona: '🏍️', udaje: '', terminy: [] }, { id: 'eso', nazev: 'Eso', ikona: '🐕', udaje: '', terminy: [] }] };
   renderTerminy();
-  check('v Termínech zůstane jen motorka', [...document.querySelectorAll('#termKarty > .card')].map(k => k.dataset.karta).join(), 'gs');
+  check('v Termínech zůstane jen Eso', [...document.querySelectorAll('#termKarty > .card')].map(k => k.dataset.karta).join(), 'eso');
   check('  ani v blízkých auta nejsou', /Pojištění/.test(document.getElementById('termBlizke').textContent), false);
   const bt = document.getElementById('bmwTerminy'), vt = document.getElementById('vwTerminy');
   check('BMW a VW mají termíny ve své kartě na Wallboxu', !!bt.closest('.slide[data-title="Wallbox"]') + ' ' + bt.querySelectorAll('.term-radek').length + ' ' + vt.querySelectorAll('.term-radek').length, 'true 1 1');
   check('  nadpis „Termíny a údaje“, údaje vidět', bt.querySelector('.graph-title').textContent + ' | ' + /5SP/.test(bt.textContent), 'Termíny a údaje | true');
   check('  VW má fotku', document.querySelector('#vwKarta img').getAttribute('src'), '/vw.jpg');
+  check('  motorka má kartu s fotkou a termíny', document.querySelector('#gsKarta img').getAttribute('src') + ' ' + document.getElementById('gsTerminy').querySelector('.graph-title').textContent, '/gs.jpg Termíny a údaje');
   bt.querySelector('.term-upravit').click();
   check('úprava se otevře přímo v kartě auta', !!bt.querySelector('.term-form') + ' ' + !!document.querySelector('#termKarty .term-form'), 'true false');
   bt.querySelector('.zrusit').click();
