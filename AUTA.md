@@ -24,28 +24,96 @@ Stránka **Auta/Wallbox** má kartu pro každé vozidlo: fotku, živá data (kde
   - Když akce ve Zkratkách nejsou, ovládání z SMGhome udělat nejde (bez obcházení zabezpečení
     výrobce, což tu neděláme).
 
-## VW Multivan — jak zkusit živá data
+## VW Multivan — jak zkusit živá data (podrobně)
 
 Most `public/nas/auto-most.py` běží na NASu a čte data přes knihovnu CarConnectivity
-(neoficiální přístup do cloudu VW). VW ho 27.–28. 5. 2026 zablokoval; komunita ho částečně
-obešla. Postup, jestli to u nás pojede:
+(neoficiální přístup do cloudu VW, oficiální pro majitele VW nemá). VW ho 27.–28. 5. 2026
+zablokoval; komunita ho částečně obešla. Proto nejdřív zkouška, jestli to u nás pojede.
 
-1. **SSH na NAS jako root** a aktualizovat knihovnu:
+**Proč NAS a ne server na Renderu:** knihovna je v Pythonu (server je v Node), heslo k VW ID
+by muselo být na Renderu a cloud VW servery z datacenter blokuje častěji než domácí připojení.
+Kdyby na NASu jelo spolehlivě, dá se přesun zvážit.
+
+Heslo k VW ID nikam nepiš — jen do souboru na NASu (krok 6). Do chatu ani do repozitáře ne.
+
+### 1. Zapnout SSH na NASu (jednou)
+DSM v prohlížeči → **Ovládací panely → Terminál a SNMP** → zaškrtni **Povolit službu SSH**
+(port 22) → **Použít**.
+
+### 2. Připojit se z Macu
+1. Otevři appku **Terminál** (Spotlight ⌘+mezerník → „Terminál“).
+2. Napiš (UZIVATEL = tvůj účet v DSM, IP_NASU = adresa NASu v síti, např. 192.168.1.x —
+   najdeš ji v DSM → Ovládací panely → Síť):
    ```
-   python3 -m pip install --upgrade carconnectivity carconnectivity-connector-volkswagen
-   curl -o /volume1/family/scripts/auto/auto-most.py https://solax-pretok.onrender.com/nas/auto-most.py
+   ssh UZIVATEL@IP_NASU
    ```
-2. **Konfigurace** `auto.config.json` vedle skriptu (heslo k VW ID jen sem, ne do chatu):
-   ```
-   {"appka": "https://solax-pretok.onrender.com",
-    "vw": {"username": "…", "password": "…"}}
-   ```
-3. **Zkouška:** `python3 /volume1/family/scripts/auto/auto-most.py --vypis`
-   - Vypíše procenta, dojezd, nabíjení → funguje. Pak spouštět bez `--vypis` v Plánovači úloh
-     (Spuštění systému). Karta VW se sama naplní do 10 minut.
-   - Chyba přihlášení / 401 / 403 → VW přístup zavřel. Výstup (bez hesla) pošli Claudovi;
-     zkusí, jestli novější verze knihovny nepomůže.
-4. **Když to nepůjde:**
+3. Napoprvé se zeptá *Are you sure you want to continue connecting?* → napiš `yes` a Enter.
+4. Zadej heslo k DSM. **Při psaní se nic nezobrazuje, ani hvězdičky** — to je správně. Enter.
+5. Přepni se na správce: `sudo -i` a znovu heslo k DSM. Řádek teď končí `#`.
+
+### 3. Python a pip
+```
+python3 --version
+python3 -m pip --version
+```
+- Když `pip` chybí: `python3 -m ensurepip --upgrade`.
+- Knihovna potřebuje Python 3.9 nebo novější. Když je verze starší (DSM má někdy 3.8),
+  nainstaluj v DSM **Centrum balíčků → Python 3.11** (nebo nejnovější nabízený) a dál místo
+  `python3` piš celou cestu, kterou vypíše `ls /var/packages/*ython3*/target/usr/bin/python3*`.
+
+### 4. Složka a knihovna
+```
+mkdir -p /volume1/family/scripts/auto
+cd /volume1/family/scripts/auto
+python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade carconnectivity carconnectivity-connector-volkswagen
+```
+Trvá to pár minut. Červené *WARNING* nevadí, *ERROR* na konci ano — pak výstup pošli Claudovi.
+
+### 5. Stáhnout most
+```
+curl -o auto-most.py https://solax-pretok.onrender.com/nas/auto-most.py
+```
+(Render po nečinnosti usíná — když to napoprvé selže, zkus za minutu znovu.)
+
+### 6. Konfigurace s heslem
+```
+vi auto.config.json
+```
+V editoru `vi`: stiskni **i** (psaní), vlož text níže a doplň svůj e-mail a heslo k VW ID
+(ten účet, kterým se přihlašuješ do appky Volkswagen), pak **Esc**, napiš **:wq** a Enter.
+```
+{"appka": "https://solax-pretok.onrender.com",
+ "vw": {"username": "tvuj e-mail k VW ID", "password": "heslo k VW ID"}}
+```
+Pak soubor zamkni jen pro správce: `chmod 600 auto.config.json`
+
+### 7. Zkouška
+```
+python3 auto-most.py --vypis
+```
+- **Vypíše procenta baterie, dojezd a stav nabíjení** → funguje, pokračuj krokem 8.
+- **Chyba přihlášení, 401, 403, „login failed“** → VW přístup zavřel. Výstup zkopíruj a pošli
+  Claudovi, **ale nejdřív z něj smaž VIN a e-mail** (heslo se nevypisuje).
+- **„Chybí knihovna“** → zopakuj krok 4.
+
+### 8. Spouštět trvale
+DSM → **Ovládací panely → Plánovač úloh → Vytvořit → Spuštěná úloha → Uživatelem definovaný
+skript**:
+- Obecné: název „VW most“, **Uživatel: root**, Událost: **Spuštění systému**.
+- Nastavení úlohy → Spustit příkaz:
+  ```
+  python3 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1
+  ```
+- **OK**, pak úlohu označ a dej **Spustit** (ať nečeká na restart NASu).
+
+Do 10 minut se karta VW na Auta/Wallbox naplní (procenta, dojezd, nabíjení). Když ne:
+`tail -n 30 /volume1/family/scripts/auto/auto-most.log` a výstup (bez VIN a e-mailu) Claudovi.
+
+### 9. Odhlásit se z NASu
+`exit` (ze správce) a ještě jednou `exit`. SSH můžeš v DSM zase vypnout, most běží dál.
+
+### Když to nepůjde vůbec
    - *Oficiální partneři VW* (Tronity, Enode, …) — placené, hlavně stav nabíjení. Pro domácí
      kartu se to nevyplatí.
    - *EU Data Act* (od 9/2026 musí výrobce dát majiteli data z auta) — VW zatím nemá rozhraní
