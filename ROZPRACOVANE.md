@@ -34,8 +34,17 @@ Zkratky a zpátky do appky se to samo nevrátí.
 světla, servis a olej (km i datum) a čas měření. Nádrž ani dojezd zatím ne — až je
 pošle, most je pošle taky (`drives`), nic dalšího se dělat nemusí.
 
-**Zbývá uživateli:** stáhnout novou verzi mostu (`curl -o auto-most.py …/nas/auto-most.py`)
-a nastavit Plánovač úloh (AUTA.md, krok 8 — s celou cestou k Pythonu 3.9).
+**Zbývá uživateli (připomenout):** nová verze mostu je stažená? (13 479 B) a hlavně
+**Plánovač úloh** — DSM → Plánovač úloh → Vytvořit → Spuštěná úloha → Uživatelem
+definovaný skript; „VW most", root, Spuštění systému, příkaz
+`/var/packages/Python3.9/target/usr/bin/python3.9 /volume1/family/scripts/auto/auto-most.py >> /volume1/family/scripts/auto/auto-most.log 2>&1`,
+pak úlohu označit a **Spustit**. Karta VW se naplní do 15 minut.
+
+## Motorka BMW R 1300 GS — zjistit, jestli je v BMW CarData
+
+Uživatel ověří na webu BMW (stejně jako u auta: BMW CarData), jestli je tam mezi vozidly
+i motorka. Když ano, server (`bmwDotaz`, mapování vozidel) se rozšíří na víc vozidel
+a motorka dostane živá data jako BMW. Když ne, zůstávají jen termíny a údaje.
 
 ## Kalendář na iPadu — počasí + auta (doladit detaily)
 
