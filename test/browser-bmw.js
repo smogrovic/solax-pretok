@@ -45,12 +45,21 @@ setTimeout(async () => {
     dojezdKm: 612, palivoPct: 68, palivoL: 40, km: 98412, zamek: 'zamčeno', otevreno: [], servisKm: 8400,
     servis: [{ typ: 'OIL', stav: 'OK', datum: '2027-08-01', km: null }], pneu: { lp: 2.5, pp: 2.5, lz: 2.7, pz: null }, kdy: Date.now() } });
   const t = blok().textContent;
-  check('dojezd, nádrž, km', [/⛽ 612 km/.test(t), /nádrž 68 % · 40 l/.test(t), /najeto 98\\s412 km/.test(t)].join(' '), 'true true true');
-  check('zámek', blok().querySelector('.bmw-radek').textContent + ' ' + blok().querySelector('.bmw-radek').classList.contains('pozor'), '🔒 zamčeno · vše zavřené false');
-  check('servis a pneu', [/servis za 8\\s400 km · oil do 1. 8. 2027/.test(t), /vpředu 2,5 \\/ 2,5 · vzadu 2,7 \\/ – bar/.test(t)].join(' '), 'true true');
-  check('model, živě a tlačítko Odpojit', /420d Gran Coupé · auto hlásilo .* · živě/.test(t) + ' ' + /Odpojit/.test(t), 'true true');
+  const dl = () => [...blok().querySelectorAll('.auto-dl')].map(x => x.textContent.replace(/\\u00a0/g, ' ')).join(' | ');
+  const rad = () => [...blok().querySelectorAll('.auto-radek')].map(x => x.textContent.replace(/\\u00a0/g, ' '));
+  check('dlaždice: dojezd, nádrž, km', dl(), 'Dojezd612 km | Nádrž68 %40 l | Najeto98 412 km');
+  check('  vedle sebe, stejně široké', (() => { const r = [...blok().querySelectorAll('.auto-dl')].map(x => x.getBoundingClientRect());
+    return Math.abs(r[0].top - r[2].top) < 2 && Math.abs(r[0].width - r[2].width) < 2; })(), true);
+  check('zámek', rad()[0] + ' ' + blok().querySelector('.auto-radek').classList.contains('pozor'), 'Zámek🔒 zamčeno · vše zavřené false');
+  check('servis česky, každá položka zvlášť', rad()[1], 'ServisServis za 8 400 km\\nOlej do 1. 8. 2027');
+  check('pneu', rad()[2], 'Pneuvpředu 2,5 / 2,5 · vzadu 2,7 / – bar');
+  const popisy = [...blok().querySelectorAll('.auto-radek-hodnota')].map(x => Math.round(x.getBoundingClientRect().left));
+  check('  hodnoty zarovnané pod sebou', new Set(popisy).size, 1);
+  check('živě a tlačítko Odpojit v patičce', /auto hlásilo .* · živě/.test(blok().querySelector('.auto-meta').textContent) + ' ' + blok().querySelector('.auto-pata button').textContent, 'true Odpojit');
+  renderBmw({ ...bmwData, stav: { ...bmwData.stav, servis: [{ typ: 'OIL', km: 8400 }, { typ: 'BRAKE_FLUID', datum: '2028-01-01' }] } });
+  check('stejné km u oleje → obecný servis se neopakuje', rad()[1], 'ServisOlej za 8 400 km\\nBrzdová kapalina do 1. 1. 2028');
   renderBmw({ ...bmwData, stav: { ...bmwData.stav, zamek: 'odemčeno', otevreno: ['okno řidič'] } });
-  check('odemčené a otevřené okno červeně', blok().querySelector('.bmw-radek').textContent + ' ' + blok().querySelector('.bmw-radek').classList.contains('pozor'), '🔓 odemčeno · otevřené: okno řidič true');
+  check('odemčené a otevřené okno červeně', rad()[0] + ' ' + blok().querySelector('.auto-radek').classList.contains('pozor'), 'Zámek🔓 odemčeno · otevřené: okno řidič true');
   renderBmw({ pripojeno: true, stream: false, stav: null, chyba: 'přihlášení k BMW vypršelo — připoj auto znovu.' });
   check('bez dat a s chybou', /čekám na první data/.test(blok().textContent) + ' ' + /stream odpojený/.test(blok().textContent) + ' ' + /vypršelo/.test(blok().textContent), 'true true true');
   check('nic nepřetéká', blok().scrollWidth <= blok().clientWidth + 1, true);

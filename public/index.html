@@ -1159,7 +1159,7 @@
   /* Živá data auta (BMW CarData) v kartě termínů */
   .bmw-karta{align-items:stretch;}
   .bmw-foto{display:block;width:100%;height:auto;aspect-ratio:900/507;object-fit:cover;border-radius:14px;}
-  .bmw-titulek{margin:10px 0 0;text-align:left;}
+  .bmw-titulek{margin:12px 0 0;text-align:left;font-size:17px;}
   .vw-foto{aspect-ratio:900/507;}
   .auto-terminy{margin-top:10px;}
   .auto-terminy:empty{display:none;}
@@ -1172,6 +1172,25 @@
   .bmw-radek{font-size:13px;color:var(--navy);margin-top:6px;overflow-wrap:anywhere;}
   .bmw-radek.pozor{color:var(--red);font-weight:600;}
   .bmw-meta{font-size:12px;color:var(--grey-text);margin-top:6px;}
+  /* Data auta (BMW i VW stejně): dlaždice s čísly, pod nimi tabulka popisek → hodnota */
+  .bmw-blok:has(> .auto-panel){background:none;padding:0;}
+  .auto-panel{margin:8px 0 4px;}
+  .auto-dlazdice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .auto-dlazdice.n1{grid-template-columns:minmax(0,1fr);}
+  .auto-dlazdice.n2, .auto-dlazdice.n4{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .auto-dl{background:var(--bg);border-radius:12px;padding:8px 6px 9px;text-align:center;min-width:0;}
+  .auto-dl-popis{font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--grey-text);}
+  .auto-dl-hodnota{font-size:20px;font-weight:700;color:var(--navy);line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .auto-dl-pozn{font-size:11px;color:var(--grey-text);margin-top:1px;}
+  .auto-radky{margin-top:8px;border-radius:12px;background:var(--bg);padding:2px 12px;}
+  .auto-radek{display:grid;grid-template-columns:80px minmax(0,1fr);gap:10px;padding:7px 0;font-size:13px;line-height:1.35;color:var(--navy);}
+  .auto-radek + .auto-radek{border-top:1px solid rgba(44,62,80,0.08);}
+  .auto-radek-popis{color:var(--grey-text);}
+  .auto-radek-hodnota{white-space:pre-line;overflow-wrap:anywhere;}
+  .auto-radek.pozor .auto-radek-hodnota{color:var(--red);font-weight:600;}
+  .auto-pata{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px;min-height:28px;}
+  .auto-meta{font-size:12px;color:var(--grey-text);}
+  .auto-pata .bmw-tl{flex:none;padding:4px 12px;font-size:12px;}
   .bmw-kod{font-size:24px;font-weight:700;letter-spacing:2px;color:var(--navy);margin:6px 0;}
   .bmw-form{display:flex;gap:8px;margin-top:8px;}
   .bmw-form input{flex:1;min-width:0;font-size:14px;padding:8px 10px;border-radius:10px;border:1px solid rgba(44,62,80,.2);}
@@ -2355,12 +2374,7 @@
     font-size:11px;
     color:var(--grey-text);
   }
-  .wb-auto{width:100%;margin-top:12px;padding:10px 12px;border-radius:14px;background:rgba(44,62,80,0.05);box-sizing:border-box;}
-  .wb-auto[hidden]{display:none;}
-  .wb-auto-hlavni{display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--grey-text);}
-  .wb-auto-soc{font-size:22px;font-weight:700;color:var(--navy);}
-  .wb-auto-meta{font-size:11px;color:var(--grey-text);margin-top:2px;}
-  .wb-auto.stare .wb-auto-soc{color:var(--grey-text);}
+  #wbAuto.stare .auto-dl-hodnota{color:var(--grey-text);}
   .wb-stats{
     display:flex;
     width:100%;
@@ -3607,8 +3621,8 @@
 
       <!-- BMW: stav auta z BMW CarData (server drží přihlášení a stream) -->
       <div class="card bmw-karta" id="bmwKarta">
-        <img class="bmw-foto" src="/bmw.jpg" alt="BMW 4 Gran Coupé" loading="lazy">
-        <div class="graph-title bmw-titulek">BMW 4 Gran Coupé</div>
+        <img class="bmw-foto" src="/bmw.jpg" alt="BMW 420d Gran Coupé" loading="lazy">
+        <div class="graph-title bmw-titulek">BMW 420d Gran Coupé</div>
         <div id="bmwObsah"></div>
         <!-- Termíny a údaje auta (STK, známka, pojištění, olej) — data jsou z Termínů -->
         <div class="auto-terminy" id="bmwTerminy" data-karta-auta="bmw4"></div>
@@ -3618,11 +3632,7 @@
       <div class="card bmw-karta" id="vwKarta">
         <img class="bmw-foto vw-foto" src="/vw.jpg" alt="VW Multivan" loading="lazy">
         <div class="graph-title bmw-titulek">VW Multivan</div>
-        <div class="wb-auto" id="wbAuto" hidden>
-          <div class="wb-auto-hlavni"><span class="wb-auto-soc" id="wbAutoSoc">–</span><span id="wbAutoText"></span></div>
-          <div id="wbAutoRadky"></div>
-          <div class="wb-auto-meta" id="wbAutoMeta"></div>
-        </div>
+        <div id="wbAuto" hidden></div>
         <div class="bmw-meta" id="vwBezDat"></div>
         <div class="auto-terminy" id="vwTerminy" data-karta-auta="vw"></div>
       </div>
@@ -11908,50 +11918,46 @@ const AUTO_NABIJENI_CZ = {
   conservation: 'udržuje baterii', error: 'chyba nabíjení', discharging: 'vybíjí se'
 };
 
-// Shrnutí VW pro kartu na Auta/Wallbox i pro kalendář na iPadu (null = data nejsou)
+// Shrnutí VW pro kartu na Auta/Wallbox (null = data nejsou): dlaždice s čísly
+// a řádky popisek → hodnota, stejně jako u BMW
 function autoShrnuti(a) {
   if (!(a && a.kdy && a.stav)) return null;
   const s = a.stav;
   const c = n => Math.round(n).toLocaleString('cs-CZ');
   const je = n => typeof n === 'number';
-  // Velké číslo: baterie, jinak nádrž, jinak dojezd, jinak kilometry
-  // Plug-in hybrid (Multivan): baterie i nádrž vedle sebe
-  const hlavni = je(s.soc) && je(s.palivoPct) ? `🔋 ${Math.round(s.soc)} % · ⛽ ${Math.round(s.palivoPct)} %`
-    : je(s.soc) ? `🚗 ${Math.round(s.soc)} %` : je(s.palivoPct) ? `⛽ ${Math.round(s.palivoPct)} %`
-    : je(s.dojezdKm) ? `⛽ ${c(s.dojezdKm)} km` : je(s.km) ? `${c(s.km)} km` : '🚗 –';
-  const kusy = [];
-  if (je(s.dojezdKm) && (je(s.soc) || je(s.palivoPct))) {
-    kusy.push(`dojezd ${c(s.dojezdKm)} km` + (je(s.elDojezdKm) ? ` (${c(s.elDojezdKm)} km na elektřinu)` : ''));
-  }
-  if (je(s.km) && (je(s.soc) || je(s.palivoPct) || je(s.dojezdKm))) kusy.push(`najeto ${c(s.km)} km`);
-  else if (je(s.km)) kusy.push('najeto');
-  // Řádky pod tím jako u BMW: zámek, ruční brzda, servis a olej
+  const dlazdice = [];
+  if (je(s.soc)) dlazdice.push({ popis: 'Baterie', hodnota: `${Math.round(s.soc)} %`, pozn: je(s.elDojezdKm) ? `${c(s.elDojezdKm)} km na elektřinu` : '' });
+  if (je(s.palivoPct)) dlazdice.push({ popis: 'Nádrž', hodnota: `${Math.round(s.palivoPct)} %` });
+  if (je(s.dojezdKm)) dlazdice.push({ popis: 'Dojezd', hodnota: `${c(s.dojezdKm)} km` });
+  if (je(s.km)) dlazdice.push({ popis: 'Najeto', hodnota: `${c(s.km)} km` });
   const radky = [];
   if (s.zamek || typeof s.rucniBrzda === 'boolean') {
-    radky.push({ pozor: s.zamek === 'odemčeno', text: [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 odemčeno') : null,
+    radky.push({ popis: 'Zámek', pozor: s.zamek === 'odemčeno', hodnota: [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 odemčeno') : null,
       s.rucniBrzda === true ? 'ruční brzda zatažená' : s.rucniBrzda === false ? 'ruční brzda povolená' : null].filter(Boolean).join(' · ') });
   }
-  if (s.zapojeno === true && !s.nabiji) radky.push({ text: '🔌 kabel zapojený, nenabíjí' });
+  if (s.nabijeni || s.zapojeno === true) {
+    let n = s.nabijeni ? (AUTO_NABIJENI_CZ[s.nabijeni] || s.nabijeni) : '';
+    if (s.nabiji && je(s.cilSoc)) n += ` do ${Math.round(s.cilSoc)} %`;
+    if (s.nabiji && je(s.vykonKw)) n += ` (${s.vykonKw.toFixed(1).replace('.', ',')} kW)`;
+    if (s.nabiji && s.hotovoV) n += `, hotovo v ${fmtSolTime(Date.parse(s.hotovoV))}`;
+    if (s.zapojeno === true && !s.nabiji) n = (n ? n + ' · ' : '') + '🔌 kabel zapojený';
+    radky.push({ popis: 'Nabíjení', hodnota: n });
+  }
   const termin = (km, datum) => [je(km) ? `za ${c(km)} km` : null,
     datum ? `do ${new Date(datum).toLocaleDateString('cs-CZ')}` : null].filter(Boolean).join(' nebo ');
   const servis = termin(s.servisKm, s.servisDatum), olej = termin(s.olejKm, s.olejDatum);
-  if (servis && servis === olej) radky.push({ text: `🔧 servis a olej ${servis}` });
+  const sv = [];
+  if (servis && servis === olej) sv.push(`Prohlídka a olej ${servis}`);
   else {
-    if (servis) radky.push({ text: `🔧 servis ${servis}` });
-    if (olej) radky.push({ text: `🛢️ olej ${olej}` });
+    if (servis) sv.push(`Prohlídka ${servis}`);
+    if (olej) sv.push(`Olej ${olej}`);
   }
-  if (s.nabijeni) {
-    let n = AUTO_NABIJENI_CZ[s.nabijeni] || s.nabijeni;
-    if (s.nabiji && typeof s.cilSoc === 'number') n += ` do ${Math.round(s.cilSoc)} %`;
-    if (s.nabiji && typeof s.vykonKw === 'number') n += ` (${s.vykonKw.toFixed(1).replace('.', ',')} kW)`;
-    kusy.push(n);
-  }
+  if (sv.length) radky.push({ popis: 'Servis', hodnota: sv.join('\n') });
+  if (s.chyba) radky.push({ popis: 'Pozor', pozor: true, hodnota: s.chyba });
   const meta = [];
+  if (s.zmerenoV) meta.push(`auto hlásilo ${fmtSolTime(Date.parse(s.zmerenoV))}`);
   if (!a.zive) meta.push('most na NASu mlčí');
-  if (s.chyba) meta.push(s.chyba);
-  if (s.nabiji && s.hotovoV) meta.push(`nabito v ${fmtSolTime(Date.parse(s.hotovoV))}`);
-  if (s.zmerenoV) meta.push(`změřeno ${fmtSolTime(Date.parse(s.zmerenoV))}`);
-  return { soc: hlavni, text: kusy.join(' · '), radky, meta: meta.join(' · '), zive: !!a.zive };
+  return { dlazdice, radky, meta: meta.join(' · '), zive: !!a.zive };
 }
 const VW_BEZ_DAT = 'Živá data z VW zatím nepřišla — posílá je most na NASu z portálu VW (asi po 15 min).';
 
@@ -11965,10 +11971,7 @@ function renderAuto(d) {
   if (bezDat) { bezDat.hidden = !!sh; bezDat.textContent = VW_BEZ_DAT; }
   if (!sh) return;
   wbAutoEl.classList.toggle('stare', !sh.zive);
-  document.getElementById('wbAutoSoc').textContent = sh.soc;
-  document.getElementById('wbAutoText').textContent = sh.text;
-  document.getElementById('wbAutoRadky').replaceChildren(...sh.radky.map(r => termEl('div', 'bmw-radek' + (r.pozor ? ' pozor' : ''), r.text)));
-  document.getElementById('wbAutoMeta').textContent = sh.meta;
+  wbAutoEl.replaceChildren(autoPanelEl(sh.dlazdice, sh.radky, sh.meta));
 }
 
 // ---------- Nejsme doma ----------
@@ -14752,49 +14755,88 @@ function bmwBlokEl() {
     b.appendChild(f);
   } else {
     const s = d.stav;
-    if (!s) b.appendChild(termEl('div', 'bmw-male', 'Připojeno — čekám na první data z auta.'));
-    else {
-      const cisla = termEl('div', 'bmw-cisla');
-      if (typeof s.dojezdKm === 'number') cisla.appendChild(termEl('span', 'bmw-velke', `⛽ ${bmwCislo(s.dojezdKm)} km`));
-      const pal = [];
-      if (typeof s.palivoPct === 'number') pal.push(`${Math.round(s.palivoPct)} %`);
-      if (typeof s.palivoL === 'number') pal.push(`${bmwCislo(s.palivoL)} l`);
-      if (pal.length) cisla.appendChild(termEl('span', 'bmw-male', 'nádrž ' + pal.join(' · ')));
-      if (typeof s.km === 'number') cisla.appendChild(termEl('span', 'bmw-male', `najeto ${bmwCislo(s.km)} km`));
-      b.appendChild(cisla);
-      if (s.zamek || (s.otevreno && s.otevreno.length)) {
-        const pozor = s.zamek === 'odemčeno' || (s.otevreno && s.otevreno.length);
-        const t = [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 ' + s.zamek) : null,
-          s.otevreno && s.otevreno.length ? 'otevřené: ' + s.otevreno.join(', ') : 'vše zavřené'].filter(Boolean).join(' · ');
-        b.appendChild(termEl('div', 'bmw-radek' + (pozor ? ' pozor' : ''), t));
-      }
-      const servis = [];
-      if (typeof s.servisKm === 'number') servis.push(`servis za ${bmwCislo(s.servisKm)} km`);
-      for (const x of (s.servis || []).slice(0, 4)) {
-        const kdy = x.datum ? 'do ' + termDatumCz(x.datum) : (typeof x.km === 'number' ? `za ${bmwCislo(x.km)} km` : '');
-        if (x.typ) servis.push(`${x.typ.toLowerCase().replace(/_/g, ' ')}${kdy ? ' ' + kdy : ''}`);
-      }
-      if (servis.length) b.appendChild(termEl('div', 'bmw-radek', '🔧 ' + servis.join(' · ')));
-      if (s.pneu) {
-        const p = v => (typeof v === 'number' ? bmwCislo(v, 1) : '–');
-        b.appendChild(termEl('div', 'bmw-radek', `🛞 vpředu ${p(s.pneu.lp)} / ${p(s.pneu.pp)} · vzadu ${p(s.pneu.lz)} / ${p(s.pneu.pz)} bar`));
-      }
-    }
     const meta = [];
-    if (d.model) meta.push(d.model);
     if (d.stav && d.stav.kdy) meta.push('auto hlásilo ' + fmtSolTime(d.stav.kdy));
     meta.push(d.stream ? 'živě' : 'stream odpojený');
-    b.appendChild(termEl('div', 'bmw-meta', meta.join(' · ')));
-  }
-  if (d && d.chyba) b.appendChild(termEl('div', 'bmw-radek pozor', d.chyba));
-  if (bmwHlaska) b.appendChild(termEl('div', 'bmw-meta', bmwHlaska));
-  if (d && d.pripojeno) {
+    if (!s) b.appendChild(termEl('div', 'bmw-male', 'Připojeno — čekám na první data z auta.'));
     const odp = tl('Odpojit', false, async () => {
       if (!(await zeptejSe('Odpojit BMW?', 'Appka zapomene přihlášení i poslední data. Připojit jde zase kdykoli.'))) return;
       bmwVolej('/api/bmw/odpojit', {});
     });
-    odp.style.marginTop = '8px';
-    b.appendChild(odp);
+    b.appendChild(autoPanelEl(s ? bmwDlazdice(s) : [], s ? bmwRadky(s) : [], meta.join(' · '), odp));
+  }
+  if (d && d.chyba) b.appendChild(termEl('div', 'bmw-radek pozor', d.chyba));
+  if (bmwHlaska) b.appendChild(termEl('div', 'bmw-meta', bmwHlaska));
+  return b;
+}
+
+// BMW: velká čísla nahoře a řádky pod nimi (stejné rozložení jako VW)
+function bmwDlazdice(s) {
+  const d = [];
+  if (typeof s.dojezdKm === 'number') d.push({ popis: 'Dojezd', hodnota: `${bmwCislo(s.dojezdKm)} km` });
+  if (typeof s.palivoPct === 'number') d.push({ popis: 'Nádrž', hodnota: `${Math.round(s.palivoPct)} %`, pozn: typeof s.palivoL === 'number' ? `${bmwCislo(s.palivoL)} l` : '' });
+  else if (typeof s.palivoL === 'number') d.push({ popis: 'Nádrž', hodnota: `${bmwCislo(s.palivoL)} l` });
+  if (typeof s.km === 'number') d.push({ popis: 'Najeto', hodnota: `${bmwCislo(s.km)} km` });
+  return d;
+}
+// Servisní položky BMW česky (CarData posílá anglické kódy)
+const BMW_SERVIS_CZ = { OIL: 'Olej', VEHICLE_CHECK: 'Prohlídka', BRAKE_FLUID: 'Brzdová kapalina', VEHICLE_TUV: 'STK',
+  TUV: 'STK', EMISSION_CHECK: 'Emise', BRAKE_PADS_FRONT: 'Brzdy vpředu', BRAKE_PADS_REAR: 'Brzdy vzadu',
+  MICRO_FILTER: 'Pylový filtr', AIR_FILTER: 'Vzduchový filtr', SPARK_PLUGS: 'Svíčky', COOLANT: 'Chladicí kapalina' };
+function bmwRadky(s) {
+  const r = [];
+  if (s.zamek || (s.otevreno && s.otevreno.length)) {
+    r.push({ popis: 'Zámek', pozor: s.zamek === 'odemčeno' || !!(s.otevreno && s.otevreno.length),
+      hodnota: [s.zamek ? (s.zamek === 'zamčeno' ? '🔒 zamčeno' : '🔓 ' + s.zamek) : null,
+        s.otevreno && s.otevreno.length ? 'otevřené: ' + s.otevreno.join(', ') : 'vše zavřené'].filter(Boolean).join(' · ') });
+  }
+  const servis = [];
+  // Obecný servis jen když ho žádná položka neříká (olej bývá na stejných km)
+  if (typeof s.servisKm === 'number' && !(s.servis || []).some(x => x.km === s.servisKm)) servis.push(`Servis za ${bmwCislo(s.servisKm)} km`);
+  for (const x of (s.servis || []).slice(0, 5)) {
+    if (!x.typ) continue;
+    const nazev = BMW_SERVIS_CZ[x.typ] || (x.typ.charAt(0) + x.typ.slice(1).toLowerCase().replace(/_/g, ' '));
+    const kdy = [typeof x.km === 'number' ? `za ${bmwCislo(x.km)} km` : null, x.datum ? 'do ' + termDatumCz(x.datum) : null].filter(Boolean).join(' nebo ');
+    servis.push(`${nazev}${kdy ? ' ' + kdy : ''}`);
+  }
+  if (servis.length) r.push({ popis: 'Servis', hodnota: servis.join('\n') });
+  if (s.pneu) {
+    const p = v => (typeof v === 'number' ? bmwCislo(v, 1) : '–');
+    r.push({ popis: 'Pneu', hodnota: `vpředu ${p(s.pneu.lp)} / ${p(s.pneu.pp)} · vzadu ${p(s.pneu.lz)} / ${p(s.pneu.pz)} bar` });
+  }
+  return r;
+}
+
+// Společné rozložení dat auta (BMW i VW): dlaždice s čísly, tabulka popisek → hodnota,
+// patička s časem a případně tlačítkem
+function autoPanelEl(dlazdice, radky, meta, tlacitko) {
+  const b = termEl('div', 'auto-panel');
+  if (dlazdice.length) {
+    const g = termEl('div', 'auto-dlazdice n' + Math.min(dlazdice.length, 4));
+    for (const x of dlazdice) {
+      const t = termEl('div', 'auto-dl');
+      t.appendChild(termEl('div', 'auto-dl-popis', x.popis));
+      t.appendChild(termEl('div', 'auto-dl-hodnota', x.hodnota));
+      if (x.pozn) t.appendChild(termEl('div', 'auto-dl-pozn', x.pozn));
+      g.appendChild(t);
+    }
+    b.appendChild(g);
+  }
+  if (radky.length) {
+    const l = termEl('div', 'auto-radky');
+    for (const x of radky) {
+      const r = termEl('div', 'auto-radek' + (x.pozor ? ' pozor' : ''));
+      r.appendChild(termEl('span', 'auto-radek-popis', x.popis));
+      r.appendChild(termEl('span', 'auto-radek-hodnota', x.hodnota));
+      l.appendChild(r);
+    }
+    b.appendChild(l);
+  }
+  if (meta || tlacitko) {
+    const p = termEl('div', 'auto-pata');
+    p.appendChild(termEl('span', 'auto-meta', meta || ''));
+    if (tlacitko) p.appendChild(tlacitko);
+    b.appendChild(p);
   }
   return b;
 }
