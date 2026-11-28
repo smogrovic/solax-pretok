@@ -158,6 +158,8 @@ def stav_auta(auto):
         'soc': _cislo(_hodnota(pohon, 'level')),
         'dojezdKm': dojezd,
         'palivoPct': _cislo(_hodnota(nadrz, 'level')),
+        # U plug-in hybridu zvlášť dojezd na elektřinu (celkový je v dojezdKm)
+        'elDojezdKm': _cislo(_hodnota(pohon, 'range')) if nadrz is not None else None,
         'km': _cislo(_hodnota(auto, 'odometer')),
         'zamek': ZAMEK_CZ.get((zamek or '').lower()) if zamek else None,
         'rucniBrzda': brzda if isinstance(brzda, bool) else None,

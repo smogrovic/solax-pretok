@@ -13038,6 +13038,7 @@ function autoOcisti(t) {
     soc: cislo(t.soc, 0, 100),
     dojezdKm: cislo(t.dojezdKm, 0, 2000),
     palivoPct: cislo(t.palivoPct, 0, 100),
+    elDojezdKm: cislo(t.elDojezdKm, 0, 1000),
     km: cislo(t.km, 0, 2000000),
     zamek: ['zamčeno', 'odemčeno'].includes(t.zamek) ? t.zamek : null,
     rucniBrzda: typeof t.rucniBrzda === 'boolean' ? t.rucniBrzda : null,

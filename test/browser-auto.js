@@ -37,6 +37,13 @@ setTimeout(() => {
   check('diesel bez dojezdu: velké číslo jsou km', document.getElementById('wbAutoSoc').textContent.replace(/\\u00a0/g, ' ') + ' ' + document.getElementById('wbAutoText').textContent, '64 063 km najeto');
   check('  zámek a ruční brzda', radky()[0], '🔒 zamčeno · ruční brzda zatažená');
   check('  servis a olej naráz, když sedí', radky()[1], '🔧 servis a olej za 17 800 km nebo do 19. 5. 2028');
+  // Multivan plug-in hybrid — jak ho portál poslal 28. 11. 2026
+  renderAuto({ zive: true, kdy: T, stav: { soc: 99, palivoPct: 100, dojezdKm: 552, elDojezdKm: 32, km: 64063,
+    zamek: 'odemčeno', rucniBrzda: true, nabijeni: 'off', nabiji: false, zapojeno: false } });
+  check('hybrid: baterie i nádrž', document.getElementById('wbAutoSoc').textContent, '🔋 99 % · ⛽ 100 %');
+  check('  dojezd s elektrickým, km, nabíjení', document.getElementById('wbAutoText').textContent.replace(/\\u00a0/g, ' '),
+    'dojezd 552 km (32 km na elektřinu) · najeto 64 063 km · nenabíjí');
+  check('  odemčeno červeně', document.querySelector('#wbAutoRadky .bmw-radek.pozor').textContent, '🔓 odemčeno · ruční brzda zatažená');
   renderAuto({ zive: true, kdy: T, stav: { soc: 90, zapojeno: true, nabijeni: 'off', nabiji: false } });
   check('kabel zapojený, nenabíjí', radky().join('|'), '🔌 kabel zapojený, nenabíjí');
   renderAuto({ zive: true, kdy: T, stav: { soc: 50, zapojeno: true, nabijeni: 'charging', nabiji: true } });

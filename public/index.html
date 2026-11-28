@@ -11915,10 +11915,14 @@ function autoShrnuti(a) {
   const c = n => Math.round(n).toLocaleString('cs-CZ');
   const je = n => typeof n === 'number';
   // Velké číslo: baterie, jinak nádrž, jinak dojezd, jinak kilometry
-  const hlavni = je(s.soc) ? `🚗 ${Math.round(s.soc)} %` : je(s.palivoPct) ? `⛽ ${Math.round(s.palivoPct)} %`
+  // Plug-in hybrid (Multivan): baterie i nádrž vedle sebe
+  const hlavni = je(s.soc) && je(s.palivoPct) ? `🔋 ${Math.round(s.soc)} % · ⛽ ${Math.round(s.palivoPct)} %`
+    : je(s.soc) ? `🚗 ${Math.round(s.soc)} %` : je(s.palivoPct) ? `⛽ ${Math.round(s.palivoPct)} %`
     : je(s.dojezdKm) ? `⛽ ${c(s.dojezdKm)} km` : je(s.km) ? `${c(s.km)} km` : '🚗 –';
   const kusy = [];
-  if (je(s.dojezdKm) && (je(s.soc) || je(s.palivoPct))) kusy.push(`dojezd ${Math.round(s.dojezdKm)} km`);
+  if (je(s.dojezdKm) && (je(s.soc) || je(s.palivoPct))) {
+    kusy.push(`dojezd ${c(s.dojezdKm)} km` + (je(s.elDojezdKm) ? ` (${c(s.elDojezdKm)} km na elektřinu)` : ''));
+  }
   if (je(s.km) && (je(s.soc) || je(s.palivoPct) || je(s.dojezdKm))) kusy.push(`najeto ${c(s.km)} km`);
   else if (je(s.km)) kusy.push('najeto');
   // Řádky pod tím jako u BMW: zámek, ruční brzda, servis a olej

@@ -76,6 +76,17 @@ print(json.dumps(m.stav_auta(auto)))`);
   check('pohon diesel: nádrž a dojezd', [out.palivoPct, out.dojezdKm, out.soc].join(','), '55,612,');
 }
 {
+  // Multivan plug-in hybrid (28. 11. 2026): primary benzín, secondary elektro
+  const out = py(`
+class T:
+    def __init__(s, v): s.value = v
+auto = N(vin=A('X'), drives=N(total_range=A(552.0), drives={
+  'primary': N(type=A(T('gasoline')), level=A(100.0), range=A(520.0)),
+  'secondary': N(type=A(T('electric')), level=A(99.0), range=A(32.0))}))
+print(json.dumps(m.stav_auta(auto)))`);
+  check('hybrid: baterie, nádrž, dojezd, elektro', [out.soc, out.palivoPct, out.dojezdKm, out.elDojezdKm].join(','), '99,100,552,32');
+}
+{
   // Plug-in hybrid: kabel z charging.connector (bez něj null)
   const out = py(`
 class E:
